@@ -102,6 +102,10 @@ export const errorDeCuit = (cuit: string, original?: string | null): string | nu
   if (digitos.length === 0) return null;
   if (original && digitos === original.replace(/\D/g, '')) return null;
   if (digitos.length !== 11) return 'El CUIT debe tener 11 dígitos';
+  // Ningún CUIT empieza con 00: es un DNI rellenado con ceros (B17, #1561).
+  if (digitos.startsWith('00')) {
+    return 'Un CUIT no empieza con 00. Si es un DNI, elegí «DNI» en el tipo de documento.';
+  }
   if (!validarCuit(digitos)) {
     return 'El CUIT no es válido: el dígito verificador no coincide. Revisá los números.';
   }

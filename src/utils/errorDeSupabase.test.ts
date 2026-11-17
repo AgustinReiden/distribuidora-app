@@ -409,6 +409,12 @@ describe('errorDeSupabase — CHECK violado (23514)', () => {
     expect(e.message).toMatch(/cantidad mínima de venta.*99\.999\.999/)
   })
 
+  it('el documento de un cliente con forma de DNI y tipo CUIT dice qué hacer (B17)', () => {
+    const e = errorDeSupabase(check('clientes_documento_con_su_tipo'), SIN_CONEXION)
+    expect(e.message).toMatch(/documento del cliente.*elegí «DNI»/)
+    expect(e.message).not.toContain('clientes_documento_con_su_tipo')
+  })
+
   // Hay RAISE EXCEPTION ... USING ERRCODE = 'check_violation' con un motivo de negocio en castellano:
   // el motivo tiene que llegar intacto, no el genérico (compra mínima, precio 0, sin chofer, cancelar
   // con motivo, bot apagado, subrubros...).

@@ -72,6 +72,18 @@ describe('errorDeCuit', () => {
   it('pero si se cambia a otro inválido sí se rechaza', () => {
     expect(errorDeCuit('20-12345678-8', '20-12345678-9')).not.toBeNull()
   })
+
+  // B17 (#1561): el campo CUIT exigía 11 dígitos y los DNI se cargaban rellenados con ceros
+  // (00-0NNNNNNN-D). Uno de cada once pasa el dígito verificador: el prefijo lo frena igual.
+  it('un DNI rellenado con ceros no pasa como CUIT, aunque el dígito verificador coincida', () => {
+    expect(validarCuit('00-03012346-8')).toBe(true)
+    expect(errorDeCuit('00-03012346-8')).toMatch(/no empieza con 00.*elegí «DNI»/)
+    expect(errorDeCuit('00-03012345-6')).toMatch(/no empieza con 00/)
+  })
+
+  it('el de una ficha vieja que no se tocó no bloquea guardar otros cambios', () => {
+    expect(errorDeCuit('00-03012345-6', '00-03012345-6')).toBeNull()
+  })
 })
 
 describe('errorDeDocumento', () => {

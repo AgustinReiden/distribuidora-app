@@ -290,11 +290,14 @@ export function isValidDni(dni: string | null | undefined): boolean {
 
 /**
  * Convierte DNI a formato de almacenamiento (00-XXXXXXXX-0)
- * Permite almacenar DNI en el mismo campo que CUIT
+ * Permite almacenar DNI en el mismo campo que CUIT.
+ * Un DNI vacío queda vacío: rellenarlo daba 00-00000000-0, un documento que no es
+ * de nadie (B17, #1561).
  */
 export function dniToStorageFormat(dni: string): string {
-  const dniLimpio = dni.replace(/\D/g, '').padStart(8, '0')
-  return `00-${dniLimpio}-0`
+  const digitos = dni.replace(/\D/g, '')
+  if (!digitos) return ''
+  return `00-${digitos.padStart(8, '0')}-0`
 }
 
 /**

@@ -298,6 +298,11 @@ suelta en `sucursales`.
   —selectores, rutas, recorridos— los oculta; el historial —reportes, cuenta corriente y los
   embeds `cliente:clientes(*)`— **tiene** que seguir viéndolos, que es de lo que se trata la
   baja lógica. Una consulta que no elige está eligiendo mal por omisión.
+- **El tipo de documento de un cliente sale del valor** (B17, #1561). Un DNI se guarda en
+  `clientes.cuit` como `00-XXXXXXXX-0` con `tipo_documento = 'DNI'`, y ningún CUIT empieza con
+  00. Lo pone `trg_clientes_tipo_documento_del_valor` (el relleno `00-00000000-0` queda NULL) y
+  lo cierra el CHECK `clientes_documento_con_su_tipo`; espejo en `documentoParaGuardar`
+  (`src/utils/documentoCliente.ts`). Un camino nuevo que escriba el documento no manda el tipo.
 - **Una promo con uso no se borra: se desactiva** (1556-b1, decisión del dueño). Sus FKs no son
   RESTRICT (el regalo de un pedido quedaba sin promo y no volvía al stock al cancelarlo), así que
   lo frena `trg_promocion_no_se_borra_con_uso`: líneas de pedido de cualquier estado, ajustes de

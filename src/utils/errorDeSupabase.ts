@@ -157,6 +157,7 @@ export async function respuestaDeErrorLegible(res: Response): Promise<Response> 
 const CHECKS_CONOCIDOS: Array<[RegExp, string]> = [
   [/cantidad_minima_venta/, 'La cantidad mínima de venta tiene que ser mayor que 0 y de hasta 99.999.999 unidades (o quedar vacía, sin mínimo).'],
   [/impuestos_internos/, 'El impuesto interno está fuera de rango.'],
+  [/clientes_documento/, 'El documento del cliente no es válido: un CUIT no empieza con 00. Si es un DNI, elegí «DNI» en el tipo de documento.'],
   [/(nombre|razon_social|direccion|fantasia).*(blank|vacio|trim|no_vacio|not_empty)|(blank|vacio|trim|no_vacio|not_empty).*(nombre|razon_social|direccion|fantasia)/, 'Hay un dato obligatorio vacío o con sólo espacios (nombre, razón social o dirección).'],
 ]
 

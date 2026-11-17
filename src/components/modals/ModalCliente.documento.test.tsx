@@ -101,6 +101,49 @@ describe('ModalCliente — CUIT', () => {
   })
 })
 
+describe('ModalCliente — DNI (B17, #1561)', () => {
+  const elegirDni = () => fireEvent.change(screen.getByDisplayValue('CUIT'), { target: { value: 'DNI' } })
+
+  it('elegir DNI y dejarlo vacío guarda sin documento, no el relleno 00-00000000-0', async () => {
+    renderModal()
+    elegirDni()
+    completar({ cuit: null as unknown as string })
+    guardar()
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled(), ESPERA)
+    expect(onSave.mock.calls[0][0]).toMatchObject({ cuit: '', tipo_documento: 'DNI' })
+  })
+
+  it('un DNI se guarda en el formato de almacenamiento, con tipo DNI', async () => {
+    renderModal()
+    elegirDni()
+    fireEvent.change(screen.getByLabelText('DNI'), { target: { value: '30123456' } })
+    completar({ cuit: null as unknown as string })
+    guardar()
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled(), ESPERA)
+    expect(onSave.mock.calls[0][0]).toMatchObject({ cuit: '00-30123456-0', tipo_documento: 'DNI' })
+  })
+
+  it('un DNI rellenado con ceros en el campo CUIT no guarda y dice que elija DNI', async () => {
+    renderModal()
+    completar({ cuit: '00030123468' })
+    guardar()
+
+    expect(await screen.findByText(/no empieza con 00/i, {}, ESPERA)).toBeVisible()
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('un cliente con DNI se abre como DNI, con el número limpio', () => {
+    const existente = {
+      id: '8', razon_social: 'Almacén Inventado', nombre_fantasia: 'Almacén Inventado', direccion: 'Berutti 399',
+      cuit: '00-01234567-0', tipo_documento: 'DNI', activo: true,
+    } as unknown as ClienteDB
+    renderModal(existente)
+    expect(screen.getByLabelText('DNI')).toHaveValue('1234567')
+  })
+})
+
 describe('ModalCliente — obligatorios sin espacios solos', () => {
   it.each([
     ['razón social', { razon: '   ' }, /raz[óo]n social/i],
