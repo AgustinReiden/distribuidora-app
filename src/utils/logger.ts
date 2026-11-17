@@ -24,6 +24,26 @@ function formatArgs(args: unknown[]): unknown[] {
 }
 
 /**
+ * El `error` que devuelve supabase-js NO es un `Error`: es un objeto plano
+ * `{ message, details, hint, code }` (ver `errorDeSupabase`). Para un `logger.error` con uno de
+ * esos como argumento, la etiqueta sola no alcanza para diagnosticar (1600-b4).
+ */
+function esErrorPlano(arg: unknown): arg is { message: string; code?: unknown } {
+  return typeof arg === 'object' && arg !== null && !(arg instanceof Error)
+    && typeof (arg as { message?: unknown }).message === 'string'
+}
+
+/** Lo que diagnostica de un error plano, con el texto redactado (`details` suele traer valores). */
+function errorPlanoLegible(plano: object): Record<string, string> {
+  const salida: Record<string, string> = {}
+  for (const campo of ['code', 'message', 'details', 'hint']) {
+    const valor = (plano as Record<string, unknown>)[campo]
+    if (typeof valor === 'string' && valor !== '') salida[campo] = redactarTexto(valor)
+  }
+  return salida
+}
+
+/**
  * Logger principal
  */
 const logger = {
@@ -69,7 +89,22 @@ const logger = {
           extra: { message: mensaje, additionalInfo: resto }
         })
       } else {
-        captureMessage(mensaje, 'error')
+        const planoIndex = args.findIndex(esErrorPlano)
+        if (planoIndex !== -1) {
+          // Un error plano de supabase: sin esto sólo llegaba la etiqueta a Sentry, y el
+          // `code` (42501, PGRST201) y el texto del server, que son lo que diagnostica, se
+          // perdían. Se manda como excepción, con el texto redactado como el resto.
+          const plano = args[planoIndex] as { message: string; code?: unknown }
+          const etiqueta = typeof args[0] === 'string' ? mensaje : ''
+          const codigo = typeof plano.code === 'string' && plano.code !== '' ? ` [${plano.code}]` : ''
+          const resto = sanitizedArgs.filter((_, i) => i !== planoIndex)
+          captureException(
+            new Error(redactarTexto(`${etiqueta ? `${etiqueta} ` : ''}${plano.message}${codigo}`)),
+            { extra: { message: mensaje, additionalInfo: resto, errorPlano: errorPlanoLegible(plano) } }
+          )
+        } else {
+          captureMessage(mensaje, 'error')
+        }
       }
     }
   },

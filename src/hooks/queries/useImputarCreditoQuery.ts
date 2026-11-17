@@ -137,7 +137,8 @@ async function imputarCredito(input: ImputarCreditoInput): Promise<ImputarCredit
 /**
  * En `onSuccess` invalida por prefijo todo lo que mira el saldo o el estado de
  * pago: pedidos (faltante y `estado_pago`), clientes (`saldo_cuenta`), las NCs
- * (el crédito disponible de cada una), pagos y deudores en mora. La ficha del
+ * (el crédito disponible de cada una) y deudores en mora (ninguna consulta de
+ * TanStack lee `pagos` por su cuenta: no hay clave `['pagos']`). La ficha del
  * cliente lee pagos y saldo con estado local, no con TanStack: refresca ella
  * misma en `onImputado`.
  */
@@ -146,7 +147,6 @@ export function useImputarCreditoMutation() {
   return useMutation({
     mutationFn: imputarCredito,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pagos'] })
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       queryClient.invalidateQueries({ queryKey: ['clientes'] })
       queryClient.invalidateQueries({ queryKey: ['notas_credito_venta'] })

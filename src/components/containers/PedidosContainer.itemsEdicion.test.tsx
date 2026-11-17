@@ -204,7 +204,7 @@ describe('PedidosContainer — guardar items de la edición', () => {
     const invalidados = invalidateQueries.mock.calls.map(([arg]) => (arg as { queryKey: string[] }).queryKey[0])
     // Lo que ya estaba, para que el fix no se coma nada.
     expect(invalidados).toContain('pedidos')
-    expect(invalidados).toContain('recorridos')
+    expect(invalidados).toContain('recorridos-hoja-ruta')
     // Lo que faltaba: sin esto el catálogo sirve stock de hasta 10 minutos
     // atrás y la cuenta corriente, el saldo anterior al cambio de total.
     expect(invalidados).toContain('productos')

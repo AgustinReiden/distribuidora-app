@@ -53,6 +53,9 @@ const ACTIVITY_EVENTS: ActivityEventName[] = [
   'input'
 ]
 
+/** Lo que dice el login. Contiene «perfil»: `LoginScreen` sólo muestra tal cual los mensajes que lo nombran. */
+const MENSAJE_PERFIL_DESACTIVADO = 'Tu perfil está desactivado. Consultá con el administrador.'
+
 export interface Perfil {
   id: string;
   nombre: string;
@@ -139,8 +142,9 @@ function leerPerfilCacheado(userId: string): Perfil | null {
     if (!crudo) return null
     const perfil = JSON.parse(crudo) as Perfil
     // Del usuario de ESTA sesión y de nadie más: en un teléfono compartido, el
-    // perfil cacheado del anterior le daría a este el rol del otro.
-    return perfil?.id === userId ? perfil : null
+    // perfil cacheado del anterior le daría a este el rol del otro. Y uno desactivado no
+    // sirve para arrancar sin señal (1600-b15).
+    return perfil?.id === userId && perfil.activo !== false ? perfil : null
   } catch {
     return null
   }
@@ -153,6 +157,11 @@ function leerPerfilCacheado(userId: string): Perfil | null {
 interface ResultadoPerfil {
   perfil: Perfil | null
   huboServidor: boolean
+  /**
+   * El servidor contestó y el perfil está desactivado (1600-b15): no es lo mismo que "no
+   * se pudo leer" (red) ni que "no existe". Con `desactivado`, `perfil` es null a propósito.
+   */
+  desactivado?: boolean
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
@@ -256,6 +265,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
 
         const nextPerfil = data as Perfil
+        // Un desactivado con el token todavía vivo (el ban de Auth no invalida un access
+        // token ya emitido): el server ya le niega todo, y acá no se le arma la app. No
+        // se muestra ni se cachea (1600-b15).
+        if (nextPerfil.activo === false) {
+          logger.warn('[useAuth] El perfil está desactivado:', userId)
+          try {
+            localStorage.removeItem(CLAVE_PERFIL_CACHEADO)
+          } catch {
+            // Sin storage no hay nada que olvidar.
+          }
+          return { perfil: null, huboServidor: true, desactivado: true }
+        }
         guardarPerfilCacheado(nextPerfil)
         if (mountedRef.current && userIdRef.current === userId) {
           perfilDesdeCacheRef.current = false
@@ -275,6 +296,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
     perfilRequestsRef.current.set(userId, request)
     return request
   }, [setPerfil])
+
+  /**
+   * Saca a un usuario desactivado y se lo dice en el login (1600-b15). Una sola vez: el
+   * `signOut` local deja `user` en null, así que nada vuelve a hidratarlo ni recarga la página.
+   */
+  const cerrarPorDesactivado = useCallback(async (source: string): Promise<void> => {
+    guardarAvisoDeCierre('desactivado')
+    await signOutLocal(`${source}:perfil-desactivado`)
+  }, [signOutLocal])
 
   const hydrateAuthenticatedUser = useCallback(async (nextUser: User, source: string): Promise<ResultadoPerfil> => {
     setUser(nextUser)
@@ -301,6 +331,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const resultado = await hydrateAuthenticatedUser(sessionUser, source)
     if (resultado.perfil) {
+      return resultado
+    }
+
+    // Desactivado: no hay nada que renovar ni que reintentar (el server ya contestó).
+    if (resultado.desactivado) {
+      await cerrarPorDesactivado(source)
       return resultado
     }
 
@@ -343,7 +379,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     return hydrateAuthenticatedUser(refreshData.session.user, `${source}:refresh`)
-  }, [clearLocalAuthState, hydrateAuthenticatedUser, setPerfil, signOutLocal])
+  }, [clearLocalAuthState, cerrarPorDesactivado, hydrateAuthenticatedUser, setPerfil, signOutLocal])
 
   const handleAuthStateChange = useCallback(async (event: string, session: Session | null) => {
     if (!mountedRef.current || event === 'INITIAL_SESSION') {
@@ -405,10 +441,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     try {
-      const { perfil: resolvedPerfil, huboServidor } = await handleSessionResolved(event, nextUser)
+      const { perfil: resolvedPerfil, huboServidor, desactivado } = await handleSessionResolved(event, nextUser)
       // Sin perfil Y con el servidor contestando: esta sesión no sirve. Si no
-      // hubo servidor, no se concluye nada — se espera a que vuelva la red.
-      if (!resolvedPerfil && huboServidor) {
+      // hubo servidor, no se concluye nada — se espera a que vuelva la red. El
+      // desactivado ya salió en `handleSessionResolved`.
+      if (!resolvedPerfil && huboServidor && !desactivado) {
         await signOutLocal(`${event}:missing-profile`)
       }
     } catch (err) {
@@ -525,7 +562,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       if (data.user) {
-        const { perfil: resolvedPerfil } = await handleSessionResolved('login', data.user)
+        const { perfil: resolvedPerfil, desactivado } = await handleSessionResolved('login', data.user)
+        if (desactivado) {
+          throw new Error(MENSAJE_PERFIL_DESACTIVADO)
+        }
         if (!resolvedPerfil) {
           await signOutLocal('login:missing-profile')
           throw new Error('No se pudo cargar el perfil del usuario. Intenta de nuevo.')
@@ -580,12 +620,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const rehidratar = (): void => {
       if (!perfilDesdeCacheRef.current && perfilRef.current) return
-      void fetchPerfil(user.id)
+      void fetchPerfil(user.id).then(resultado => {
+        // Se arrancó a ciegas con el perfil cacheado y ahora el server dice que está
+        // desactivado (1600-b15).
+        if (resultado.desactivado && mountedRef.current && userIdRef.current === user.id) {
+          return cerrarPorDesactivado('online')
+        }
+      })
     }
 
     window.addEventListener('online', rehidratar)
     return () => window.removeEventListener('online', rehidratar)
-  }, [user, fetchPerfil])
+  }, [user, fetchPerfil, cerrarPorDesactivado])
 
   useEffect(() => {
     if (!user) return

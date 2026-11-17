@@ -4,8 +4,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * La CSP del repo: la meta de index.html, nginx.conf y public/_headers dicen lo
- * mismo, y dejan ver la factura escaneada (INF-7, #1563).
+ * La CSP del repo: la meta de index.html, nginx.conf, public/_headers y el plugin de
+ * headers de vite.config.js (dev y preview) dicen lo mismo, y dejan ver la factura escaneada (INF-7, #1563).
  *
  * El visor de la factura la muestra como `blob:` (`urlLocalDeArchivo`): la imagen
  * entra por `img-src blob:` y el PDF, por `frame-src 'self' blob:`. Sin
@@ -24,6 +24,10 @@ const CSPS = {
   'index.html': leer('index.html').match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)?.[1],
   'nginx.conf': leer('nginx.conf').match(/add_header Content-Security-Policy "([^"]+)"/)?.[1],
   'public/_headers': leer('public/_headers').match(/^\s*Content-Security-Policy: (.+)$/m)?.[1]?.trim(),
+  // Cuarta copia (1600-b10): la que `vite dev` y `vite preview` mandan como header, y contra la
+  // que corre e2e/security.spec.js. Sin `frame-src`, el visor de la factura se probaba contra
+  // una CSP más estricta que la del repo.
+  'vite.config.js': leer('vite.config.js').match(/'Content-Security-Policy',\s*"([^"]+)"/)?.[1],
 }
 
 function directiva(csp: string, nombre: string): string[] | undefined {
@@ -32,7 +36,8 @@ function directiva(csp: string, nombre: string): string[] | undefined {
 }
 
 describe('la CSP del repo', () => {
-  it('está en los tres lugares, y es la misma', () => {
+  it('está en los cuatro lugares, y es la misma', () => {
+    expect(Object.keys(CSPS)).toHaveLength(4)
     for (const [archivo, csp] of Object.entries(CSPS)) expect(csp, archivo).toBeTruthy()
     expect(new Set(Object.values(CSPS)).size).toBe(1)
   })

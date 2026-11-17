@@ -1361,7 +1361,6 @@ export default function PedidosContainer(): React.ReactElement {
       // familia recorridos* para que la hoja de ruta/comanda re-descargada desde
       // Exportaciones refleje cambios de fecha/notas (sino sirve datos cacheados).
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
@@ -1446,7 +1445,6 @@ export default function PedidosContainer(): React.ReactElement {
     // desde la ruta armada via useRecorridosHojaRutaQuery) reflejen el precio
     // editado y no sirvan paradas cacheadas con el valor viejo.
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
-    queryClient.invalidateQueries({ queryKey: ['recorridos'] })
     queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
     queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
     queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
@@ -2261,7 +2259,6 @@ export default function PedidosContainer(): React.ReactElement {
       // la ruta del transportista, la ruta existente (para re-editar) y el
       // resumen para re-descargar la hoja de ruta.
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
@@ -2520,7 +2517,6 @@ export default function PedidosContainer(): React.ReactElement {
       // Aunque `aplicar_orden_ruta` falle en el 2.º chofer, el 1.º ya quedó armado:
       // sin refrescar, la pantalla seguía con la lista de antes (#1549).
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
       queryClient.invalidateQueries({ queryKey: ['rutas-en-curso'] })
@@ -2655,7 +2651,7 @@ export default function PedidosContainer(): React.ReactElement {
     // rechaza, pero el cliente ya había puesto la plata en la mano). Se espera el
     // refetch, como en el cobro: al cerrarse el modal el chofer sigue con el saldo
     // nuevo. `invalidateQueries` no tira si el refetch falla (sin red queda lo que había).
-    queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+    queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
     await queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
     return results
   }, [queryClient])

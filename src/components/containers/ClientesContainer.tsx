@@ -349,7 +349,6 @@ export default function ClientesContainer(): React.ReactElement {
       clientRequestId: datosPago.clientRequestId,
     })
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
-    queryClient.invalidateQueries({ queryKey: ['ficha-cliente'] })
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
     notify.success(pago.idempotentReplay
       ? 'Ese pago ya había entrado en tu intento anterior: no se cobró dos veces.'
@@ -368,7 +367,6 @@ export default function ClientesContainer(): React.ReactElement {
   }) => {
     const result = await registrarPagoFIFO(input)
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
-    queryClient.invalidateQueries({ queryKey: ['ficha-cliente'] })
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
     if (result.sobrante > 0) {
       notify.success(`Pago registrado. ${formatPrecio(result.sobrante)} quedó como saldo a favor.`)
@@ -388,7 +386,6 @@ export default function ClientesContainer(): React.ReactElement {
   }) => {
     const result = await registrarPagoCombinadoFIFO(input)
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
-    queryClient.invalidateQueries({ queryKey: ['ficha-cliente'] })
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
     if (result.sobrante > 0) {
       notify.success(`Pago registrado. ${formatPrecio(result.sobrante)} quedó como saldo a favor.`)

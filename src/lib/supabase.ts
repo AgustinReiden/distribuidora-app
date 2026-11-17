@@ -36,7 +36,13 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     storageKey: 'distribuidora_v2',
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
+    // Apagado (1600-b1). Con `true`, un link con `#access_token=...` abría esa sesión sin
+    // preguntar: el visitante de un link ajeno quedaba logueado en la cuenta de otro. La app
+    // sólo entra por `signInWithPassword` (LoginScreen) y no tiene pantalla de «recuperar
+    // contraseña», de invitación ni de magic link —tampoco el `updateUser` que pondría la
+    // contraseña—, así que ningún flujo necesita leer un token de la URL. Si algún día se
+    // suma uno, que lo pida a propósito (`exchangeCodeForSession` / `setSession`).
+    detectSessionInUrl: false,
   },
   global: {
     // Sin plazo a propósito: por acá pasan las subidas a Storage y las descargas

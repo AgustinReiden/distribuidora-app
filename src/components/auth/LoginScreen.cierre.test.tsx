@@ -32,6 +32,14 @@ describe('LoginScreen: por qué se cerró la sesión', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Tu sesión se cerró por inactividad')
   })
 
+  it('tras sacar a un usuario desactivado (1600-b15) se lo dice', () => {
+    guardarAvisoDeCierre('desactivado')
+
+    render(<LoginScreen />)
+
+    expect(screen.getByRole('status')).toHaveTextContent('Tu usuario está desactivado')
+  })
+
   it('lo muestra una sola vez: el siguiente ingreso no lo repite', () => {
     guardarAvisoDeCierre('inactividad')
     const primera = render(<LoginScreen />)

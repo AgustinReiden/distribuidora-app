@@ -13,7 +13,7 @@
  */
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const setSucursalHeaderMock = vi.fn()
@@ -33,6 +33,12 @@ vi.mock('../lib/supabase', () => ({
   setSucursalHeader: (...args: unknown[]) => setSucursalHeaderMock(...args),
 }))
 
+const notifyErrorMock = vi.fn()
+vi.mock('../hooks/supabase/base', () => ({
+  notifyError: (...args: unknown[]) => notifyErrorMock(...args),
+}))
+
+import { supabase } from '../lib/supabase'
 import { SucursalProvider, useSucursal } from './SucursalContext'
 
 const USER = 'user-1'
@@ -144,5 +150,68 @@ describe('SucursalContext', () => {
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.sucursales).toHaveLength(0)
     expect(result.current.currentSucursalId).toBeNull()
+  })
+})
+
+/**
+ * 1563-b3 / 1596-b8: `cambiar_sucursal` NO lanza cuando rechaza el cambio: contesta
+ * `{ success: false, error }`. El front sólo miraba `error` y daba el cambio por hecho.
+ */
+describe('SucursalContext.switchSucursal', () => {
+  const filas = [
+    filaSucursal,
+    { id: 2, usuario_id: USER, sucursal_id: 4, es_default: false, sucursal: { id: 4, nombre: 'Tucumán' } },
+  ]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+  })
+
+  async function montar() {
+    responder({ usuario_sucursales: filas, perfil_roles: [] })
+    const hook = renderHook(() => useSucursal(), { wrapper })
+    await waitFor(() => expect(hook.result.current.loading).toBe(false))
+    expect(hook.result.current.currentSucursalId).toBe(3)
+    setSucursalHeaderMock.mockClear()
+    return hook
+  }
+
+  it('si el servidor contesta success:false, no cambia la sucursal ni el header, y avisa', async () => {
+    const { result } = await montar()
+    vi.mocked(supabase.rpc).mockResolvedValue({
+      data: { success: false, error: 'No autorizado para esta sucursal' },
+      error: null,
+    } as never)
+
+    await act(async () => { await result.current.switchSucursal(4) })
+
+    expect(result.current.currentSucursalId).toBe(3)
+    expect(setSucursalHeaderMock).not.toHaveBeenCalled()
+    expect(localStorage.getItem('distribuidora_sucursal_activa')).toBe('3')
+    expect(notifyErrorMock).toHaveBeenCalledTimes(1)
+    // El texto del server no se le muestra tal cual.
+    expect(notifyErrorMock.mock.calls[0][0]).not.toMatch(/No autorizado/)
+  })
+
+  it('si el servidor contesta success:true, cambia la sucursal y el header', async () => {
+    const { result } = await montar()
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: { success: true, sucursal_id: 4 }, error: null } as never)
+
+    await act(async () => { await result.current.switchSucursal(4) })
+
+    expect(result.current.currentSucursalId).toBe(4)
+    expect(setSucursalHeaderMock).toHaveBeenCalledWith(4)
+    expect(notifyErrorMock).not.toHaveBeenCalled()
+  })
+
+  it('un error del RPC tampoco cambia la sucursal, y ahora avisa', async () => {
+    const { result } = await montar()
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: null, error: { message: 'Failed to fetch', code: '' } } as never)
+
+    await act(async () => { await result.current.switchSucursal(4) })
+
+    expect(result.current.currentSucursalId).toBe(3)
+    expect(notifyErrorMock).toHaveBeenCalledTimes(1)
   })
 })

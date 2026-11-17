@@ -2,7 +2,7 @@
  * TanStack Query hooks para Pedidos
  * Reemplaza el hook usePedidos con mejor cache y gestión de estado
  */
-import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { PedidoDB, PedidoItemDB, PerfilDB, FiltrosPedidosState, PedidoSalvedadResumen, TipoComprobanteVenta } from '../../types'
@@ -770,7 +770,12 @@ export function usePedidosPaginatedQuery(
     queryKey: pedidosKeys.paginated(currentSucursalId, page, pageSize, { ...filters, busqueda: search } as Partial<FiltrosPedidosState>),
     queryFn: () => fetchPedidosPaginated(page, pageSize, filters, search),
     staleTime: 2 * 60 * 1000,
-    placeholderData: keepPreviousData,
+    // Cambiar de página o de filtro conserva lo que había mientras carga lo nuevo (sin
+    // parpadeo); cambiar de SUCURSAL no (1600-b3): la clave empieza `['pedidos', sucursalId,
+    // ...]`, y con `keepPreviousData` a secas se veían unos segundos los pedidos de la
+    // sucursal anterior, con sus botones habilitados, hasta que llegaba la lista nueva.
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[1] === currentSucursalId ? previousData : undefined,
     enabled,
   })
 }
@@ -882,7 +887,7 @@ export function useCambiarEstadoMutation() {
       // La ruta del día del transportista lee pedido.estado vía el recorrido;
       // al marcar entregado hay que refrescarla para que avance la parada.
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
     },
   })
 }
@@ -960,7 +965,6 @@ export function useVolverPedidoAPendienteMutation() {
       // La ruta perdió una parada y el chofer un pedido.
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
     },
   })
@@ -1148,7 +1152,7 @@ export function useEntregasMasivasMutation() {
       // esto la pantalla del chofer, Recorridos y el modal de armar ruta seguían con la
       // foto de antes (#1549).
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
       queryClient.invalidateQueries({ queryKey: ['rutas-en-curso'] })
     },
   })
@@ -1216,7 +1220,6 @@ export function useCancelarPedidoMutation() {
       // independientes. Sin esto, cancelar un pedido ya ruteado le dejaba la
       // parada en el mapa: manejaba hasta la puerta de un cliente sin pedido.
       // Mismo conjunto que invalidan handleGuardarItemsEdicion y aplicarOrden.
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
@@ -1284,7 +1287,6 @@ export function useCambiarClientePedidoMutation() {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
@@ -1519,7 +1521,6 @@ export function useEntregaYPagoMasivosMutation() {
       // que reflejarse (saldo, stock, la parada cerrada en la ruta activa).
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
       // La parada que se cierra está en la ruta del chofer (#1549).
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })

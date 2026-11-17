@@ -73,6 +73,28 @@ describe('fetch de supabase.ts', () => {
     expect(getSucursalHeader()).toBe(2)
   })
 
+  // 1600-b1: con `detectSessionInUrl: true`, abrir un link con `#access_token=...` de otro
+  // usuario dejaba la sesión del visitante en esa cuenta.
+  it('un link con un token en el fragmento no abre ninguna sesión', async () => {
+    const payload = btoa(JSON.stringify({ sub: 'otro-usuario', exp: Math.floor(Date.now() / 1000) + 3600 }))
+    const jwt = `eyJhbGciOiJIUzI1NiJ9.${payload}.firma`
+    fetchFalso.mockImplementation(async () => new Response(JSON.stringify({ id: 'otro-usuario', aud: 'authenticated' })))
+    window.history.replaceState(null, '', `/#access_token=${jwt}&refresh_token=r&expires_in=3600&token_type=bearer&type=magiclink`)
+    try {
+      const { supabase } = await cargarCliente()
+
+      const { data } = await supabase.auth.getSession()
+
+      expect(data.session).toBeNull()
+      expect(pedidoA('/auth/v1/user')).toBeUndefined()
+      // Y no lo toca: el fragmento queda como vino.
+      expect(window.location.hash).toContain('access_token=')
+    } finally {
+      window.history.replaceState(null, '', '/')
+      window.localStorage.clear()
+    }
+  })
+
   describe('un error de gateway en PostgREST (#1304)', () => {
     it('llega con su status como code, no con el HTML', async () => {
       fetchFalso.mockResolvedValue(new Response(html524, { status: 524 }))

@@ -65,6 +65,53 @@ describe('logger.error en producción', () => {
     expect(captureException).not.toHaveBeenCalled()
   })
 
+  /**
+   * 1600-b4: supabase-js devuelve el error como objeto plano (`{ message, code, details, hint }`),
+   * no como `Error`. Sólo mandaba la etiqueta y se perdían el código y el texto del server.
+   */
+  it("('msg', errorPlano de supabase) → captureException con el código y el texto del server", async () => {
+    const logger = await importLoggerEnProduccion()
+
+    logger.error('[SucursalContext] Error loading sucursales:', {
+      message: 'permission denied for table usuario_sucursales',
+      code: '42501',
+      details: null,
+      hint: null,
+    })
+
+    expect(captureMessage).not.toHaveBeenCalled()
+    expect(captureException).toHaveBeenCalledTimes(1)
+    const [error, contexto] = captureException.mock.calls[0] as [Error, { extra: { errorPlano: Record<string, string> } }]
+    expect(error).toBeInstanceOf(Error)
+    expect(error.message).toContain('permission denied for table usuario_sucursales')
+    expect(error.message).toContain('[42501]')
+    expect(error.message).toContain('[SucursalContext]')
+    expect(contexto.extra.errorPlano.code).toBe('42501')
+  })
+
+  it('el error plano también pasa por la redacción: un valor en `details` no sale tal cual', async () => {
+    const logger = await importLoggerEnProduccion()
+
+    logger.error('Alta de cliente', {
+      message: 'duplicate key value violates unique constraint',
+      code: '23505',
+      details: 'Key (cuit)=(20-12345678-9) already exists.',
+    })
+
+    const [error, contexto] = captureException.mock.calls[0] as [Error, { extra: { errorPlano: Record<string, string> } }]
+    expect(JSON.stringify(contexto.extra.errorPlano)).not.toContain('12345678')
+    expect(error.message).not.toContain('12345678')
+  })
+
+  it('un objeto sin `message` no es un error plano: sigue siendo captureMessage', async () => {
+    const logger = await importLoggerEnProduccion()
+
+    logger.error('Estado raro', { codigo: 7 })
+
+    expect(captureMessage).toHaveBeenCalledWith('Estado raro', 'error')
+    expect(captureException).not.toHaveBeenCalled()
+  })
+
   /** #1266: el primer argumento a veces es un template con datos del cliente. */
   it('redacta el texto que manda: CUIT, email y URLs con búsquedas', async () => {
     const logger = await importLoggerEnProduccion()

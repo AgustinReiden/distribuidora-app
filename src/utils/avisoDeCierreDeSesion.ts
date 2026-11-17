@@ -9,7 +9,7 @@
  * que sobrevive hasta que se monta el login.
  */
 
-export type MotivoDeCierre = 'inactividad'
+export type MotivoDeCierre = 'inactividad' | 'desactivado'
 
 const CLAVE = 'sesion:motivo-de-cierre'
 
@@ -17,6 +17,8 @@ let enMemoria: MotivoDeCierre | null = null
 
 export const MENSAJES_DE_CIERRE: Record<MotivoDeCierre, string> = {
   inactividad: 'Tu sesión se cerró por inactividad. Ingresá de nuevo para seguir.',
+  // 1600-b15: un desactivado con el token todavía vivo veía la app vacía, sin explicación.
+  desactivado: 'Tu usuario está desactivado, así que no podés usar la app. Consultá con el administrador.',
 }
 
 function esMotivo(valor: unknown): valor is MotivoDeCierre {
