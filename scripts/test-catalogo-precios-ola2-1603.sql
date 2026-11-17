@@ -36,7 +36,9 @@
 --        en el mismo punto sigue bloqueando por punto.
 --   D4 · [R] siguen chocando: sin unidad contra «PB»; «PB» contra «Planta Baja»; «Local
 --        1» contra «Loc. 1»; las mismas unidades en otro orden; una localidad que empieza
---        con una palabra de unidad («Puesto Viejo», «Planta Urbana», «Unidad Turística»).
+--        con una palabra de unidad («Puesto Viejo», «Planta Urbana», «Unidad Turística»);
+--        la misma unidad con más detalle («Local 1» y «Local 1, PB»), con «N°» o con la
+--        letra separada («1A» y «1 A»).
 --   E1 · [F] espejo: las direcciones y los pares de src/utils/direccionCliente.espejo.json
 --        (los mismos que corre el TS) dan la clave, la unidad y el choque esperados.
 -- Borrar un producto (1561-b2, D32):
@@ -332,6 +334,16 @@ BEGIN
   v_res := public.verificar_duplicado_cliente(NULL, NULL, 'Calle Ensayo 450, Local 2, T4000 San Miguel de Tucumán, Tucumán');
   f := pg_temp.t_si(f, NOT COALESCE((v_res->>'bloquea')::boolean, false),
                     format('«Local 1» y «Local 2» de la misma altura chocan: %s', v_res));
+  -- «N°» y la letra separada del número (segunda revisión): siguen siendo otra unidad.
+  INSERT INTO public.clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
+  VALUES ('ZZ ensayo B6a n2', 'ZZ ensayo B6a n2', 'Calle Ensayo 451, Local N° 2', p_suc),
+         ('ZZ ensayo B6a 3b', 'ZZ ensayo B6a 3b', 'Calle Ensayo 452, Dpto 3 B', p_suc);
+  v_res := public.verificar_duplicado_cliente(NULL, NULL, 'Calle Ensayo 451, Local N° 3');
+  f := pg_temp.t_si(f, NOT COALESCE((v_res->>'bloquea')::boolean, false),
+                    format('«Local N° 2» y «Local N° 3» chocan: %s', v_res));
+  v_res := public.verificar_duplicado_cliente(NULL, NULL, 'Calle Ensayo 452, Dpto 3 C');
+  f := pg_temp.t_si(f, NOT COALESCE((v_res->>'bloquea')::boolean, false),
+                    format('«Dpto 3 B» y «Dpto 3 C» chocan: %s', v_res));
   -- La clave (la del índice) sigue siendo la calle y la altura.
   f := pg_temp.t_si(f, public.clave_direccion_cliente('Calle Ensayo 450, Local 1') = 'calle ensayo 450',
                     format('la clave de «…, Local 1» cambió: %s', public.clave_direccion_cliente('Calle Ensayo 450, Local 1')));
@@ -380,7 +392,12 @@ BEGIN
     ('Calle Ensayo 888, Piso 2, Dpto B', 'Calle Ensayo 888, Dpto B, Piso 2'),
     ('Calle Ensayo 888', 'Calle Ensayo 888, Puesto Viejo'),
     ('Calle Ensayo 888', 'Calle Ensayo 888, Planta Urbana, Lules'),
-    ('Calle Ensayo 888', 'Calle Ensayo 888, Unidad Turística Lules')
+    ('Calle Ensayo 888', 'Calle Ensayo 888, Unidad Turística Lules'),
+    -- La misma unidad con más detalle, o escrita de otra forma (segunda revisión).
+    ('Calle Ensayo 888, Local 1', 'Calle Ensayo 888, Local 1, PB'),
+    ('Calle Ensayo 888, Piso 2', 'Calle Ensayo 888, Piso 2, Dpto B'),
+    ('Calle Ensayo 888, Local 1', 'Calle Ensayo 888, Local N° 1'),
+    ('Calle Ensayo 888, Local 1A', 'Calle Ensayo 888, Local 1 A')
   ) AS t(existe, nueva) LOOP
     v_n := v_n + 1;
     BEGIN
@@ -445,9 +462,9 @@ BEGIN
           ('Mitre N° 450', 'mitre n 450', NULL::text),
           ('Mitre Nº 450', 'mitre n 450', NULL::text),
           ('Mitre nº450, 1º B', 'mitre n 450', NULL::text),
-          ('Mitre 450, Piso 2 Dpto B', 'mitre 450', 'dpto b piso 2'),
-          ('Mitre 450, Piso 2, Dpto B', 'mitre 450', 'dpto b piso 2'),
-          ('Mitre 450, Dpto B, Piso 2', 'mitre 450', 'dpto b piso 2'),
+          ('Mitre 450, Piso 2 Dpto B', 'mitre 450', 'dpto b, piso 2'),
+          ('Mitre 450, Piso 2, Dpto B', 'mitre 450', 'dpto b, piso 2'),
+          ('Mitre 450, Dpto B, Piso 2', 'mitre 450', 'dpto b, piso 2'),
           ('Mitre 450, 2° B', 'mitre 450', NULL::text),
           ('Mitre 450, Depto. 3, Tucumán', 'mitre 450', 'dpto 3'),
           ('Mitre 450, Local, Tucumán', 'mitre 450', NULL::text),
@@ -464,10 +481,24 @@ BEGIN
           ('Calle 777, Unidad Funcional 03', 'calle 777', 'uf 3'),
           ('Calle 777, UF 3', 'calle 777', 'uf 3'),
           ('Calle 777, Departamento 4A', 'calle 777', 'dpto 4a'),
-          ('Calle 777, Oficina 12, Piso 1', 'calle 777', 'of 12 piso 1'),
+          ('Calle 777, Oficina 12, Piso 1', 'calle 777', 'of 12, piso 1'),
           ('Calle 777, Local 01', 'calle 777', 'local 1'),
-          ('Calle 777, PB, Local 2', 'calle 777', 'local 2 pb'),
+          ('Calle 777, PB, Local 2', 'calle 777', 'local 2, pb'),
           ('Calle 777, Galpón 5', 'calle 777', 'galpon 5'),
+          ('Calle 777, Local N° 2', 'calle 777', 'local 2'),
+          ('Calle 777, Local Nº 3', 'calle 777', 'local 3'),
+          ('Calle 777, Local Nro. 2', 'calle 777', 'local 2'),
+          ('Calle 777, Local Nro 2', 'calle 777', 'local 2'),
+          ('Calle 777, Local No. 2', 'calle 777', 'local 2'),
+          ('Calle 777, Local # 2', 'calle 777', 'local 2'),
+          ('Calle 777, Dpto 3 B', 'calle 777', 'dpto 3b'),
+          ('Calle 777, Dpto 3B', 'calle 777', 'dpto 3b'),
+          ('Calle 777, Dpto N° 3 C', 'calle 777', 'dpto 3c'),
+          ('Calle 777, Local 1 A', 'calle 777', 'local 1a'),
+          ('Calle 777, Local 1 y 2', 'calle 777', 'local 1'),
+          ('Calle 777, Dpto N', 'calle 777', 'dpto n'),
+          ('Calle 777, Local 1, PB', 'calle 777', 'local 1, pb'),
+          ('Calle 777, Piso 2, Dpto B', 'calle 777', 'dpto b, piso 2'),
           ('', NULL::text, NULL::text),
           (NULL::text, NULL::text, NULL::text)
         ) AS t(d, clave, unidad)
@@ -489,7 +520,15 @@ BEGIN
           ('Calle 777, PB', 'Calle 777, Local 2', false),
           ('Calle 777, Local 1', 'Calle 777', true),
           ('Calle 777, Local 1', 'Calle 778, Local 2', false),
-          ('Calle 777, UF 3', 'Calle 777, Unidad Funcional 03', true)
+          ('Calle 777, UF 3', 'Calle 777, Unidad Funcional 03', true),
+          ('Calle 777, Local 1', 'Calle 777, Local 1, PB', true),
+          ('Calle 777, Piso 2', 'Calle 777, Piso 2, Dpto B', true),
+          ('Calle 777, Local 1, PB', 'Calle 777, Local 2, PB', false),
+          ('Calle 777, Local N° 2', 'Calle 777, Local N° 3', false),
+          ('Calle 777, Dpto 3 B', 'Calle 777, Dpto 3 C', false),
+          ('Calle 777, Local 1', 'Calle 777, Local N° 1', true),
+          ('Calle 777, Local 1A', 'Calle 777, Local 1 A', true),
+          ('Calle 777, Local Nro. 2', 'Calle 777, Local # 2', true)
         ) AS p(a, b, chocan)
     ) q
    WHERE NOT COALESCE(q.ok, false);

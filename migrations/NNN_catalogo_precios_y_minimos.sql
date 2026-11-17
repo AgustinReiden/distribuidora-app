@@ -78,9 +78,13 @@
 --   sinónimos al mismo token (loc = local; dpto/depto/dto/departamento; of/oficina;
 --   pb = planta baja; uf = unidad funcional…), y una palabra de unidad cuenta sólo
 --   con un identificador detrás (un número o una letra suelta) o si es PB: «Puesto
---   Viejo», «Planta Urbana» o «Unidad Turística» son localidades. El orden no importa.
+--   Viejo», «Planta Urbana» o «Unidad Turística» son localidades. «N°», «Nº», «Nro.»,
+--   «No.» y «#» se descartan, y la letra suelta que sigue al número se le pega («3 B»
+--   es «3b»). El orden no importa; las unidades salen separadas por coma.
 -- · _otra_unidad_misma_puerta(a, b) es la regla: la usa verificar_duplicado_cliente
---   en el bloqueo por dirección y en el de punto.
+--   en el bloqueo por dirección y en el de punto. La misma unidad con más detalle
+--   («Local 1» y «Local 1, PB») es la misma puerta: son otra unidad sólo si ninguna
+--   lista de unidades contiene a la otra.
 -- · Espejo: claveDireccionConAltura, unidadDireccion y otraUnidadMismaPuerta
 --   (src/utils/duplicadoCliente.ts), con el fixture src/utils/direccionCliente.espejo.json.
 --
@@ -549,10 +553,19 @@ BEGIN
         END;
         IF v_palabra IS NOT NULL THEN
           v_salto := CASE WHEN t[i] = 'unidad' AND t[i + 1] = 'funcional' THEN 2 ELSE 1 END;
+          -- «Local N° 2», «Nro. 2», «No. 2», «# 2»: el «número» no es el identificador.
+          IF t[i + v_salto] IN ('n', 'nro', 'no', 'num', 'numero') AND t[i + v_salto + 1] ~ '^[0-9]' THEN
+            v_salto := v_salto + 1;
+          END IF;
           v_id := t[i + v_salto];
           -- Sólo con un identificador detrás: un número (con una letra pegada) o una
           -- letra suelta. «Puesto Viejo» o «Unidad Turística» no son unidades.
           IF v_id ~ '^([0-9]+[a-z]?|[a-z])$' THEN
+            -- «Dpto 3 B» es «dpto 3b», como «Dpto 3B».
+            IF v_id ~ '^[0-9]+$' AND t[i + v_salto + 1] ~ '^[a-z]$' AND t[i + v_salto + 1] <> 'y' THEN
+              v_id := v_id || t[i + v_salto + 1];
+              v_salto := v_salto + 1;
+            END IF;
             v_unidades := v_unidades || (v_palabra || ' ' || regexp_replace(v_id, '^0+([0-9])', '\1'));
             i := i + v_salto;
           END IF;
@@ -561,16 +574,19 @@ BEGIN
       i := i + 1;
     END LOOP;
   END LOOP;
-  -- Ordenadas byte a byte (COLLATE "C"), como el sort() del espejo.
+  -- Ordenadas byte a byte (COLLATE "C"), como el sort() del espejo, y separadas por
+  -- coma: _otra_unidad_misma_puerta las vuelve a separar.
   RETURN NULLIF(array_to_string(ARRAY(SELECT DISTINCT (x COLLATE "C") FROM unnest(v_unidades) x
-                                        ORDER BY 1), ' '), '');
+                                        ORDER BY 1), ', '), '');
 END
 $function$;
 
 COMMENT ON FUNCTION public.unidad_direccion_cliente(text) IS
   '1596-b7 (#1596): la unidad dentro de la puerta de una dirección («Local 2», «Dpto. B», «PB»), normalizada y ordenada; NULL si no hay. Espejo: unidadDireccion (src/utils/duplicadoCliente.ts).';
 
--- La regla: la misma calle y altura, y las dos con una unidad, distinta.
+-- La regla: la misma calle y altura, y las dos con una unidad, distinta. La misma
+-- unidad con más detalle («Local 1» y «Local 1, PB») es la misma puerta: son otra
+-- unidad sólo si ninguna de las dos listas contiene a la otra.
 CREATE FUNCTION public._otra_unidad_misma_puerta(p_a text, p_b text)
 RETURNS boolean
 LANGUAGE sql
@@ -579,12 +595,15 @@ SET search_path TO 'public', 'pg_temp'
 AS $function$
   SELECT COALESCE(
            public.clave_direccion_cliente(p_a) = public.clave_direccion_cliente(p_b)
-           AND public.unidad_direccion_cliente(p_a) <> public.unidad_direccion_cliente(p_b),
-           false);
+           AND NOT (string_to_array(ua, ', ') <@ string_to_array(ub, ', '))
+           AND NOT (string_to_array(ub, ', ') <@ string_to_array(ua, ', ')),
+           false)
+    FROM (SELECT public.unidad_direccion_cliente(p_a) AS ua,
+                 public.unidad_direccion_cliente(p_b) AS ub) u;
 $function$;
 
 COMMENT ON FUNCTION public._otra_unidad_misma_puerta(text, text) IS
-  '1596-b7 (#1596): dos direcciones son unidades distintas de la misma puerta si tienen la misma calle y altura y las dos dicen una unidad, distinta. No chocan por dirección y no bloquean por punto: es un aviso. Espejo: otraUnidadMismaPuerta.';
+  '1596-b7 (#1596): dos direcciones son unidades distintas de la misma puerta si tienen la misma calle y altura, las dos dicen una unidad y ninguna lista de unidades contiene a la otra. No chocan por dirección y no bloquean por punto: es un aviso. Espejo: otraUnidadMismaPuerta.';
 
 -- Sólo de server: las llama verificar_duplicado_cliente (DEFINER).
 REVOKE ALL ON FUNCTION public.unidad_direccion_cliente(text) FROM PUBLIC, anon, authenticated;
@@ -787,9 +806,9 @@ BEGIN
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.clave_direccion_cliente(text)', '723f836397e4dca8a2c713373d28fab2', false,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
-    ('public.unidad_direccion_cliente(text)', 'c20167f583008713960e01ee5f85e477', false,
+    ('public.unidad_direccion_cliente(text)', '34f7930ec9ac932aeea15856acc231ea', false,
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public._otra_unidad_misma_puerta(text,text)', '49f580d52fc6092889813c060799447e', false,
+    ('public._otra_unidad_misma_puerta(text,text)', '63d66577fab9558e87b174b2582790ea', false,
      '{postgres=X/postgres,service_role=X/postgres}'),
     ('public.productos_rechazar_borrado_con_historial()', '945ad427e04031ac694f0afdc1ffe450', true,
      '{postgres=X/postgres,service_role=X/postgres}'),

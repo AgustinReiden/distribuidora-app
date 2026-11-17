@@ -124,6 +124,12 @@ const PALABRAS_DE_UNIDAD = new Map<string, string>([
 /** Lo que identifica a la unidad: un número (con una letra pegada) o una letra suelta. */
 const IDENTIFICADOR_DE_UNIDAD = /^([0-9]+[a-z]?|[a-z])$/
 
+/** Las palabras que dicen «número» antes del identificador («N°», «Nro.», «No.»). */
+const PALABRAS_DE_NUMERO = new Set(['n', 'nro', 'no', 'num', 'numero'])
+
+/** Entre una unidad y otra en lo que devuelve `unidadDireccion` («dpto b, piso 2»). */
+const SEPARADOR_DE_UNIDADES = ', '
+
 /**
  * La unidad dentro de la puerta, normalizada (1596-b7, #1596): lo que viene
  * después de la primera coma y dice «Local 2», «Dpto. B», «Piso 3», «PB»…
@@ -133,7 +139,10 @@ const IDENTIFICADOR_DE_UNIDAD = /^([0-9]+[a-z]?|[a-z])$/
  * - Una palabra de unidad cuenta sólo con un identificador detrás (un número, o
  *   una letra suelta); «PB» y «planta baja» no lo necesitan. «Puesto Viejo»,
  *   «Planta Urbana» o «Unidad Turística» son localidades, no unidades.
- * - El orden no importa: las unidades salen ordenadas y sin repetir.
+ * - «N°», «Nº», «Nro.», «No.» y «#» antes del número se descartan, y una letra
+ *   suelta después del número se le pega: «Dpto N° 3 B» es «dpto 3b».
+ * - El orden no importa: las unidades salen ordenadas, sin repetir y separadas
+ *   por coma («dpto b, piso 2»).
  *
  * Devuelve `null` si no hay ninguna. Espejo de `unidad_direccion_cliente` (SQL);
  * el fixture que corren los dos es `direccionCliente.espejo.json`.
@@ -148,20 +157,29 @@ export function unidadDireccion(direccion: string | null | undefined): string | 
       if (t[i] === 'planta' && t[i + 1] === 'baja') { unidades.add('pb'); i++; continue }
       const palabra = PALABRAS_DE_UNIDAD.get(t[i])
       if (!palabra) continue
-      const salto = t[i] === 'unidad' && t[i + 1] === 'funcional' ? 2 : 1
-      const id = t[i + salto]
+      let salto = t[i] === 'unidad' && t[i + 1] === 'funcional' ? 2 : 1
+      // «Local N° 2», «Nro. 2», «No. 2», «# 2»: el «número» no es el identificador.
+      if (PALABRAS_DE_NUMERO.has(t[i + salto]) && /^[0-9]/.test(t[i + salto + 1] ?? '')) salto++
+      let id = t[i + salto]
       if (id && IDENTIFICADOR_DE_UNIDAD.test(id)) {
+        // «Dpto 3 B» es «dpto 3b», como «Dpto 3B».
+        const letra = t[i + salto + 1]
+        if (/^[0-9]+$/.test(id) && letra && /^[a-z]$/.test(letra) && letra !== 'y') {
+          id += letra
+          salto++
+        }
         unidades.add(`${palabra} ${id.replace(/^0+(?=[0-9])/, '')}`)
         i += salto
       }
     }
   }
-  return unidades.size ? [...unidades].sort().join(' ') : null
+  return unidades.size ? [...unidades].sort().join(SEPARADOR_DE_UNIDADES) : null
 }
 
 /**
  * ¿Son dos unidades distintas de la misma puerta? (1596-b7, regla de la
- * coordinadora): la misma calle y altura, y LAS DOS con una unidad, distinta.
+ * coordinadora): la misma calle y altura, y LAS DOS con una unidad, distinta (y
+ * ninguna contenida en la otra: «Local 1» y «Local 1, PB» son la misma puerta).
  * Entonces no chocan por dirección ni bloquean por estar en el mismo punto (el
  * punto de Google es el de la puerta): es un aviso. Si una sola tiene unidad, o
  * es la misma, chocan. Espejo de `_otra_unidad_misma_puerta` (SQL).
@@ -174,7 +192,13 @@ export function otraUnidadMismaPuerta(
   if (!clave || clave !== claveDireccionConAltura(b)) return false
   const ua = unidadDireccion(a)
   const ub = unidadDireccion(b)
-  return ua != null && ub != null && ua !== ub
+  if (ua == null || ub == null) return false
+  // La misma unidad con más detalle («Local 1» y «Local 1, PB») es la misma puerta:
+  // son otra unidad sólo si ninguna de las dos listas contiene a la otra.
+  const la = ua.split(SEPARADOR_DE_UNIDADES)
+  const lb = ub.split(SEPARADOR_DE_UNIDADES)
+  const contiene = (x: string[], y: string[]) => y.every(u => x.includes(u))
+  return !contiene(la, lb) && !contiene(lb, la)
 }
 
 /**
@@ -483,8 +507,10 @@ export function mensajeDuplicado(v: VeredictoDuplicadoRPC): MensajeDuplicado {
         titulo: 'Ya hay un cliente en esa dirección',
         mensaje: nombre
           ? `${nombre} está cargado en la misma dirección.${avisado} ` +
-            'Si de verdad es otro comercio en la misma puerta, agregale el local a la dirección ' +
-            '(por ejemplo "Berutti 399 Local 2") y volvé a intentar.'
+            // La unidad cuenta después de una coma, y en las dos fichas (1596-b7).
+            'Si de verdad es otro comercio en la misma puerta, agregale el local a la dirección, ' +
+            'después de una coma (por ejemplo "Berutti 399, Local 2"), y volvé a intentar. ' +
+            'Si la ficha que ya existe no dice su local, cargáselo también.'
           : `Ya hay un cliente cargado en esa misma dirección. ${SIN_IDENTIDAD}`,
       }
 
@@ -497,6 +523,18 @@ export function mensajeDuplicado(v: VeredictoDuplicadoRPC): MensajeDuplicado {
       }
 
     case 'distancia':
+      // A menos de 1 m el server bloquea por punto, salvo que sea otra unidad de la
+      // misma puerta (1596-b7): un aviso a menos de 1 m es eso, y lo decimos así.
+      if (v.distancia_m != null && v.distancia_m < DUPLICADO_BLOQUEO_METROS) {
+        return {
+          titulo: 'Hay otra unidad en la misma puerta',
+          mensaje: nombre
+            ? `${nombre} es otra unidad de la misma puerta (otro local, depto o piso).${avisado} ` +
+              '¿Seguro que es otro comercio y querés crearlo igual?'
+            : `Hay otra unidad de la misma puerta. ${SIN_IDENTIDAD} ` +
+              '¿Seguro que es otro comercio y querés crearlo igual?',
+        }
+      }
       return {
         titulo: 'Hay un cliente muy cerca',
         mensaje: nombre

@@ -109,6 +109,27 @@ describe('clasificarDuplicado — unidades de la misma puerta (1596-b7)', () => 
       .toMatchObject({ bloquea: true, motivo: 'punto', candidato: otro })
   })
 
+  it('el mensaje por dirección aconseja la unidad después de una coma, la forma que se reconoce', () => {
+    const m = mensajeDuplicado({
+      bloquea: true, avisa: false, motivo: 'direccion', distancia_m: null,
+      cliente_visible: { id: 1, codigo: 1, nombre: 'Kiosco de ensayo', activo: true }, aviso_admin: false,
+    }).mensaje
+    expect(m).toContain('"Berutti 399, Local 2"')
+    expect(unidadDireccion('Berutti 399, Local 2')).toBe('local 2')
+  })
+
+  it('un aviso a menos de 1 m es otra unidad de la misma puerta, y lo dice', () => {
+    const v = {
+      bloquea: false, avisa: true, motivo: 'distancia' as const, distancia_m: 0,
+      cliente_visible: { id: 1, codigo: 1, nombre: 'Kiosco de ensayo', activo: true }, aviso_admin: false,
+    }
+    const { titulo, mensaje } = mensajeDuplicado(v)
+    expect(titulo).toBe('Hay otra unidad en la misma puerta')
+    expect(mensaje).toContain('otra unidad de la misma puerta')
+    expect(mensaje).not.toContain('0 m')
+    expect(mensajeDuplicado({ ...v, distancia_m: 5.2 }).mensaje).toContain('a 5,2 m')
+  })
+
   it('cambiar sólo la unidad cambia la identidad que mira el guard', () => {
     expect(cambiaIdentidadDuplicado({ direccion: 'Calle 777, Local 1' }, { direccion: 'Calle 777, Local 2' })).toBe(true)
     expect(cambiaIdentidadDuplicado({ direccion: 'Calle 777, Local 1' }, { direccion: 'Calle 777, Loc. 1, Tucumán' })).toBe(false)
