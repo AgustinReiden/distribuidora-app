@@ -10,7 +10,9 @@ import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
 import { Loader2, Settings, AlertTriangle, Percent, CalendarClock, CalendarRange, PackageX, History, Boxes } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { formatCurrency } from '../../utils/formatters';
-import { leerPlataTipeada, numeroEditable, parsePrecio } from '../../utils/calculations';
+import { leerPlataTipeada, parsePrecio } from '../../utils/calculations';
+import { leerDecimalSinMiles, leerEntero, numeroConMiles } from '../../utils/normalizarNumero';
+import { CampoNumero } from '../ui/CampoNumero';
 import { DIAS_ATRAS_FECHA_PEDIDO_MAXIMO, DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO } from '../../utils/fechaPedido';
 import { errorDeMultiploRedondeo, MULTIPLO_REDONDEO_PRECIO } from '../../utils/precios';
 import { MONTO_MINIMO_TECHO, type ModoMinimoPedido, type ReglaMinimoPedido } from '../../utils/montoMinimo';
@@ -111,17 +113,18 @@ function FormAlertasVencimiento({
   guardando: boolean;
   onGuardar: (diasAlerta: number, diasCritico: number) => void;
 }) {
-  const [amarillo, setAmarillo] = useState(String(diasAlerta));
-  const [rojo, setRojo] = useState(String(diasCritico));
+  const [amarillo, setAmarillo] = useState(numeroConMiles(diasAlerta));
+  const [rojo, setRojo] = useState(numeroConMiles(diasCritico));
   const [error, setError] = useState<string | null>(null);
 
   // El valor del servidor llega despues del primer render y cambia al cambiar
   // de sucursal.
-  useEffect(() => { setAmarillo(String(diasAlerta)); }, [diasAlerta]);
+  useEffect(() => { setAmarillo(numeroConMiles(diasAlerta)); }, [diasAlerta]);
   useEffect(() => { setRojo(String(diasCritico)); }, [diasCritico]);
 
-  const nAmarillo = Number(amarillo);
-  const nRojo = Number(rojo);
+  // Enteros, con los miles que pone el campo (B20, D17): «3.650» son 3650 días; una coma, no.
+  const nAmarillo = leerEntero(amarillo) ?? NaN;
+  const nRojo = leerEntero(rojo) ?? NaN;
   const validoAmarillo = Number.isInteger(nAmarillo) && nAmarillo >= 0 && nAmarillo <= 3650;
   const validoRojo = Number.isInteger(nRojo) && nRojo >= 0 && nRojo <= 3650;
   const ordenOk = validoAmarillo && validoRojo && nRojo <= nAmarillo;
@@ -169,15 +172,12 @@ function FormAlertasVencimiento({
             Amarillo
           </label>
           <div className="mt-2 flex items-center gap-2">
-            <input
+            <CampoNumero
               id="dias-alerta"
-              type="number"
-              min={0}
-              max={3650}
-              step="1"
-              inputMode="numeric"
+              entero
+              motivo={null}
               value={amarillo}
-              onChange={(e) => { setAmarillo(e.target.value); setError(null); }}
+              onChange={(t) => { setAmarillo(t); setError(null); }}
               aria-invalid={!validoAmarillo}
               className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
@@ -190,15 +190,12 @@ function FormAlertasVencimiento({
             Rojo
           </label>
           <div className="mt-2 flex items-center gap-2">
-            <input
+            <CampoNumero
               id="dias-critico"
-              type="number"
-              min={0}
-              max={3650}
-              step="1"
-              inputMode="numeric"
+              entero
+              motivo={null}
               value={rojo}
-              onChange={(e) => { setRojo(e.target.value); setError(null); }}
+              onChange={(t) => { setRojo(t); setError(null); }}
               aria-invalid={!validoRojo || !ordenOk}
               className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
@@ -333,7 +330,7 @@ function FormVentanaPrecioAnterior({
   // de sucursal.
   useEffect(() => { setValor(String(horas)); }, [horas]);
 
-  const n = Number(valor);
+  const n = leerEntero(valor) ?? NaN;
   // Mismo rango que el CHECK de la tabla y la RPC: entero de 0 a 168.
   const invalido = valor.trim() === '' || !Number.isInteger(n) || n < 0 || n > 168;
   const cambio = !invalido && n !== horas;
@@ -374,15 +371,12 @@ function FormVentanaPrecioAnterior({
           Horas
         </label>
         <div className="mt-2 flex items-center gap-2">
-          <input
+          <CampoNumero
             id="ventana-precio-anterior"
-            type="number"
-            min={0}
-            max={168}
-            step={1}
-            inputMode="numeric"
+            entero
+            motivo={null}
             value={valor}
-            onChange={(e) => setValor(e.target.value)}
+            onChange={setValor}
             disabled={!puedeEditar}
             aria-invalid={invalido}
             aria-describedby={invalido ? 'ventana-precio-anterior-error' : undefined}
@@ -442,7 +436,7 @@ function FormDiasAtrasFechaPedido({
   // de sucursal.
   useEffect(() => { setValor(String(dias)); }, [dias]);
 
-  const n = Number(valor);
+  const n = leerEntero(valor) ?? NaN;
   // Mismo rango que el CHECK de la columna y la RPC: entero de 0 a 30.
   const invalido = valor.trim() === '' || !Number.isInteger(n) || n < 0 || n > DIAS_ATRAS_FECHA_PEDIDO_MAXIMO;
   const cambio = !invalido && n !== dias;
@@ -482,15 +476,12 @@ function FormDiasAtrasFechaPedido({
           Días hacia atrás
         </label>
         <div className="mt-2 flex items-center gap-2">
-          <input
+          <CampoNumero
             id="dias-atras-fecha-pedido"
-            type="number"
-            min={0}
-            max={DIAS_ATRAS_FECHA_PEDIDO_MAXIMO}
-            step={1}
-            inputMode="numeric"
+            entero
+            motivo={null}
             value={valor}
-            onChange={(e) => setValor(e.target.value)}
+            onChange={setValor}
             disabled={!puedeEditar}
             aria-invalid={invalido}
             aria-describedby={invalido ? 'dias-atras-fecha-pedido-error dias-atras-fecha-pedido-ayuda' : 'dias-atras-fecha-pedido-ayuda'}
@@ -546,11 +537,11 @@ function FormMultiploRedondeo({
   guardando: boolean;
   onGuardar: (multiplo: number) => void;
 }) {
-  const [valor, setValor] = useState(numeroEditable(multiplo));
+  const [valor, setValor] = useState(numeroConMiles(multiplo));
 
   // El valor del servidor llega después del primer render y cambia al cambiar
   // de sucursal.
-  useEffect(() => { setValor(numeroEditable(multiplo)); }, [multiplo]);
+  useEffect(() => { setValor(numeroConMiles(multiplo)); }, [multiplo]);
 
   // Es plata (#1560): «1.000» es mil, no uno. Sin redondear, para que «1,234»
   // siga diciendo «hasta dos decimales» en vez de guardarse 1,23.
@@ -592,12 +583,11 @@ function FormMultiploRedondeo({
         </label>
         <div className="mt-2 flex items-center gap-2">
           <span className="text-stone-500 dark:text-stone-400">$</span>
-          <input
+          <CampoNumero
             id="multiplo-redondeo-precio"
-            type="text"
-            inputMode="decimal"
+            motivo={null}
             value={valor}
-            onChange={(e) => setValor(e.target.value)}
+            onChange={setValor}
             disabled={!puedeEditar}
             aria-invalid={!!error}
             aria-describedby={error ? 'multiplo-redondeo-precio-error' : undefined}
@@ -656,8 +646,9 @@ function FormAlertasCombos({
   useEffect(() => { setMargen(String(margenMinimo)); }, [margenMinimo]);
   useEffect(() => { setDescuento(String(descuentoMaximo)); }, [descuentoMaximo]);
 
-  const nM = Number(margen.replace(',', '.'));
-  const nD = Number(descuento.replace(',', '.'));
+  // Porcentajes: sin miles (B20, D17); la tecla del punto es la coma.
+  const nM = leerDecimalSinMiles(margen) ?? NaN;
+  const nD = leerDecimalSinMiles(descuento) ?? NaN;
   // Mismo rango que el CHECK de la tabla y la RPC: 0 a 100.
   const fueraDeRango = (txt: string, n: number) => txt.trim() === '' || !Number.isFinite(n) || n < 0 || n > 100;
   const invalido = fueraDeRango(margen, nM) || fueraDeRango(descuento, nD);
@@ -700,12 +691,12 @@ function FormAlertasCombos({
             Margen mínimo
           </label>
           <div className="mt-2 flex items-center gap-2">
-            <input
+            <CampoNumero
               id="combo-margen-minimo"
-              type="text"
-              inputMode="decimal"
+              sinMiles
+              motivo={null}
               value={margen}
-              onChange={(e) => setMargen(e.target.value)}
+              onChange={setMargen}
               disabled={!puedeEditar}
               aria-invalid={fueraDeRango(margen, nM)}
               className={inputCls}
@@ -718,12 +709,12 @@ function FormAlertasCombos({
             Descuento máximo
           </label>
           <div className="mt-2 flex items-center gap-2">
-            <input
+            <CampoNumero
               id="combo-descuento-maximo"
-              type="text"
-              inputMode="decimal"
+              sinMiles
+              motivo={null}
               value={descuento}
-              onChange={(e) => setDescuento(e.target.value)}
+              onChange={setDescuento}
               disabled={!puedeEditar}
               aria-invalid={fueraDeRango(descuento, nD)}
               className={inputCls}
@@ -786,8 +777,9 @@ function FormComisiones({
   useEffect(() => { setPrev(String(pctPreventista)); }, [pctPreventista]);
   useEffect(() => { setOtros(String(pctOtros)); }, [pctOtros]);
 
-  const nPrev = Number(prev.replace(',', '.'));
-  const nOtros = Number(otros.replace(',', '.'));
+  // Porcentajes: sin miles (B20, D17); la tecla del punto es la coma.
+  const nPrev = leerDecimalSinMiles(prev) ?? NaN;
+  const nOtros = leerDecimalSinMiles(otros) ?? NaN;
   const validoPrev = Number.isFinite(nPrev) && nPrev >= 0 && nPrev <= 100;
   const validoOtros = Number.isFinite(nOtros) && nOtros >= 0 && nOtros <= 100;
   const valido = validoPrev && validoOtros;
@@ -841,15 +833,12 @@ function FormComisiones({
             Preventistas
           </label>
           <div className="mt-2 flex items-center gap-2">
-            <input
+            <CampoNumero
               id="pct-preventista"
-              type="number"
-              min={0}
-              max={100}
-              step="0.01"
-              inputMode="decimal"
+              sinMiles
+              motivo={null}
               value={prev}
-              onChange={(e) => { setPrev(e.target.value); setError(null); }}
+              onChange={(t) => { setPrev(t); setError(null); }}
               disabled={!puedeEditar}
               aria-invalid={!validoPrev}
               className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -863,15 +852,12 @@ function FormComisiones({
             Resto (admin, encargado)
           </label>
           <div className="mt-2 flex items-center gap-2">
-            <input
+            <CampoNumero
               id="pct-otros"
-              type="number"
-              min={0}
-              max={100}
-              step="0.01"
-              inputMode="decimal"
+              sinMiles
+              motivo={null}
               value={otros}
-              onChange={(e) => { setOtros(e.target.value); setError(null); }}
+              onChange={(t) => { setOtros(t); setError(null); }}
               disabled={!puedeEditar}
               aria-invalid={!validoOtros}
               className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -978,20 +964,20 @@ export default function VistaConfiguracion({
   onGuardarMultiploRedondeo,
   extra,
 }: VistaConfiguracionProps) {
-  const [valor, setValor] = useState(numeroEditable(montoMinimoActual ?? 0));
+  const [valor, setValor] = useState(numeroConMiles(montoMinimoActual ?? 0));
   const [modo, setModo] = useState<ModoMinimoPedido>(modoMinimoActual);
-  const [gratis, setGratis] = useState(numeroEditable(montoEnvioGratisActual ?? 0));
-  const [cargo, setCargo] = useState(numeroEditable(cargoEnvioActual ?? 0));
+  const [gratis, setGratis] = useState(numeroConMiles(montoEnvioGratisActual ?? 0));
+  const [cargo, setCargo] = useState(numeroConMiles(cargoEnvioActual ?? 0));
   const [error, setError] = useState<string | null>(null);
 
   // El valor del servidor llega después del primer render (y cambia al cambiar
   // de sucursal): sin esto el campo se quedaría mostrando 0.
   useEffect(() => {
-    setValor(numeroEditable(montoMinimoActual ?? 0));
+    setValor(numeroConMiles(montoMinimoActual ?? 0));
   }, [montoMinimoActual]);
   useEffect(() => { setModo(modoMinimoActual); }, [modoMinimoActual]);
-  useEffect(() => { setGratis(numeroEditable(montoEnvioGratisActual ?? 0)); }, [montoEnvioGratisActual]);
-  useEffect(() => { setCargo(numeroEditable(cargoEnvioActual ?? 0)); }, [cargoEnvioActual]);
+  useEffect(() => { setGratis(numeroConMiles(montoEnvioGratisActual ?? 0)); }, [montoEnvioGratisActual]);
+  useEffect(() => { setCargo(numeroConMiles(cargoEnvioActual ?? 0)); }, [cargoEnvioActual]);
 
   const parseado = parsearMonto(valor);
   const parseadoGratis = parsearMonto(gratis);
@@ -1114,12 +1100,11 @@ export default function VistaConfiguracion({
 
           <div className="mt-3 flex items-center gap-2">
             <span className="text-stone-500 dark:text-stone-400">$</span>
-            <input
+            <CampoNumero
               id="monto-minimo"
-              type="text"
-              inputMode="decimal"
+              motivo={null}
               value={valor}
-              onChange={(e) => handleChange(e.target.value)}
+              onChange={handleChange}
               disabled={!puedeEditarMinimo}
               aria-invalid={!valido}
               aria-describedby={error || !valido ? 'monto-minimo-error' : undefined}
@@ -1135,12 +1120,10 @@ export default function VistaConfiguracion({
                 </label>
                 <div className="mt-1 flex items-center gap-2">
                   <span className="text-stone-500 dark:text-stone-400">$</span>
-                  <input
+                  <CampoNumero
                     id="cargo-envio"
-                    type="text"
-                    inputMode="decimal"
                     value={cargo}
-                    onChange={(e) => { setCargo(e.target.value); setError(null); }}
+                    onChange={(t) => { setCargo(t); setError(null); }}
                     disabled={!puedeEditarMinimo}
                     className="w-40 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
@@ -1153,12 +1136,10 @@ export default function VistaConfiguracion({
                   </label>
                   <div className="mt-1 flex items-center gap-2">
                     <span className="text-stone-500 dark:text-stone-400">$</span>
-                    <input
+                    <CampoNumero
                       id="monto-envio-gratis"
-                      type="text"
-                      inputMode="decimal"
                       value={gratis}
-                      onChange={(e) => { setGratis(e.target.value); setError(null); }}
+                      onChange={(t) => { setGratis(t); setError(null); }}
                       disabled={!puedeEditarMinimo}
                       className="w-40 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />

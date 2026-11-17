@@ -11,6 +11,7 @@
 import { useState, type FormEvent } from 'react'
 import { Landmark, Plus, Loader2 } from 'lucide-react'
 import { Button } from '../../ui/Button'
+import { CampoNumero } from '../../ui/CampoNumero'
 import {
   useCatalogoIIQuery,
   useGuardarEncuadreIIMutation,
@@ -64,11 +65,13 @@ function FormTasa({ encuadre, onListo }: { encuadre: EncuadreII; onListo: () => 
     <form onSubmit={handleSubmit} className="mt-2 flex flex-wrap items-end gap-2">
       <div>
         <label htmlFor={`tasa-${encuadre.id}`} className="block text-xs text-stone-500 mb-1">Tasa nominal (%)</label>
-        <input
+        {/* Un porcentaje: sin miles, y la tecla del punto es la coma (B20, D17). */}
+        <CampoNumero
           id={`tasa-${encuadre.id}`}
-          inputMode="decimal"
+          sinMiles
+          motivo={null}
           value={tasa}
-          onChange={(e) => setTasa(e.target.value)}
+          onChange={setTasa}
           placeholder="8"
           className={`${INPUT} w-24`}
         />
@@ -182,7 +185,7 @@ function FormEncuadre({ encuadre, onListo }: { encuadre?: EncuadreII; onListo: (
         <div className="flex flex-wrap gap-2">
           <div>
             <label htmlFor="tasa-nuevo" className="block text-xs text-stone-500 mb-1">Tasa nominal (%)</label>
-            <input id="tasa-nuevo" inputMode="decimal" value={tasa} onChange={(e) => setTasa(e.target.value)} placeholder="10" className={`${INPUT} w-24`} />
+            <CampoNumero id="tasa-nuevo" sinMiles motivo={null} value={tasa} onChange={setTasa} placeholder="10" className={`${INPUT} w-24`} />
           </div>
           <div>
             <label htmlFor="desde-nuevo" className="block text-xs text-stone-500 mb-1">Vigente desde</label>

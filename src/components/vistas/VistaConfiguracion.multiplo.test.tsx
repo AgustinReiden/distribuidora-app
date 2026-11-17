@@ -75,7 +75,8 @@ describe('VistaConfiguracion — múltiplo del redondeo de los precios en masa',
   })
 
   // «1.234» ya no va acá: es plata, y con el punto de miles es mil doscientos treinta y cuatro (#1560).
-  it.each(['0', '-10', '10000.01', '1,234', '10.001', 'abc', '12abc', ''])('rechaza %j con su motivo y no guarda', async (valor) => {
+  // B20 (D17): el menos y las letras tipeados no entran (ver abajo); lo demás se rechaza con su motivo.
+  it.each(['0', '10000.01', '1,234', '10.001', 'abc', ''])('rechaza %j con su motivo y no guarda', async (valor) => {
     const onGuardar = vi.fn()
     render(<VistaConfiguracion {...props({ onGuardarMultiploRedondeo: onGuardar })} />)
     const { input, boton } = formMultiplo()
@@ -85,13 +86,24 @@ describe('VistaConfiguracion — múltiplo del redondeo de los precios en masa',
     expect(boton).toBeDisabled()
   })
 
-  // #1560: es plata y se lee con el punto de miles, como el resto de los montos. Con
-  // `Number(valor.replace(',', '.'))`, «1.000» se guardaba 1 y «10.000», 10, sin error.
   it.each([
-    ['1.000', 1000],
-    ['10.000', 10000],
-    ['1.000,00', 1000],
-    ['1.000,5', 1000.5],
+    ['-10', '10'],
+    ['12abc', '12'],
+  ])('tipeado %j: el menos y las letras no entran, queda %j', async (tipeado, queda) => {
+    render(<VistaConfiguracion {...props({ onGuardarMultiploRedondeo: vi.fn() })} />)
+    const { input } = formMultiplo()
+    await userEvent.clear(input)
+    await userEvent.type(input, tipeado)
+    expect(input.value).toBe(queda)
+  })
+
+  // #1560 y B20 (D17, cambió de regla): es plata. Tipeado, el punto es la coma decimal y los miles
+  // los pone el campo («1000» se ve «1.000»).
+  it.each([
+    ['1000', 1000],
+    ['10000', 10000],
+    ['1000,00', 1000],
+    ['1000,5', 1000.5],
     ['12.5', 12.5],
     ['0.50', 0.5],
   ])('lee %j como %d', async (tipeado, esperado) => {

@@ -50,6 +50,39 @@ describe('VistaConfiguracion — comisión por defecto', () => {
     expect(onGuardarComisiones).toHaveBeenCalledWith(3, 0)
   })
 
+  // B20 (D17): un porcentaje no lleva miles; la tecla del punto es la coma decimal.
+  it('el porcentaje tipeado «2.5» se ve «2,5» y se guarda 2,5; uno que no se entiende no se guarda', async () => {
+    const onGuardarComisiones = vi.fn()
+    render(<VistaConfiguracion {...props({ onGuardarComisiones })} />)
+    const prev = screen.getByLabelText('Preventistas') as HTMLInputElement
+    await userEvent.clear(prev)
+    await userEvent.type(prev, '2.5')
+    expect(prev.value).toBe('2,5')
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar comisiones' }))
+    expect(onGuardarComisiones).toHaveBeenCalledWith(2.5, 0)
+
+    onGuardarComisiones.mockClear()
+    await userEvent.clear(prev)
+    await userEvent.type(prev, '2,5,')
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar comisiones' }))
+    expect(onGuardarComisiones).not.toHaveBeenCalled()
+  })
+
+  // B20 (D17): los días del aviso de vencimiento son enteros; los miles los pone el campo.
+  it('los días del aviso: «1500» se ve «1.500», y «1.5» (una coma) no es un día', async () => {
+    const onGuardarAlertas = vi.fn()
+    render(<VistaConfiguracion {...props({ onGuardarAlertas })} />)
+    const amarillo = screen.getByLabelText('Amarillo') as HTMLInputElement
+    await userEvent.clear(amarillo)
+    await userEvent.type(amarillo, '1500')
+    expect(amarillo.value).toBe('1.500')
+    expect(amarillo).not.toHaveAttribute('aria-invalid', 'true')
+    await userEvent.clear(amarillo)
+    await userEvent.type(amarillo, '1.5')
+    expect(amarillo.value).toBe('1,5')
+    expect(amarillo).toHaveAttribute('aria-invalid', 'true')
+  })
+
   it('sin permiso (no admin) los inputs y el botón quedan deshabilitados y lo dice', () => {
     render(<VistaConfiguracion {...props({ puedeEditarComisiones: false })} />)
     expect(screen.getByLabelText('Preventistas')).toBeDisabled()
