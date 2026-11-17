@@ -1198,6 +1198,10 @@ export function useCancelarPedidoMutation() {
     onSuccess: (_data, { tipo }) => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })
+      // STK-15: cancelar devuelve las unidades a sus lotes (trigger de stock);
+      // Vencimientos y la ficha seguían con los contadores de antes. Literal,
+      // como `['mermas']` abajo: no se importa `useLotesQuery` a este módulo.
+      queryClient.invalidateQueries({ queryKey: ['lotes', currentSucursalId] })
       // FRT-2: cancelar saca la boleta de la deuda y deja lo cobrado como saldo a
       // favor; el saldo cacheado del cliente quedaba viejo hasta 5 minutos.
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })

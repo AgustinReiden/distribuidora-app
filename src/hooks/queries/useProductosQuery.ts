@@ -10,7 +10,7 @@ import { armarLotesPreciosMasivo, esErrorDeEscala, TOPE_LOTE_SERVIDOR, type Esca
 import type { ProductoDB, ProductoFormInput } from '../../types'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
-import { conCostos } from './costosProductos'
+import { conCostos, usePuedeVerCostos } from './costosProductos'
 import { traerTodo } from '../../utils/paginacion'
 
 // Query keys
@@ -29,15 +29,15 @@ export const productosKeys = {
 // sólo los trae para admin y encargado. Ver productoColumnas.ts.
 // PostgREST corta en 1.000 filas sin avisar: el catálogo de un súper tiene miles
 // de productos (#1561). Paginado, con un orden único (`id` de desempate).
-async function fetchProductos(): Promise<ProductoDB[]> {
+async function fetchProductos(puedeVerCostos = true): Promise<ProductoDB[]> {
   const data = await traerTodo<ProductoDB>(
     () => supabase.from('productos').select(PRODUCTO_COLUMNAS).order('nombre').order('id') as never,
     { etiqueta: 'los productos', sinConexion: 'Sin conexión: no se pudo cargar los productos. Revisá la señal e intentá de nuevo.' },
   )
-  return conCostos(data)
+  return conCostos(data, { puedeVerCostos })
 }
 
-async function fetchProductoById(id: string): Promise<ProductoDB | null> {
+async function fetchProductoById(id: string, puedeVerCostos = true): Promise<ProductoDB | null> {
   const { data, error } = await supabase
     .from('productos')
     .select(PRODUCTO_COLUMNAS)
@@ -45,7 +45,7 @@ async function fetchProductoById(id: string): Promise<ProductoDB | null> {
     .single()
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el producto. Revisá la señal e intentá de nuevo.')
-  const [conCosto] = await conCostos([data as unknown as ProductoDB])
+  const [conCosto] = await conCostos([data as unknown as ProductoDB], { puedeVerCostos })
   return conCosto
 }
 
@@ -272,9 +272,10 @@ async function deleteProducto(id: string): Promise<void> {
  */
 export function useProductosQuery(opts?: { enabled?: boolean }) {
   const { currentSucursalId } = useSucursal()
+  const puedeVerCostos = usePuedeVerCostos()
   return useQuery({
     queryKey: productosKeys.lists(currentSucursalId),
-    queryFn: fetchProductos,
+    queryFn: () => fetchProductos(puedeVerCostos),
     enabled: opts?.enabled ?? true,
     staleTime: 10 * 60 * 1000, // 10 minutos - productos cambian poco
   })
@@ -285,9 +286,10 @@ export function useProductosQuery(opts?: { enabled?: boolean }) {
  */
 export function useProductoQuery(id: string) {
   const { currentSucursalId } = useSucursal()
+  const puedeVerCostos = usePuedeVerCostos()
   return useQuery({
     queryKey: productosKeys.detail(currentSucursalId, id),
-    queryFn: () => fetchProductoById(id),
+    queryFn: () => fetchProductoById(id, puedeVerCostos),
     enabled: !!id,
   })
 }

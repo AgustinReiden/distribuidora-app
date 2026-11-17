@@ -166,8 +166,14 @@ export default function ModalNotaCredito({
   const ajusteExcede = restanteCompra !== null && ajuste.total > restanteCompra
 
   const totalDevolucion = subtotal + iva + iiDevolucion
+  // #1590-c: la devolución tiene el mismo tope, pero sólo si la compra ya tiene un
+  // ajuste (decisión del dueño, #1565): sin ajustes, devolver toda la mercadería
+  // entra siempre aunque acredite más que el total. Es la regla de
+  // `registrar_nota_credito`; acá se avisa antes de guardar y no por el error.
+  const tieneAjuste = notasExistentes.some(n => n.tipo === 'ajuste')
+  const devolucionExcede = tieneAjuste && restanteCompra !== null && Math.round(totalDevolucion * 100) / 100 > restanteCompra
   const puedeGuardar = modo === 'devolucion'
-    ? itemsConCantidad.length > 0
+    ? itemsConCantidad.length > 0 && !devolucionExcede
     : ajuste.total > 0 && !ajusteExcede && motivo.trim() !== '' && (sinCredito || ajIvaCargado)
 
   const handleCantidadChange = (lineaId: string, value: string) => {
@@ -410,6 +416,17 @@ export default function ModalNotaCredito({
                 <span className="text-gray-800 dark:text-white">Total:</span>
                 <span className="text-blue-600" data-testid="nc-total">{formatPrecio(totalDevolucion)}</span>
               </div>
+              {tieneAjuste && restanteCompra !== null && (
+                <p
+                  role={devolucionExcede ? 'alert' : undefined}
+                  data-testid="nc-devolucion-restante"
+                  className={`text-xs ${devolucionExcede ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}`}
+                >
+                  {devolucionExcede
+                    ? `Supera lo que le queda a la compra: ${formatPrecio(Math.max(restanteCompra, 0))} (su total menos las notas que ya tiene, contando los ajustes).`
+                    : `Le quedan ${formatPrecio(Math.max(restanteCompra, 0))} por acreditar (su total menos las notas que ya tiene, contando los ajustes).`}
+                </p>
+              )}
             </div>
             ) : (
             <div className="space-y-2">

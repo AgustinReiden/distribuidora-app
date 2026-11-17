@@ -42,6 +42,8 @@ export const comprasKeys = {
   byProveedor: (sucursalId: number | null, proveedorId: string) => [...comprasKeys.all(sucursalId), 'proveedor', proveedorId] as const,
   byProducto: (sucursalId: number | null, productoId: string) => [...comprasKeys.all(sucursalId), 'producto', productoId] as const,
   transferencias: (sucursalId: number | null) => [...comprasKeys.all(sucursalId), 'transferencias'] as const,
+  /** Las líneas de compras anteriores de cada producto (variación de costo). */
+  costosAnteriores: (sucursalId: number | null) => [...comprasKeys.all(sucursalId), 'costos-anteriores'] as const,
 }
 
 interface CompraItemRPC {
@@ -326,6 +328,9 @@ async function fetchComprasMismaFactura(
   }))
 }
 
+/** Líneas que se piden por producto: sobra para saltear las dos o tres que se excluyen. */
+const POR_PRODUCTO_COSTO_ANTERIOR = 25
+
 /**
  * Las líneas de compras anteriores de estos productos, para la variación de
  * costo (utils/costoAnterior elige cuál es "la anterior" de cada uno).
@@ -339,7 +344,9 @@ async function fetchComprasMismaFactura(
  *
  * El límite es por las dudas, no por el caso normal: con el orden por fecha
  * descendente la primera fila válida de cada producto es la respuesta, y las
- * exclusiones (misma factura, misma compra) son una o dos filas.
+ * exclusiones (misma factura, misma compra) son una o dos filas. Pero es global:
+ * si se llena, un producto de mucho movimiento le saca el lugar a otro de compra
+ * más vieja, y a ése se le pide su propia ventana (1599-b4).
  *
  * Igual que el aviso de duplicada: si la RLS no deja leer, vuelve vacío y no se
  * muestra ninguna variación.
@@ -350,24 +357,43 @@ async function fetchCostosAnteriores(
   ref: ReferenciaCostoAnterior,
 ): Promise<FilaCostoAnterior[]> {
   if (productoIds.length === 0 || !ref.fechaCompra) return []
-  let query = supabase
-    .from('compra_items')
-    .select('producto_id, compra_id, costo_real_unitario, costo_unitario, bonificacion, compra:compras!inner(id, fecha_compra, created_at, numero_factura, tipo_factura, letra_comprobante, estado)')
-    .in('producto_id', productoIds)
-    .not('costo_real_unitario', 'is', null)
-    .neq('compra.estado', 'cancelada')
-    .lte('compra.fecha_compra', ref.fechaCompra)
-  if (sucursalId !== null) query = query.eq('sucursal_id', sucursalId)
-  if (ref.compraId !== null) query = query.neq('compra_id', ref.compraId)
 
-  const { data, error } = await query
-    .order('compra(fecha_compra)', { ascending: false })
-    .order('compra(created_at)', { ascending: false })
-    .order('compra_id', { ascending: false })
-    .limit(Math.min(1000, 25 * productoIds.length))
+  const leer = async (ids: string[], limite: number): Promise<FilaCostoAnterior[]> => {
+    let query = supabase
+      .from('compra_items')
+      .select('producto_id, compra_id, costo_real_unitario, costo_unitario, bonificacion, compra:compras!inner(id, fecha_compra, created_at, numero_factura, tipo_factura, letra_comprobante, estado)')
+      .in('producto_id', ids)
+      .not('costo_real_unitario', 'is', null)
+      .neq('compra.estado', 'cancelada')
+      .lte('compra.fecha_compra', ref.fechaCompra)
+    if (sucursalId !== null) query = query.eq('sucursal_id', sucursalId)
+    if (ref.compraId !== null) query = query.neq('compra_id', ref.compraId)
 
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar los costos anteriores. Revisá la señal e intentá de nuevo.')
-  return (data ?? []) as unknown as FilaCostoAnterior[]
+    const { data, error } = await query
+      .order('compra(fecha_compra)', { ascending: false })
+      .order('compra(created_at)', { ascending: false })
+      .order('compra_id', { ascending: false })
+      .limit(limite)
+
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar los costos anteriores. Revisá la señal e intentá de nuevo.')
+    return (data ?? []) as unknown as FilaCostoAnterior[]
+  }
+
+  const limite = Math.min(1000, POR_PRODUCTO_COSTO_ANTERIOR * productoIds.length)
+  const filas = await leer(productoIds, limite)
+  // La ventana alcanzó para todos: lo normal.
+  if (filas.length < limite) return filas
+
+  // 1599-b4: la ventana se llenó. Está ordenada por fecha, así que un producto
+  // de mucho movimiento la ocupa entera y otro cuya última compra es más vieja
+  // queda afuera sin «costo anterior». A los que la ventana no resolvió se les
+  // pide su propia ventana; con una consulta por producto el límite ya no se
+  // reparte con nadie.
+  const resueltos = elegirCostosAnteriores(filas, ref)
+  const sinResolver = productoIds.filter(id => !resueltos.has(String(id)))
+  if (sinResolver.length === 0) return filas
+  const aparte = await Promise.all(sinResolver.map(id => leer([id], POR_PRODUCTO_COSTO_ANTERIOR)))
+  return [...filas, ...aparte.flat()]
 }
 
 /**
@@ -419,36 +445,71 @@ async function fetchCompraQueFijaCosto(productoId: string): Promise<CompraDBExte
 async function sincronizarLotesDeCompra(
   compraId: string | number,
   items: { productoId: string; vencimientos?: { fecha: string; cantidad: number }[] }[],
-  /**
-   * `true` = llamar aunque no haya ningún vencimiento. Lo usa la EDICIÓN: la
-   * RPC recibe la foto completa de los lotes de esta factura, así que una lista
-   * vacía es la forma de borrar los que había. En el ALTA no hay nada que
-   * borrar, así que sin vencimientos ni se llama.
-   */
-  forzar = false,
 ): Promise<string | null> {
+  // Es el ALTA: no hay lotes que borrar, así que sin vencimientos ni se llama.
+  // La EDICIÓN llama siempre (una lista vacía borra los que había) y lo hace
+  // aparte, en `actualizarCompraItems`, porque si falla tiene que devolver qué
+  // quedó sin sincronizar (STK-13).
   const lotes = aplanarVencimientos(items)
-  if (lotes.length === 0 && !forzar) return null
+  if (lotes.length === 0) return null
 
   try {
-    const { data, error } = await supabase.rpc('sincronizar_lotes_compra', {
-      p_compra_id: compraId,
-      p_lotes: lotes,
-    })
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el guardado de los vencimientos.')
-
-    const res = data as unknown as { warning_clamp?: { producto_id: number; unidades: number }[] }
-    const clamp = res?.warning_clamp ?? []
-    if (clamp.length > 0) {
-      const total = clamp.reduce((acc, c) => acc + c.unidades, 0)
-      return `Se recortaron ${total} u. de vencimientos en ${clamp.length} producto(s): los lotes no entraban en el stock disponible.`
-    }
-    return null
+    return await llamarSincronizarLotes(compraId, lotes)
   } catch (e) {
     return `La compra se registró, pero los vencimientos no se pudieron guardar: ${
       e instanceof Error ? e.message : 'error desconocido'
     }. Se pueden cargar a mano desde la ficha del producto.`
   }
+}
+
+/** Los lotes de una compra tal como los recibe `sincronizar_lotes_compra`. */
+export type LotesDeCompra = ReturnType<typeof aplanarVencimientos>
+
+/**
+ * `sincronizar_lotes_compra` con la foto completa de los lotes de la compra.
+ * Lanza si falla; devuelve el aviso de lo que la RPC tuvo que recortar, si hubo.
+ */
+async function llamarSincronizarLotes(compraId: string | number, lotes: LotesDeCompra): Promise<string | null> {
+  const { data, error } = await supabase.rpc('sincronizar_lotes_compra', {
+    p_compra_id: compraId,
+    p_lotes: lotes,
+  })
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el guardado de los vencimientos.')
+
+  const res = data as unknown as { warning_clamp?: { producto_id: number; unidades: number }[] }
+  const clamp = res?.warning_clamp ?? []
+  if (clamp.length > 0) {
+    const total = clamp.reduce((acc, c) => acc + c.unidades, 0)
+    return `Se recortaron ${total} u. de vencimientos en ${clamp.length} producto(s): los lotes no entraban en el stock disponible.`
+  }
+  return null
+}
+
+/**
+ * Los lotes que una edición no pudo sincronizar (STK-13, #1542). La edición de
+ * la compra (`actualizar_compra_items`) y la sincronización de sus lotes son dos
+ * llamadas, y no hay una RPC que las haga juntas: si la segunda falla con la
+ * compra ya bajada, un lote queda con más unidades que la compra. Esto es lo que
+ * hace falta para repetir la segunda llamada.
+ */
+export interface LotesSinSincronizar {
+  compraId: string
+  lotes: LotesDeCompra
+}
+
+/**
+ * Reintenta la sincronización de lotes que falló al editar una compra. Lanza si
+ * vuelve a fallar (la pantalla muestra el motivo y deja reintentar otra vez);
+ * devuelve el aviso de recorte, si lo hubo. Deja la lista de lotes al día.
+ */
+export async function reintentarSincronizarLotes(
+  queryClient: ReturnType<typeof useQueryClient>,
+  sucursalId: number | null,
+  pendiente: LotesSinSincronizar,
+): Promise<string | null> {
+  const aviso = await llamarSincronizarLotes(pendiente.compraId, pendiente.lotes)
+  invalidarLotes(queryClient, sucursalId)
+  return aviso
 }
 
 async function registrarCompra(compraData: CompraFormInputExtended): Promise<RegistrarCompraResult> {
@@ -754,7 +815,7 @@ export function useCostosAnterioresQuery(productoIds: string[], ref: ReferenciaC
   )
   return useQuery({
     queryKey: [
-      ...comprasKeys.all(currentSucursalId), 'costos-anteriores',
+      ...comprasKeys.costosAnteriores(currentSucursalId),
       ids.join(','), ref.compraId ?? 'nueva', ref.fechaCompra,
     ] as const,
     queryFn: () => fetchCostosAnteriores(currentSucursalId, ids, ref),
@@ -778,6 +839,7 @@ export function useRegistrarCompraMutation() {
     onSuccess: () => {
       // Invalidar compras y productos (stock actualizado)
       queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
+      invalidarDetalleYCostosAnteriores(queryClient, currentSucursalId)
       queryClient.invalidateQueries({ queryKey: ['productos'] })
       invalidarCatalogoCargos(queryClient, currentSucursalId)
       invalidarLotes(queryClient, currentSucursalId)
@@ -796,6 +858,16 @@ export function useRegistrarCompraMutation() {
  */
 function invalidarLotes(queryClient: ReturnType<typeof useQueryClient>, sucursalId: number | null) {
   queryClient.invalidateQueries({ queryKey: lotesKeys.all(sucursalId) })
+}
+
+/**
+ * Lo que una compra que cambió deja viejo además de la lista (1557-b8, 1599-b5):
+ * su detalle (5 min de caché) y los costos anteriores de sus productos, que
+ * salen de las líneas de las compras de la sucursal.
+ */
+function invalidarDetalleYCostosAnteriores(queryClient: ReturnType<typeof useQueryClient>, sucursalId: number | null) {
+  queryClient.invalidateQueries({ queryKey: comprasKeys.details(sucursalId) })
+  queryClient.invalidateQueries({ queryKey: comprasKeys.costosAnteriores(sucursalId) })
 }
 
 /** Una compra guardada puede haber creado conceptos y escrito medidas en la ficha. */
@@ -938,6 +1010,8 @@ async function actualizarCompraItems(
   warningCostoCompra: WarningCostoCompra[]
   warningIiDeclarado: string | null
   warningLotes: string | null
+  /** Lo que falta sincronizar si falló: la pantalla ofrece reintentarlo. null = nada pendiente. */
+  lotesPendientes: LotesSinSincronizar | null
   warningConceptos: string | null
   warningMedidas: string | null
 }> {
@@ -967,7 +1041,21 @@ async function actualizarCompraItems(
   // completa de los lotes de esta factura, así que una lista vacía es la forma
   // de borrar los que había. `actualizar_compra_items` borra y recrea las
   // líneas, y los lotes tienen que seguir a las líneas.
-  const warningLotes = await sincronizarLotesDeCompra(result.compra_id, input.items, true)
+  // STK-13: si esta segunda llamada falla, la compra ya está editada (y quizá
+  // bajada) y los lotes quedaron como estaban. No se calla: el aviso lo dice y se
+  // devuelve lo que falta para que la pantalla deje reintentar.
+  const lotes = aplanarVencimientos(input.items)
+  let warningLotes: string | null = null
+  let lotesPendientes: LotesSinSincronizar | null = null
+  try {
+    warningLotes = await llamarSincronizarLotes(result.compra_id, lotes)
+  } catch (e) {
+    lotesPendientes = { compraId: String(result.compra_id), lotes }
+    warningLotes = 'La compra se editó, pero los vencimientos no se pudieron sincronizar con las nuevas cantidades: ' +
+      `${e instanceof Error ? e.message : 'error desconocido'}. ` +
+      'Mientras no se sincronicen, un vencimiento de esta compra puede tener más unidades que la compra misma. ' +
+      'Reintentá la sincronización desde el aviso, o abrí la compra y guardala de nuevo.'
+  }
   const warningMedidas = await guardarMedidasDeFicha(input.medidasFicha)
 
   return {
@@ -976,6 +1064,7 @@ async function actualizarCompraItems(
     warningCostoCompra: result.warnings ?? [],
     warningIiDeclarado: result.warning_ii_declarado ?? null,
     warningLotes,
+    lotesPendientes,
     warningConceptos: conceptos.warning,
     warningMedidas,
   }
@@ -993,6 +1082,7 @@ export function useActualizarCompraMutation() {
     mutationFn: actualizarCompraItems,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
+      invalidarDetalleYCostosAnteriores(queryClient, currentSucursalId)
       queryClient.invalidateQueries({ queryKey: ['productos'] })
       invalidarCatalogoCargos(queryClient, currentSucursalId)
       invalidarLotes(queryClient, currentSucursalId)
@@ -1037,7 +1127,7 @@ export function useAnularCompraMutation() {
       queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
       // El detalle también: el modal 'ver' sigue abierto después de anular y
       // tiene que pasar a mostrar la compra cancelada.
-      queryClient.invalidateQueries({ queryKey: comprasKeys.details(currentSucursalId) })
+      invalidarDetalleYCostosAnteriores(queryClient, currentSucursalId)
       queryClient.invalidateQueries({ queryKey: ['productos'] })
       invalidarLotes(queryClient, currentSucursalId)
     },
@@ -1090,6 +1180,7 @@ export function useCambiarProveedorCompraMutation() {
     mutationFn: cambiarProveedorCompra,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: comprasKeys.lists(currentSucursalId) })
+      invalidarDetalleYCostosAnteriores(queryClient, currentSucursalId)
       queryClient.invalidateQueries({ queryKey: ['productos'] })
       invalidarLotes(queryClient, currentSucursalId)
     },

@@ -163,3 +163,53 @@ describe('ModalNotaCredito — tope del ajuste (#1557, CMP-2)', () => {
     expect(onSave.mock.calls[0][0]).toMatchObject({ total: 210, items: [] })
   })
 })
+
+describe('ModalNotaCredito — tope de la devolución cuando hay un ajuste (#1590-c)', () => {
+  // 10 u. x 100 sin IVA = 1.000. Con un ajuste de 800 le quedan 200: la devolución no puede pasarlos.
+  const compra: ModalNotaCreditoProps['compra'] = {
+    id: '400', numero_factura: 'A-0001-00000400', tipo_factura: 'FC', impuestos_internos: 0, total: 1000,
+    items: [
+      { id: '1', producto_id: '10', producto: { id: '10', nombre: 'Agua' }, cantidad: 10, costo_unitario: 100, subtotal: 1000, impuestos_internos: 0, porcentaje_iva: 0, condicion_iva: 'exento' },
+    ],
+  }
+  const nota = (tipo: 'ajuste' | 'devolucion', total: number) =>
+    ({ id: '9', compra_id: '400', fecha: '2026-11-12', subtotal: total, iva: 0, total, tipo })
+
+  function renderDevolucion(notas: ReturnType<typeof nota>[]) {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    render(<ModalNotaCredito compra={compra} notasExistentes={notas} onSave={onSave} onClose={() => {}} />)
+    return onSave
+  }
+  const cantidad = (n: string) =>
+    fireEvent.change(screen.getByLabelText('Cantidad a acreditar de Agua'), { target: { value: n } })
+
+  it('muestra lo que le queda a la compra y no deja pasarlo', () => {
+    const onSave = renderDevolucion([nota('ajuste', 800)])
+    expect(screen.getByTestId('nc-devolucion-restante')).toHaveTextContent('Le quedan')
+    expect(screen.getByTestId('nc-devolucion-restante')).toHaveTextContent('200')
+
+    cantidad('3')
+    expect(screen.getByTestId('nc-devolucion-restante')).toHaveTextContent('Supera lo que le queda a la compra')
+    expect(guardar()).toBeDisabled()
+    fireEvent.click(guardar())
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('hasta lo que le queda, se guarda', async () => {
+    const onSave = renderDevolucion([nota('ajuste', 800)])
+    cantidad('2')
+    expect(screen.getByTestId('nc-devolucion-restante')).toHaveTextContent('Le quedan')
+    fireEvent.click(guardar())
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ total: 200 })
+  })
+
+  it('sin un ajuste en la compra el tope no rige: devolver toda la mercadería entra siempre', async () => {
+    const onSave = renderDevolucion([nota('devolucion', 100)])
+    expect(screen.queryByTestId('nc-devolucion-restante')).toBeNull()
+    cantidad('9')
+    expect(guardar()).toBeEnabled()
+    fireEvent.click(guardar())
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+  })
+})
