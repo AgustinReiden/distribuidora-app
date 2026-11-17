@@ -62,7 +62,7 @@ const inputMonto = (): HTMLInputElement =>
 /** Abre el modal, cobra `monto` y lo cierra. Devuelve las claves con que viajó. */
 async function cobrar(monto: string, onConfirmar: Mock<Confirmar>): Promise<string[]> {
   const { unmount } = abrir(onConfirmar)
-  await waitFor(() => expect(inputMonto().value).toBe('21600'))
+  await waitFor(() => expect(inputMonto().value).toBe('21.600'))
   fireEvent.change(inputMonto(), { target: { value: monto } })
   const llamadas = onConfirmar.mock.calls.length
   fireEvent.click(screen.getByRole('button', { name: /^registrar pago$/i }))
@@ -115,7 +115,7 @@ describe('ModalPagoPedido — la clave del cobro sobrevive al modal (#1410)', ()
     abrir(onConfirmar)
 
     expect(screen.getByText(/Este cobro quedó sin confirmar/)).toBeTruthy()
-    expect(inputMonto().value).toBe('7000')
+    expect(inputMonto().value).toBe('7.000')
     fireEvent.click(screen.getByRole('button', { name: /^registrar pago$/i }))
 
     await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
@@ -157,7 +157,7 @@ describe('ModalPagoPedido — la clave del cobro sobrevive al modal (#1410)', ()
 
     expect(await screen.findByText(/ya entró: no hace falta volver a cargarlo/)).toBeTruthy()
     expect(screen.queryByText(/Este cobro quedó sin confirmar/)).toBeNull()
-    await waitFor(() => expect(inputMonto().value).toBe('14600'))
+    await waitFor(() => expect(inputMonto().value).toBe('14.600'))
     expect(leerCobroSinConfirmar('4625')).toBeNull()
   })
 
@@ -170,7 +170,7 @@ describe('ModalPagoPedido — la clave del cobro sobrevive al modal (#1410)', ()
     })
     abrir(vi.fn<Confirmar>(), [pagoDe(3000)])
 
-    await waitFor(() => expect(inputMonto().value).toBe('18600'))
+    await waitFor(() => expect(inputMonto().value).toBe('18.600'))
     expect(screen.queryByText(/Este cobro quedó sin confirmar/)).toBeNull()
     expect(screen.queryByText(/ya entró/)).toBeNull()
     expect(leerCobroSinConfirmar('4625')).toBeNull()
@@ -179,7 +179,7 @@ describe('ModalPagoPedido — la clave del cobro sobrevive al modal (#1410)', ()
   it('el cobro lleva lo pagado de la boleta al intentarlo', async () => {
     const onConfirmar = vi.fn<Confirmar>().mockResolvedValue(undefined)
     const { unmount } = abrir(onConfirmar, [pagoDe(1600)])
-    await waitFor(() => expect(inputMonto().value).toBe('20000'))
+    await waitFor(() => expect(inputMonto().value).toBe('20.000'))
     fireEvent.click(screen.getByRole('button', { name: /^registrar pago$/i }))
     await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
     unmount()
@@ -209,7 +209,7 @@ describe('ModalPagoPedido — la clave del cobro sobrevive al modal (#1410)', ()
     })
     const onConfirmar = vi.fn<Confirmar>().mockResolvedValue(undefined)
     abrir(onConfirmar, [pagoDe(3000)])
-    await waitFor(() => expect(inputMonto().value).toBe('18600'))
+    await waitFor(() => expect(inputMonto().value).toBe('18.600'))
 
     expect(await cobrarAhora('500', onConfirmar)).not.toBe(CLAVE_VIEJA)
   })

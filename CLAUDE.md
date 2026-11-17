@@ -136,11 +136,15 @@ suelta en `sucursales`.
 - Los ids son `bigint` y llegan como `number` en runtime: usá `z.coerce.string()`, no
   `z.string()`.
 - **Un número escrito a mano se lee con `leerNumero`** (`src/utils/normalizarNumero.ts`, #1560;
-  decisión del dueño D17): lo que se muestra lleva el punto de miles y la coma decimal, y la tecla
-  del punto se escribe como coma al tipear (`teclearNumero` en el `onChange`). Lo que no se entiende
-  da `null` y el campo lo marca: nunca se guarda como otro número. Nada de `type="number"`,
-  `parseFloat` ni `Number()` sobre lo tipeado. La tabla de casos es `numeroTipeado.tabla.test.ts`.
-  Y `redondear` es `round(numeric, n)` de Postgres (medio hacia afuera).
+  decisión del dueño D17): lo que se muestra lleva el punto de miles y la coma decimal. Al tipear,
+  el punto y la coma son decimales (la tecla del punto se ve como coma) y el punto de miles lo pone
+  el campo: para 150.000 se escribe «150000» y se ve «150.000»; «150.000» tipeado es 150. Un campo
+  lo hace con `NumberInput` o, si es un `<input>` de texto, con `useTecleoNumero` en el `onChange`
+  y la precarga con `numeroConMiles`; lo pegado se lee como se muestra («1.250,50» es 1250,5).
+  Los `sinMiles` (porcentajes, litros) no llevan miles. Lo que no se entiende da `null` y el campo
+  lo marca: nunca se guarda como otro número. Nada de `type="number"`, `parseFloat` ni `Number()`
+  sobre lo tipeado. La tabla de casos es `numeroTipeado.tabla.test.ts`. Y `redondear` es
+  `round(numeric, n)` de Postgres (medio hacia afuera).
 - **Un NaN pasa toda guarda de piso** (#1468, #1520). `'NaN'::numeric` es mayor que todo número:
   pasa `x < 0`, `x <= 0` y todo CHECK `x >= 0` o `x > 0`, y `LEAST('NaN', x)` da `x`. Llega
   cuando un cliente manda el string `'NaN'`. Toda columna numeric con un CHECK de piso suma

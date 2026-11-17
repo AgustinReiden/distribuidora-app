@@ -3,8 +3,9 @@ import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck,
 import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
 import { fechaPedidoFueraDeRango, mensajeFechaAnteriorAlPiso, pisoFechaPedido } from '../../utils/fechaPedido';
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo';
-import { numeroEditable, parsePrecio } from '../../utils/calculations';
-import { NUMERO_ILEGIBLE, esTextoIlegible, teclearNumero } from '../../utils/normalizarNumero';
+import { parsePrecio } from '../../utils/calculations';
+import { NUMERO_ILEGIBLE, esTextoIlegible, numeroConMiles } from '../../utils/normalizarNumero';
+import { useTecleoNumero } from '../../hooks/useTecleoNumero';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { resolverDescuentoPctCliente } from '../../utils/descuentoCliente';
@@ -269,6 +270,8 @@ const ModalPedido = memo(function ModalPedido({
   const categoriasScrollRef = useRef<HTMLDivElement>(null);
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
   const [editingPriceValue, setEditingPriceValue] = useState<string>('');
+  // El precio que edita el admin pone los miles al tipear (D17).
+  const tecleoPrecio = useTecleoNumero();
   // Input de la edición de precio (a lo sumo uno a la vez): el listener de
   // Escape de abajo lo reconoce por acá.
   const precioInputRef = useRef<HTMLInputElement>(null);
@@ -1407,15 +1410,15 @@ const ModalPedido = memo(function ModalPedido({
                                     <input
                                       ref={precioInputRef}
                                       // Texto y no `number` (#1560): el `number` deja vacío «1.500,50» y
-                                      // el precio no cambiaba sin aviso. Lo lee `parsePrecio`, y la
-                                      // tecla del punto se escribe como coma (D17).
+                                      // el precio no cambiaba sin aviso. Lo lee `parsePrecio`; el punto
+                                      // de miles lo pone el campo y la tecla del punto es coma (D17).
                                       type="text"
                                       inputMode="decimal"
                                       aria-label="Editar precio unitario"
                                       value={editingPriceValue}
                                       aria-invalid={esTextoIlegible(editingPriceValue)}
                                       title={esTextoIlegible(editingPriceValue) ? NUMERO_ILEGIBLE : undefined}
-                                      onChange={e => setEditingPriceValue(teclearNumero(editingPriceValue, e.target.value))}
+                                      onChange={e => setEditingPriceValue(tecleoPrecio(editingPriceValue, e))}
                                       onKeyDown={e => {
                                         if (e.key === 'Enter') {
                                           // Lo que no se entiende queda a la vista para corregirlo.
@@ -1446,7 +1449,7 @@ const ModalPedido = memo(function ModalPedido({
                                     onClick={() => {
                                       if (isAdmin && onActualizarPrecio) {
                                         setEditingPriceId(item.productoId);
-                                        setEditingPriceValue(numeroEditable(item.precioUnitario));
+                                        setEditingPriceValue(numeroConMiles(item.precioUnitario));
                                       }
                                     }}
                                   >
@@ -1457,7 +1460,7 @@ const ModalPedido = memo(function ModalPedido({
                                     onClick={() => {
                                       if (isAdmin && onActualizarPrecio) {
                                         setEditingPriceId(item.productoId);
-                                        setEditingPriceValue(numeroEditable(precioInfo!.precioResuelto));
+                                        setEditingPriceValue(numeroConMiles(precioInfo!.precioResuelto));
                                       }
                                     }}
                                   >
@@ -1471,7 +1474,7 @@ const ModalPedido = memo(function ModalPedido({
                                     onClick={() => {
                                       if (isAdmin && onActualizarPrecio) {
                                         setEditingPriceId(item.productoId);
-                                        setEditingPriceValue(numeroEditable(item.precioUnitario));
+                                        setEditingPriceValue(numeroConMiles(item.precioUnitario));
                                       }
                                     }}
                                   >

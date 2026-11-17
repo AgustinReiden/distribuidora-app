@@ -25,9 +25,9 @@ function montar(precioUnitario: number) {
 }
 
 describe('FormEscalaMayorista · el precio inicial', () => {
-  it('se precarga con coma decimal', () => {
+  it('se precarga con coma decimal y los miles que pone el campo', () => {
     montar(1234.5)
-    expect(screen.getByLabelText('Precio mayorista')).toHaveValue('1234,5')
+    expect(screen.getByLabelText('Precio mayorista')).toHaveValue('1.234,5')
   })
 
   it('guardar sin tocarlo no lo multiplica por mil', async () => {
@@ -59,6 +59,16 @@ describe('FormEscalaMayorista · lo tipeado', () => {
     const cantidad = screen.getByLabelText('Cantidad mínima')
     expect(cantidad).toHaveAttribute('type', 'text')
     expect(cantidad).toHaveAttribute('inputmode', 'numeric')
+  })
+
+  it('los miles los pone el campo al tipear', async () => {
+    const onGuardar = montarVacio()
+    await userEvent.type(screen.getByLabelText('Cantidad mínima'), '1500')
+    await userEvent.type(screen.getByLabelText('Precio mayorista'), '150000,5')
+    expect(screen.getByLabelText('Cantidad mínima')).toHaveValue('1.500')
+    expect(screen.getByLabelText('Precio mayorista')).toHaveValue('150.000,5')
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+    expect(onGuardar).toHaveBeenCalledWith(expect.objectContaining({ cantidadMinima: 1500, precioUnitario: 150000.5 }))
   })
 
   it('una cantidad pegada «1.250» son 1250 unidades, no 1', async () => {

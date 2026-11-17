@@ -41,6 +41,15 @@ describe('ProductoMedidas · lo tipeado', () => {
     expect(mutateAsync).toHaveBeenCalledWith([{ productoId: '7', medidaId: 'pal', unidadesPor: esperado }])
   })
 
+  it('tipeado «1200» se ve «1.200» (los miles los pone el campo) y se guarda 1200', async () => {
+    const user = userEvent.setup()
+    render(<ProductoMedidas productoId={7} />)
+    await user.type(screen.getByRole('textbox'), '1200')
+    expect(screen.getByRole('textbox')).toHaveValue('1.200')
+    await user.keyboard('{Enter}')
+    expect(mutateAsync).toHaveBeenCalledWith([{ productoId: '7', medidaId: 'pal', unidadesPor: 1200 }])
+  })
+
   it('tipeado «1.200» se ve «1,200» y se guarda 1,2', async () => {
     const user = userEvent.setup()
     render(<ProductoMedidas productoId={7} />)

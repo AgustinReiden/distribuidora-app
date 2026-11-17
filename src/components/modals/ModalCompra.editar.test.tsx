@@ -243,7 +243,7 @@ describe("ModalCompra 'editar' · abrir la 304 y guardar sin tocar nada", () => 
     const { user, onGuardarEdicion } = renderEditar(conTercero)
     // La fila lo muestra: pregunta tildada, IVA guardado (no el 21% de 9.000 = 1.890).
     expect(screen.getByRole('checkbox', { name: /Viene con factura del transportista/ })).toBeChecked()
-    expect(screen.getByLabelText('IVA de la factura')).toHaveValue('1700')
+    expect(screen.getByLabelText('IVA de la factura')).toHaveValue('1.700')
     expect(screen.getByLabelText('Transportista')).toHaveValue('Transportes Sintéticos')
     await guardar(user)
     const params = paramsActualizarCompraItems(enviado(onGuardarEdicion))
@@ -358,7 +358,7 @@ describe("ModalCompra 'editar' · cabezal inmutable, borrador ausente", () => {
       expect(screen.getAllByText('Percepción IIBB')).toHaveLength(1)
       expect(within(bloque()).getByText('Percepción IIBB').parentElement!.querySelector('input')).toBeEnabled()
       // NumberInput muestra la coma decimal (#1560): «1234.5» con dos ceros más sería miles.
-      expect(within(bloque()).getByDisplayValue('1234,5')).toBeEnabled()
+      expect(within(bloque()).getByDisplayValue('1.234,5')).toBeEnabled()
     })
 
     it('cambiar la IIBB viaja a la RPC como p_percepcion_iibb, y el total con ella', async () => {

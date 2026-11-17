@@ -34,7 +34,7 @@ describe('ModalPagoPedido · el monto leído', () => {
         guardando={false}
       />,
     )
-    await waitFor(() => expect(inputMonto().value).toBe('300000'))
+    await waitFor(() => expect(inputMonto().value).toBe('300.000'))
 
     fireEvent.change(inputMonto(), { target: { value: '150.000' } })
 

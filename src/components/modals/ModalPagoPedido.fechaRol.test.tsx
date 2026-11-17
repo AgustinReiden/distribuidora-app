@@ -67,7 +67,7 @@ describe('ModalPagoPedido — la fecha del cobro según el rol (FRV-2)', () => {
   it('el cobro de quien no es admin viaja con la fecha de hoy', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     renderModal({ isAdmin: false, onConfirmar })
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
 
     await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
@@ -77,7 +77,7 @@ describe('ModalPagoPedido — la fecha del cobro según el rol (FRV-2)', () => {
   it('con otra fecha que hoy, quien no es admin no cobra: se le dice cómo hacerlo', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     renderModal({ isAdmin: false, onConfirmar })
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     fireEvent.change(inputFecha(), { target: { value: ayer() } })
     fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
 
@@ -93,7 +93,7 @@ describe('ModalPagoPedido — la fecha del cobro según el rol (FRV-2)', () => {
     expect(input.max).toBe(fechaLocalISO())
     expect(screen.queryByText(/solo podés registrar el cobro con la fecha de hoy/i)).toBeNull()
 
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     fireEvent.change(input, { target: { value: ayer() } })
     fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
 
@@ -161,7 +161,7 @@ describe('ModalPagoPedido — el día cambia con el modal abierto (L7)', () => {
     vi.setSystemTime(new Date('2026-11-16T23:59:00-03:00'))
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     renderModal({ isAdmin: false, onConfirmar, modoEntregaTransportista: false, onEntregarSinPago: undefined })
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     expect(inputFecha().value).toBe('2026-11-16')
 
     vi.setSystemTime(new Date('2026-11-17T00:01:00-03:00'))

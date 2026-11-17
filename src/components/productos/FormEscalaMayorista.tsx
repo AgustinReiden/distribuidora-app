@@ -5,8 +5,9 @@
  * y el repo no anida modales (ver ProductosContainer, "Crear condición").
  */
 import { useState } from 'react'
-import { numeroEditable, parsePrecio } from '../../utils/calculations'
-import { esTextoIlegible, leerEntero, teclearNumero } from '../../utils/normalizarNumero'
+import { parsePrecio } from '../../utils/calculations'
+import { esTextoIlegible, leerEntero, numeroConMiles } from '../../utils/normalizarNumero'
+import { useTecleoNumero } from '../../hooks/useTecleoNumero'
 import { formatPrecio } from '../../utils/formatters'
 import { margenesEscala, descuentoSobreLista } from './margenEscala'
 import { Button } from '../ui/Button'
@@ -42,8 +43,10 @@ export default function FormEscalaMayorista({
   onGuardar,
   onCancelar,
 }: FormEscalaMayoristaProps) {
-  const [cantidad, setCantidad] = useState(inicial?.cantidadMinima ? String(inicial.cantidadMinima) : '')
-  const [precio, setPrecio] = useState(inicial?.precioUnitario ? numeroEditable(inicial.precioUnitario) : '')
+  const [cantidad, setCantidad] = useState(inicial?.cantidadMinima ? numeroConMiles(inicial.cantidadMinima) : '')
+  const [precio, setPrecio] = useState(inicial?.precioUnitario ? numeroConMiles(inicial.precioUnitario) : '')
+  // Los miles los pone el campo al tipear, y la tecla del punto es coma (D17).
+  const tecleo = useTecleoNumero()
   const [etiqueta, setEtiqueta] = useState(inicial?.etiqueta ?? '')
   const [error, setError] = useState('')
 
@@ -91,7 +94,7 @@ export default function FormEscalaMayorista({
             inputMode="numeric"
             autoFocus
             value={cantidad}
-            onChange={e => setCantidad(teclearNumero(cantidad, e.target.value))}
+            onChange={e => setCantidad(tecleo(cantidad, e))}
             onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancelar() }}
             className="mt-0.5 block w-20 px-2 py-1 border rounded text-sm text-center dark:bg-gray-800 dark:border-gray-600 dark:text-white"
             aria-label="Cantidad mínima"
@@ -104,7 +107,7 @@ export default function FormEscalaMayorista({
             type="text"
             inputMode="decimal"
             value={precio}
-            onChange={e => setPrecio(teclearNumero(precio, e.target.value))}
+            onChange={e => setPrecio(tecleo(precio, e))}
             aria-invalid={esTextoIlegible(precio)}
             onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancelar() }}
             className="mt-0.5 block w-28 px-2 py-1 border rounded text-sm text-right dark:bg-gray-800 dark:border-gray-600 dark:text-white"

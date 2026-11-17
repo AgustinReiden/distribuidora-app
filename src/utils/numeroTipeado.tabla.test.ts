@@ -1,17 +1,24 @@
 /**
- * La tabla de los números tipeados (#1542 STK-18, #1560 b1-b5, #1600 b11). Regla del dueño (D17):
- * en todo lo que se muestra, el separador de miles es el punto y el de decimales la coma; al
- * tipear, la tecla del punto es el separador decimal y se ve como coma.
+ * La tabla de los números tipeados (#1542 STK-18, #1560 b1-b5, #1600 b11). Regla del dueño (D17,
+ * confirmada el 17/11): en todo lo que se muestra, el separador de miles es el punto y el de
+ * decimales la coma. Al tipear, el punto y la coma son decimales (la tecla del punto se ve como
+ * coma) y el punto de miles lo pone el campo: para 150.000 se escribe «150000» y se ve «150.000».
  *
  * Cada fila dice qué pasa con una misma cadena por las dos puertas de un campo:
- * - **tipeada** tecla por tecla: cada punto que entra se escribe como coma (`teclearNumero`), y lo
- *   que queda en el campo es lo que se lee;
+ * - **tipeada** tecla por tecla (`formatearTecleo`): lo que queda en el campo es lo que se lee;
  * - **pegada** de una sola vez (de una planilla, de un mensaje): no hay tecla del punto, así que la
  *   cadena se lee con la regla de lo que se muestra.
  * `null` es «no se entiende»: el campo lo rechaza a la vista, nunca lo guarda como otro número.
  */
 import { describe, it, expect } from 'vitest'
-import { leerEntero, leerNumero, normalizarNumero, teclearNumero } from './normalizarNumero'
+import {
+  formatearTecleo,
+  leerEntero,
+  leerNumero,
+  normalizarNumero,
+  numeroConMiles,
+  teclearNumero,
+} from './normalizarNumero'
 import {
   leerPlataTipeada,
   numeroEditable,
@@ -23,18 +30,26 @@ import {
 import { formatCurrency } from './formatters'
 import { parseMonto } from './personal'
 
-/** Lo que queda en el campo después de tipear `texto` tecla por tecla. */
-function tipear(texto: string): string {
+/** Lo que se ve en el campo después de cada tecla, tipeando `texto` al final. */
+function pasos(texto: string): string[] {
+  const vistos: string[] = []
   let campo = ''
-  for (const tecla of texto) campo = teclearNumero(campo, campo + tecla)
-  return campo
+  for (const tecla of texto) {
+    campo = formatearTecleo(campo, campo + tecla, campo.length + 1, { negativo: true }).texto
+    vistos.push(campo)
+  }
+  return vistos
 }
+
+/** Lo que queda en el campo después de tipear `texto` tecla por tecla. */
+const tipear = (texto: string): string => pasos(texto).pop() ?? ''
 
 /** Cómo se muestra lo leído: miles con punto, decimales con coma. */
 const mostrar = (n: number | null): string | null => (n === null ? null : formatCurrency(redondear(n, 2)))
 
 const MENOS_UNICODE = '−10'
 const NUEVE_400 = '9'.repeat(400)
+const NUEVE_400_CON_MILES = NUEVE_400.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
 
 // [lo que el usuario escribe, lo que queda en el campo al tipearlo, leído al tipear, leído al pegar]
 const TABLA: Array<[string, string, number | null, number | null]> = [
@@ -46,11 +61,12 @@ const TABLA: Array<[string, string, number | null, number | null]> = [
   ['1.250,50', '1,250,50', null, 1250.5],
   ['1,234,567', '1,234,567', null, null],
   ['1..5', '1,,5', null, null],
-  ['10-', '10-', null, null],
-  ['1e5', '1e5', null, null],
-  ['Infinity', 'Infinity', null, null],
+  // Una tecla que no es dígito, coma ni punto no entra (el menos, sólo al principio).
+  ['10-', '10', 10, null],
+  ['1e5', '15', 15, null],
+  ['Infinity', '', null, null],
   ['', '', null, null],
-  [MENOS_UNICODE, MENOS_UNICODE, -10, -10],
+  [MENOS_UNICODE, '-10', -10, -10],
   ['150.000', '150,000', 150, 150000],
   ['1.500', '1,500', 1.5, 1500],
   ['1.500,50', '1,500,50', null, 1500.5],
@@ -59,21 +75,132 @@ const TABLA: Array<[string, string, number | null, number | null]> = [
   ['1.234.567', '1,234,567', null, 1234567],
   ['1.000.00', '1,000,00', null, null],
   ['1.50.0', '1,50,0', null, null],
+  // Los miles los pone el campo.
+  ['150000', '150.000', 150000, 150000],
+  ['1500,50', '1.500,50', 1500.5, 1500.5],
+  ['1234567', '1.234.567', 1234567, 1234567],
+  ['1234567,891', '1.234.567,891', 1234567.891, 1234567.891],
+  ['007', '7', 7, 7],
   // Más formas que llegan pegadas.
   ['1,500.50', '1,500,50', null, 1500.5],
   ['0.500', '0,500', 0.5, 0.5],
-  ['$ 150.000', '$ 150,000', 150, 150000],
-  ['280 000', '280 000', 280000, 280000],
-  ['150000', '150000', 150000, 150000],
-  ['1500,50', '1500,50', 1500.5, 1500.5],
+  ['$ 150.000', '150,000', 150, 150000],
+  ['280 000', '280.000', 280000, 280000],
   ['-10', '-10', -10, -10],
   ['1.500,', '1,500,', null, 1500],
   [',', ',', null, null],
   ['.', ',', null, null],
-  ['12abc', '12abc', null, null],
-  ['NaN', 'NaN', null, null],
-  [NUEVE_400, NUEVE_400, null, null],
+  ['12abc', '12', 12, null],
+  ['NaN', '', null, null],
+  [NUEVE_400, NUEVE_400_CON_MILES, null, null],
 ]
+
+// Lo que se VE en el campo después de cada tecla.
+describe('tecla por tecla: los miles los pone el campo', () => {
+  it.each([
+    ['150000', ['1', '15', '150', '1.500', '15.000', '150.000']],
+    ['1500,5', ['1', '15', '150', '1.500', '1.500,', '1.500,5']],
+    ['1.250', ['1', '1,', '1,2', '1,25', '1,250']],
+    ['150.000', ['1', '15', '150', '150,', '150,0', '150,00', '150,000']],
+    ['1234,5678', ['1', '12', '123', '1.234', '1.234,', '1.234,5', '1.234,56', '1.234,567', '1.234,5678']],
+    ['0,05', ['0', '0,', '0,0', '0,05']],
+    ['-1500', ['-', '-1', '-15', '-150', '-1.500']],
+  ])('%j se ve %j', (texto, vistos) => {
+    expect(pasos(texto)).toEqual(vistos)
+  })
+})
+
+describe('formatearTecleo: borrar, el cursor, seleccionar y pegar', () => {
+  it('borrar un cero de «1.500» da «150»', () => {
+    expect(formatearTecleo('1.500', '1.50', 4)).toEqual({ texto: '150', cursor: 3 })
+  })
+
+  it('Backspace justo después de un punto de miles borra el dígito de antes, no se traba', () => {
+    // «1.|500»: el navegador quita el punto; el campo quita el 1.
+    expect(formatearTecleo('1.500', '1500', 1, { direccion: 'atras' })).toEqual({ texto: '500', cursor: 0 })
+    // «15.|000»
+    expect(formatearTecleo('15.000', '15000', 2, { direccion: 'atras' })).toEqual({ texto: '1.000', cursor: 1 })
+  })
+
+  it('Supr justo antes de un punto de miles borra el dígito de después', () => {
+    // «1|.500»
+    expect(formatearTecleo('1.500', '1500', 1, { direccion: 'adelante' })).toEqual({ texto: '100', cursor: 1 })
+  })
+
+  it('el cursor queda después del mismo dígito aunque entre o salga un punto', () => {
+    // «1|.000» + 5 → «15|.000»
+    expect(formatearTecleo('1.000', '15.000', 2)).toEqual({ texto: '15.000', cursor: 2 })
+    // «150|» + 0 → «1.500|»
+    expect(formatearTecleo('150', '1500', 4)).toEqual({ texto: '1.500', cursor: 5 })
+    // «1.500|» borrar → «150|»
+    expect(formatearTecleo('1.500', '1.50', 4)).toEqual({ texto: '150', cursor: 3 })
+    // «|1.500» + 2 → «2|1.500»
+    expect(formatearTecleo('1.500', '21.500', 1)).toEqual({ texto: '21.500', cursor: 1 })
+    // «12.345|,5» borrar el 5 → «1.234|,5»
+    expect(formatearTecleo('12.345,5', '12.34,5', 5)).toEqual({ texto: '1.234,5', cursor: 5 })
+  })
+
+  it('seleccionar todo y tipear reemplaza', () => {
+    expect(formatearTecleo('1.500,50', '7', 1)).toEqual({ texto: '7', cursor: 1 })
+    expect(formatearTecleo('1.500,50', ',', 1)).toEqual({ texto: ',', cursor: 1 })
+  })
+
+  it('lo pegado se lee como se muestra la plata y se ve con miles', () => {
+    expect(formatearTecleo('', '1.250,50', 8).texto).toBe('1.250,50')
+    expect(formatearTecleo('', '1250,5', 6).texto).toBe('1.250,5')
+    expect(formatearTecleo('', '12.50', 5).texto).toBe('12,50')
+    expect(formatearTecleo('', '$ 150.000', 9).texto).toBe('150.000')
+    expect(formatearTecleo('', '1,500.50', 8).texto).toBe('1.500,50')
+    expect(leerNumero(formatearTecleo('', '1.250,50', 8).texto)).toBe(1250.5)
+  })
+
+  it('lo pegado que no se entiende entra tal cual (el campo lo marca) y no se reagrupa', () => {
+    expect(formatearTecleo('', '1,234,567', 9).texto).toBe('1,234,567')
+    expect(formatearTecleo('', '1.50.0', 6).texto).toBe('1.50.0')
+    // Seguir tipeando sobre eso no lo reinterpreta: sólo la tecla del punto es coma.
+    expect(formatearTecleo('1.50.0', '1.50.05', 7).texto).toBe('1.50.05')
+    expect(leerNumero('1.50.05')).toBeNull()
+  })
+
+  it('una segunda coma queda a la vista; los decimales no se formatean', () => {
+    expect(formatearTecleo('1.000,5', '1.000,5,', 8).texto).toBe('1.000,5,')
+    expect(formatearTecleo('1,2345', '1,23456', 7).texto).toBe('1,23456')
+  })
+
+  it('el menos sólo al principio y sólo si el campo lo acepta', () => {
+    expect(formatearTecleo('', '-', 1).texto).toBe('')
+    expect(formatearTecleo('', '-', 1, { negativo: true }).texto).toBe('-')
+    expect(formatearTecleo('15', '1-5', 2, { negativo: true }).texto).toBe('15')
+    expect(formatearTecleo('', '−', 1, { negativo: true }).texto).toBe('-')
+  })
+
+  it('el campo vacío queda vacío', () => {
+    expect(formatearTecleo('5', '', 0)).toEqual({ texto: '', cursor: 0 })
+    expect(formatearTecleo('1.500', '', 0)).toEqual({ texto: '', cursor: 0 })
+  })
+})
+
+describe('numeroConMiles (la precarga de un campo que pone los miles)', () => {
+  it.each([
+    [1500.5, '1.500,5'],
+    [1500, '1.500'],
+    [150000, '150.000'],
+    [1234567.891, '1.234.567,891'],
+    [0.5, '0,5'],
+    [0.1 + 0.2, '0,3'],
+    [-1500, '-1.500'],
+    [999, '999'],
+  ])('%d se precarga %j', (n, texto) => {
+    expect(numeroConMiles(n)).toBe(texto)
+    expect(leerNumero(numeroConMiles(n))).toBe(Number(n.toFixed(6)))
+  })
+
+  it('null, undefined y NaN dan el campo vacío', () => {
+    expect(numeroConMiles(null)).toBe('')
+    expect(numeroConMiles(undefined)).toBe('')
+    expect(numeroConMiles(NaN)).toBe('')
+  })
+})
 
 describe('tabla de números tipeados (D17)', () => {
   it.each(TABLA)('%j: tipeado queda %j y se lee %s; pegado se lee %s', (entrada, campo, alTipear, alPegar) => {
@@ -125,7 +252,7 @@ describe('los lectores que quedan leen la tabla igual', () => {
       // que acepta lo lee igual. La excepción es la tira de 400 nueves: parseMonto da Infinity
       // (`personal.ts` no es de esta tarjeta; queda anotado en el informe).
       const monto = parseMonto(texto)
-      if (monto !== null && texto !== NUEVE_400) expect(monto).toBe(leido)
+      if (monto !== null && Number.isFinite(monto)) expect(monto).toBe(leido)
     }
   })
 

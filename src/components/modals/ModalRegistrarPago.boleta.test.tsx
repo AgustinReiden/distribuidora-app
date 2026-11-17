@@ -76,9 +76,9 @@ describe('ModalRegistrarPago — con una boleta elegida se mide contra lo que fa
     await user.selectOptions(screen.getByRole('combobox'), '7001')
 
     await user.click(screen.getByRole('button', { name: '50%' }))
-    expect(campoMonto()).toHaveValue('1000')
+    expect(campoMonto()).toHaveValue('1.000')
     await user.click(screen.getByRole('button', { name: 'Total' }))
-    expect(campoMonto()).toHaveValue('2000')
+    expect(campoMonto()).toHaveValue('2.000')
     expect(registrar().disabled).toBe(false)
   })
 

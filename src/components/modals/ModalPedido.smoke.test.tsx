@@ -1230,6 +1230,7 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
   // «1,500»); pegado, «1.500,50» sigue siendo mil quinientos y cincuenta.
   it.each([
     ['1500,50', 'tipea', 1500.5],
+    ['150000', 'tipea', 150000],
     ['1.500', 'tipea', 1.5],
     ['1250,5', 'tipea', 1250.5],
     ['1.500,50', 'pega', 1500.5],
@@ -1241,8 +1242,8 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     await user.click(botonCarrito())
     await user.click(screen.getByText(/1\.250,00 c\/u/))
     const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
-    // El precio vigente se precarga con coma decimal (`numeroEditable`), no con punto.
-    expect(input).toHaveValue('1250')
+    // El precio vigente se precarga con los miles que pone el campo (`numeroConMiles`).
+    expect(input).toHaveValue('1.250')
     await user.clear(input)
     if (como === 'tipea') await user.type(input, texto)
     else await user.paste(texto)

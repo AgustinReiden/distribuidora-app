@@ -116,14 +116,16 @@ describe('NumberInput', () => {
     expect(onChange).toHaveBeenCalledWith(7)
   })
 
-  // D17 (#1560, #1542): la tecla del punto es la coma decimal y se ve como coma. Cambió de regla:
-  // antes «1.500» tipeado era mil quinientos.
+  // D17 (#1560, #1542): el punto y la coma tipeados son decimales (la tecla del punto se ve como
+  // coma) y el punto de miles lo pone el campo. Cambió de regla: antes «1.500» tipeado era mil
+  // quinientos; ahora para eso se escribe «1500» y se ve «1.500».
   it.each([
     ['1.500', '1,500', 1.5],
     ['150.000', '150,000', 150],
     ['1.250', '1,250', 1.25],
-    ['150000', '150000', 150000],
-    ['1500,50', '1500,50', 1500.5],
+    ['150000', '150.000', 150000],
+    ['1500,50', '1.500,50', 1500.5],
+    ['1234567', '1.234.567', 1234567],
     ['1,5', '1,5', 1.5],
     ['0,5', '0,5', 0.5],
     ['12.50', '12,50', 12.5],
@@ -143,12 +145,13 @@ describe('NumberInput', () => {
 
   // Lo pegado no pasa por la tecla del punto: se lee como se muestra la plata.
   it.each([
-    ['1.500', 1500],
-    ['150.000', 150000],
-    ['1.500,50', 1500.5],
-    ['1.234.567', 1234567],
-    ['12.50', 12.5],
-  ])('pegado %j se lee %d', async (texto, esperado) => {
+    ['1.500', '1.500', 1500],
+    ['150.000', '150.000', 150000],
+    ['1.500,50', '1.500,50', 1500.5],
+    ['1.234.567', '1.234.567', 1234567],
+    ['1500,5', '1.500,5', 1500.5],
+    ['12.50', '12,50', 12.5],
+  ])('pegado %j se ve %j y se lee %d', async (texto, visto, esperado) => {
     const user = userEvent.setup()
     const onChange = vi.fn()
     render(<NumberInput aria-label="num" value={0} onChange={onChange} />)
@@ -156,10 +159,104 @@ describe('NumberInput', () => {
 
     await user.clear(input)
     await user.paste(texto)
-    expect(input).toHaveValue(texto)
+    expect(input).toHaveValue(visto)
     await user.tab()
 
     expect(onChange).toHaveBeenLastCalledWith(esperado)
+  })
+
+  it('el valor del padre se muestra con los miles', () => {
+    render(<NumberInput aria-label="num" value={1500.5} onChange={vi.fn()} />)
+    expect(screen.getByLabelText('num')).toHaveValue('1.500,5')
+  })
+
+  it('en modo entero también pone los miles, y una coma no es una cantidad', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    render(<NumberInput aria-label="num" integer value={0} onChange={onChange} />)
+    const input = screen.getByLabelText('num')
+
+    await user.clear(input)
+    await user.type(input, '12500')
+    expect(input).toHaveValue('12.500')
+    await user.tab()
+    expect(onChange).toHaveBeenLastCalledWith(12500)
+
+    await user.clear(input)
+    await user.type(input, '1.5')
+    expect(input).toHaveValue('1,5')
+    await user.tab()
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(onChange).toHaveBeenCalledTimes(1)
+  })
+
+  describe('el cursor y los puntos de miles', () => {
+    const montar = (value: number) => {
+      render(<NumberInput aria-label="num" value={value} selectOnFocus={false} onChange={vi.fn()} />)
+      return screen.getByLabelText('num') as HTMLInputElement
+    }
+
+    it('un dígito en el medio queda donde se tipeó aunque entre un punto', async () => {
+      const user = userEvent.setup()
+      const input = montar(1000)
+      // «1|.000» + 5 → «15|.000»
+      await user.type(input, '5', { initialSelectionStart: 1, initialSelectionEnd: 1 })
+      expect(input).toHaveValue('15.000')
+      expect(input.selectionStart).toBe(2)
+    })
+
+    it('tipear al final de «150» lo agrupa y el cursor queda al final', async () => {
+      const user = userEvent.setup()
+      const input = montar(150)
+      await user.type(input, '0', { initialSelectionStart: 3, initialSelectionEnd: 3 })
+      expect(input).toHaveValue('1.500')
+      expect(input.selectionStart).toBe(5)
+    })
+
+    it('borrar un cero de «1.500» da «150»', async () => {
+      const user = userEvent.setup()
+      const input = montar(1500)
+      await user.type(input, '{Backspace}', { initialSelectionStart: 5, initialSelectionEnd: 5 })
+      expect(input).toHaveValue('150')
+      expect(input.selectionStart).toBe(3)
+    })
+
+    it('Backspace justo después de un punto de miles borra el dígito de antes', async () => {
+      const user = userEvent.setup()
+      const input = montar(15000)
+      // «15.|000»
+      await user.type(input, '{Backspace}', { initialSelectionStart: 3, initialSelectionEnd: 3 })
+      expect(input).toHaveValue('1.000')
+      expect(input.selectionStart).toBe(1)
+    })
+
+    it('Supr justo antes de un punto de miles borra el dígito de después', async () => {
+      const user = userEvent.setup()
+      const input = montar(1500)
+      // «1|.500»
+      await user.type(input, '{Delete}', { initialSelectionStart: 1, initialSelectionEnd: 1 })
+      expect(input).toHaveValue('100')
+      expect(input.selectionStart).toBe(1)
+    })
+
+    it('seleccionar todo y tipear reemplaza', async () => {
+      const user = userEvent.setup()
+      const onChange = vi.fn()
+      render(<NumberInput aria-label="num" value={1500.5} onChange={onChange} />)
+      const input = screen.getByLabelText('num')
+      await user.click(input) // selectOnFocus: selecciona todo
+      await user.keyboard('7')
+      expect(input).toHaveValue('7')
+      await user.tab()
+      expect(onChange).toHaveBeenLastCalledWith(7)
+    })
+
+    it('el campo vacío queda vacío', async () => {
+      const user = userEvent.setup()
+      const input = montar(5)
+      await user.type(input, '{Backspace}', { initialSelectionStart: 1, initialSelectionEnd: 1 })
+      expect(input).toHaveValue('')
+    })
   })
 
   it('la tecla del punto en el medio se vuelve coma y el cursor queda en su lugar', async () => {
@@ -262,6 +359,16 @@ describe('NumberInput sinMiles', () => {
     await user.tab()
 
     expect(onChange).toHaveBeenLastCalledWith(esperado)
+  })
+
+  it('no pone miles: un litro o un porcentaje no llega a mil', async () => {
+    const user = userEvent.setup()
+    render(<NumberInput aria-label="pct" sinMiles value={1500} selectOnFocus={false} onChange={vi.fn()} />)
+    const input = screen.getByLabelText('pct')
+    expect(input).toHaveValue('1500')
+    await user.clear(input)
+    await user.type(input, '12500')
+    expect(input).toHaveValue('12500')
   })
 
   it('deja un solo separador, el decimal', async () => {

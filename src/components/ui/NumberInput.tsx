@@ -17,11 +17,14 @@
  * impide controlar el string vacío y los ceros a la izquierda. Con `text`
  * controlamos el valor y igual sale el teclado numérico en mobile.
  *
- * La tecla del punto es la coma decimal y se ve como coma (D17, #1560): «1.250»
- * tipeado queda «1,250» y es uno coma veinticinco. Lo pegado entra tal cual
- * («1.250,50» es mil doscientos cincuenta y cincuenta). Lo que no se entiende
- * («1,000,50») queda a la vista en rojo y no se confirma: el campo no lo
- * guarda como otro número.
+ * Al tipear, el punto y la coma son decimales (la tecla del punto se ve como
+ * coma) y el punto de miles lo pone el campo (D17, #1560): «150000» se ve
+ * «150.000», y «1.250» tipeado se ve «1,250» y es uno coma veinticinco. Lo
+ * pegado se lee como se muestra la plata («1.250,50» es mil doscientos
+ * cincuenta y cincuenta). Lo que no se entiende («1,000,50») queda a la vista
+ * en rojo y no se confirma: el campo no lo guarda como otro número. Con
+ * `sinMiles` (porcentajes, litros) no hay miles: la tecla del punto es coma y
+ * nada más.
  */
 import {
   useState,
@@ -34,7 +37,15 @@ import {
   ReactElement,
 } from 'react'
 import { numeroEditable, redondear } from '../../utils/calculations'
-import { NUMERO_ILEGIBLE, leerDecimalSinMiles, leerNumero, teclearNumero } from '../../utils/normalizarNumero'
+import {
+  NUMERO_ILEGIBLE,
+  formatearTecleo,
+  leerDecimalSinMiles,
+  leerEntero,
+  leerNumero,
+  numeroConMiles,
+  teclearNumero,
+} from '../../utils/normalizarNumero'
 
 type InheritedInputProps = Omit<
   InputHTMLAttributes<HTMLInputElement>,
@@ -91,7 +102,7 @@ export function NumberInput({
   // draft === '...' -> el usuario está editando (puede ser '' o parcial).
   const [draft, setDraft] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  // Al escribir la tecla del punto como coma, React deja el cursor al final: se repone.
+  // Al poner o quitar un punto de miles, React deja el cursor al final: se repone.
   const cursor = useRef<number | null>(null)
   useLayoutEffect(() => {
     const input = inputRef.current
@@ -101,21 +112,11 @@ export function NumberInput({
     cursor.current = null
   })
 
-  /** Limpia el string a un numérico tipeable (sin forzar a número todavía). */
-  const sanitize = (raw: string): string => {
-    if (integer) {
-      // Solo dígitos. Quitar ceros a la izquierda: "007" -> "7", "0" -> "0".
-      return raw.replace(/[^\d]/g, '').replace(/^0+(?=\d)/, '')
-    }
-    // Decimal: dígitos y separadores, tal cual. Los puntos de miles y la coma los lee
-    // `parsePrecio` (#1560); quedarse con el primer separador hacía de «1.500,50» un «1.50050».
+  /** Sin miles (`sinMiles`): dígitos y un solo separador, el decimal; sin ceros adelante («0,5» queda). */
+  const sanitizeSinMiles = (raw: string): string => {
     let s = raw.replace(/[^\d.,]/g, '')
-    if (sinMiles) {
-      // Sin miles hay un solo separador, el decimal: los que siguen se descartan.
-      const sep = s.search(/[.,]/)
-      if (sep !== -1) s = s.slice(0, sep + 1) + s.slice(sep + 1).replace(/[.,]/g, '')
-    }
-    // Quitar ceros a la izquierda salvo el que precede al separador ("0,5").
+    const sep = s.search(/[.,]/)
+    if (sep !== -1) s = s.slice(0, sep + 1) + s.slice(sep + 1).replace(/[.,]/g, '')
     return s.replace(/^0+(?=\d)/, '')
   }
 
@@ -123,10 +124,8 @@ export function NumberInput({
   const toNumber = (raw: string): number | null => {
     const t = raw.trim()
     if (t === '') return null
-    if (integer) {
-      const n = parseInt(t, 10)
-      return Number.isFinite(n) ? n : null
-    }
+    // Un entero con los puntos de miles del campo («1.500»); con coma no es una cantidad.
+    if (integer) return leerEntero(t)
     const n = sinMiles ? leerDecimalSinMiles(t) : leerNumero(t)
     return n === null ? null : redondear(n, 2)
   }
@@ -143,9 +142,17 @@ export function NumberInput({
 
   const handleChange = (e: ChangeEvent<HTMLInputElement>): void => {
     const crudo = e.target.value
-    const tecleado = integer ? crudo : teclearNumero(display, crudo)
-    if (tecleado !== crudo) cursor.current = e.target.selectionStart
-    const next = sanitize(tecleado)
+    let next: string
+    if (sinMiles) {
+      const tecleado = teclearNumero(display, crudo)
+      if (tecleado !== crudo) cursor.current = e.target.selectionStart
+      next = sanitizeSinMiles(tecleado)
+    } else {
+      const direccion = (e.nativeEvent as InputEvent).inputType === 'deleteContentForward' ? 'adelante' : 'atras'
+      const r = formatearTecleo(display, crudo, e.target.selectionStart ?? crudo.length, { direccion })
+      cursor.current = r.cursor
+      next = r.texto
+    }
     setDraft(next)
     if (commitOnChange) {
       // En vivo mandamos el número crudo (como hacía el parseInt anterior);
@@ -187,9 +194,9 @@ export function NumberInput({
     onKeyDown?.(e)
   }
 
-  // El valor del padre se muestra con coma decimal: «1.5» con dos ceros más sería «1.500»,
-  // que se lee como mil quinientos; «1,500» sigue siendo uno y medio (#1560).
-  const display = draft !== null ? draft : numeroEditable(value)
+  // El valor del padre se muestra con coma decimal y, salvo `sinMiles`, con los miles («1.500,5»).
+  // Con coma, «1,5» con dos ceros más sigue siendo uno y medio (#1560).
+  const display = draft !== null ? draft : sinMiles ? numeroEditable(value) : numeroConMiles(value)
   const invalido = ilegible(draft)
 
   return (

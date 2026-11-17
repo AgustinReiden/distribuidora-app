@@ -184,6 +184,21 @@ describe('ModalGrupoPrecio', () => {
     )
   })
 
+  it('la cantidad y el precio ponen los miles al tipear', async () => {
+    const { onSave } = renderModal()
+    await userEvent.type(screen.getByPlaceholderText('Ej: Papas Fritas'), 'Fideos Cotella')
+    await userEvent.click(screen.getByText('CODITO COTELLA 500GRS'))
+    await userEvent.type(screen.getByPlaceholderText('Cant. minima total'), '1200')
+    await userEvent.type(screen.getByPlaceholderText('Precio c/u'), '15000,5')
+    expect(screen.getByPlaceholderText('Cant. minima total')).toHaveValue('1.200')
+    expect(screen.getByPlaceholderText('Precio c/u')).toHaveValue('15.000,5')
+    await userEvent.click(guardar())
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ escalas: [expect.objectContaining({ cantidadMinima: 1200, precioUnitario: 15000.5 })] }),
+    )
+  })
+
   // #1560-b3: la cantidad era `type="number"` y la leía `parseInt`: «1.250» quedaba en 1.
   it('la cantidad mínima pegada «1.250» son 1250 unidades', async () => {
     const { onSave } = renderModal()

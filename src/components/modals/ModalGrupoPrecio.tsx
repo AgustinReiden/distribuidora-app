@@ -16,8 +16,9 @@ import { Plus, Trash2, Search, ChevronDown, ChevronRight, Layers } from 'lucide-
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { formatPrecio } from '../../utils/formatters'
-import { numeroEditable, parsePrecio } from '../../utils/calculations'
-import { esTextoIlegible, leerEntero, teclearNumero } from '../../utils/normalizarNumero'
+import { parsePrecio } from '../../utils/calculations'
+import { esTextoIlegible, leerEntero, numeroConMiles } from '../../utils/normalizarNumero'
+import { useTecleoNumero } from '../../hooks/useTecleoNumero'
 import { describirReglaEscala } from '../../utils/describirReglaEscala'
 import type { EscalaPrecio } from '../../utils/precioMayorista'
 import type { GrupoPrecioConDetalles, GrupoPrecioFormInput, ProductoDB } from '../../types'
@@ -72,8 +73,8 @@ function escalaDesdeGrupo(
 ): EscalaForm {
   const combinada = Object.keys(minimosDB).length > 0 || (escalaDB.min_productos_distintos ?? 1) > 1
   return {
-    cantidadMinima: String(escalaDB.cantidad_minima),
-    precioUnitario: numeroEditable(Number(escalaDB.precio_unitario)),
+    cantidadMinima: numeroConMiles(escalaDB.cantidad_minima),
+    precioUnitario: numeroConMiles(Number(escalaDB.precio_unitario)),
     etiqueta: escalaDB.etiqueta || '',
     combinada,
     expandido: combinada,
@@ -82,8 +83,8 @@ function escalaDesdeGrupo(
       Object.entries(minimosDB).map(([pid, v]) => [
         pid,
         {
-          cantidad: String(v.cantidad),
-          precio: v.precioOverride != null && v.precioOverride > 0 ? numeroEditable(v.precioOverride) : '',
+          cantidad: numeroConMiles(v.cantidad),
+          precio: v.precioOverride != null && v.precioOverride > 0 ? numeroConMiles(v.precioOverride) : '',
         },
       ])
     ),
@@ -120,6 +121,8 @@ export default function ModalGrupoPrecio({
         : (productosPreseleccionados || []).map(String)
     )
   )
+  // Cantidades y precios ponen los miles al tipear, y la tecla del punto es coma (D17).
+  const tecleo = useTecleoNumero()
   const [escalas, setEscalas] = useState<EscalaForm[]>(() => {
     if (!grupo) return [escalaVacia()]
     return grupo.escalas.map(e => {
@@ -573,7 +576,7 @@ export default function ModalGrupoPrecio({
                         inputMode="numeric"
                         value={escala.cantidadMinima}
                         aria-invalid={cantidadIlegible(escala.cantidadMinima)}
-                        onChange={e => actualizarEscala(index, { cantidadMinima: teclearNumero(escala.cantidadMinima, e.target.value) })}
+                        onChange={e => actualizarEscala(index, { cantidadMinima: tecleo(escala.cantidadMinima, e) })}
                         className="flex-1 px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                         placeholder="Cant. minima total"
                       />
@@ -585,7 +588,7 @@ export default function ModalGrupoPrecio({
                           inputMode="decimal"
                           value={escala.precioUnitario}
                           aria-invalid={esTextoIlegible(escala.precioUnitario)}
-                          onChange={e => actualizarEscala(index, { precioUnitario: teclearNumero(escala.precioUnitario, e.target.value) })}
+                          onChange={e => actualizarEscala(index, { precioUnitario: tecleo(escala.precioUnitario, e) })}
                           className="w-full pl-7 pr-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                           placeholder={escala.combinada ? 'Precio base (opcional)' : 'Precio c/u'}
                           title={escala.combinada
@@ -661,7 +664,7 @@ export default function ModalGrupoPrecio({
                             inputMode="numeric"
                             value={escala.minProductosDistintos}
                             aria-invalid={cantidadIlegible(escala.minProductosDistintos)}
-                            onChange={e => actualizarEscala(index, { minProductosDistintos: teclearNumero(escala.minProductosDistintos, e.target.value) })}
+                            onChange={e => actualizarEscala(index, { minProductosDistintos: tecleo(escala.minProductosDistintos, e) })}
                             className="w-16 px-2 py-1 border rounded text-xs text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                           />
                         </div>
@@ -694,7 +697,7 @@ export default function ModalGrupoPrecio({
                                       inputMode="numeric"
                                       value={cantidadValue}
                                       aria-invalid={cantidadIlegible(cantidadValue)}
-                                      onChange={e => actualizarMinimoProducto(index, String(p.id), teclearNumero(cantidadValue, e.target.value))}
+                                      onChange={e => actualizarMinimoProducto(index, String(p.id), tecleo(cantidadValue, e))}
                                       className="w-16 px-2 py-1 border rounded text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                                       placeholder="Min"
                                     />
@@ -705,7 +708,7 @@ export default function ModalGrupoPrecio({
                                         inputMode="decimal"
                                         value={precioValue}
                                         aria-invalid={esTextoIlegible(precioValue)}
-                                        onChange={e => actualizarPrecioProducto(index, String(p.id), teclearNumero(precioValue, e.target.value))}
+                                        onChange={e => actualizarPrecioProducto(index, String(p.id), tecleo(precioValue, e))}
                                         disabled={!tieneCantidad}
                                         className="w-full pl-5 pr-2 py-1 border rounded text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:cursor-not-allowed"
                                         placeholder={tieneCantidad ? 'Base' : ''}
