@@ -13,6 +13,11 @@
 -- 904, de marzo) y un producto que en julio sólo salió como regalo (sucursal 1).
 -- Los pasos 1 y 10 lo exigen: sin ellos, el resto daría verde sin probar nada.
 --
+-- Desde la migración de reportes de la ola 2 de #1603 (REP-D de #1545 y 1562-b6), el
+-- gerencial y "Por preventista" son netos de las notas de crédito de venta (por la fecha
+-- de la nota, `_ventas_nc`) y el gerencial deja la venta sin costo fuera del margen; el
+-- rendimiento sigue por boleta. Los pasos 4 y 5 cruzan con esas notas.
+--
 --   psql "$DATABASE_URL" -f scripts/test-reportes-cierran-1297.sql
 
 DO $ensayo$
@@ -36,6 +41,9 @@ DECLARE
   v_x          numeric;
   v_y          numeric;
   v_sv         numeric;
+  v_nc_con     numeric;
+  v_nc_sin     numeric;
+  v_nc_sv      numeric;
   v_n          int;
   v_solo       int := 0;  -- productos sólo regalados en un mes (9)
   v_tolerancia constant numeric := 0.01;  -- los reportes redondean a 2 decimales
@@ -132,21 +140,45 @@ BEGIN
       END LOOP;
 
       -- ----------------- 4 · el rendimiento cierra y trae la fila "(sin vendedor)"
+      -- REP-D (#1545): el gerencial es neto de las notas de crédito del mes (por la
+      -- fecha de la nota); el rendimiento sigue por boleta. Las notas que restan son
+      -- las de _ventas_nc: las que acreditan una línea con costo (v_nc_con) y las que
+      -- acreditan una sin costo (v_nc_sin).
+      SELECT COALESCE(sum(n.monto) FILTER (WHERE public.costo_valuacion(n.costo_al_crear, prod.costo_promedio,
+                        prod.costo_real, prod.costo_sin_iva, prod.impuestos_internos) IS NOT NULL), 0),
+             COALESCE(sum(n.monto) FILTER (WHERE public.costo_valuacion(n.costo_al_crear, prod.costo_promedio,
+                        prod.costo_real, prod.costo_sin_iva, prod.impuestos_internos) IS NULL), 0),
+             COALESCE(sum(n.monto) FILTER (WHERE n.usuario_id IS NULL), 0)
+        INTO v_nc_con, v_nc_sin, v_nc_sv
+        FROM public._ventas_nc(CASE WHEN v_suc IS NULL THEN public._sucursales_red() ELSE ARRAY[v_suc] END,
+                               v_mes, v_hasta) n
+        LEFT JOIN productos prod ON prod.id = n.producto_id;
+      IF abs(v_nc_con + v_nc_sin - COALESCE((v_g->'kpis'->>'notas_credito_venta')::numeric, 0)) > v_tolerancia THEN
+        v_fallas := v_fallas || format('%s %s · las notas de _ventas_nc %s <> notas_credito_venta %s',
+          v_red, to_char(v_mes, 'YYYY-MM'), v_nc_con + v_nc_sin, v_g->'kpis'->>'notas_credito_venta');
+      END IF;
       v_rp := public.rendimiento_preventistas(v_suc, v_mes);
       v_x := (SELECT COALESCE(sum((e->>'venta')::numeric), 0) FROM jsonb_array_elements(v_rp->'preventistas') e);
-      IF abs(v_x - v_venta) > v_tolerancia THEN
-        v_fallas := v_fallas || format('%s %s · Σ rendimiento.venta %s <> venta %s',
-          v_red, to_char(v_mes, 'YYYY-MM'), v_x, v_venta);
+      IF abs(v_x - (v_venta + v_nc_con + v_nc_sin)) > v_tolerancia THEN
+        v_fallas := v_fallas || format('%s %s · Σ rendimiento.venta %s <> venta %s + notas %s',
+          v_red, to_char(v_mes, 'YYYY-MM'), v_x, v_venta, v_nc_con + v_nc_sin);
       END IF;
 
-      -- El rendimiento deja la venta sin costo fuera del margen; el gerencial la
-      -- cuenta a costo 0. La diferencia tiene que ser exactamente esa.
-      v_x := (SELECT COALESCE(sum((e->>'margen_comercial')::numeric + (e->>'venta_sin_costo')::numeric), 0)
-                FROM jsonb_array_elements(v_rp->'preventistas') e);
+      -- 1562-b6 (#1562): los dos dejan la venta sin costo fuera del margen. El margen
+      -- del rendimiento es el del gerencial más las notas sobre líneas con costo, y su
+      -- venta sin costo, la del gerencial más las notas sobre líneas sin costo.
+      v_x := (SELECT COALESCE(sum((e->>'margen_comercial')::numeric), 0) FROM jsonb_array_elements(v_rp->'preventistas') e);
       v_y := (SELECT COALESCE(sum((e->>'margen_comercial')::numeric), 0) FROM jsonb_array_elements(v_g->'vendedores') e);
-      IF abs(v_x - v_y) > v_tolerancia THEN
-        v_fallas := v_fallas || format('%s %s · margen + venta_sin_costo %s <> margen del gerencial %s',
-          v_red, to_char(v_mes, 'YYYY-MM'), v_x, v_y);
+      IF abs(v_x - (v_y + v_nc_con)) > v_tolerancia THEN
+        v_fallas := v_fallas || format('%s %s · margen del rendimiento %s <> margen del gerencial %s + notas con costo %s',
+          v_red, to_char(v_mes, 'YYYY-MM'), v_x, v_y, v_nc_con);
+      END IF;
+      v_x := (SELECT COALESCE(sum((e->>'venta_sin_costo')::numeric), 0) FROM jsonb_array_elements(v_rp->'preventistas') e);
+      v_y := (SELECT COALESCE(sum((e->>'venta_sin_costo')::numeric), 0) FROM jsonb_array_elements(v_g->'vendedores') e);
+      IF abs(v_x - (v_y + v_nc_sin)) > v_tolerancia
+         OR abs(v_y - (v_g->'kpis'->>'ingreso_sin_costo')::numeric) > v_tolerancia THEN
+        v_fallas := v_fallas || format('%s %s · venta sin costo del rendimiento %s <> gerencial %s (kpi %s) + notas sin costo %s',
+          v_red, to_char(v_mes, 'YYYY-MM'), v_x, v_y, v_g->'kpis'->>'ingreso_sin_costo', v_nc_sin);
       END IF;
 
       SELECT COALESCE(sum(GREATEST(p.total - p.cargo_envio, 0)), 0) INTO v_sv
@@ -168,8 +200,9 @@ BEGIN
       -- --------------- 5 · "Por preventista" trae la misma fila, con id NULL
       v_vp := public.reporte_ventas_por_preventista(v_mes, v_hasta, v_suc);
       v_fila := (SELECT e FROM jsonb_array_elements(v_vp) e WHERE e->>'id' IS NULL);
+      -- REP-D: la de "Por preventista" es neta de las notas de esas boletas.
       IF v_sv > 0 AND (v_fila IS NULL OR v_fila->>'nombre' <> '(sin vendedor)'
-                       OR (v_fila->>'totalVentas')::numeric <> v_sv) THEN
+                       OR abs((v_fila->>'totalVentas')::numeric - (v_sv - v_nc_sv)) > v_tolerancia) THEN
         v_fallas := v_fallas || format('%s %s · Por preventista sin la fila "(sin vendedor)" de %s: %s',
           v_red, to_char(v_mes, 'YYYY-MM'), v_sv, v_fila);
       ELSIF v_sv = 0 AND v_fila IS NOT NULL THEN

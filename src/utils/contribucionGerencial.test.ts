@@ -1,9 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import { contribucionEstimada, resumenCobranza } from './contribucionGerencial'
+import { contribucionEstimada, notasCreditoAparte, resumenCobranza } from './contribucionGerencial'
 
 describe('contribucionEstimada', () => {
-  it('margen neto − mermas − comisión − notas de crédito de venta', () => {
+  it('RPC anterior a REP-D (sin venta_bruta): margen neto − mermas − comisión − notas de crédito', () => {
     expect(contribucionEstimada({ margen_neto: 1000, mermas: 100, notas_credito_venta: 50 }, 200)).toBe(650)
+  })
+
+  it('REP-D (#1545): con venta_bruta el margen ya es neto de notas y no se restan dos veces', () => {
+    // venta 1000 = bruta 1050 − 50 de notas; el margen del RPC ya la trae neta.
+    expect(contribucionEstimada({ margen_neto: 950, mermas: 100, notas_credito_venta: 50, venta_bruta: 1050 }, 200))
+      .toBe(650)
   })
 
   it('sin la clave de NC (respuesta cacheada pre-289) resta 0', () => {
@@ -15,6 +21,15 @@ describe('contribucionEstimada', () => {
       { margen_neto: '1000' as unknown as number, mermas: 0, notas_credito_venta: '10200.00' as unknown as number },
       0,
     )).toBe(-9200)
+  })
+})
+
+describe('notasCreditoAparte', () => {
+  it('todas con un RPC anterior a REP-D, ninguna con uno que ya las restó, 0 sin la clave', () => {
+    expect(notasCreditoAparte({ notas_credito_venta: 50 })).toBe(50)
+    expect(notasCreditoAparte({ notas_credito_venta: 50, venta_bruta: 1050 })).toBe(0)
+    expect(notasCreditoAparte({ notas_credito_venta: 50, venta_bruta: 0 })).toBe(0)
+    expect(notasCreditoAparte({})).toBe(0)
   })
 })
 
