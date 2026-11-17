@@ -96,7 +96,10 @@ suelta en `sucursales`.
   `perfiles.activo = false`. Un helper de rol nuevo mira `activo` igual, y una RPC que decide por
   el rol de quien llama usa esos helpers o mira `activo` (#1490): `scripts/check-rol-sin-activo.mjs`
   falla ante una lectura de `perfiles.rol` de `auth.uid()` (o de un alias) sin `activo`, salvo las
-  de `scripts/rol-sin-activo-permitidas.json`, que sólo se achica. Nadie edita su propio
+  de `scripts/rol-sin-activo-permitidas.json`, que sólo se achica. Una **policy** tampoco lee el rol
+  sin `activo` (1564-b11 de #1603): usa los helpers o suma `COALESCE(activo, true)` a la subconsulta
+  sobre `perfiles` (el depósito no tiene helper), y el mismo gate falla ante cualquiera, sin lista
+  de permitidas. Nadie edita su propio
   perfil (decisión del dueño): `perfiles` se escribe sólo por `perfiles_update_admin`. Y ningún
   `UPDATE` ni `DELETE` de `perfiles` deja la base sin un admin activo (`perfiles_guard_desactivacion`).
 - **El rol es uno solo en toda sucursal: `perfiles.rol`** (mig 486, #1519). Lo que cambia por
@@ -106,6 +109,16 @@ suelta en `sucursales`.
 - **El path de un bucket privado empieza por la sucursal** (`<sucursal_id>/…`, #1474). Sus
   policies comparan `(storage.foldername(name))[1]` con las sucursales del usuario, nunca sólo el
   rol. Lo vigila `scripts/check-storage.mjs`, que además falla ante un bucket público.
+- **Lo reservado de la política comercial se lee por RPC** (decisión del dueño, 1564-b6 de #1603).
+  Las comisiones, las alertas de combos y la ventana del precio anterior las da
+  `politica_comercial_reservada()` a admin y encargado; el front lee por REST sólo lo de vender
+  (`POLITICA_COLUMNAS_PARA_VENDER`). Una columna nueva de `politicas_comerciales` elige: si la
+  necesita quien vende, va a esa lista; si no, a la RPC. El REVOKE de lo reservado para
+  `authenticated` (la parte 2) va después, con su issue.
+- **Una `auditoria_*` que lee código limpia el cuerpo con `_sql_sin_comentarios` o
+  `_sql_sin_comentarios_ni_literales`** (#1541): una sola pasada que entiende las comillas. Sacar
+  primero los `--` y después los literales rompe la paridad con un literal `' -- '` y esconde lo
+  que sigue. Espejo en `scripts/lib/locks.mjs`.
 - **Los avisos se guardan 90 días y `audit_logs` 24 meses** (1561-b10 y 1596-b10, decisión del
   dueño). Los borra `purgar_retencion()`, sólo de `service_role`, que corre
   `.github/workflows/purgar-retencion.yml`: nada más borra `audit_logs`, que es evidencia. La baja
@@ -216,7 +229,8 @@ suelta en `sucursales`.
   `registrar_salvedad` guarda su costo, su lista, su origen, su descuento y su escala en
   `salvedad_linea_foto` (sólo de server: lleva el costo), y `anular_salvedad` la reinserta con
   eso. Sin foto (las anteriores), el costo de hoy. Un camino nuevo que borre la línea de una
-  salvedad guarda la foto igual, y uno que repunte escalas repunta también la de la foto.
+  salvedad guarda la foto igual (como `_combo_trasladar` al fusionar las dos líneas de un
+  combo), y uno que repunte escalas repunta también la de la foto.
   Anular una salvedad que devuelve el derecho a un regalo se rechaza si **cualquier** salvedad
   del pedido, viva o anulada, recortó un regalo de esa promo (1592-b5 y su revisión): mirar
   sólo la propia hacía que el resultado dependiera del orden en que se anulan.
@@ -259,6 +273,10 @@ suelta en `sucursales`.
 - **La diferencia de un canje es informativa** (#1329). `_aplicar_cambio_producto` mueve el
   stock y guarda `cambios_productos.diferencia_monto`, pero no toca `saldo_cuenta`: sin boleta
   ni pago detrás rompe CC-A y no se puede cobrar. Si hay que cobrarla, se hace un pedido.
+- **Una salvedad va sólo sobre un pedido en camino o entregado** (1595-b5, decisión del dueño
+  D23). `registrar_salvedad` rechaza uno pendiente o en preparación (`pedido_sin_salir`): lo que
+  no va se saca editándolo. Un ensayo que registre salvedades pone antes el pedido en `asignado`
+  o `entregado`.
 - Una confirmación disparada desde un modal Radix tiene que renderizarse **dentro** del
   modal. Como hermano en el container queda detrás del overlay y falla en silencio.
 - **Toda lectura nueva de `clientes` decide qué hace con los inactivos.** Un cliente con
@@ -268,6 +286,11 @@ suelta en `sucursales`.
   —selectores, rutas, recorridos— los oculta; el historial —reportes, cuenta corriente y los
   embeds `cliente:clientes(*)`— **tiene** que seguir viéndolos, que es de lo que se trata la
   baja lógica. Una consulta que no elige está eligiendo mal por omisión.
+- **Una promo con uso no se borra: se desactiva** (1556-b1, decisión del dueño). Sus FKs no son
+  RESTRICT (el regalo de un pedido quedaba sin promo y no volvía al stock al cancelarlo), así que
+  lo frena `trg_promocion_no_se_borra_con_uso`: líneas de pedido de cualquier estado, ajustes de
+  stock o salvedades. El front cuenta lo mismo antes de ofrecer "Eliminar"
+  (`promocionesEliminacion.ts`): si cambia la regla de un lado, cambia del otro.
 - **El stock por lote lo lleva un trigger, no las RPCs** (y cómo devolver, etiquetar y lockear) → `migrations/CLAUDE.md`.
 - **"Venta por vendedor" tiene UNA definición y se escribe siempre igual** (migs 241 y 318, #568):
   `estado = 'entregado'` · `canal <> 'cambio'` · `tipo_factura IS DISTINCT FROM 'VB'` · por
@@ -382,9 +405,18 @@ suelta en `sucursales`.
   10 × 100 con un flete de 300 dan 1.300. La ZZ guarda `bonificaciones` y `no_gravado` en 0: el
   cuadre del alta y COMPRA-A1 suman los cargos `en_factura` de `compra_cargos`, y el front los
   lleva en `cargosEnFactura`. En una FC no cambia: el cargo gravado va a `bonificaciones`.
-- **Una NC de compra no pasa lo que le queda a la compra** (su total menos todas sus notas): el ajuste
-  siempre, y la devolución si la compra tiene un ajuste (#1557, #1565; decisión del dueño). Sin ajustes
-  la devolución total entra siempre, aunque acredite más que el total. Un camino nuevo de NC hace igual.
+- **Una NC de compra no pasa lo que le queda a la compra** (su total menos sus notas vigentes): el ajuste
+  siempre, y la devolución si la compra tiene un ajuste (#1557, #1565; decisión del dueño). La devolución
+  se valúa neta de la bonificación y de los descuentos de cabecera (`_compra_factor_neto`, #1590 D16):
+  un descuento con reparto le baja el neto sólo a sus renglones, y el resto va parejo. Devolver todo
+  nunca acredita más que lo pagado. Un camino nuevo de NC hace igual.
+- **Una NC de compra se anula, no se borra** (`anular_nota_credito_compra`, #1590 D15): queda
+  `anulada` con su motivo, y deshace el stock, los lotes que tomó (`notas_credito.lotes_tomados`), el
+  promedio y la reposición. Una devolución anterior a la 483 (10/11/2026) no se anula: no corrigió el
+  promedio ni sus lotes. Toda suma de las notas de una compra filtra `NOT anulada`; un camino nuevo
+  que baje lotes por una nota los anota ahí.
+- **Un envío a un producto desactivado lo reactiva sólo con la confirmación** (#1558 D7): el renglón
+  trae `"reactivar": true`; sin la marca, `aceptar_movimiento_sucursal` rechaza.
 - **El total de una ZZ lo pone el server** (#1603): el subtotal, los otros impuestos y los cargos
   `en_factura`, en el alta y en la edición, mande lo que mande el front (un PWA de antes de la 506
   manda el subtotal). Un descuento en factura que lo deja negativo se rechaza con su motivo. Un camino
@@ -416,9 +448,17 @@ suelta en `sucursales`.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
   **visible para todos los preventistas** (mig 028), o sea lo contrario de reservado. Y
-  `reservado_admin` **no** es "solo lo ve admin": lo ven también encargado, transportista y
-  depósito, y el preventista que ya le vendió —esa excepción es la que evita que sus pedidos
-  viejos pierdan el cliente y desaparezcan por los `!inner` de `usePedidosQuery`—. Todo
+  `reservado_admin` **no** es "solo lo ve admin": lo ven también el encargado, el que le reparte un
+  pedido y el preventista que ya le vendió —esa excepción es la que evita que sus pedidos
+  viejos pierdan el cliente y desaparezcan por los `!inner` de `usePedidosQuery`—. Quién ve un
+  cliente es **una sola regla, `_cliente_visible`** (1564-b12 de #1603, decisión del dueño), que
+  usan `mt_clientes_select` y `obtener_resumen_cuenta_cliente`: admin y encargado ven todos; quien
+  actúa como preventista, los libres y los suyos; cualquiera, el que le vendió y el de un pedido
+  que reparte (también el depósito con el extra de chofer); el depósito, nada más; un rol nuevo no
+  hereda nada. `verificar_duplicado_cliente` queda afuera a propósito (avisa de un duplicado entre
+  todos), y el bot va aparte. Una lectura nueva de clientes con permisos de server usa esa función,
+  como `EXISTS (SELECT 1 FROM _cliente_visible(...))`: es `SETOF` para que la policy la inlinee (una
+  función SQL escalar con subconsultas se llama fila por fila). Todo
   camino nuevo que ofrezca clientes *para operar* lo excluye; todo camino de *historial* lo
   sigue mostrando.
   Desde la 358 esa excepción de historial vale para **cualquier** cliente, no sólo el
@@ -553,6 +593,13 @@ query bien formada da `42501`: sirve sólo para ver `PGRST200`/`PGRST201`, que P
 resuelve antes de ir a la base (un `42501` quiere decir que el embed resolvió). El caso
 positivo se prueba con el JWT de una sesión, o en SQL con `SET LOCAL ROLE authenticated` +
 `request.jwt.claims`.
+
+Y al revés: **una FK nueva entre dos tablas que ya tienen otra rompe los embeds que ya
+existían**, también en los bundles viejos del PWA, que un deploy no arregla. Antes de aplicar
+una migración que suma una FK, buscá en `src/` los embeds entre esas dos tablas; el que quede
+pide su relación explícita (`perfiles!notas_credito_usuario_id_fkey(...)`). Pasó con la 523
+(`notas_credito.anulada_por → perfiles`: el detalle de una compra dejó de cargar sus notas de
+crédito); la 524 sacó esa FK.
 
 Pariente de la misma familia: **dos sobrecargas SQL con rangos `[obligatorios, total]`
 superpuestos** hacen que PostgREST no sepa cuál llamar y tire `PGRST203`, también en

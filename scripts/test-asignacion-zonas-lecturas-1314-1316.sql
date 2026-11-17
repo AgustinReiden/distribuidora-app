@@ -54,7 +54,11 @@ BEGIN
   PERFORM set_config('request.jwt.claims', '', true);
 
   -- ------------------------------------------------ 1 · tablero sin zona ---
-  FOR v_suc IN SELECT id FROM sucursales WHERE activa ORDER BY id LOOP
+  -- tablero_clientes_inactivos se borró en la migración de B9 del plan #1603 (nadie la llamaba,
+  -- decisión del dueño D48): sin ella, 1 y 3.2 no aplican.
+  FOR v_suc IN SELECT id FROM sucursales
+                WHERE activa AND to_regprocedure('public.tablero_clientes_inactivos(bigint,integer,boolean)') IS NOT NULL
+                ORDER BY id LOOP
     v_j := public.tablero_clientes_inactivos(v_suc, 14, true);
     WITH v AS (SELECT * FROM public._tablero_ventas(public._tablero_sucursales(v_suc), '2000-01-01', v_hoy)),
     agg AS (SELECT cliente_id, max(fecha) AS ultima FROM v GROUP BY cliente_id)
@@ -122,11 +126,14 @@ BEGIN
 
   -- 3.2 · En el tablero, todo cliente con fila en cliente_preventistas trae ese
   -- preventista.
+  v_n := 0;
+  IF to_regprocedure('public.tablero_clientes_inactivos(bigint,integer,boolean)') IS NOT NULL THEN
   SELECT count(*) INTO v_n
     FROM sucursales s
     CROSS JOIN LATERAL jsonb_array_elements(public.tablero_clientes_inactivos(s.id, 14, true)->'clientes') e
     JOIN cliente_preventistas cp ON cp.cliente_id = (e->>'cliente_id')::bigint
    WHERE s.activa AND (e->>'preventista_id')::uuid IS DISTINCT FROM cp.preventista_id;
+  END IF;
   IF v_n > 0 THEN
     v_fallas := v_fallas || format('3.2 · %s clientes del tablero no traen el preventista de cliente_preventistas', v_n);
   END IF;
