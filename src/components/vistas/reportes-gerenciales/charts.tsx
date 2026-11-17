@@ -56,7 +56,11 @@ function baseTooltip(bg: string) {
 }
 
 // --- Evolución mensual: venta + bonificaciones (barras) + margen neto % (línea) ---
-export function EvolucionChart({ data }: { data: ReporteMes[] }): React.ReactElement {
+export function EvolucionChart({ data, sinCostoDe }: {
+  data: ReporteMes[]
+  /** Lo vendido sin costo que el server dejó fuera del margen de ese mes (`sinCostoFueraDelMargen`). Sin él, 0. */
+  sinCostoDe?: (m: ReporteMes) => number
+}): React.ReactElement {
   const t = useChartTheme()
   // Gráfico mixto (barras + línea): tipamos laxo para react-chartjs-2.
   const chartData: any = {
@@ -66,7 +70,8 @@ export function EvolucionChart({ data }: { data: ReporteMes[] }): React.ReactEle
       { type: 'bar', label: 'Bonificaciones', data: data.map(m => m.bonif), backgroundColor: PALETTE.amber, borderRadius: 4, order: 2, yAxisID: 'y' },
       {
         type: 'line', label: 'Margen neto %',
-        data: data.map(m => margenNetoMesPct(m) * 100),
+        // Un mes sin base (venta ≤ sin costo) no tiene margen: null, sin punto en la línea.
+        data: data.map(m => { const x = margenNetoMesPct(m, sinCostoDe?.(m) ?? 0); return x == null ? null : x * 100 }),
         borderColor: PALETTE.violet, backgroundColor: PALETTE.violet, tension: 0.35,
         borderWidth: 2.5, pointRadius: 4, pointBackgroundColor: t.surface, pointBorderWidth: 2,
         order: 1, yAxisID: 'y1',

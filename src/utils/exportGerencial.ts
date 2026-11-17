@@ -115,11 +115,11 @@ export function hojaMetadatos(r: ReporteGerencial): SheetConfig {
 function filasKpis(k: ReporteKpis): Fila[] {
   const ventaReal = k.venta_real ?? k.venta
   const margenReal = k.margen_real ?? k.margen_comercial
-  // Con el server nuevo la venta ya es neta de las notas de crédito y manda `venta_bruta` (REP-D, #1545;
-  // la clave todavía no está en el tipo, se lee defensivo): se abre en bruta, menos las notas, y la
-  // venta como RESULTADO, para que nadie vuelva a restar las notas de una cifra que ya las restó.
-  // Sin `venta_bruta` (server anterior o respuesta cacheada) queda la fila de siempre.
-  const ventaBruta = (k as { venta_bruta?: number | null }).venta_bruta
+  // Con el server nuevo la venta ya es neta de las notas de crédito y manda `venta_bruta` (REP-D, #1545):
+  // se abre en bruta, menos las notas, y la venta como RESULTADO, para que nadie vuelva a restar las
+  // notas de una cifra que ya las restó. Sin `venta_bruta` (server anterior o respuesta cacheada) queda
+  // la fila de siempre, con las notas aparte.
+  const ventaBruta = k.venta_bruta
   const conBruta = ventaBruta != null
   const filasVenta: Fila[] = conBruta
     ? [
@@ -150,9 +150,9 @@ function filasKpis(k: ReporteKpis): Fila[] {
     { Indicador: 'Mermas — pérdida', Valor: n(k.mermas_perdida ?? 0) },
     { Indicador: 'Mermas — ajustes', Valor: n(k.mermas_ajuste ?? 0) },
     { Indicador: 'Mermas — muestras', Valor: n(k.mermas_muestra ?? 0) },
-    // mig 289 (#845): no tocan los márgenes; la contribución las resta.
-    // Con `venta_bruta` esta cifra ya está restada de la venta de arriba (y de los márgenes): se dice.
-    { Indicador: conBruta ? 'Notas de crédito de venta (ya restadas de la venta)' : 'Notas de crédito de venta', Valor: n(k.notas_credito_venta ?? 0) },
+    // mig 289 (#845): no tocan los márgenes; la contribución las resta. Con `venta_bruta` ya van
+    // arriba (bruta − notas = venta) y esta fila repetiría el mismo número: sólo queda la cantidad.
+    ...(conBruta ? [] : [{ Indicador: 'Notas de crédito de venta', Valor: n(k.notas_credito_venta ?? 0) }]),
     { Indicador: 'Notas de crédito de venta (cantidad)', Valor: n(k.notas_credito_venta_n ?? 0) },
     // Vales blancos: consumo interno a costo, FUERA de la venta (0 si la respuesta es vieja).
     { Indicador: 'Consumo interno (vales blancos, a costo)', Valor: n(k.consumo_interno?.monto ?? 0) },
@@ -356,19 +356,31 @@ export function hojasMermas(r: ReporteGerencial): SheetConfig[] {
  * (eso es el CMV, que va en Resumen y en Evolución).
  */
 export function hojasCompras(r: ReporteGerencial): SheetConfig[] {
-  const filas = (r.mensual ?? []).map(m => ({
-    Mes: m.mes,
-    Compras: n(m.compras),
-  }))
-  if (filas.length === 0) return []
-  // Las notas de crédito de compra del período (1557-b3): `Compras` ya las restó. El server nuevo
-  // las manda aparte (`kpis.compras_notas_credito`); con uno anterior la clave no viene y no hay renglón.
-  // Se lee defensivo: la clave todavía no está en el tipo `ReporteKpis` (la suma el PR del server).
-  const notasCredito = (r.kpis as { compras_notas_credito?: number } | undefined)?.compras_notas_credito
-  if (notasCredito != null && n(notasCredito) !== 0) {
-    filas.push({ Mes: 'Notas de crédito (ya restadas de Compras)', Compras: -Math.abs(n(notasCredito)) })
+  const mensual = r.mensual ?? []
+  if (mensual.length === 0) return []
+  // Con el server nuevo cada mes manda sus notas de crédito de compra (`compras_notas_credito`, 1557-b3)
+  // y `compras` ya viene NETO de ellas: se abre en columnas para que cierre (Facturas + Notas +
+  // Transferencias = Compras) y un SUMA de «Compras» no las reste dos veces. Las notas van en negativo
+  // en su propia columna, nunca en la de los meses. Sin la clave (server anterior) queda Mes + Compras.
+  const conNotas = mensual.some(m => m.compras_notas_credito != null)
+  if (!conNotas) {
+    const filas = mensual.map(m => ({ Mes: m.mes, Compras: n(m.compras) }))
+    return [hoja('Compras', filas, [12, 18], { formatos: { Compras: M } })]
   }
-  return [hoja('Compras', filas, [40, 18], { formatos: { Compras: M } })]
+  const filas = mensual.map(m => {
+    const notas = Math.abs(n(m.compras_notas_credito ?? 0))
+    const transferencias = n(m.compras_transferencias ?? 0)
+    return {
+      Mes: m.mes,
+      Facturas: n(m.compras) - transferencias + notas,
+      'Notas de crédito': notas ? -notas : 0,
+      Transferencias: transferencias,
+      Compras: n(m.compras),
+    }
+  })
+  return [hoja('Compras', filas, [12, 16, 18, 16, 18], {
+    formatos: { Facturas: M, 'Notas de crédito': M, Transferencias: M, Compras: M },
+  })]
 }
 
 // ---------------------------------------------------------------------------

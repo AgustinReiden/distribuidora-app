@@ -151,7 +151,11 @@ export default function VistaGastos({
     ...vehiculos.map(v => ({ key: String(v.id), label: `${v.patente} · ${v.descripcion}`, texto: v.descripcion })),
   ]
 
-  const conteo = `${gastos.length} ${gastos.length === 1 ? 'GASTO' : 'GASTOS'}`
+  // La carga falló y no hay nada en pantalla: no se sabe cuántos gastos hay ni cuánto suman. «0 GASTOS»,
+  // «$0» y un Excel vacío dirían que el mes está vacío (H7 de la revisión de #1561).
+  const sinDatos = error && gastos.length === 0 && !loading
+  const conteo = sinDatos ? '— GASTOS' : `${gastos.length} ${gastos.length === 1 ? 'GASTO' : 'GASTOS'}`
+  const monto = (x: number): string => (sinDatos ? '—' : formatPrecio(x))
 
   return (
     <div className="space-y-6">
@@ -168,7 +172,7 @@ export default function VistaGastos({
                 Rubros
               </Button>
             )}
-            <Button type="button" variant="secondary" size="md" onClick={onExportar}>
+            <Button type="button" variant="secondary" size="md" onClick={onExportar} disabled={sinDatos}>
               <Download className="w-4 h-4" aria-hidden="true" />
               Exportar
             </Button>
@@ -208,12 +212,12 @@ export default function VistaGastos({
         {GRUPOS_GASTO.map(g => (
           <Card key={g.valor} variant="stat" data-testid={`total-${g.valor}`}>
             <p className="text-xs text-gray-500 dark:text-gray-400">{g.etiqueta}</p>
-            <p className="text-lg font-bold text-gray-800 dark:text-white">{formatPrecio(totales.porGrupo.get(g.valor) ?? 0)}</p>
+            <p className="text-lg font-bold text-gray-800 dark:text-white">{monto(totales.porGrupo.get(g.valor) ?? 0)}</p>
           </Card>
         ))}
         <Card variant="stat" accent="brand" data-testid="total-todos">
           <p className="text-xs text-gray-500 dark:text-gray-400">Total del mes</p>
-          <p className="text-lg font-bold text-gray-800 dark:text-white">{formatPrecio(totales.todos)}</p>
+          <p className="text-lg font-bold text-gray-800 dark:text-white">{monto(totales.todos)}</p>
         </Card>
       </div>
 

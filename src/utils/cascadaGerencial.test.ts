@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { pasosCascada, sinCostoFueraDelMargen } from './cascadaGerencial'
+import { pasosCascada } from './cascadaGerencial'
 
 const base = { venta: 100000, cmv: 60000, bonif: 5000, mermas: 1000, comision: 2000 }
 
@@ -10,9 +10,8 @@ describe('pasosCascada — sin venta sin costo (el gráfico de hoy)', () => {
     expect(rotulos(base)).toEqual(['Venta', '− CMV', 'Mg comerc.', '− Bonif.', '− Mermas', '− Comis.', 'Contrib.'])
   })
 
-  it('con 0, con un valor negativo o con basura, tampoco hay paso', () => {
+  it('con 0 o con basura tampoco hay paso', () => {
     expect(rotulos({ ...base, sinCosto: 0 })).not.toContain('− Sin costo')
-    expect(rotulos({ ...base, sinCosto: -50 })).not.toContain('− Sin costo')
     expect(rotulos({ ...base, sinCosto: Number.NaN })).not.toContain('− Sin costo')
   })
 
@@ -50,18 +49,25 @@ describe('pasosCascada — con venta sin costo fuera del margen (server nuevo, 1
   })
 })
 
-describe('sinCostoFueraDelMargen — sólo cuenta si el server lo excluyó', () => {
-  it('con el server nuevo (manda venta_bruta), devuelve lo vendido sin costo', () => {
-    expect(sinCostoFueraDelMargen({ ingreso_sin_costo: 8000, venta_bruta: 105000 })).toBe(8000)
+describe('pasosCascada — un sin costo NEGATIVO (una nota de crédito sobre un producto sin costo)', () => {
+  it('sigue cerrando con el margen que resta el server: venta − sin costo − CMV', () => {
+    // El server resta el sin costo tal cual, también negativo: margen = 100.000 − (−3.000) − 60.000.
+    const { pasos } = pasosCascada({ ...base, sinCosto: -3000 })
+    expect(pasos.find(p => p.l === 'Mg comerc.')?.v).toBe(43000)
+    expect(pasos.map(p => p.l)).toContain('+ Sin costo')
   })
 
-  it('con el server de hoy (sin venta_bruta) da 0: su margen todavía incluye esa venta', () => {
-    expect(sinCostoFueraDelMargen({ ingreso_sin_costo: 8000 })).toBe(0)
+  it('la barra sube y queda con los extremos en orden [bajo, alto]', () => {
+    const { pasos } = pasosCascada({ ...base, sinCosto: -3000 })
+    const paso = pasos.find(p => p.l === '+ Sin costo')!
+    expect(paso.v).toBe(3000)
+    expect(paso.r).toEqual([40000, 43000])
+    expect(paso.tono).toBe('emerald')
   })
 
-  it('sin el dato, en 0 o inválido, da 0', () => {
-    expect(sinCostoFueraDelMargen({ venta_bruta: 100 })).toBe(0)
-    expect(sinCostoFueraDelMargen({ ingreso_sin_costo: 0, venta_bruta: 100 })).toBe(0)
-    expect(sinCostoFueraDelMargen({ ingreso_sin_costo: null, venta_bruta: 100 })).toBe(0)
+  it('con 0, NaN o sin el dato no hay paso', () => {
+    for (const sinCosto of [0, Number.NaN, undefined]) {
+      expect(rotulos({ ...base, sinCosto }).some(l => /Sin costo/.test(l))).toBe(false)
+    }
   })
 })

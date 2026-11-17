@@ -139,10 +139,11 @@ describe('hojasResumen — venta bruta y neta de notas de crédito (REP-D, serve
     ])
   })
 
-  it('con venta_bruta, la otra fila de notas dice que ya están restadas', () => {
-    const indicadores = filasResumen(conBruta()).map(f => f.Indicador)
-    expect(indicadores).toContain('Notas de crédito de venta (ya restadas de la venta)')
-    expect(indicadores).not.toContain('Notas de crédito de venta')
+  it('con venta_bruta no hay una segunda fila de notas con el mismo número: sólo queda la cantidad', () => {
+    const filas = filasResumen(conBruta())
+    const conMonto = filas.filter(f => /Notas de crédito de venta/.test(String(f.Indicador)) && f.Valor === 2000)
+    expect(conMonto).toHaveLength(1)
+    expect(filas.map(f => f.Indicador)).toContain('Notas de crédito de venta (cantidad)')
   })
 
   it('sin venta_bruta (server de hoy) queda como siempre: una fila «Venta» y las notas aparte', () => {
@@ -309,21 +310,28 @@ describe('hojasCompras', () => {
   })
 })
 
-describe('hojasCompras — notas de crédito de compra (server nuevo, #1562)', () => {
-  const conNotas = (monto: number) => reporte({
-    kpis: { ...reporte().kpis, compras_notas_credito: monto } as ReporteGerencial['kpis'],
+describe('hojasCompras — notas de crédito de compra (server nuevo, #1562, H8)', () => {
+  const conNotas = () => reporte({
+    mensual: [
+      { mes: '2026-07', pedidos: 40, venta: 90000, clientes: 15, ticket: 2000, cmv: 50000, bonif: 1000, mermas: 500, compras: 60000, compras_notas_credito: 4000, compras_transferencias: 1000 },
+      { mes: '2026-08', pedidos: 50, venta: 100000, clientes: 20, ticket: 2000, cmv: 60000, bonif: 5000, mermas: 1000, compras: 70000, compras_notas_credito: 0, compras_transferencias: 0 },
+    ] as ReporteGerencial['mensual'],
   })
 
-  it('si el server manda compras_notas_credito, va como renglón negativo, ya restada de Compras', () => {
-    const filas = hojasCompras(conNotas(4500))[0].data
+  it('cada mes abre en Facturas, Notas de crédito (en negativo, en su columna), Transferencias y Compras (neto)', () => {
+    const filas = hojasCompras(conNotas())[0].data
+    expect(filas[0]).toEqual({ Mes: '2026-07', Facturas: 63000, 'Notas de crédito': -4000, Transferencias: 1000, Compras: 60000 })
+    expect(filas[1]).toEqual({ Mes: '2026-08', Facturas: 70000, 'Notas de crédito': 0, Transferencias: 0, Compras: 70000 })
+  })
+
+  it('en cada mes Facturas + Notas + Transferencias = Compras, y no hay renglón suelto debajo de los meses', () => {
+    const filas = hojasCompras(conNotas())[0].data as Array<Record<string, number>>
     expect(filas).toHaveLength(2)
-    expect(filas[0]).toEqual({ Mes: '2026-08', Compras: 70000 })
-    expect(filas[1]).toEqual({ Mes: 'Notas de crédito (ya restadas de Compras)', Compras: -4500 })
+    for (const f of filas) expect(f.Facturas + f['Notas de crédito'] + f.Transferencias).toBe(f.Compras)
   })
 
-  it('sin la clave (server de hoy) o con 0, no hay renglón', () => {
-    expect(hojasCompras(reporte())[0].data).toHaveLength(1)
-    expect(hojasCompras(conNotas(0))[0].data).toHaveLength(1)
+  it('sin la clave (server de hoy) queda Mes + Compras, como siempre', () => {
+    expect(hojasCompras(reporte())[0].data).toEqual([{ Mes: '2026-08', Compras: 70000 }])
   })
 })
 

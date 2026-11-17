@@ -7,12 +7,21 @@
  *
  * La vista se mockea: acá se prueba qué rango le pide el container al reporte.
  */
-import React from 'react'
+import React, { useEffect } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 
 const mockReporte = vi.fn()
+const vistaProps: { actual: Record<string, unknown> } = { actual: {} }
+const ubicacion = { search: '' }
+
+/** Anota la query string de la URL para poder afirmar qué se guarda ahí. */
+function Sonda(): null {
+  const { search } = useLocation()
+  useEffect(() => { ubicacion.search = search }, [search])
+  return null
+}
 
 vi.mock('../../hooks/queries', () => ({
   useReporteGerencialQuery: (...args: unknown[]) => {
@@ -42,7 +51,10 @@ vi.mock('../../contexts/SucursalContext', () => ({
 }))
 
 vi.mock('../vistas/VistaReportesGerenciales', () => ({
-  default: () => <div>vista gerencial</div>,
+  default: (props: Record<string, unknown>) => {
+    vistaProps.actual = props
+    return <div>vista gerencial</div>
+  },
 }))
 
 import ReportesGerencialesContainer from './ReportesGerencialesContainer'
@@ -79,6 +91,76 @@ describe('ReportesGerencialesContainer › «Este mes» al cruzar la medianoche 
     await act(async () => { vi.advanceTimersByTime(60_000) })
 
     expect(ultimoRango()).toEqual(['2026-12-01', '2026-12-01'])
+  })
+
+  it('con «Este mes» en la URL (sólo el preset), pasada la medianoche salta solo al mes nuevo y sigue siendo «Este mes» (H5)', async () => {
+    render(
+      <MemoryRouter initialEntries={['/reportes-gerenciales?pr=mes-actual']}>
+        <ReportesGerencialesContainer />
+      </MemoryRouter>,
+    )
+    await screen.findByText('vista gerencial')
+    const antes = vistaProps.actual.periodoSel as { key: string; esMes: boolean; periodoMes: string | null }
+    expect(antes.key).toBe('mes-actual')
+    expect(ultimoRango()).toEqual(['2026-11-01', '2026-11-30'])
+
+    await act(async () => { vi.advanceTimersByTime(60_000) })
+
+    const despues = vistaProps.actual.periodoSel as { key: string; esMes: boolean; periodoMes: string | null }
+    expect(despues.key).toBe('mes-actual')
+    expect(ultimoRango()).toEqual(['2026-12-01', '2026-12-01'])
+    // El análisis mensual sigue disponible, ahora el de diciembre.
+    expect(despues.esMes).toBe(true)
+    expect(despues.periodoMes).toBe('2026-12-01')
+  })
+
+  it('un link viejo con el rango de «Este mes» y el preset (pr) también sigue al día (H5)', async () => {
+    render(
+      <MemoryRouter initialEntries={['/reportes-gerenciales?desde=2026-11-01&hasta=2026-11-30&pr=mes-actual']}>
+        <ReportesGerencialesContainer />
+      </MemoryRouter>,
+    )
+    await screen.findByText('vista gerencial')
+    expect((vistaProps.actual.periodoSel as { key: string }).key).toBe('mes-actual')
+    expect(ultimoRango()).toEqual(['2026-11-01', '2026-11-30'])
+
+    await act(async () => { vi.advanceTimersByTime(60_000) })
+
+    expect((vistaProps.actual.periodoSel as { key: string }).key).toBe('mes-actual')
+    expect(ultimoRango()).toEqual(['2026-12-01', '2026-12-01'])
+  })
+
+  it('elegir un preset a mano lo deja en la URL y sobrevive a la medianoche (H5)', async () => {
+    render(
+      <MemoryRouter initialEntries={['/reportes-gerenciales']}>
+        <Sonda />
+        <ReportesGerencialesContainer />
+      </MemoryRouter>,
+    )
+    await screen.findByText('vista gerencial')
+    const opciones = vistaProps.actual.opcionesPeriodo as Array<{ key: string }>
+    const mesPasado = opciones.find(o => o.key === 'mes-pasado')!
+    await act(async () => { (vistaProps.actual.onPeriodo as (p: unknown) => void)(mesPasado) })
+    expect((vistaProps.actual.periodoSel as { key: string }).key).toBe('mes-pasado')
+    expect(ubicacion.search).toBe('?pr=mes-pasado') // sólo el preset, sin fechas
+    expect(ultimoRango()).toEqual(['2026-10-01', '2026-10-31'])
+
+    await act(async () => { vi.advanceTimersByTime(60_000) })
+
+    // El «mes pasado» ahora es noviembre completo: sigue siendo ese preset, no «Personalizado».
+    expect((vistaProps.actual.periodoSel as { key: string }).key).toBe('mes-pasado')
+    expect(ultimoRango()).toEqual(['2026-11-01', '2026-11-30'])
+  })
+
+  it('un rango tipeado a mano sin preset sigue siendo «Personalizado»', async () => {
+    render(
+      <MemoryRouter initialEntries={['/reportes-gerenciales?desde=2026-11-05&hasta=2026-11-20']}>
+        <ReportesGerencialesContainer />
+      </MemoryRouter>,
+    )
+    await screen.findByText('vista gerencial')
+    expect((vistaProps.actual.periodoSel as { key: string }).key).toBe('custom')
+    expect(ultimoRango()).toEqual(['2026-11-05', '2026-11-20'])
   })
 
   it('mientras el día no cambia, el período no se mueve', async () => {

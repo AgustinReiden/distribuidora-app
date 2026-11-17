@@ -95,6 +95,18 @@ describe('GastosContainer — la carga de los gastos falló (#1561)', () => {
     expect(refetch).toHaveBeenCalledTimes(1)
   })
 
+  it('con la carga caída el encabezado y las tarjetas no dicen «0 GASTOS» ni «$0», y Exportar no baja un mes vacío (H7)', async () => {
+    mocks.gastos.mockReturnValue({ data: undefined, isLoading: false, isError: true, refetch })
+    render(<GastosContainer />)
+
+    await screen.findByRole('alert', undefined, ESPERA_VISTA)
+    expect(document.body.textContent).not.toMatch(/(^|\s)0 GASTOS/)
+    expect(screen.getByTestId('total-todos')).toHaveTextContent('—')
+    expect(screen.getByTestId('total-todos')).not.toHaveTextContent('$')
+    expect(screen.getByTestId('total-vehiculos')).not.toHaveTextContent('$')
+    expect(screen.getByRole('button', { name: /Exportar/ })).toBeDisabled()
+  })
+
   it('con gastos en caché y un refetch que falló, manda la lista, no el error', async () => {
     mocks.gastos.mockReturnValue({ data: [gasto], isLoading: false, isError: true, refetch })
     render(<GastosContainer />)
