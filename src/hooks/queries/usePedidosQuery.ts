@@ -19,6 +19,7 @@ import { traerTodo } from '../../utils/paginacion'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
 import { camposComboRPC, type CamposCombo } from '../../utils/combosPedido'
+import { mismoTotalDelAlta } from '../../utils/totalDelAlta'
 
 // Query keys
 export const pedidosKeys = {
@@ -604,7 +605,8 @@ async function crearPedido(input: CrearPedidoInput): Promise<CrearPedidoResult> 
       existente.total != null &&
       // `input.total` es el de productos y el servidor guarda productos + cargo:
       // se compara sin el cargo, o un pedido con envío nunca sería el propio.
-      (esVB || Math.abs((existente.total - (existente.cargoEnvio ?? 0)) - input.total) < 0.01)
+      // Con la tolerancia del centavo del alta, en centavos enteros (1559-b1 guarda la suma).
+      (esVB || mismoTotalDelAlta(existente.total - (existente.cargoEnvio ?? 0), input.total))
 
     if (esNuestro && !esVB) {
       await registrarOrigenPrecio(result.pedido_id!, input.origenes, input)

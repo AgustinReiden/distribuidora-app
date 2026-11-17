@@ -7,7 +7,7 @@
 -- y los demás siguen.
 --
 --   T1   · 1559-b1  · un alta con p_total un centavo arriba de la suma guarda la suma.
---   S4   · 1561-b4  · con la sucursal inactiva el alta se rechaza con el motivo (D33).
+--   S4   · 1561-b4  · con la sucursal inactiva el alta y el bot se rechazan con el motivo (D33).
 --   C7   · 1559-b7  · el alta con un cliente inactivo de otra sucursal no dice su nombre.
 --   F5   · 1559-b5  · forma de pago 'bitcoin' se rechaza; 'cuenta_corriente' y 'transferencia' entran.
 --   E6   · 1559-b6  · la programada va de hoy a 60 días (D21): hoy+61 y ayer se rechazan en el
@@ -195,9 +195,17 @@ BEGIN
   BEGIN
     UPDATE sucursales SET activa = false WHERE id = 1;
     v_j := pg_temp.alta(v_pre, v_cli, jsonb_build_array(pg_temp.venta(v_a, 1)));
+    -- Y el bot (D33 no distingue canales; lo pidió la revisión de la tarjeta).
+    INSERT INTO bot_pedidos_pendientes (id, perfil_id, sucursal_id, cliente_id, items, total)
+    VALUES ('00000000-0000-0000-0000-0000000b4b05', v_pre, 1, v_cli,
+            jsonb_build_array(pg_temp.venta(v_a, 1)), 100);
+    v_t := public.crear_pedido_completo_bot(v_pre, '00000000-0000-0000-0000-0000000b4b05')::text;
     UPDATE sucursales SET activa = true WHERE id = 1;
     IF pg_temp.ok(v_j) OR v_j::text NOT LIKE '%dada de baja: no acepta pedidos%' THEN
       v_fallas := v_fallas || format('S4 · el alta en una sucursal inactiva: %s', v_j);
+    END IF;
+    IF pg_temp.ok(v_t::jsonb) OR v_t NOT LIKE '%"error": "La sucursal % está dada de baja: no acepta pedidos%' THEN
+      v_fallas := v_fallas || format('S4 · el bot en una sucursal inactiva: %s', v_t);
     END IF;
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('S4 · error: %s', SQLERRM);
   END;

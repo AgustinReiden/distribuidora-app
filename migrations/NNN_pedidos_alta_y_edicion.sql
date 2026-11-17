@@ -46,7 +46,8 @@
 --     centavo dejaba el total corrido de SUM(subtotal) y del desglose).
 --   · 1543-b2: el escape de la 480b para un producto desactivado en el cambio
 --     de cliente rige por tipo de línea y hasta la cantidad del pedido original.
--- crear_pedido_completo_bot: 1558-b2 igual (sólo eso, por la ficha).
+-- crear_pedido_completo_bot: 1558-b2 y 1561-b4 igual (la sucursal inactiva, pedida
+-- por la revisión de la tarjeta: D33 no distingue canales).
 -- crear_pedido_idempotente (1559-b4): el replay de una clave sólo le devuelve
 -- el pedido a quien lo cargó.
 --
@@ -369,7 +370,7 @@ END
 $parche_alta$;
 
 -- =========================================================================
--- 3 · crear_pedido_completo_bot: 1558-b2 (sólo eso)
+-- 3 · crear_pedido_completo_bot: 1558-b2 y 1561-b4
 -- =========================================================================
 DO $parche_bot$
 DECLARE
@@ -393,6 +394,24 @@ $r$      'El pedido tiene que tener al menos un producto que no sea regalo. El p
       'Un regalo tiene que ser de una promoción: sin promoción no descuenta stock. Hacé el pedido de nuevo. El pedido no se creó.');
   END IF;
 $r$, 'crear_pedido_completo_bot (regalo sin promoción)');
+
+  -- 1561-b4: la sucursal inactiva, después del rol, como en crear_pedido_completo.
+  v_def := pg_temp.parche(v_def,
+$a$    RETURN jsonb_build_object('success', false, 'error', 'No tiene permisos para crear pedidos');
+  END IF;
+$a$,
+$r$    RETURN jsonb_build_object('success', false, 'error', 'No tiene permisos para crear pedidos');
+  END IF;
+
+  -- 1561-b4 (#1561, decisión del dueño D33): una sucursal inactiva no acepta pedidos,
+  -- tampoco por el bot. Mismo mensaje que crear_pedido_completo, en la clave 'error' que
+  -- muestra la edge function (crear_pedido.ts).
+  IF NOT EXISTS (SELECT 1 FROM sucursales WHERE id = v_pendiente.sucursal_id AND COALESCE(activa, true)) THEN
+    RETURN jsonb_build_object('success', false, 'error', format(
+      'La sucursal %s está dada de baja: no acepta pedidos nuevos. El pedido no se creó.',
+      COALESCE((SELECT nombre FROM sucursales WHERE id = v_pendiente.sucursal_id), '#' || v_pendiente.sucursal_id)));
+  END IF;
+$r$, 'crear_pedido_completo_bot (sucursal inactiva)');
 
   EXECUTE v_def;
 END
@@ -962,7 +981,7 @@ BEGIN
   FOR r IN SELECT * FROM (VALUES
     ('public.crear_pedido_completo(bigint,numeric,uuid,jsonb,text,text,text,date,text,numeric,numeric,date,uuid)', '8b0db4fcd010599185a1aee539b58dac', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
-    ('public.crear_pedido_completo_bot(uuid,uuid)', 'b233ee9edc19fb342a9a54faec848442', true, '{postgres=X/postgres,service_role=X/postgres}'),
+    ('public.crear_pedido_completo_bot(uuid,uuid)', 'ec5685ac974e28b6ddd0a30d1808c6d4', true, '{postgres=X/postgres,service_role=X/postgres}'),
     ('public.crear_pedido_idempotente(bigint,numeric,uuid,jsonb,text,text,text,date,text,numeric,numeric,date,uuid,text)', '153a687adf8278c7a5c1ae9c3872e4ed', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)', '387beb9228d1751823bc2a6c710b9098', true,
