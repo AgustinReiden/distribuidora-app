@@ -36,6 +36,7 @@ import type { ProductoParaAlertas } from '../../utils/comboAlertas'
 import { useCategoriasQuery, useSubcategoriasQuery } from '../../hooks/queries/useCategoriasQuery'
 import { ordenDelGrupo, ordenParaGuardar, ordenableDe } from '../../utils/comboOrden'
 import { fechaLocalISO } from '../../utils/formatters'
+import { detalleDeUso, mensajeAlNoBorrarPromocion } from '../../utils/promocionesEliminacion'
 
 const VistaPromociones = lazyWithReload(() => import('../vistas/VistaPromociones'))
 const ModalPromocion = lazyWithReload(() => import('../modals/ModalPromocion'))
@@ -182,9 +183,9 @@ export default function PromocionesContainer(): React.ReactElement {
 
   // Borrar una promo con historial NO es inocente: a diferencia de clientes
   // (mig 200) las FKs de promociones no son RESTRICT -- pedido_items.promocion_id
-  // es SET NULL y promo_ajustes es CASCADE -- asi que el DELETE nunca falla
-  // solo, borra en silencio el historial de ajustes y desprende la promo de
-  // los pedidos ya facturados. Se cuenta primero y se ofrece desactivar.
+  // es SET NULL y promo_ajustes es CASCADE --: borraría el historial de ajustes
+  // y desprendería la promo de los pedidos. Se cuenta primero y se ofrece
+  // desactivar; el server rechaza lo mismo (1556-b1) si algo cambió entretanto.
   const handleEliminarPromocion = useCallback(async (id: string) => {
     const promo = promociones.find(p => p.id === id)
     const nombre = promo?.nombre || 'esta promocion'
@@ -198,14 +199,7 @@ export default function PromocionesContainer(): React.ReactElement {
     }
 
     if (referencias.tieneUso) {
-      const detalle: string[] = []
-      if (referencias.pedidos > 0) {
-        detalle.push(`${referencias.pedidos} ${referencias.pedidos === 1 ? 'pedido' : 'pedidos'} facturados`)
-      }
-      if (referencias.ajustes > 0) {
-        detalle.push(`${referencias.ajustes} ${referencias.ajustes === 1 ? 'ajuste' : 'ajustes'} de stock`)
-      }
-      const detalleTexto = detalle.join(' y ')
+      const detalleTexto = detalleDeUso(referencias)
 
       if (!promo?.activo) {
         notify.error(
@@ -242,7 +236,7 @@ export default function PromocionesContainer(): React.ReactElement {
           await eliminarPromocion.mutateAsync(id)
           notify.success(`Promoción "${nombre}" eliminada`)
         } catch (err) {
-          notify.error(err instanceof Error && err.message ? err.message : 'Error al eliminar promoción')
+          notify.error(mensajeAlNoBorrarPromocion(err))
         }
       },
     })

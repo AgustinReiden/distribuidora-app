@@ -33,6 +33,48 @@
 --
 -- Sin la migración falla en A2-A5, B1-B4, C2 y en todo D y E.
 
+-- Ola 2 de #1603 (B1, 1595-b5; decisión del dueño D23): una salvedad se registra sólo sobre un
+-- pedido en camino o entregado. El ensayo carga pedidos y les registra salvedades enseguida: este
+-- envoltorio pone el pedido en camino (asignado) para la salvedad y lo devuelve al estado que tenía,
+-- así el resto del caso no cambia.
+CREATE OR REPLACE FUNCTION pg_temp.ola2_estado_pedido(p_ped bigint, p_estado text)
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER AS $ola2$
+DECLARE
+  v_prev   text;
+  v_claims text := current_setting('request.jwt.claims', true);
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_ped;
+  IF v_prev IS DISTINCT FROM p_estado THEN
+    PERFORM set_config('request.jwt.claims', '', true);
+    UPDATE public.pedidos SET estado = p_estado WHERE id = p_ped;
+    PERFORM set_config('request.jwt.claims', COALESCE(v_claims, ''), true);
+  END IF;
+  RETURN v_prev;
+END
+$ola2$;
+
+CREATE OR REPLACE FUNCTION pg_temp.salvedad_en_camino(p_pedido_id bigint, p_pedido_item_id bigint,
+  p_cantidad_afectada integer, p_motivo character varying, p_descripcion text DEFAULT NULL,
+  p_foto_url text DEFAULT NULL, p_devolver_stock boolean DEFAULT true, p_client_request_id uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql AS $ola2$
+DECLARE
+  v_prev text;
+  v_res  jsonb;
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_pedido_id;
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, 'asignado');
+  END IF;
+  v_res := public.registrar_salvedad(p_pedido_id, p_pedido_item_id, p_cantidad_afectada, p_motivo,
+                                     p_descripcion, p_foto_url, p_devolver_stock, p_client_request_id);
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, v_prev);
+  END IF;
+  RETURN v_res;
+END
+$ola2$;
+
+
 SET client_min_messages = warning;
 
 CREATE OR REPLACE FUNCTION pg_temp.e5_t_reset()
@@ -366,7 +408,7 @@ BEGIN
         jsonb_build_object('producto_id', B, 'cantidad', 2, 'precio_unitario', (pr->>B::text)::numeric, 'precio_sin_combo_unitario', 120, 'combo_id', v_combo)));
       PERFORM pg_temp.e5_claims(v_adm, v_suc);
       v_it := (SELECT id FROM pedido_items WHERE pedido_id = ped AND producto_id = A);
-      j := public.registrar_salvedad(ped, v_it, 1, 'cliente_rechaza', 'ensayo 1556 combo', NULL, true, NULL);
+      j := pg_temp.salvedad_en_camino(ped, v_it, 1, 'cliente_rechaza', 'ensayo 1556 combo', NULL, true, NULL);
       PERFORM pg_temp.e5_t_reset();
       v_sal := (j->>'salvedad_id')::bigint;
       IF (SELECT cantidad_combos FROM pedido_combos WHERE pedido_id = ped) <> 1 THEN
@@ -487,7 +529,7 @@ BEGIN
     -- la salvedad sobre la parte R×1 la saca entera
     PERFORM pg_temp.e5_claims(v_adm, v_suc);
     v_it := (SELECT id FROM pedido_items WHERE pedido_id = ped AND es_bonificacion AND producto_id = R);
-    j := public.registrar_salvedad(ped, v_it, 1, 'cliente_rechaza', 'ensayo 1556', NULL, true, NULL);
+    j := pg_temp.salvedad_en_camino(ped, v_it, 1, 'cliente_rechaza', 'ensayo 1556', NULL, true, NULL);
     PERFORM pg_temp.e5_t_reset();
     IF NOT COALESCE((j->>'success')::boolean, false)
        OR (SELECT u.del_pedido FROM public._promo_usos(p, ped) u) <> 3 THEN
@@ -498,7 +540,7 @@ BEGIN
     ped2 := pg_temp.e5_alta_ok(c1, v_adm, v_suc, pg_temp.e5_items(V, 10, R, 4, p));
     PERFORM pg_temp.e5_claims(v_adm, v_suc);
     v_it := (SELECT id FROM pedido_items WHERE pedido_id = ped2 AND es_bonificacion);
-    j := public.registrar_salvedad(ped2, v_it, 1, 'cliente_rechaza', 'ensayo 1556', NULL, true, NULL);
+    j := pg_temp.salvedad_en_camino(ped2, v_it, 1, 'cliente_rechaza', 'ensayo 1556', NULL, true, NULL);
     PERFORM pg_temp.e5_t_reset();
     IF NOT COALESCE((j->>'success')::boolean, false)
        OR (SELECT regalo_corte FROM pedido_items WHERE id = v_it) <> 3 THEN

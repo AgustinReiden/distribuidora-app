@@ -355,20 +355,23 @@ export interface ReferenciasPromocionCount extends ReferenciasPromocion {
 /**
  * Cuenta lo que colgaría de un DELETE de promociones, para poder avisar ANTES
  * de borrarla. A diferencia de clientes (mig 200), acá las FKs no son
- * RESTRICT: el DELETE nunca falla solo, así que no hay un 23503 del que
- * enterarse después. Ver `tienePromocionUso` para el porqué.
+ * RESTRICT; el que rechaza es el trigger de la guarda del server, con la misma
+ * regla. Ver `tienePromocionUso` para el porqué.
  */
 export async function contarReferenciasDePromocion(promocionId: string): Promise<ReferenciasPromocionCount> {
-  const [pedidosRes, ajustesRes] = await Promise.all([
+  const [pedidosRes, ajustesRes, salvedadesRes] = await Promise.all([
     supabase.from('pedido_items').select('id', { count: 'exact', head: true }).eq('promocion_id', promocionId),
     supabase.from('promo_ajustes').select('id', { count: 'exact', head: true }).eq('promocion_id', promocionId),
+    supabase.from('salvedades_items').select('id', { count: 'exact', head: true }).eq('promocion_id', promocionId),
   ])
   if (pedidosRes.error) throw errorDeSupabase(pedidosRes.error, 'Sin conexión: no se pudo cargar los usos de la promoción. Revisá la señal e intentá de nuevo.')
   if (ajustesRes.error) throw errorDeSupabase(ajustesRes.error, 'Sin conexión: no se pudo cargar los usos de la promoción. Revisá la señal e intentá de nuevo.')
+  if (salvedadesRes.error) throw errorDeSupabase(salvedadesRes.error, 'Sin conexión: no se pudo cargar los usos de la promoción. Revisá la señal e intentá de nuevo.')
 
   const referencias: ReferenciasPromocion = {
     pedidos: pedidosRes.count ?? 0,
     ajustes: ajustesRes.count ?? 0,
+    salvedades: salvedadesRes.count ?? 0,
   }
 
   return { ...referencias, tieneUso: tienePromocionUso(referencias) }

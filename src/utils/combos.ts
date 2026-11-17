@@ -177,6 +177,15 @@ export function totalDelCombo(precio: number, k: number, lineas: readonly LineaT
  * Tira si el máximo común divisor de todas las cantidades no divide T: ahí no
  * hay precios unitarios que den el total ("2 por $999,99"). `precioRepartible`
  * evita armar esos combos y `guardar_combo` evita crearlos.
+ *
+ * Ninguna línea queda en $0 (#1592, 1592-b4): con una referencia de centavos y
+ * el combo muy rebajado, el redondeo le daba 0 (Fernet $10.000 + caramelo $0,01
+ * a $4.000: el caramelo salía gratis). Si el reparto deja alguna línea por
+ * debajo de un centavo, cada unidad toma un centavo y lo que sobra del total
+ * (T − Σ q) se reparte con la misma regla. Cuando ninguna línea queda en 0 el
+ * reparto es el de siempre, así que los pedidos ya armados se validan igual. Si
+ * ni así queda cada línea con un centavo (un combo de centavos, menos que una
+ * unidad de cada lugar), tira: no hay reparto.
  */
 export function prorratearTotal(total: number, lineas: readonly LineaProrrateo[]): Map<string, number> {
   const T = BigInt(centavos(total))
@@ -189,6 +198,35 @@ export function prorratearTotal(total: number, lineas: readonly LineaProrrateo[]
     throw new Error('El total del combo no se puede repartir exacto entre sus líneas')
   }
 
+  let u = repartoEnCentavos(T, ls, R, false) as Map<string, bigint>
+  if (ls.some(l => (u.get(l.id) as bigint) < 1n)) {
+    // 1592-b4: un centavo por unidad primero, y el resto con la misma regla,
+    // sin bajar ninguna línea de 0.
+    const piso = ls.reduce((s, l) => s + l.q, 0n)
+    if (T < piso) throw new Error('El total del combo no alcanza para un centavo por unidad')
+    const resto = repartoEnCentavos(T - piso, ls, R, true)
+    if (resto === null) throw new Error('El total del combo no se puede repartir sin dejar una línea en $0')
+    u = new Map(ls.map(l => [l.id, (resto.get(l.id) as bigint) + 1n]))
+  }
+
+  const out = new Map<string, number>()
+  for (const l of ls) out.set(l.id, Number(u.get(l.id) as bigint) / 100)
+  return out
+}
+
+/**
+ * El reparto de `prorratearTotal` en centavos. Con `sinNegativos` (el segundo
+ * paso de 1592-b4, sobre lo que queda después del centavo por unidad) ninguna
+ * línea baja de 0: el resto va a la más cara que lo divide sin quedar negativa,
+ * y en el reparto de #1259 cada una toma el precio más cercano a su proporción
+ * entre 0 y lo que todavía falta repartir. null si así no hay reparto.
+ */
+function repartoEnCentavos(
+  T: bigint,
+  ls: readonly { id: string; q: bigint; c: bigint }[],
+  R: bigint,
+  sinNegativos: boolean,
+): Map<string, bigint> | null {
   const u = new Map<string, bigint>()
   for (const l of ls) u.set(l.id, (2n * T * l.c + R) / (2n * R))
 
@@ -196,7 +234,7 @@ export function prorratearTotal(total: number, lineas: readonly LineaProrrateo[]
   const resto = T - suma
   if (resto !== 0n) {
     const divisibles = ls
-      .filter(l => resto % l.q === 0n)
+      .filter(l => resto % l.q === 0n && (!sinNegativos || (u.get(l.id) as bigint) + resto / l.q >= 0n))
       .sort((a, b) => (a.c === b.c ? compararIds(a.id, b.id) : a.c > b.c ? -1 : 1))
     if (divisibles.length > 0) {
       const l = divisibles[0]
@@ -208,23 +246,39 @@ export function prorratearTotal(total: number, lineas: readonly LineaProrrateo[]
         .filter(l => l !== ultima)
         .sort((a, b) => (a.c === b.c ? compararIds(a.id, b.id) : a.c > b.c ? -1 : 1))
       let falta = T
-      otras.forEach((l, i) => {
+      for (let i = 0; i < otras.length; i++) {
+        const l = otras[i]
         // El resto tiene que quedar divisible por el mcd de las que vienen después.
         const g = [...otras.slice(i + 1), ultima].reduce((m, x) => mcd(m, x.q), 0n)
+        const paso = g / mcd(l.q, g)
         let x = u.get(l.id) as bigint
         while ((falta - l.q * x) % g !== 0n) x++
-        const y = x - g / mcd(l.q, g)
-        const elegido = abs(y * R - T * l.c) < abs(x * R - T * l.c) ? y : x
+        const y = x - paso
+        let elegido = abs(y * R - T * l.c) < abs(x * R - T * l.c) ? y : x
+        if (sinNegativos) {
+          // Entre 0 y lo que falta: lo que pasa del tope baja al mayor posible.
+          const tope = falta / l.q
+          if (x > tope) elegido = x - ((x - tope + paso - 1n) / paso) * paso
+          else if (y < 0n) elegido = x
+          if (elegido < 0n) return null
+        }
         u.set(l.id, elegido)
         falta -= l.q * elegido
-      })
+      }
       u.set(ultima.id, falta / ultima.q)
     }
   }
+  return u
+}
 
-  const out = new Map<string, number>()
-  for (const l of ls) out.set(l.id, Number(u.get(l.id) as bigint) / 100)
-  return out
+/** Si `prorratearTotal` tiene un reparto para este total y estas líneas. */
+export function sePuedeRepartir(total: number, lineas: readonly LineaProrrateo[]): boolean {
+  try {
+    prorratearTotal(total, lineas)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** Atajo de `prorratearTotal` para un combo excluyente: k × precio. */
@@ -397,7 +451,11 @@ export function armarCombos(
       }
       // El total del combo tiene que quedar positivo (un acumulable sobre una
       // escala muy baja podría no dejar nada que repartir).
-      if (totalDelCombo(combo.precio, uso2.k, lineasDe(uso2, excl2)) <= 0) break
+      const lineas2 = lineasDe(uso2, excl2)
+      const total2 = totalDelCombo(combo.precio, uso2.k, lineas2)
+      if (total2 <= 0) break
+      // Ni un combo cuyo total no alcanza para un centavo en cada línea (1592-b4).
+      if (!sePuedeRepartir(total2, lineas2)) break
 
       uso = uso2
       disp = disp2

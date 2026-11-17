@@ -12,7 +12,8 @@
 --        y el sabor no se mueve (el regalo no mueve stock).
 --   V2 · La misma venta por el bot.
 --   E1 · El admin cambia notas y fecha de un pedido pendiente: se guardan, no vuelve a pendiente
---        y updated_at no se mueve.
+--        y updated_at se mueve (cambió de regla en la ola 2 del plan #1603, B4, 1595-b6: todo
+--        UPDATE que cambia algo mueve la versión; antes no se movía) y devuelve la de antes y la nueva.
 --   E2 · El admin le cambia la fecha programada a un pedido asignado con su parada en una ruta en
 --        curso: vuelve a pendiente, sin chofer y fuera de la ruta, con la fecha y las notas nuevas,
 --        y devuelve el updated_at de antes y el nuevo.
@@ -24,7 +25,8 @@
 --        resultado dice cuál de los dos corrió.
 --   E5 · Un usuario que no puede editar el pedido (el chofer, en uno sin chofer): P0002. El PATCH
 --        de antes no fallaba: no tocaba ninguna fila.
---   P1 · actualizar_fechas_y_notas_pedido es INVOKER, con EXECUTE para authenticated y no para anon.
+--   P1 · actualizar_fechas_y_notas_pedido es INVOKER, con EXECUTE para authenticated y no para anon
+--        (desde la ola 2 del plan #1603, B4, con p_updated_at_esperado: la firma de seis).
 --   L1 · Los cuerpos: crear_pedido_completo y el bot bloquean productos con contenedores, y las
 --        promos, antes del bucle de productos.
 --
@@ -149,6 +151,9 @@ DECLARE
   v_e4     text := '';
   v_fallas text[] := '{}';
   F CONSTANT date := DATE '2099-04-11';
+  -- La programada que se edita va dentro del rango (hoy a 60 días, 1559-b6 de la ola 2 del
+  -- plan #1603): con F + 1 (2099) la edición se rechaza. Cambió de regla.
+  P CONSTANT date := public._tablero_hoy() + 5;
 BEGIN
   SELECT s.id, adm.usuario_id, pv.usuario_id, tr.usuario_id
     INTO v_suc, v_adm, v_prev, v_tr
@@ -233,7 +238,8 @@ BEGIN
     v_ver := pg_temp.t_version_vieja(v_ped);
     v_j := pg_temp.t_editar(v_adm, v_suc, v_ped, 'ensayo E1', F - 1, NULL);
     IF v_j ? 'error' OR (v_j->>'vuelto_a_pendiente')::boolean
-       OR (v_j->>'updated_at')::timestamptz IS DISTINCT FROM v_ver
+       OR (v_j->>'updated_at')::timestamptz IS NOT DISTINCT FROM v_ver
+       OR (v_j->>'updated_at')::timestamptz IS DISTINCT FROM (SELECT updated_at FROM pedidos WHERE id = v_ped)
        OR (v_j->>'updated_at_anterior')::timestamptz IS DISTINCT FROM v_ver
        OR pg_temp.t_estado(v_ped, NULL) IS DISTINCT FROM format('pendiente|chofer=f|fecha=%s|prog=%s|notas=ensayo E1|parada=f',
                                                                F - 1, (SELECT fecha_entrega_programada FROM pedidos WHERE id = v_ped)) THEN
@@ -253,12 +259,12 @@ BEGIN
       RAISE EXCEPTION 'E2 el fixture no quedó asignado y en la ruta: %', pg_temp.t_estado(v_ped, v_r);
     END IF;
     v_ver := pg_temp.t_version_vieja(v_ped);
-    v_j := pg_temp.t_editar(v_adm, v_suc, v_ped, 'ensayo E2', NULL, F + 1);
+    v_j := pg_temp.t_editar(v_adm, v_suc, v_ped, 'ensayo E2', NULL, P);
     IF v_j ? 'error' OR NOT (v_j->>'vuelto_a_pendiente')::boolean OR v_j->>'paradas_eliminadas' IS DISTINCT FROM '1'
        OR (v_j->>'updated_at_anterior')::timestamptz IS DISTINCT FROM v_ver
        OR (v_j->>'updated_at')::timestamptz IS NOT DISTINCT FROM v_ver
        OR (v_j->>'updated_at')::timestamptz IS DISTINCT FROM (SELECT updated_at FROM pedidos WHERE id = v_ped)
-       OR pg_temp.t_estado(v_ped, v_r) NOT LIKE format('pendiente|chofer=f|%%|prog=%s|notas=ensayo E2|parada=f', F + 1) THEN
+       OR pg_temp.t_estado(v_ped, v_r) NOT LIKE format('pendiente|chofer=f|%%|prog=%s|notas=ensayo E2|parada=f', P) THEN
       v_fallas := v_fallas || format('E2 dio %s y dejó %s', v_j, pg_temp.t_estado(v_ped, v_r));
     END IF;
     RAISE EXCEPTION 'volver' USING ERRCODE = 'ZZ398';
@@ -288,7 +294,7 @@ BEGIN
     v_ped := pg_temp.t_venta(v_prev, v_suc, v_cli, v_items);
     v_r := pg_temp.t_ruta(v_adm, v_suc, v_tr, F, v_ped);
     v_antes := pg_temp.t_estado(v_ped, v_r);
-    v_j := pg_temp.t_editar(v_prev, v_suc, v_ped, 'ensayo E4', F - 1, F + 1);
+    v_j := pg_temp.t_editar(v_prev, v_suc, v_ped, 'ensayo E4', F - 1, P);
     IF public._preventista_en_ventana((SELECT created_at FROM pedidos WHERE id = v_ped)) THEN
       v_e4 := 'en ventana: la vuelta pasó y el UPDATE se rechazó';
       v_txt := '%modificar estas columnas%fecha%';
@@ -312,7 +318,7 @@ BEGIN
   BEGIN
     v_ped := pg_temp.t_venta(v_adm, v_suc, v_cli, v_items);
     v_antes := pg_temp.t_estado(v_ped, NULL);
-    v_j := pg_temp.t_editar(v_tr, v_suc, v_ped, 'ensayo E5', NULL, F + 1);
+    v_j := pg_temp.t_editar(v_tr, v_suc, v_ped, 'ensayo E5', NULL, P);
     IF v_j->>'error' IS DISTINCT FROM 'P0002' OR pg_temp.t_estado(v_ped, NULL) IS DISTINCT FROM v_antes THEN
       v_fallas := v_fallas || format('E5 dio %s y dejó %s', v_j, pg_temp.t_estado(v_ped, NULL));
     END IF;
@@ -323,11 +329,11 @@ BEGIN
   END;
 
   -- P1 · los permisos de la función nueva
-  IF to_regprocedure('public.actualizar_fechas_y_notas_pedido(bigint,text,date,timestamp with time zone,date)') IS NULL THEN
+  IF to_regprocedure('public.actualizar_fechas_y_notas_pedido(bigint,text,date,timestamp with time zone,date,timestamp with time zone)') IS NULL THEN
     v_fallas := v_fallas || 'P1 actualizar_fechas_y_notas_pedido no existe'::text;
-  ELSIF (SELECT prosecdef FROM pg_proc WHERE oid = 'public.actualizar_fechas_y_notas_pedido(bigint,text,date,timestamp with time zone,date)'::regprocedure)
-        OR NOT has_function_privilege('authenticated', 'public.actualizar_fechas_y_notas_pedido(bigint,text,date,timestamp with time zone,date)', 'EXECUTE')
-        OR has_function_privilege('anon', 'public.actualizar_fechas_y_notas_pedido(bigint,text,date,timestamp with time zone,date)', 'EXECUTE') THEN
+  ELSIF (SELECT prosecdef FROM pg_proc WHERE oid = 'public.actualizar_fechas_y_notas_pedido(bigint,text,date,timestamp with time zone,date,timestamp with time zone)'::regprocedure)
+        OR NOT has_function_privilege('authenticated', 'public.actualizar_fechas_y_notas_pedido(bigint,text,date,timestamp with time zone,date,timestamp with time zone)', 'EXECUTE')
+        OR has_function_privilege('anon', 'public.actualizar_fechas_y_notas_pedido(bigint,text,date,timestamp with time zone,date,timestamp with time zone)', 'EXECUTE') THEN
     v_fallas := v_fallas || 'P1 actualizar_fechas_y_notas_pedido: tiene que ser INVOKER, con EXECUTE para authenticated y no para anon'::text;
   END IF;
 
