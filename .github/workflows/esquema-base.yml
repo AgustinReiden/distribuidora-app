@@ -13,7 +13,8 @@ name: Esquema base
 #
 # Qué guarda: `pg_dump --schema-only` del schema public (tablas, funciones, policies, grants:
 # lo mismo que ya está en migrations/, que es público) y la lista del ledger de migraciones.
-# NO guarda datos. El cache lo ve cualquier run del repo, incluidos los PRs de forks.
+# NO guarda datos, y antes de guardar se escanea (scripts/ci/escanear-volcado.sh). El cache lo ve
+# cualquier run del repo, incluidos los PRs de forks.
 
 on:
   schedule:
@@ -33,6 +34,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Verificar el secret
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
@@ -72,6 +76,17 @@ jobs:
             echo "::error::El esquema pesa $TAM bytes: el volcado falló o quedó parcial."
             exit 1
           fi
+
+      # La foto es pública (la restaura cualquier PR, también los de forks, y puede imprimirla en un
+      # log): si el volcado trae algo que no tendría que estar en un lugar público, no se guarda.
+      # No imprime lo que encontró. Hoy el esquema de prod no trae nada de esto (medido 17/11).
+      - name: Escanear el volcado antes de guardarlo
+        run: bash scripts/ci/escanear-volcado.sh esquema-base/esquema.sql
+
+      # Cuándo se tomó: sql-local.yml se niega a usar una foto de más de 48 horas (si este
+      # workflow falla todos los días, el cache sigue devolviendo la última que hubo y nadie se enteraba).
+      - name: Marcar la fecha de la foto
+        run: date -u +%s > esquema-base/generado.txt
 
       - name: Guardar la foto en el cache
         uses: actions/cache/save@v4

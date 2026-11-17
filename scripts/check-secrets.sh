@@ -36,6 +36,14 @@ PATTERNS=(
   # Private keys
   '-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'
 
+  # Claves con prefijo propio (1600-b2, H8 de la lente de #1645): la secret key nueva de Supabase,
+  # el token de un bot de Telegram (la app tiene bot), los de GitHub y la secret key live de Stripe.
+  'sb_secret_[A-Za-z0-9_-]{20,}'
+  '[0-9]{8,10}:[A-Za-z0-9_-]{35}'
+  'ghp_[A-Za-z0-9]{36}'
+  'github_pat_[A-Za-z0-9_]{22,}'
+  'sk_live_[A-Za-z0-9]{20,}'
+
   # Supabase (solo si están hardcodeadas, no en .env)
   'eyJ[a-zA-Z0-9_-]{100,}'
 

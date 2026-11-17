@@ -29,10 +29,32 @@ export function destino(env = process.env) {
   return null;
 }
 
-/** ¿Apunta a prod? Los gates que escriben (aunque sea con ROLLBACK) se niegan. */
-export function apuntaAProd(d) {
-  const ref = 'hmuchlzmuqqxcldbzkgc';
-  return d?.tipo === 'url' && d.url.includes(ref);
+/**
+ * ¿Es una base LOCAL? Lista blanca: el contenedor de docker, o una URL cuyo host es
+ * localhost / 127.0.0.1 / ::1. Todo lo demás —una URL sin host (que toma PGHOST del entorno),
+ * `service=prod`, una IP, el ref de prod— no lo es. Los gates que escriben (aunque sea con
+ * ROLLBACK) y los ensayos se niegan ante algo que no sea local.
+ */
+export function esLocal(d) {
+  if (!d) return false;
+  if (d.tipo === 'docker') return true;
+  try {
+    const host = new URL(d.url).hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+  } catch {
+    return false;
+  }
+}
+
+/** El admin que siembra scripts/concurrencia/docker-local.mjs (`semilla`): una base local armada a propósito. */
+export const ADMIN_SEMILLA = '00000000-0000-0000-0000-0000000004e7';
+
+/** Falla (Error) si la base no tiene la semilla: antes de escribir en ella hay que saber qué base es. */
+export function verificarSemilla(d) {
+  const n = psql(`SELECT count(*) FROM auth.users WHERE id = '${ADMIN_SEMILLA}'`, { destino: d }).trim();
+  if (n !== '1') {
+    throw new Error(`la base no tiene el usuario de la semilla (${ADMIN_SEMILLA}): no es una base armada con docker-local.mjs semilla, y no se escribe en ella`);
+  }
 }
 
 const ARGS_PSQL = ['-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1'];

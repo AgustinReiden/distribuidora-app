@@ -26,7 +26,9 @@
  * NUNCA contra prod: los ensayos escriben (y se deshacen), y algunos no se deshacen.
  */
 import { readdirSync, readFileSync } from 'node:fs';
-import { apuntaAProd, destino, psqlCompleto } from '../lib/pg.mjs';
+import '../lib/salir-con-2.mjs';
+import { veredicto } from '../lib/ensayos.mjs';
+import { destino, esLocal, psqlCompleto, verificarSemilla } from '../lib/pg.mjs';
 
 const args = process.argv.slice(2);
 const solo = args.includes('--solo') ? args[args.indexOf('--solo') + 1] : null;
@@ -37,10 +39,12 @@ if (!d) {
   console.error('Falta GATE_DB_CONTENEDOR o GATE_DB_URL (una base descartable con la semilla): no puedo correr los ensayos.');
   process.exit(2);
 }
-if (apuntaAProd(d)) {
-  console.error('Esta base es la de prod: los ensayos escriben, y se niega.');
+if (!esLocal(d)) {
+  console.error('Esta base no es local (contenedor de docker, o una URL a localhost): los ensayos escriben, y se niega.');
   process.exit(2);
 }
+
+verificarSemilla(d);
 
 const carpeta = new URL('../', import.meta.url);
 const lista = JSON.parse(readFileSync(new URL('../ensayos-sql-excepciones.json', import.meta.url), 'utf8'));
@@ -62,24 +66,21 @@ for (const f of archivos) {
   const sql = readFileSync(new URL(f, carpeta), 'utf8').replaceAll('\r\n', '\n');
   const t = Date.now();
   const r = psqlCompleto(sql, { destino: d });
-  const salida = `${r.stdout}\n${r.stderr}`;
-  const ok = /ENSAYO OK/i.test(salida) && !/ENSAYO FALL/i.test(salida);
-  const motivo = ok
-    ? ''
-    : (salida.split('\n').find((l) => /ENSAYO FALL|ERROR/.test(l) && !/ENSAYO_ROLLBACK/.test(l)) ?? 'no dijo ENSAYO OK')
-        .replace(/^psql:[^:]*:\d+: /, '')
-        .trim()
-        .slice(0, 160);
+  const { ok, firma: motivo } = veredicto(`${r.stdout}\n${r.stderr}`);
   resultados.push({ f, ok, motivo, seg: (Date.now() - t) / 1000 });
   console.log(`${ok ? 'OK   ' : 'FALLA'} ${f}${ok ? '' : `  ← ${motivo}`}  (${((Date.now() - t) / 1000).toFixed(1)} s)`);
 }
 
 const fallan = resultados.filter((r) => !r.ok);
 if (escribir) {
-  const j = Object.fromEntries(fallan.map((r) => [r.f, r.motivo]));
+  const j = Object.fromEntries(
+    fallan.map((r) => [r.f, { firma: r.motivo, motivo: 'falla al nacer el gate, sobre la base de CI' }]),
+  );
   console.log(`\n${JSON.stringify(j, null, 2)}`);
 }
 const sinPermiso = fallan.filter((r) => !Object.hasOwn(excepciones, r.f));
+// Exceptuado que falla, pero por OTRA cosa que cuando se lo exceptuó (H4 de la lente de #1645).
+const cambiaron = fallan.filter((r) => Object.hasOwn(excepciones, r.f) && excepciones[r.f].firma !== r.motivo);
 const sobrantes = resultados.filter((r) => r.ok && Object.hasOwn(excepciones, r.f));
 const faltan = Object.keys(excepciones).filter((f) => !archivos.includes(f) && !solo);
 
@@ -96,13 +97,20 @@ if (faltan.length) {
   console.log('\nℹ️  Exceptuados que ya no existen: sacalos de scripts/ensayos-sql-excepciones.json.');
   for (const f of faltan) console.log(`  ${f}`);
 }
-if (sinPermiso.length && !escribir) {
-  console.error('\n❌ Ensayos que no dieron ENSAYO OK sobre la base local:');
-  for (const r of sinPermiso) console.error(`  ${r.f}  ← ${r.motivo}`);
-  console.error(
-    '\n   Un ensayo que falla es una regla que se rompió (o un ensayo viejo que ya no afirma la regla\n' +
-      '   vigente: se corrige, no se exceptúa). Sólo se exceptúa uno que necesita datos de prod.',
-  );
+if ((sinPermiso.length || cambiaron.length) && !escribir) {
+  if (sinPermiso.length) {
+    console.error('\n❌ Ensayos que no dieron ENSAYO OK sobre la base local:');
+    for (const r of sinPermiso) console.error(`  ${r.f}  ← ${r.motivo}`);
+    console.error(
+      '\n   Un ensayo que falla es una regla que se rompió (o un ensayo viejo que ya no afirma la regla\n' +
+        '   vigente: se corrige, no se exceptúa). Sólo se exceptúa uno que necesita datos de prod.',
+    );
+  }
+  if (cambiaron.length) {
+    console.error('\n❌ Ensayos exceptuados que ahora fallan por OTRA cosa (puede ser una regla rota nueva, escondida detrás de la excepción vieja):');
+    for (const r of cambiaron) console.error(`  ${r.f}\n      era:   ${excepciones[r.f].firma}\n      ahora: ${r.motivo}`);
+    console.error('\n   Si el cambio es esperado (otra cosa que falta en la semilla), actualizá la firma en scripts/ensayos-sql-excepciones.json.');
+  }
   process.exit(1);
 }
 console.log('\n✅ Todos los ensayos dan ENSAYO OK (salvo los exceptuados).');

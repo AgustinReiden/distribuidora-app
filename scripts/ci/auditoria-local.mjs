@@ -9,15 +9,15 @@
  *
  * Requiere GATE_DB_CONTENEDOR o GATE_DB_URL (scripts/lib/pg.mjs). Nunca prod.
  */
-import { apuntaAProd, destino, consultaJson } from '../lib/pg.mjs';
+import { destino, consultaJson, esLocal } from '../lib/pg.mjs';
 
 const d = destino({ GATE_DB_CONTENEDOR: process.env.GATE_DB_CONTENEDOR, GATE_DB_URL: process.env.GATE_DB_URL });
 if (!d) {
   console.error('Falta GATE_DB_CONTENEDOR o GATE_DB_URL: no hay base local a la que preguntar.');
   process.exit(2);
 }
-if (apuntaAProd(d)) {
-  console.error('Esta base es la de prod: este script es para la base local de un PR.');
+if (!esLocal(d)) {
+  console.error('Esta base no es local (contenedor de docker, o una URL a localhost): este script es para la base de un PR.');
   process.exit(2);
 }
 

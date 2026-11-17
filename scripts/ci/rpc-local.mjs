@@ -23,16 +23,17 @@
  * El puerto por defecto es 54499.
  */
 import { createServer } from 'node:http';
-import { destino, psql } from '../lib/pg.mjs';
+import { destino, esLocal, psql } from '../lib/pg.mjs';
 
 const PUERTO = Number(process.argv[2] ?? process.env.RPC_LOCAL_PUERTO ?? 54499);
-const d = destino();
+// A propósito no se mira SUPABASE_DB_URL: es la de prod.
+const d = destino({ GATE_DB_CONTENEDOR: process.env.GATE_DB_CONTENEDOR, GATE_DB_URL: process.env.GATE_DB_URL });
 if (!d) {
   console.error('Falta GATE_DB_CONTENEDOR o GATE_DB_URL: no hay base a la que llamar.');
   process.exit(2);
 }
-if (d.tipo === 'url' && d.url.includes('hmuchlzmuqqxcldbzkgc')) {
-  console.error('Esta URL es la de prod: el servidor local se niega.');
+if (!esLocal(d)) {
+  console.error('Esta base no es local (contenedor de docker, o una URL a localhost): el servidor local se niega.');
   process.exit(2);
 }
 

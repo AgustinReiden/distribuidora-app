@@ -18,7 +18,9 @@ import {
 // @ts-expect-error -- módulo .mjs de scripts/, sin tipos
 import { mensajesQueFiltran } from '../../scripts/lib/mensajes.mjs'
 // @ts-expect-error -- módulo .mjs de scripts/, sin tipos
-import { apuntaAProd, destino } from '../../scripts/lib/pg.mjs'
+import { destino, esLocal } from '../../scripts/lib/pg.mjs'
+// @ts-expect-error -- módulo .mjs de scripts/, sin tipos
+import { normalizarFirma, veredicto } from '../../scripts/lib/ensayos.mjs'
 
 /**
  * Lo que deciden los gates que leen el catálogo directo (#1564, #1595, #1601): Realtime,
@@ -205,13 +207,19 @@ describe('las listas de excepciones sólo se achican', () => {
     for (const firma of Object.keys(impl)) expect(alNacer).toContain(firma)
   })
 
-  it('ensayos-sql-excepciones.json "ensayos" sólo se achica: ninguno nuevo respecto de los 71 del hallazgo al nacer el gate', () => {
-    const { ensayos } = leerJson('ensayos-sql-excepciones.json') as { ensayos: Record<string, string> }
+  it('ensayos-sql-excepciones.json "ensayos" sólo se achica: ninguno nuevo respecto de los 102 del hallazgo al nacer el gate', () => {
+    const { ensayos } = leerJson('ensayos-sql-excepciones.json') as { ensayos: Record<string, { firma: string; motivo: string }> }
     const alNacer = [
+      'test-alicuota-linea-recreada-1274.sql',
       'test-alta-en-zona-propia-1553.sql',
       'test-alta-reparto-rol-1112.sql',
       'test-anular-compra-nc-1095.sql',
+      'test-anular-salvedad-compra-editada.sql',
+      'test-anular-salvedad-lote-bolsa.sql',
+      'test-anular-salvedad-pedido-cancelado.sql',
+      'test-asignacion-zonas-lecturas-1314-1316.sql',
       'test-aviso-admin-1189.sql',
+      'test-cancelar-sin-huella-1114.sql',
       'test-cargo-1.sql',
       'test-cargo-4.sql',
       'test-cargo-5.sql',
@@ -219,28 +227,38 @@ describe('las listas de excepciones sólo se achican', () => {
       'test-checks-1043.sql',
       'test-cobros-por-rpc-1246-1249.sql',
       'test-columnas-protegidas-1151-1155-1156.sql',
+      'test-combo-salvedad-1192.sql',
       'test-comisiones-1320-1321.sql',
       'test-compra-costos-decimales-y-version-1557.sql',
       'test-compra-nc-rest-1113.sql',
       'test-contadores-recorrido-1397.sql',
+      'test-contenedor-y-canje-a-su-lote-1558.sql',
       'test-control-rendicion-sucursal-nula.sql',
+      'test-credito-suelto-1512.sql',
+      'test-cupo-promo-y-combo-1300-1301-1283.sql',
       'test-desactivado-sin-rol-1490.sql',
+      'test-devolucion-bolsa-1085.sql',
       'test-dia-argentino-1277.sql',
       'test-duplicado-operable-y-cartera-1186-1187.sql',
+      'test-edicion-creditos-1446.sql',
+      'test-edicion-regalos-salvedades-1323-1327.sql',
+      'test-fecha-pedido-piso-1514.sql',
       'test-gastos-1.sql',
       'test-gastos-2.sql',
       'test-gastos-3.sql',
       'test-gastos-4.sql',
       'test-gastos-5.sql',
       'test-gastos-6.sql',
+      'test-gastos-7.sql',
       'test-gastos-personal-1521.sql',
       'test-gastos-rendicion-e-iva-1562.sql',
       'test-gates-1330.sql',
       'test-geolocalizacion-1602.sql',
       'test-grants-rest-1134-1135.sql',
       'test-horario-preventista-1178.sql',
-      'test-idempotencia-cobro-1440.sql',
+      'test-limpieza-1336-1368-1383.sql',
       'test-limpieza-antes-del-fork-1475.sql',
+      'test-lotes-trazabilidad-1054-1073.sql',
       'test-mermas-paginadas-1146.sql',
       'test-minimo-cliente-salvedad-1559.sql',
       'test-movimientos-sin-sucursal-1488.sql',
@@ -255,17 +273,23 @@ describe('las listas de excepciones sólo se achican', () => {
       'test-permisos-rol-personal-pagos-1519.sql',
       'test-permisos-sucursal-1374-1334.sql',
       'test-permisos-sucursal-1438.sql',
+      'test-permisos-tablero.sql',
       'test-permisos-vb-costos-proveedores.sql',
       'test-politica-precios-1157-1159.sql',
       'test-precio-servidor-1138-1139.sql',
+      'test-promo-contenedores-1501.sql',
       'test-promo-fecha-replay-bot-1152-1153-1154.sql',
       'test-promo-vigente-excluyente-1136-1137.sql',
+      'test-promos-regalos-1592.sql',
+      'test-promos-y-combos-1556.sql',
       'test-quien-marco-la-entrega-1555.sql',
       'test-rama-admin-sucursal-1244.sql',
       'test-regalo-alta-1123.sql',
+      'test-regalo-tramo-anterior-1565.sql',
       'test-regalos-vendido-y-foto-1363-1376.sql',
       'test-rendicion-y-entregas-1547-1548.sql',
       'test-reportes-cierran-1297.sql',
+      'test-reportes-ola2-1603.sql',
       'test-restos-nucleo-1520.sql',
       'test-resumen-cuenta-1044.sql',
       'test-rol-preventista-extra-1179.sql',
@@ -273,11 +297,20 @@ describe('las listas de excepciones sólo se achican', () => {
       'test-rutas-1313.sql',
       'test-saldo-bajos-1492.sql',
       'test-salvedad-anulada-1504.sql',
+      'test-salvedad-anulada-foto-1595.sql',
+      'test-salvedad-anular-1140-1142.sql',
+      'test-salvedad-anular-1161-1164.sql',
       'test-salvedad-huella-1126-1127.sql',
+      'test-salvedad-replay-lock-1508.sql',
+      'test-stock-cambio-cliente-y-canje-1594.sql',
       'test-stock-integridad-1254-1255-1256.sql',
       'test-stock-planilla-y-locks-1295-1296.sql',
+      'test-stock-promos-orden-1460.sql',
       'test-triggers-y-deposito-1245.sql',
+      'test-usuarios-retencion-ola2-1603.sql',
+      'test-venta-edicion-1398.sql',
       'test-venta-j-1098.sql',
+      'test-venta-minimo-iva-1470.sql',
       'test-volver-a-pendiente-1313.sql',
     ]
     for (const archivo of Object.keys(ensayos)) expect(alNacer).toContain(archivo)
@@ -285,7 +318,7 @@ describe('las listas de excepciones sólo se achican', () => {
 
   it('ensayos-sql-excepciones.json: cada excepción es un ensayo que existe y dice por qué', () => {
     const { ensayos, omitir } = leerJson('ensayos-sql-excepciones.json') as {
-      ensayos: Record<string, string>
+      ensayos: Record<string, { firma: string; motivo: string }>
       omitir: Record<string, string>
     }
     // Los dos de concurrencia piden dos sesiones y confirman datos: no se corren nunca en CI.
@@ -293,7 +326,9 @@ describe('las listas de excepciones sólo se achican', () => {
       'test-concurrencia-monto-pagado-1247.sql',
       'test-concurrencia-pago-fifo.sql',
     ])
-    for (const [archivo, motivo] of [...Object.entries(ensayos), ...Object.entries(omitir)]) {
+    for (const [archivo, v] of [...Object.entries(ensayos), ...Object.entries(omitir)]) {
+      const motivo = typeof v === 'string' ? v : v.motivo
+      if (typeof v !== 'string') expect(v.firma.length, `firma de ${archivo}`).toBeGreaterThan(5)
       expect(archivo).toMatch(/^test-.*\.sql$/)
       expect(fs.existsSync(path.join(raiz, archivo))).toBe(true)
       expect(motivo.length).toBeGreaterThan(10)
@@ -317,7 +352,7 @@ describe('el SQL de los complementos', () => {
 
 describe('destino de la base de los gates', () => {
   // Se arma por partes: una URL con usuario y clave escrita entera la frena check-secrets.sh.
-  const urlCon = (usuario: string) => ['postgresql:', '', `${usuario}:clave@host/postgres`].join('/')
+  const urlCon = (usuario: string, host = 'host') => ['postgresql:', '', `${usuario}:clave@${host}/postgres`].join('/')
 
   it('GATE_DB_CONTENEDOR manda sobre las URL, y GATE_DB_URL sobre SUPABASE_DB_URL', () => {
     expect(destino({ GATE_DB_CONTENEDOR: 'c1', GATE_DB_URL: 'postgresql://x' }).tipo).toBe('docker')
@@ -326,9 +361,57 @@ describe('destino de la base de los gates', () => {
     expect(destino({})).toBeNull()
   })
 
-  it('reconoce la URL de prod para que los gates que escriben se nieguen', () => {
-    expect(apuntaAProd(destino({ GATE_DB_URL: urlCon('postgres.hmuchlzmuqqxcldbzkgc') }))).toBe(true)
-    expect(apuntaAProd(destino({ GATE_DB_URL: urlCon('postgres') }))).toBe(false)
-    expect(apuntaAProd(destino({ GATE_DB_CONTENEDOR: 'ci-sql' }))).toBe(false)
+  it('lista blanca: sólo el contenedor local o una URL a localhost / 127.0.0.1 / ::1 es local (H6 de la lente de #1645)', () => {
+    expect(esLocal(destino({ GATE_DB_CONTENEDOR: 'ci-sql' }))).toBe(true)
+    expect(esLocal(destino({ GATE_DB_URL: urlCon('postgres', 'localhost:54430') }))).toBe(true)
+    expect(esLocal(destino({ GATE_DB_URL: urlCon('postgres', '127.0.0.1:54430') }))).toBe(true)
+    expect(esLocal(destino({ GATE_DB_URL: urlCon('postgres', '[::1]:54430') }))).toBe(true)
+    // La de prod, una IP de afuera, una URL sin host (toma PGHOST del entorno) y service=… no lo son,
+    // aunque la URL no nombre el ref de prod: antes la lista negra los dejaba pasar.
+    expect(esLocal(destino({ GATE_DB_URL: urlCon('postgres.hmuchlzmuqqxcldbzkgc', 'aws-1.pooler.example:5432') }))).toBe(false)
+    expect(esLocal(destino({ GATE_DB_URL: urlCon('postgres', '10.0.0.5:5432') }))).toBe(false)
+    expect(esLocal(destino({ GATE_DB_URL: ['postgresql:', '', '', 'postgres'].join('/') }))).toBe(false)
+    expect(esLocal(destino({ GATE_DB_URL: 'service=prod' }))).toBe(false)
+    expect(esLocal(destino({ SUPABASE_DB_URL: urlCon('postgres', 'localhost:5432') }))).toBe(true)
+    expect(esLocal(null)).toBe(false)
+  })
+})
+
+describe('veredicto de un ensayo (H4 de la lente de #1645)', () => {
+  it('«ENSAYO OK» en un NOTICE o en el mensaje de su excepción final es OK', () => {
+    expect(veredicto('NOTICE:  ENSAYO OK\nERROR:  ENSAYO_ROLLBACK').ok).toBe(true)
+    expect(veredicto('ERROR:  ENSAYO OK · R1 R2 R3 (todo revertido)').ok).toBe(true)
+  })
+
+  it('«ensayo #1234 OK» también lo es: antes el criterio buscaba el texto contiguo «ENSAYO OK» y no lo veía', () => {
+    expect(veredicto('NOTICE:  ensayo #1074 OK (todo revertido)').ok).toBe(true)
+  })
+
+  it('un «ENSAYO FALLÓ» (con o sin tilde) no es OK aunque otra línea diga OK', () => {
+    expect(veredicto('NOTICE:  ensayo OK parte 1\nERROR:  ENSAYO FALLÓ (2 fallas):\n  C1 mal').ok).toBe(false)
+    expect(veredicto('ERROR:  ENSAYO FALLO · sin fixtures').ok).toBe(false)
+  })
+
+  it('«ENSAYO OK · 0 fallas» es OK: «fallas» en una línea de OK no es un veredicto', () => {
+    expect(veredicto('ERROR:  ENSAYO OK · 0 fallas · notas: C3 sin obtener_resumen_compras').ok).toBe(true)
+  })
+
+  it('un ensayo que no dice nada no es OK', () => {
+    expect(veredicto('')).toEqual({ ok: false, firma: 'no dijo ENSAYO OK' })
+  })
+
+  it('la firma de la falla trae la línea del veredicto y las dos siguientes, sin uuids ni números', () => {
+    const v = veredicto(
+      'ERROR:  ENSAYO FALLÓ (15):\n  C1 hay 84 checks, no 79\n  C2 RUTA-A no ve la parada 4521\n  C3 otra\nCONTEXT:  PL/pgSQL',
+    )
+    expect(v.ok).toBe(false)
+    expect(v.firma).toBe('ENSAYO FALLÓ (N): | CN hay N checks, no N | CN RUTA-A no ve la parada N')
+    expect(normalizarFirma('a 0238dba2-771c-447d-b7ae-3d1d8d9cdea9 b 12')).toBe('a <uuid> b N')
+  })
+
+  it('una firma distinta es otra falla: la excepción vieja no la tapa', () => {
+    const antes = veredicto('ERROR:  el ensayo necesita un cliente activo en la sucursal 1').firma
+    const ahora = veredicto('ERROR:  ENSAYO FALLÓ · V1 dio otra cosa').firma
+    expect(ahora).not.toBe(antes)
   })
 })

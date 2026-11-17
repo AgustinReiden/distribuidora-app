@@ -23,8 +23,8 @@ name: SQL local
 # cada push a main que los toque.
 #
 # Hasta que esquema-base.yml haya corrido una vez (se dispara a mano la primera vez) no hay
-# foto que restaurar: en un PR el job avisa (::warning::) y termina sin correr nada; en
-# `push` y a demanda, falla.
+# foto que restaurar, y el job FALLA diciendo cómo generarla (un gate que no puede mirar es rojo,
+# no verde). También falla si la foto tiene más de 48 horas.
 
 on:
   pull_request:
@@ -75,21 +75,33 @@ jobs:
           key: esquema-prod-ninguna-exacta
           restore-keys: esquema-prod-
 
+      # Sin foto el job NO puede mirar nada, y un gate que no puede mirar es ROJO, no verde: un
+      # tilde sin haber corrido nada se lee como «verificado» (el mismo error de las 52 corridas de
+      # integridad.yml sin secrets). Pasa hasta que alguien dispara «Esquema base» por primera vez, y
+      # de nuevo si GitHub desaloja el cache (lo hace a los 7 días sin uso).
       - name: Sin foto del esquema
         if: steps.foto.outputs.cache-matched-key == ''
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "::warning::No hay foto del esquema de prod en el cache: este PR NO corrió los gates ni los ensayos de SQL. Disparar a mano el workflow «Esquema base» (Actions > Esquema base > Run workflow) y volver a correr éste."
-            exit 0
-          fi
-          echo "::error::No hay foto del esquema de prod en el cache (workflow «Esquema base»)."
+          echo "::error::No hay foto del esquema de prod en el cache, así que este PR NO pudo correr los gates ni los ensayos de SQL. Generarla: Actions > «Esquema base» > Run workflow (tarda un minuto), y después volver a correr este job."
           exit 1
 
-      - name: Qué foto se restauró
+      # Una foto vieja no es una foto buena: si «Esquema base» falla todos los días (secret rotado,
+      # cron apagado por inactividad) el cache sigue devolviendo la última que hubo, cada PR la
+      # mantiene viva y nadie se entera. Pasadas 48 horas, rojo.
+      - name: La foto es de las últimas 48 horas
         if: steps.foto.outputs.cache-matched-key != ''
         run: |
-          echo "foto: ${{ steps.foto.outputs.cache-matched-key }}"
+          if [ ! -f esquema-base/generado.txt ]; then
+            echo "::error::La foto no dice cuándo se tomó (esquema-base/generado.txt): es de una versión vieja de «Esquema base». Volver a generarla (Actions > «Esquema base» > Run workflow)."
+            exit 1
+          fi
+          edad=$(( $(date -u +%s) - $(cat esquema-base/generado.txt) ))
+          echo "foto: ${{ steps.foto.outputs.cache-matched-key }} · tomada hace $((edad / 3600)) h"
           echo "ledger de prod: $(wc -l < esquema-base/ledger.txt) migraciones, última $(tail -n1 esquema-base/ledger.txt)"
+          if [ "$edad" -gt 172800 ]; then
+            echo "::error::La foto del esquema tiene $((edad / 3600)) horas (el límite es 48): «Esquema base» no está corriendo. Mirar sus últimas corridas (¿falló el secret SUPABASE_DB_URL?) y dispararlo a mano."
+            exit 1
+          fi
 
       - name: Levantar Postgres local
         if: steps.foto.outputs.cache-matched-key != ''
@@ -122,20 +134,31 @@ jobs:
         if: steps.foto.outputs.cache-matched-key != ''
         run: docker exec -i ci-sql psql -U postgres -h localhost -d postgres -X -q -v ON_ERROR_STOP=1 < scripts/ci/semilla-ensayos.sql
 
-      # Las migraciones con NNN literal son las del PR (todavía sin número). Una que ya tenga
-      # número es de prod y ya está en la foto.
-      - name: Aplicar las migraciones pendientes del PR
+      # El volcado sin datos reinicia las secuencias en 1 y hace pasar CHECKs que apoyan en un id de
+      # prod (pagos_client_request_id_historico: id <= 8049). Con 10^9 los ids nuevos quedan por
+      # encima de cualquier id histórico, como en prod.
+      - name: Secuencias altas
+        if: steps.foto.outputs.cache-matched-key != ''
+        run: docker exec -i ci-sql psql -U postgres -h localhost -d postgres -X -q -v ON_ERROR_STOP=1 < scripts/ci/secuencias-altas.sql
+
+      # Dos grupos, en este orden: (1) las migraciones NUMERADAS de migrations/ que la foto no tiene
+      # (se aplicaron a prod después de las 07:30 y su archivo ya entró a main: sin esto sus ensayos
+      # corren contra un esquema sin ellas y todo queda rojo hasta mañana), y (2) las `NNN_*.sql` con
+      # el número literal, que son las del PR. El PR tiene que estar al día con main.
+      - name: Aplicar las migraciones que la foto no tiene
         id: migr
         if: steps.foto.outputs.cache-matched-key != ''
         run: |
           set -euo pipefail
+          node scripts/ci/migraciones-pendientes.mjs esquema-base/ledger.txt > /tmp/pendientes.txt
           n=0
-          for f in $(ls migrations/NNN_*.sql 2>/dev/null | sort); do
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
             echo "== aplicando $f"
             node scripts/concurrencia/docker-local.mjs aplicar "$f"
             n=$((n+1))
-          done
-          echo "migraciones pendientes aplicadas: $n"
+          done < /tmp/pendientes.txt
+          echo "migraciones aplicadas sobre la foto: $n"
 
       - name: Gates de SQL
         id: gates

@@ -4,7 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * La CSP del repo: la meta de index.html, nginx.conf y public/_headers dicen lo
+ * La CSP del repo: la meta de index.html y nginx.conf dicen lo
  * mismo, y dejan ver la factura escaneada (INF-7, #1563).
  *
  * El visor de la factura la muestra como `blob:` (`urlLocalDeArchivo`): la imagen
@@ -23,7 +23,6 @@ const leer = (archivo: string) => fs.readFileSync(path.join(RAIZ, archivo), 'utf
 const CSPS = {
   'index.html': leer('index.html').match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)?.[1],
   'nginx.conf': leer('nginx.conf').match(/add_header Content-Security-Policy "([^"]+)"/)?.[1],
-  'public/_headers': leer('public/_headers').match(/^\s*Content-Security-Policy: (.+)$/m)?.[1]?.trim(),
 }
 
 function directiva(csp: string, nombre: string): string[] | undefined {
@@ -32,7 +31,7 @@ function directiva(csp: string, nombre: string): string[] | undefined {
 }
 
 describe('la CSP del repo', () => {
-  it('está en los tres lugares, y es la misma', () => {
+  it('está en los dos lugares, y es la misma', () => {
     for (const [archivo, csp] of Object.entries(CSPS)) expect(csp, archivo).toBeTruthy()
     expect(new Set(Object.values(CSPS)).size).toBe(1)
   })

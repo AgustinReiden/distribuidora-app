@@ -22,8 +22,14 @@ if [ -z "${GATE_DB_CONTENEDOR:-}" ] && [ -z "${GATE_DB_URL:-}" ]; then
   echo "Falta GATE_DB_CONTENEDOR o GATE_DB_URL." >&2
   exit 2
 fi
-# La URL de prod nunca: los gates de acá corren RPCs y arman datos.
-case "${GATE_DB_URL:-}" in *hmuchlzmuqqxcldbzkgc*) echo "GATE_DB_URL es la de prod." >&2; exit 2 ;; esac
+# Lista blanca: el contenedor local, o una URL a localhost / 127.0.0.1 / ::1 (los gates de acá corren RPCs y arman
+# datos). Una URL sin host, `service=…` o una IP de afuera no pasan; scripts/lib/pg.mjs lo vuelve a verificar.
+if [ -z "${GATE_DB_CONTENEDOR:-}" ]; then
+  case "${GATE_DB_URL:-}" in
+    *://localhost[:/]*|*://127.0.0.1[:/]*|*://*@localhost[:/]*|*://*@127.0.0.1[:/]*|*@\[::1\]*) ;;
+    *) echo "GATE_DB_URL no es una base local (localhost / 127.0.0.1): no se corre." >&2; exit 2 ;;
+  esac
+fi
 unset SUPABASE_DB_URL
 
 node scripts/ci/rpc-local.mjs "$PUERTO" > /tmp/rpc-local.log 2>&1 &

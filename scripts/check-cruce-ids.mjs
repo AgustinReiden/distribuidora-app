@@ -23,7 +23,8 @@
  * Uso local:  GATE_DB_CONTENEDOR=<contenedor con la semilla> node scripts/check-cruce-ids.mjs
  */
 import { readFileSync } from 'node:fs';
-import { apuntaAProd, destino, psql } from './lib/pg.mjs';
+import './lib/salir-con-2.mjs';
+import { destino, esLocal, psql, verificarSemilla } from './lib/pg.mjs';
 
 // A propósito no se mira SUPABASE_DB_URL: es la de prod.
 const d = destino({ GATE_DB_CONTENEDOR: process.env.GATE_DB_CONTENEDOR, GATE_DB_URL: process.env.GATE_DB_URL });
@@ -31,10 +32,12 @@ if (!d) {
   console.error('Falta GATE_DB_CONTENEDOR o GATE_DB_URL (una base descartable con las sucursales 1 y 2): el gate no puede mirar.');
   process.exit(2);
 }
-if (apuntaAProd(d)) {
-  console.error('Esta base es la de prod: el gate arma datos y corre RPCs de escritura, y se niega.');
+if (!esLocal(d)) {
+  console.error('Esta base no es local (contenedor de docker, o una URL a localhost): el gate arma datos y corre RPCs de escritura, y se niega.');
   process.exit(2);
 }
+
+verificarSemilla(d);
 
 const { funciones: permitidas } = JSON.parse(
   readFileSync(new URL('./cruce-ids-permitidas.json', import.meta.url), 'utf8'),

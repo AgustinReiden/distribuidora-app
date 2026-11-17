@@ -1,80 +1,417 @@
 {
-  "_doc": "Ensayos de SQL (scripts/test-*.sql) que no dan ENSAYO OK sobre la base local de CI (esquema de prod + las migraciones del PR + scripts/ci/semilla-ensayos.sql), y por qué. Los lee scripts/ci/ensayos-sql.mjs (#1601 1601-b7, decisión D60 del dueño). 'ensayos' SÓLO SE ACHICA (lo fija src/test/catalogo.test.ts): un ensayo nuevo arma sus propios datos y corre sobre la base con la semilla, no se suma acá. Los que están son los que fallan al nacer el gate (16/11/2026): piden datos que sólo hay en prod, o estaban rotos desde antes y la tarjeta B13b de #1603 los arregla. Al arreglar uno, sacalo en el mismo PR: el gate avisa cuál sobra. 'omitir' son los que no se corren nunca en CI.",
+  "_doc": "Ensayos de SQL (scripts/test-*.sql) que no dan ENSAYO OK sobre la base local de CI (la foto del esquema de prod + las migraciones que le faltan + scripts/ci/semilla-ensayos.sql + secuencias altas), y la FIRMA de su falla. Los lee scripts/ci/ensayos-sql.mjs (#1601 1601-b7, decisión D60 del dueño). 'ensayos' SÓLO SE ACHICA (lo fija src/test/catalogo.test.ts): un ensayo nuevo arma sus propios datos y corre sobre la base con la semilla, no se suma acá. La firma es la línea del veredicto y las dos siguientes, sin uuids ni números (scripts/lib/ensayos.mjs): si un exceptuado empieza a fallar por OTRA cosa, el CI se pone rojo, porque puede ser una regla rota nueva escondida detrás de la excepción. Al arreglar un ensayo, sacalo en el mismo PR: el gate avisa cuál sobra. Se armó el 17/11/2026 contra el esquema de producción de ese día (ya con las migraciones 515 a 524, cuyos ensayos todavía no estaban en main): varios fallan por eso y salen solos al integrar esas tarjetas. 'omitir' son los que no se corren nunca en CI.",
   "omitir": {
     "test-concurrencia-monto-pagado-1247.sql": "pide DOS sesiones psql a la vez y confirma datos (deja una función y filas en la base): lo cubre el arnés de scripts/concurrencia/ (C1), que corre a mano contra Docker",
     "test-concurrencia-pago-fifo.sql": "pide DOS sesiones psql a la vez y confirma datos: lo cubre el arnés de scripts/concurrencia/, que corre a mano contra Docker"
   },
   "ensayos": {
-    "test-alta-en-zona-propia-1553.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLO (error inesperado): P0001 faltan fixtures: ninguna sucursal activa con admin, encargado y tres preventistas",
-    "test-alta-reparto-rol-1112.sql": "al nacer el gate, sobre la base de CI: column \"preventista_id\" does not exist",
-    "test-anular-compra-nc-1095.sql": "al nacer el gate, sobre la base de CI: A · la nota no se registró: {\"error\": \"El importe de la nota no coincide con el costo neto de la factura (con su bonificación): subtotal 0.00 e IVA 0.00",
-    "test-aviso-admin-1189.sql": "al nacer el gate, sobre la base de CI: no hay un cliente de la sucursal 1 con coordenadas, un pedido no VB y ningún otro cliente a menos de 40 m",
-    "test-cargo-1.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · D · error: D alta de puro regalo: {\"errores\": [\"El pedido tiene que tener al menos un producto que no sea regalo. El pedido no se creó.\"]",
-    "test-cargo-4.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · (a) reporte_gerencial [1|comparar] cambio sin ningun cargo | (a) reporte_gerencial [1|no_entregados] cambio sin ningun cargo | (a) report",
-    "test-cargo-5.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · sin un dia con 5 pedidos entregados en 90 dias",
-    "test-cartera-chofer-y-asignacion-1182-1183.sql": "al nacer el gate, sobre la base de CI: el ensayo necesita una sucursal activa con un transportista base sin extra, un preventista con extra transportista, otro preventista, un encargado y un",
-    "test-checks-1043.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · STK-D no ve un movimiento nuevo sin origen (0 → 0) | MERMA-I no ve una merma nueva sin usuario (0 → 0) | COMPRA-A2 no ve una compra nueva",
-    "test-cobros-por-rpc-1246-1249.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLO (1 fallas)",
-    "test-columnas-protegidas-1151-1155-1156.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ (1 fallas, todo revertido):",
-    "test-comisiones-1320-1321.sql": "al nacer el gate, sobre la base de CI: ENSAYO · faltan personas: adm <uuid>, adm1 <uuid>, otra 2, enc 8c8ef5c9-6b37-40c7-b273-d7258",
-    "test-compra-costos-decimales-y-version-1557.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · R2 II -90: {\"error\": \"Hay renglones fuera de rango: ZZ ensayo 1557 R2 <uuid> (renglón 1): el impuesto inter",
-    "test-compra-nc-rest-1113.sql": "al nacer el gate, sobre la base de CI: fixture · la nota de C no se registró: {\"error\": \"El importe de la nota no coincide con el costo neto de la factura (con su bonificación): subtotal 0.00",
-    "test-contadores-recorrido-1397.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · L1 recalcular_recorrido no bloquea la ruta entre las paradas y los contadores",
-    "test-control-rendicion-sucursal-nula.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · sin contexto: admin <uuid>, usuario <uuid>, ajena 2, rubro <NULL>",
-    "test-desactivado-sin-rol-1490.sql": "al nacer el gate, sobre la base de CI: relation \"ensayo_1490_huellas\" does not exist",
-    "test-dia-argentino-1277.sql": "al nacer el gate, sobre la base de CI: faltan fixtures: ninguna boleta entregada con saldo en una sucursal con admin y cartera",
-    "test-duplicado-operable-y-cartera-1186-1187.sql": "al nacer el gate, sobre la base de CI: el ensayo necesita un preventista base sin extra (PB <uuid>), uno con el extra transportista (PXT <NULL>), otro preventist",
-    "test-gastos-1.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · 1 la semilla tiene 0 rubros (esperado 18) | 1 el rubro Peajes y estacionamiento no esta como dice el spec | 1 el rubro Expensas no esta c",
-    "test-gastos-2.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · sin contexto: S1 1, S2 2, admin <uuid>, rubro <NULL>",
-    "test-gastos-3.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · sin contexto: A 1, B 2, adm <uuid>, enc <uuid>, t 0e49b85f-7626-41ae-bd91-44a",
-    "test-gastos-4.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · sin contexto: a1 <uuid>, at <uuid>, ad <uuid>,",
-    "test-gastos-5.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · sin contexto: a1 <uuid>, at <uuid>, ad <uuid>,",
-    "test-gastos-6.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · sin contexto: a1 <uuid>, ad <uuid>, rubro peajes <NULL>, rubro faltantes <NUL",
-    "test-gastos-personal-1521.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · sin contexto: a1 <uuid>, rubro varios <NULL>, rubro faltantes <NULL>",
-    "test-gastos-rendicion-e-iva-1562.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · R6 cerrar vacía una rendición de hace 85 días: tenía que andar y falló: No hay nada que rendir de ese transportista el 23/08/2026 en esta",
-    "test-gates-1330.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · sin contexto: admin <uuid>, sucursal 1, rubro <NULL>",
-    "test-geolocalizacion-1602.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLO · no hay un pedido de un preventista activo para probar",
-    "test-grants-rest-1134-1135.sql": "al nacer el gate, sobre la base de CI: fixture · falta medida (<NULL>), encuadre con alícuota vigente (<NULL>) o cliente (1)",
-    "test-horario-preventista-1178.sql": "al nacer el gate, sobre la base de CI: column \"preventista_id\" does not exist",
-    "test-idempotencia-cobro-1440.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · C2 un pago nuevo entró con client_request_id",
-    "test-limpieza-antes-del-fork-1475.sql": "al nacer el gate, sobre la base de CI: B1 · se borró el producto <NULL> con historial",
-    "test-mermas-paginadas-1146.sql": "al nacer el gate, sobre la base de CI: ENSAYO SIN DATOS: la sucursal <NULL> tiene 0 mermas, hacen falta mas de 500",
-    "test-minimo-cliente-salvedad-1559.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ (1 fallas):",
-    "test-movimientos-sin-sucursal-1488.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ (5 fallas, todo revertido):",
-    "test-nota-credito-lotes-1079.sql": "al nacer el gate, sobre la base de CI: A · la nota no se registró: {\"error\": \"El importe de la nota no coincide con el costo neto de la factura (con su bonificación): subtotal 0.00 e IVA 0.00",
-    "test-pedido-baja-1131.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLO (1 fallas)",
-    "test-pedido-sin-items-1078.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · no hay datos: pedido editable (<NULL>), admin de su sucursal (<NULL>)",
-    "test-permisos-1291-1272.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ #1291/#1272: faltan datos (s 1 y 2, a2 <uuid>, a1 <uuid>, ared 00000000-0000-00",
-    "test-permisos-1474.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · sin fixtures: a1 <uuid> a2 <uuid> a12 <uuid> e",
-    "test-permisos-cuenta-costos.sql": "al nacer el gate, sobre la base de CI: ensayo · no hay preventista con clientes",
-    "test-permisos-definer-sin-rol.sql": "al nacer el gate, sobre la base de CI: ensayo · no hay admin con una sucursal sin asignar",
-    "test-permisos-plata-rest.sql": "al nacer el gate, sobre la base de CI: ensayo #1003/#1013/#1014 · 2 fallas:",
-    "test-permisos-rol-personal-pagos-1519.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · sin fixtures: a1 <uuid> a2 <uuid> a12 <uuid> e",
-    "test-permisos-sucursal-1374-1334.sql": "al nacer el gate, sobre la base de CI: ENSAYO · faltan datos: adm <uuid> <uuid> <uuid>, prev 28e2ab83",
-    "test-permisos-sucursal-1438.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · G1 precios ; auditoría en la lista:",
-    "test-permisos-vb-costos-proveedores.sql": "al nacer el gate, sobre la base de CI: ensayo · a la sucursal <NULL> le falta un perfil (transp <NULL>, prev <NULL>, enc <NULL>, adm <NULL>)",
-    "test-politica-precios-1157-1159.sql": "al nacer el gate, sobre la base de CI: column \"preventista_id\" does not exist",
-    "test-precio-servidor-1138-1139.sql": "al nacer el gate, sobre la base de CI: column \"preventista_id\" does not exist",
-    "test-promo-fecha-replay-bot-1152-1153-1154.sql": "al nacer el gate, sobre la base de CI: column \"preventista_id\" does not exist",
-    "test-promo-vigente-excluyente-1136-1137.sql": "al nacer el gate, sobre la base de CI: column \"preventista_id\" does not exist",
-    "test-quien-marco-la-entrega-1555.sql": "al nacer el gate, sobre la base de CI: faltan fixtures: ninguna sucursal activa con un transportista, un admin y dos pedidos pendientes sin parada",
-    "test-rama-admin-sucursal-1244.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ #1244: 2.6 · un preventista no puede editar su propio perfil  · saltados: 4.2: no hay bot de un usuario de otra sucursal | 4.3: no hay bot",
-    "test-regalo-alta-1123.sql": "al nacer el gate, sobre la base de CI: column \"preventista_id\" does not exist",
-    "test-regalos-vendido-y-foto-1363-1376.sql": "al nacer el gate, sobre la base de CI: function public.regalo_mueve_stock_foto(pedido_items) does not exist",
-    "test-rendicion-y-entregas-1547-1548.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLO · sin contexto: suc <NULL>, A <NULL>, D <NULL>, B <NULL>, E <NULL>, ADM <NULL>, PV <NULL>, X <uuid>, otra <NU",
-    "test-reportes-cierran-1297.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ (4 fallas, todo revertido):",
-    "test-restos-nucleo-1520.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ (4 fallas):",
-    "test-resumen-cuenta-1044.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · SIN COBERTURA: ningún cliente con cancelados, pedidos vivos y un admin en su sucursal",
-    "test-rol-preventista-extra-1179.sql": "al nacer el gate, sobre la base de CI: el ensayo necesita una sucursal activa con un transportista base sin extra, un preventista con extra transportista y otro preventista base, todos activo",
-    "test-roles-columnas-caja-1170-1171-1175.sql": "al nacer el gate, sobre la base de CI: el ensayo necesita una sucursal activa con un preventista con extra transportista (y pedidos abiertos), un transportista base sin extra, un admin y un e",
-    "test-rutas-1313.sql": "al nacer el gate, sobre la base de CI: faltan fixtures en la sucursal 2: dos pedidos sin parada (P1 <NULL>, P2 <NULL>)",
-    "test-saldo-bajos-1492.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · L3 crear_pedido_idempotente o _rendicion_pagos no son los de la migración 473",
-    "test-salvedad-anulada-1504.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ (1 fallas):",
-    "test-salvedad-huella-1126-1127.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLO (1 fallas)",
-    "test-stock-integridad-1254-1255-1256.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · total_checks = 84 (tienen que ser 79) | STK-D = 0 después del caso nuevo (tenía que dar 1) | CC-B = 0 después del caso nuevo (tenía que d",
-    "test-stock-planilla-y-locks-1295-1296.sql": "al nacer el gate, sobre la base de CI: ENSAYO FALLÓ · #1296 · public.cancelar_pedido_con_stock(bigint,text,uuid,text): el cuerpo sin el bloque del lock no es el de prod del 2026-11-02 (431b y",
-    "test-triggers-y-deposito-1245.sql": "al nacer el gate, sobre la base de CI: column \"banned_until\" of relation \"users\" does not exist",
-    "test-venta-j-1098.sql": "al nacer el gate, sobre la base de CI: malformed array literal: \"sin blanco: no hay ningún rechazo total vigente en prod para los canarios\"",
-    "test-volver-a-pendiente-1313.sql": "al nacer el gate, sobre la base de CI: faltan fixtures en la sucursal 2: dos pedidos sin parada (P1 <NULL>, P2 <NULL>)"
+    "test-alicuota-linea-recreada-1274.sql": {
+      "firma": "ENSAYO FALLÓ · A exento · error: registrar: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | B no gravado · error: registrar: {\"error\": ",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-alta-en-zona-propia-1553.sql": {
+      "firma": "ENSAYO FALLO (error inesperado): PN faltan fixtures: ninguna sucursal activa con admin, encargado y tres preventistas",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-alta-reparto-rol-1112.sql": {
+      "firma": "column \"preventista_id\" does not exist | ^",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-anular-compra-nc-1095.sql": {
+      "firma": "A · la nota no se registró: {\"error\": \"El importe de la nota no coincide con el costo neto de la factura (con su bonificación): subtotal N.N e IVA N.N, y la factura da N.N y N.N. Recargá la aplicación y volvé a cargarla.\", \"success\": false}",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-anular-salvedad-compra-editada.sql": {
+      "firma": "ENSAYO FALLÓ (N fallas, todo revertido): | - M otro · error: ensN · registrar otro : {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | - ",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-anular-salvedad-lote-bolsa.sql": {
+      "firma": "A/cliente_rechaza · registrar: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false}",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-anular-salvedad-pedido-cancelado.sql": {
+      "firma": "registrar: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false}",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-asignacion-zonas-lecturas-1314-1316.sql": {
+      "firma": "function public.tablero_clientes_inactivos(bigint, integer, boolean) does not exist | ^",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-aviso-admin-1189.sql": {
+      "firma": "no hay un cliente de la sucursal N con coordenadas, un pedido no VB y ningún otro cliente a menos de N m",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-cancelar-sin-huella-1114.sql": {
+      "firma": "ENSAYO FALLO (N fallas) | - CN · error: registrar cliente_rechaza: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | - CN · error: regist",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-cargo-1.sql": {
+      "firma": "ENSAYO FALLÓ · AN · error: AN salvedad parcial: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | D · error: D alta de puro regalo: {\"err",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-cargo-4.sql": {
+      "firma": "ENSAYO FALLÓ · (a) reporte_gerencial [N|comparar] cambio sin ningun cargo | (a) reporte_gerencial [N|no_entregados] cambio sin ningun cargo | (a) reporte_gerencial [N|comparar] cambio sin ningun cargo | (a) reporte_gerencial [N|no_entregados] cambio sin ningun cargo | (a) reporte_gerencial [red|comp",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-cargo-5.sql": {
+      "firma": "ENSAYO FALLÓ · sin un dia con N pedidos entregados en N dias",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-cartera-chofer-y-asignacion-1182-1183.sql": {
+      "firma": "el ensayo necesita una sucursal activa con un transportista base sin extra, un preventista con extra transportista, otro preventista, un encargado y un admin, todos activos y de esa sucursal",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-checks-1043.sql": {
+      "firma": "ENSAYO FALLÓ · MERMA-I no ve una merma nueva sin usuario (N → N) | COMPRA-AN no ve una compra nueva desfasada (N → N) | COMIS-N no ve una venta nueva sin vendedor (N → N) | COSTO-B no ve un producto nuevo vendido sin costo (N → N) | VENTA-I no ve un cancelado nuevo con total (N → N) | saltados: regi",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-cobros-por-rpc-1246-1249.sql": {
+      "firma": "ENSAYO FALLO (N fallas) | - LN · aplicar_credito_cliente no lockea la boleta que elige | REPORTE",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-columnas-protegidas-1151-1155-1156.sql": {
+      "firma": "ENSAYO FALLÓ (N fallas, todo revertido): | - FN · encargado no cambia la fecha del pedido: N La fecha del pedido (N/N/N) no puede ser posterior a hoy. Lo que se entrega más adelante va en la fecha de entrega. | notas:",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-combo-salvedad-1192.sql": {
+      "firma": "ENSAYO FALLO (N fallas) | - MN · error: registrar cliente_rechaza (item N, N): {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | - MN · e",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-comisiones-1320-1321.sql": {
+      "firma": "ENSAYO · faltan personas: adm <uuid>, admN <uuid>, otra N, enc <uuid>, P <NULL>, ajeno <uuid>",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-compra-costos-decimales-y-version-1557.sql": {
+      "firma": "ENSAYO FALLÓ · RN II -N: {\"error\": \"Hay renglones fuera de rango: ZZ ensayo N RN <uuid> (renglón N): el impuesto interno sobre el neto va de N a N % (N % nominal).\", \"success\": false}",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-compra-nc-rest-1113.sql": {
+      "firma": "fixture · la nota de C no se registró: {\"error\": \"El importe de la nota no coincide con el costo neto de la factura (con su bonificación): subtotal N.N e IVA N.N, y la factura da N.N y N.N. Recargá la aplicación y volvé a cargarla.\", \"success\": false}",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-contadores-recorrido-1397.sql": {
+      "firma": "ENSAYO FALLÓ · LN recalcular_recorrido no bloquea la ruta entre las paradas y los contadores",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-contenedor-y-canje-a-su-lote-1558.sql": {
+      "firma": "ENSAYO FALLÓ · CN salvedad del regalo: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | · CN salvedad del regalo: stock=N lotes=[N] bols",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-control-rendicion-sucursal-nula.sql": {
+      "firma": "ENSAYO FALLÓ · sin contexto: admin <uuid>, usuario <uuid>, ajena N, rubro <NULL>",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-credito-suelto-1512.sql": {
+      "firma": "ENSAYO FALLÓ · KN cambio de cliente dio {\"error\": \"El motivo «cambio de cliente» lo pone el cambio de cliente del pedido. Para cancelarlo, elegí otro motivo.\", \"success\": false}; W N.N/N.N, suelto N",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-cupo-promo-y-combo-1300-1301-1283.sql": {
+      "firma": "ENSAYO FALLO (N fallas) | - CN · error: no se pudo registrar la salvedad: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | - CN · error:",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-desactivado-sin-rol-1490.sql": {
+      "firma": "ENSAYO FALLÓ · sin fixtures: a <uuid> e <uuid> prev <uuid> tg <NULL> pedido <NULL> entregado <NULL> item <NULL> cli N prod N lote <NULL> compra <NULL> prov N zona N",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-devolucion-bolsa-1085.sql": {
+      "firma": "ENSAYO FALLO (N fallas) | - BN · error: registrar cliente_rechaza: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | - BN · error: regist",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-dia-argentino-1277.sql": {
+      "firma": "faltan fixtures: ninguna boleta entregada con saldo en una sucursal con admin y cartera",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-duplicado-operable-y-cartera-1186-1187.sql": {
+      "firma": "el ensayo necesita un preventista base sin extra (PB <uuid>), uno con el extra transportista (PXT <NULL>), otro preventista (O <NULL>), un admin de la sucursal de PB (ADM <uuid>), un encargado de alguna de las dos sucursales (ENC <uuid>) y uno para medir (M <uuid>)",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-edicion-creditos-1446.sql": {
+      "firma": "ENSAYO FALLÓ · EN salvedad dio {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} || EN anulación dio {\"error\": \"No encontrada\", \"success\": ",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-edicion-regalos-salvedades-1323-1327.sql": {
+      "firma": "ENSAYO FALLO (N fallas): | - MN · salvedad: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | - MN · la salvedad que tira el regalo movio",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-fecha-pedido-piso-1514.sql": {
+      "firma": "ENSAYO FALLÓ · LN SEG-A ve una función del alta o la RPC nueva, o crear_pedido_idempotente cambió",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-gastos-1.sql": {
+      "firma": "ENSAYO FALLÓ · N la semilla tiene N rubros (esperado N) | N el rubro Peajes y estacionamiento no esta como dice el spec | N el rubro Expensas no esta como dice el spec | N el rubro Tasa municipal no esta como dice el spec | N el rubro Teléfono e internet no esta como dice el spec | N el rubro Combus",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-gastos-2.sql": {
+      "firma": "ENSAYO FALLÓ · sin contexto: SN N, SN N, admin <uuid>, rubro <NULL>",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-gastos-3.sql": {
+      "firma": "ENSAYO FALLÓ · sin contexto: A N, B N, adm <uuid>, enc <uuid>, t <uuid>, tN <uuid>, ajeno <uuid>, rubros <NULL> <NULL>",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-gastos-4.sql": {
+      "firma": "ENSAYO FALLÓ · sin contexto: aN <uuid>, at <uuid>, ad <uuid>, en <uuid>, tr <uuid>, rubros <NULL> <NULL>",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-gastos-5.sql": {
+      "firma": "ENSAYO FALLÓ · sin contexto: aN <uuid>, at <uuid>, ad <uuid>, o el % no es N",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-gastos-6.sql": {
+      "firma": "ENSAYO FALLÓ · sin contexto: aN <uuid>, ad <uuid>, rubro peajes <NULL>, rubro faltantes <NULL>",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-gastos-7.sql": {
+      "firma": "ENSAYO FALLÓ · el armado no dejo las tres salvedades (<NULL>, <NULL>, <NULL>) y la merma de la dañada: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"suc",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-gastos-personal-1521.sql": {
+      "firma": "ENSAYO FALLÓ · sin contexto: aN <uuid>, rubro varios <NULL>, rubro faltantes <NULL>",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-gastos-rendicion-e-iva-1562.sql": {
+      "firma": "ENSAYO FALLÓ · RN cerrar vacía una rendición de hace N días: tenía que andar y falló: No hay nada que rendir de ese transportista el N/N/N en esta sucursal: ni entregas, ni cobros, ni gastos || RN confirmar_rendicion no dejó la fila de control || RN «Editar cierre» con un gasto de ese día: falló con",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-gates-1330.sql": {
+      "firma": "ENSAYO FALLÓ · sin contexto: admin <uuid>, sucursal N, rubro <NULL>",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-geolocalizacion-1602.sql": {
+      "firma": "ENSAYO FALLO · no hay un pedido de un preventista activo para probar",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-grants-rest-1134-1135.sql": {
+      "firma": "fixture · falta medida (<NULL>), encuadre con alícuota vigente (<NULL>) o cliente (N)",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-horario-preventista-1178.sql": {
+      "firma": "column \"preventista_id\" does not exist | ^",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-limpieza-1336-1368-1383.sql": {
+      "firma": "ENSAYO FALLÓ (después de B) · RN dio {\"msg\": \"La fecha de entrega programada (N/N/N) no puede ser posterior al N/N/N: va hasta N días adelante.\", \"error\": \"N\"} y dejó pendiente|chofer=f|prog=N-N-N|notas=ensayo tN|parada=f || RN (en ventana) dio {\"msg\": \"La fecha de entrega programada (N/N/N) no pued",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-limpieza-antes-del-fork-1475.sql": {
+      "firma": "BN · se borró el producto <NULL> con historial",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-lotes-trazabilidad-1054-1073.sql": {
+      "firma": "ENSAYO FALLO (N fallas) | - CN · error: registrar cliente_rechaza: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | - DN · error: regist",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-mermas-paginadas-1146.sql": {
+      "firma": "ENSAYO SIN DATOS: la sucursal <NULL> tiene N mermas, hacen falta mas de N | ENSAYO_ROLLBACK",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-minimo-cliente-salvedad-1559.sql": {
+      "firma": "ENSAYO FALLÓ (N fallas): | - LN · el id que no existe dio OK {\"errores\": [\"El cliente del pedido no existe en esta sucursal. El pedido no se creó.\"], \"success\": false} | - LN · error: duplicate key value violates unique constraint \"sucursales_pkey\"",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-movimientos-sin-sucursal-1488.sql": {
+      "firma": "ENSAYO FALLÓ (N fallas, todo revertido): | - DN · admin de la N desactivado deniega: error inesperado column \"banned_until\" of relation \"users\" does not exist | - DN · admin de la N desactivado acepta: error inesperado column \"banned_until\" of relation \"users\" does not exist",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-nota-credito-lotes-1079.sql": {
+      "firma": "A · la nota no se registró: {\"error\": \"El importe de la nota no coincide con el costo neto de la factura (con su bonificación): subtotal N.N e IVA N.N, y la factura da N.N y N.N. Recargá la aplicación y volvé a cargarla.\", \"success\": false}",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-pedido-baja-1131.sql": {
+      "firma": "ENSAYO FALLO (N fallas) | - RN · punto de partida: anular como postgres dio N new row for relation \"pedidos\" violates check constraint \"pedidos_estado_check\" | REPORTE",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-pedido-sin-items-1078.sql": {
+      "firma": "ENSAYO FALLÓ · no hay datos: pedido editable (<NULL>), admin de su sucursal (<NULL>)",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-permisos-1291-1272.sql": {
+      "firma": "ENSAYO FALLÓ #N/#N: faltan datos (s N y N, aN <uuid>, aN <uuid>, ared <uuid>, uN <uuid>, uN <uuid>, pN <uuid>, cliN <NULL>, cliN N)",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-permisos-1474.sql": {
+      "firma": "ENSAYO FALLÓ · sin fixtures: aN <uuid> aN <uuid> aN <uuid> e <uuid> pN <uuid> pN <uuid> px <NULL>",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-permisos-cuenta-costos.sql": {
+      "firma": "ensayo · no hay preventista con clientes",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-permisos-definer-sin-rol.sql": {
+      "firma": "ensayo · no hay admin con una sucursal sin asignar",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-permisos-plata-rest.sql": {
+      "firma": "ensayo #N/#N/#N · N fallas: | #N · costos_pedido_items no le devuelve nada a admin | #N · costos_pedido_items no le devuelve nada a encargado",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-permisos-rol-personal-pagos-1519.sql": {
+      "firma": "ENSAYO FALLÓ · sin fixtures: aN <uuid> aN <uuid> aN <uuid> e <uuid> p <uuid> t <NULL> emp_t <NULL> emp_o <NULL>",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-permisos-sucursal-1374-1334.sql": {
+      "firma": "ENSAYO · faltan datos: adm <uuid> <uuid> <uuid>, prev <uuid> <uuid>, tr <uuid> <uuid>, enc <uuid>, cli N N, ped <NULL> <NULL>, caja <NULL>, pago <NULL>, ped_ch <NULL>",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-permisos-sucursal-1438.sql": {
+      "firma": "function \"public.get_audit_history(text,text,integer)\" does not exist | ^",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-permisos-tablero.sql": {
+      "firma": "ENSAYO FALLÓ (N fallas, todo revertido): | - preventista falló con otra cosa en SELECT to_jsonb(public.tablero_buscar_clientes('a', NULL, N)): function public.tablero_buscar_clientes(unknown, unknown, integer) does not exist | - preventista falló con otra cosa en SELECT to_jsonb(public.tablero_categ",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-permisos-vb-costos-proveedores.sql": {
+      "firma": "ensayo · a la sucursal <NULL> le falta un perfil (transp <NULL>, prev <NULL>, enc <NULL>, adm <NULL>)",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-politica-precios-1157-1159.sql": {
+      "firma": "column \"preventista_id\" does not exist | ^",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-precio-servidor-1138-1139.sql": {
+      "firma": "column \"preventista_id\" does not exist | ^",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-promo-contenedores-1501.sql": {
+      "firma": "ENSAYO FALLÓ · LN public._alta_bloquea_boletas_credito(bigint,bigint) tiene mdN NdNaNabdNbfNaNcNaNceN y acl {postgres=X/postgres,service_role=X/postgres}",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-promo-fecha-replay-bot-1152-1153-1154.sql": {
+      "firma": "column \"preventista_id\" does not exist | ^",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-promo-vigente-excluyente-1136-1137.sql": {
+      "firma": "column \"preventista_id\" does not exist | ^",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-promos-regalos-1592.sql": {
+      "firma": "ENSAYO FALLÓ (N): | LN/LN · error: No se puede borrar \"ZZ ensayo N KN\": tiene N u. en stock, está en la promoción «ZZ ensayo N promo». Desactivalo en lugar de borrarlo.",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-promos-y-combos-1556.sql": {
+      "firma": "ENSAYO FALLÓ (N): | CN [otro pedido tomó el lugar] la salvedad no rompió el combo: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | CN e",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-quien-marco-la-entrega-1555.sql": {
+      "firma": "faltan fixtures: ninguna sucursal activa con un transportista, un admin y dos pedidos pendientes sin parada",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-rama-admin-sucursal-1244.sql": {
+      "firma": "ENSAYO FALLÓ #N: N.N · un preventista no puede editar su propio perfil · saltados: N.N: no hay bot de un usuario de otra sucursal | N.N: no hay bot de un usuario de dos sucursales | N.N: no hay bot de un usuario sólo de la sucursal del admin",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-regalo-alta-1123.sql": {
+      "firma": "column \"preventista_id\" does not exist | ^",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-regalo-tramo-anterior-1565.sql": {
+      "firma": "ENSAYO FALLÓ (N): | LNa la salvedad sobre el regalo no anduvo como hoy: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | V×N, R:R×N # V=",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-regalos-vendido-y-foto-1363-1376.sql": {
+      "firma": "ENSAYO FALLO (N fallas): | - FN · error: function pg_temp.rv_foto(bigint) does not exist",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-rendicion-y-entregas-1547-1548.sql": {
+      "firma": "ENSAYO FALLO · sin contexto: suc <NULL>, A <NULL>, D <NULL>, B <NULL>, E <NULL>, ADM <NULL>, PV <NULL>, X <uuid>, otra <NULL>, PN <NULL>, PN <NULL>",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-reportes-cierran-1297.sql": {
+      "firma": "ENSAYO FALLÓ (N fallas, todo revertido): | - no hay regalos fraccionados en el rango: REP-NN no se prueba | - no hay pedidos sin vendedor en el rango: REP-NN no se prueba",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-reportes-ola2-1603.sql": {
+      "firma": "duplicate key value violates unique constraint \"sucursales_pkey\" | DETAIL: Key (id)=(N) already exists.",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-restos-nucleo-1520.sql": {
+      "firma": "ENSAYO FALLÓ (N fallas): | - NN · impuestos_internos = NaN: N productos_impuestos_internos_rango new row for relation \"productos\" violates check constraint \"productos_impuestos_internos_rango\" | - NN · SELECT public.actualizar_politica_minimo_pedido('bloquear', 'NaN', N, N): N - La compra mínima va ",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-resumen-cuenta-1044.sql": {
+      "firma": "ENSAYO FALLÓ · SIN COBERTURA: ningún cliente con cancelados, pedidos vivos y un admin en su sucursal",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-rol-preventista-extra-1179.sql": {
+      "firma": "el ensayo necesita una sucursal activa con un transportista base sin extra, un preventista con extra transportista y otro preventista base, todos activos",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-roles-columnas-caja-1170-1171-1175.sql": {
+      "firma": "el ensayo necesita una sucursal activa con un preventista con extra transportista (y pedidos abiertos), un transportista base sin extra, un admin y un encargado",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-rutas-1313.sql": {
+      "firma": "faltan fixtures en la sucursal N: dos pedidos sin parada (PN <NULL>, PN <NULL>)",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-saldo-bajos-1492.sql": {
+      "firma": "ENSAYO FALLÓ · LN crear_pedido_idempotente o _rendicion_pagos no son los de la migración N",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-salvedad-anulada-1504.sql": {
+      "firma": "ENSAYO FALLÓ (N fallas): | - LN · error: la salvedad no entró: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | - LN · el reintento con ",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-salvedad-anulada-foto-1595.sql": {
+      "firma": "ENSAYO FALLÓ (N fallas) | - VN · error: registrar: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | - VN · error: registrar: {\"error\": \"",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-salvedad-anular-1140-1142.sql": {
+      "firma": "ENSAYO FALLO (N fallas) | - AN · error: registrar cliente_rechaza: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | - AN · error: regist",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-salvedad-anular-1161-1164.sql": {
+      "firma": "ENSAYO FALLO (N fallas) | - DN · error: registrar cliente_rechaza: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | - DN · error: regist",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-salvedad-huella-1126-1127.sql": {
+      "firma": "ENSAYO FALLO (N fallas) | - HN · error: registrar producto_danado: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | - HN · error: regist",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-salvedad-replay-lock-1508.sql": {
+      "firma": "ENSAYO FALLÓ (N fallas): | - EN · error: la salvedad no entró: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | - EN · el reintento con ",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-stock-cambio-cliente-y-canje-1594.sql": {
+      "firma": "ENSAYO FALLÓ · KN: ledger del devuelto N->N alta_producto productos | N->N cambio_producto_merma cambios_productos | N->N merma mermas_stock",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-stock-integridad-1254-1255-1256.sql": {
+      "firma": "ENSAYO FALLÓ · total_checks = N (tienen que ser N) | CC-B = N después del caso nuevo (tenía que dar N) | CC-C = N después del caso nuevo (tenía que dar N) | FISCAL-A = N después del caso nuevo (tenía que dar N) | VENTA-N = N después del caso nuevo (tenía que dar N) | saltados: sincronizar_lotes_comp",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-stock-planilla-y-locks-1295-1296.sql": {
+      "firma": "ENSAYO FALLÓ · #N · public.cancelar_pedido_con_stock(bigint,text,uuid,text): el cuerpo sin el bloque del lock no es el de prod del N-N-N (Nb y Nc) | #N · public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz): el cuerpo sin el bloque del lock no es el de prod del N-N-N (Nb y Nc) | saltad",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-stock-promos-orden-1460.sql": {
+      "firma": "ENSAYO FALLÓ · SN la salvedad dejó ok=false B=N C=N barra=N regalo=N {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false}",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-triggers-y-deposito-1245.sql": {
+      "firma": "column \"banned_until\" of relation \"users\" does not exist | ^",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-usuarios-retencion-ola2-1603.sql": {
+      "firma": "ENSAYO FALLÓ BNb (N fallas, todo revertido): | - G · el admin sólo de la N desasignó a un usuario de las dos: N function public.desasignar_usuario_sucursal(unknown, integer) does not exist → N,N* | - BN.N · desasignar la default: N function public.desasignar_usuario_sucursal(unknown, integer) does n",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-venta-edicion-1398.sql": {
+      "firma": "ENSAYO FALLÓ · EN dio {\"success\": true, \"pedido_id\": N, \"updated_at\": \"N-N-NTN:N:N.N+N:N\", \"paradas_eliminadas\": N, \"vuelto_a_pendiente\": false, \"updated_at_anterior\": \"N-N-NTN:N:N.N+N:N\"} y dejó pendiente|chofer=f|fecha=N-N-N|prog=N-N-N|notas=ensayo EN|parada=f || EN dio {\"msg\": \"La fecha de entreg",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-venta-j-1098.sql": {
+      "firma": "malformed array literal: \"sin blanco: no hay ningún rechazo total vigente en prod para los canarios\" | ^",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-venta-minimo-iva-1470.sql": {
+      "firma": "ENSAYO FALLÓ · MN la salvedad dio ok=false A=N",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    },
+    "test-volver-a-pendiente-1313.sql": {
+      "firma": "faltan fixtures en la sucursal N: dos pedidos sin parada (PN <NULL>, PN <NULL>)",
+      "motivo": "falla al nacer el gate, sobre la base de CI"
+    }
   }
 }

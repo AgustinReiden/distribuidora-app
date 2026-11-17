@@ -17,12 +17,15 @@ E2E: `npm run test:e2e` (Playwright, chromium).
 
 Los gates de SQL y los ensayos `scripts/test-*.sql` corren **en cada PR que toca `migrations/` o
 `scripts/`** (`.github/workflows/sql-local.yml`, #1601): sobre una base local de Docker armada con
-la foto del esquema de prod (`esquema-base.yml`, sin datos) más las migraciones `NNN_*.sql` del PR.
+la foto del esquema de prod (`esquema-base.yml`, sin datos; sin foto, o con más de 48 horas, el job
+falla: se dispara a mano) más las migraciones que la foto no tiene (las numeradas que se aplicaron
+después de tomarla y las `NNN_*.sql` del PR). El PR tiene que estar al día con main.
 El cron de `integridad.yml` queda para lo que sólo se ve con los datos de prod. Un gate o un
 ensayo nuevo corre ahí sin secrets; si encuentra algo que hoy está así a propósito, va a su lista
 de excepciones (`scripts/*-permitidas.json`, `ensayos-sql-excepciones.json`) con su motivo, y la
 lista **sólo se achica**. Localmente: `GATE_DB_CONTENEDOR=<contenedor> bash scripts/ci/gates-locales.sh`
-(la base se arma con `scripts/concurrencia/docker-local.mjs`).
+(la base se arma con `scripts/concurrencia/docker-local.mjs` y la semilla de `scripts/ci/`; esa semilla
+y ese criterio de «ensayo OK» son los del CI).
 
 Deploy: push a `main` → webhook de Coolify. La config de nginx de producción **vive en el
 panel de Coolify**, no en el `nginx.conf` del repo — editar el repo no cambia nada.
