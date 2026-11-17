@@ -50,13 +50,25 @@ describe('ModalNotaCreditoVenta', () => {
     pedidosCliente = []
   })
 
-  // Cambió de regla (B16, decisión del dueño del 16/11): la nota se imputa al mes
-  // de la boleta y resta de la comisión y de las metas; antes decía que no la afectaba.
+  // Cambió de regla (B16, decisiones del dueño del 16/11 y del 17/11): la nota se
+  // imputa al mes de la boleta y le descuenta o no al vendedor según el motivo;
+  // antes decía que no afectaba la comisión.
   it('muestra la leyenda de comisión y no ofrece los regalos', () => {
     render(<ModalNotaCreditoVenta pedido={pedido} onClose={() => {}} />)
-    expect(screen.getByText('Se imputa al mes de la boleta y resta de la comisión y de las metas del vendedor')).toBeInTheDocument()
+    expect(screen.getByText('Se imputa al mes de la boleta. Según el motivo, le descuenta o no al vendedor')).toBeInTheDocument()
     expect(screen.queryByText(/No afecta la comisión/)).toBeNull()
     expect(screen.queryByText('Regalo')).toBeNull()
+  })
+
+  // B16 v3: al elegir el motivo, el modal dice si le descuenta al vendedor.
+  it('dice, según el motivo, si la nota le descuenta al vendedor', () => {
+    render(<ModalNotaCreditoVenta pedido={pedido} onClose={() => {}} />)
+    const motivo = screen.getByRole('combobox')
+    expect(screen.getByText('Este motivo no le descuenta nada al vendedor.')).toBeInTheDocument()
+    fireEvent.change(motivo, { target: { value: 'cliente_rechaza' } })
+    expect(screen.getByText(/le descuenta al vendedor la plata y las unidades/)).toBeInTheDocument()
+    fireEvent.change(motivo, { target: { value: 'descuento_comercial' } })
+    expect(screen.getByText(/le descuenta al vendedor la plata \(no las unidades\)/)).toBeInTheDocument()
   })
 
   // Antes de la imputación elegida el modal se cerraba al emitir. Ahora queda
@@ -154,7 +166,7 @@ describe('ModalNotaCreditoVenta', () => {
 
   it('el título y el pie dicen qué se emite y adónde va el crédito', () => {
     render(<ModalNotaCreditoVenta pedido={pedido} onClose={() => {}} />)
-    expect(screen.getByText('Nota de crédito por mercadería vencida o dañada')).toBeInTheDocument()
+    expect(screen.getByText('Nota de crédito de venta')).toBeInTheDocument()
     expect(screen.getByText('Total a acreditar:', { exact: false })).toBeInTheDocument()
     expect(screen.getByText('Pedido de origen #6510 · el crédito se aplica a las boletas abiertas del cliente')).toBeInTheDocument()
   })

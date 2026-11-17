@@ -127,7 +127,9 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
               <div className="flex items-center gap-2">
                 {nc.anulada
                   ? <Badge tone="danger" icon={XCircle}>Anulada</Badge>
-                  : <Badge tone="brand">Resta comisión</Badge>}
+                  : nc.resta_comision
+                    ? <Badge tone="brand">Resta comisión</Badge>
+                    : <Badge tone="neutral">No resta comisión</Badge>}
                 {onImputar && !nc.anulada && pagoLibre && (
                   <Button
                     variant="secondary"

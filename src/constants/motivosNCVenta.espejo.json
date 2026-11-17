@@ -1,0 +1,12 @@
+{
+  "_que_es": "Espejo de public.nc_venta_motivos() (B16 v3 de #1603, decisión del dueño del 17/11): los motivos de una nota de crédito de VENTA. Lo compara contra el server scripts/espejo-motivos-nc-venta.mjs y contra el front motivosNCVenta.espejo.test.ts; si cambia la lista cambian los dos lados. descuenta_vendedor = resta de la comisión y de las metas del vendedor de la boleta; descuenta_unidades = además resta unidades; mercaderia = qué pasa con lo acreditado (reingresa, merma o nada): definido y todavía sin uso.",
+  "motivos": [
+    { "motivo": "cliente_rechaza", "descuenta_vendedor": true, "descuenta_unidades": true, "mercaderia": "reingresa" },
+    { "motivo": "error_pedido", "descuenta_vendedor": true, "descuenta_unidades": true, "mercaderia": "reingresa" },
+    { "motivo": "error_entrega", "descuenta_vendedor": false, "descuenta_unidades": false, "mercaderia": "reingresa" },
+    { "motivo": "producto_vencido", "descuenta_vendedor": false, "descuenta_unidades": false, "mercaderia": "merma" },
+    { "motivo": "producto_danado", "descuenta_vendedor": false, "descuenta_unidades": false, "mercaderia": "merma" },
+    { "motivo": "descuento_comercial", "descuenta_vendedor": true, "descuenta_unidades": false, "mercaderia": "nada" },
+    { "motivo": "otro", "descuenta_vendedor": false, "descuenta_unidades": false, "mercaderia": "nada" }
+  ]
+}

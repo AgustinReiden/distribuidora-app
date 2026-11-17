@@ -2,19 +2,23 @@
 -- el lote, la v1 de _comision_lineas armaba un nested loop que reordenaba sus renglones una vez por renglón,
 -- y /comisiones de un mes daba statement timeout.
 --
+-- No es un ensayo (por eso no se llama test-*.sql y el CI no lo corre): mide, no afirma.
+--
 -- Corre con psql (no es un DO: el statement_timeout se mide por sentencia) y no deja rastro: todo va en una
 -- transacción que termina en ROLLBACK, y cada sentencia en su savepoint (ON_ERROR_ROLLBACK), así que un
 -- timeout no corta el resto.
 --
 -- Datos: una sucursal nueva con 2.000 boletas entregadas del mes pasado (3 renglones cada una, 3
--- vendedores, 20 productos) y 30 notas vigentes sobre renglones de esas boletas. Todo determinístico.
+-- vendedores, 20 productos), una meta de facturación del mes por vendedor y 30 notas vigentes sobre
+-- renglones de esas boletas, con un motivo que le descuenta al vendedor (cliente_rechaza, v3): sin
+-- liquidar, restan de la comisión como en la v2. Todo determinístico.
 --
 -- Mide: calcular_comisiones del mes como authenticated (admin) con el statement_timeout de ese rol (8 s),
 -- _comision_lineas de las 2.000 boletas, el gerencial, rendimiento, avance de metas y los dos del bot. Y
 -- escribe el md5 del conjunto de filas de _comision_lineas en una forma que no depende de los ids (puesto
 -- de la boleta, nombre de producto y de vendedor), para comparar entre bases con y sin la migración.
 --
---   docker exec -i <contenedor> psql -U postgres -h localhost -d postgres -f - < scripts/test-nc-mes-de-la-boleta-rendimiento-ola2-1603.sql
+--   docker exec -i <contenedor> psql -U postgres -h localhost -d postgres -f - < scripts/tiempos-nc-mes-de-la-boleta-ola2-1603.sql
 
 \set ON_ERROR_ROLLBACK on
 \pset footer off
@@ -71,11 +75,15 @@ BEGIN
         FROM generate_series(0, 2) j;
     UPDATE pedidos SET total = (SELECT sum(subtotal) FROM pedido_items WHERE pedido_id = v_p) WHERE id = v_p;
   END LOOP;
+  FOR k IN 1..3 LOOP
+    INSERT INTO metas_preventista (sucursal_id, preventista_id, periodo, periodo_fin, tipo_meta, valor_objetivo)
+      VALUES (v_s, v_ven[k], v_mes, (v_mes + interval '1 month - 1 day')::date, 'facturacion', 10000000);
+  END LOOP;
   -- 30 notas vigentes, una cada 66 boletas, por una unidad del último renglón (como las deja la RPC).
   FOR k IN 1..30 LOOP
     SELECT id INTO v_p FROM pedidos WHERE sucursal_id = v_s ORDER BY id OFFSET k * 66 - 1 LIMIT 1;
     INSERT INTO notas_credito_venta (sucursal_id, cliente_id, pedido_id, fecha, motivo, total, usuario_id, neto, iva)
-      SELECT v_s, p.cliente_id, p.id, p.fecha, 'producto_vencido', pi.precio_unitario, v_adm, pi.precio_unitario, 0
+      SELECT v_s, p.cliente_id, p.id, p.fecha, 'cliente_rechaza', pi.precio_unitario, v_adm, pi.precio_unitario, 0
         FROM pedidos p
         JOIN LATERAL (SELECT * FROM pedido_items x WHERE x.pedido_id = p.id ORDER BY x.id DESC LIMIT 1) pi ON true
        WHERE p.id = v_p
@@ -97,7 +105,8 @@ ANALYZE nota_credito_venta_items;
 
 SELECT (SELECT count(*) FROM pedidos WHERE sucursal_id = (SELECT v::bigint FROM b16p WHERE k = 's')) AS boletas,
        (SELECT count(*) FROM notas_credito_venta WHERE sucursal_id = (SELECT v::bigint FROM b16p WHERE k = 's')) AS notas,
-       (SELECT CASE WHEN prosrc LIKE '%nc_clave AS MATERIALIZED%' THEN 'v2'
+       (SELECT CASE WHEN prosrc LIKE '%_nc_resta_comision%' THEN 'v3'
+                    WHEN prosrc LIKE '%nc_clave AS MATERIALIZED%' THEN 'v2'
                     WHEN prosrc LIKE '%nc_clave%' THEN 'v1' ELSE 'sin B16' END
           FROM pg_proc WHERE oid = 'public._comision_lineas(bigint[])'::regprocedure) AS version;
 

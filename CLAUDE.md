@@ -328,10 +328,11 @@ suelta en `sucursales`.
   dueño): el gerencial, Ventas por cliente, por zona y por preventista, los rubros y el tablero le
   restan `_ventas_nc`, que es la séptima parte: la nota vigente cuya boleta es venta, por la fecha
   **de la nota**, al cliente de la nota y al vendedor de la boleta. Resta plata, no pedidos,
-  clientes, unidades ni CMV. Desde B16 (#1545, decisión del dueño) restan también la comisión, las
-  metas (facturación, no unidades), Rendimiento y el bot (`bot_ventas_periodo`, `bot_mis_ventas` y
-  el resumen del preventista); las jornadas y Rentabilidad siguen por boleta. Un ranking nuevo de
-  venta resta `_ventas_nc` igual.
+  clientes, unidades ni CMV, y resta toda nota, sea cual sea su motivo: es la venta de la empresa.
+  El bot también (`bot_ventas_periodo`, `bot_mis_ventas` y el resumen del preventista); las jornadas
+  y Rentabilidad siguen por boleta. Lo que le toca al VENDEDOR (comisión, metas, Rendimiento) resta
+  sólo las notas cuyo motivo le descuenta, con su foto (ver «Los motivos de una nota de crédito de
+  venta»). Un ranking nuevo de venta resta `_ventas_nc` igual.
   **La nota de crédito de venta se imputa al día de su boleta** (B16, #1545; decisión del dueño):
   `notas_credito_venta.fecha` es la de imputación, la de `pedidos.fecha`, y es la que cuenta para los
   reportes y la posición fiscal; cuándo se emitió es `created_at`, y su crédito (los pagos) es plata
@@ -339,6 +340,21 @@ suelta en `sucursales`.
   cambiar la fecha de la boleta arrastra sus notas (`trg_pedidos_fecha_arrastra_notas_credito`). Una
   nota sobre una boleta de un mes cerrado cambia ese mes. Un camino nuevo que cree notas no manda la
   fecha. La NC de compra no: su fecha es la del comprobante del proveedor.
+  **Los motivos de una nota de crédito de venta deciden qué le descuenta al vendedor, y nada va
+  hacia atrás** (B16 v3, decisión del dueño del 17/11). La lista es una, `nc_venta_motivos()` (el
+  CHECK, la RPC y la foto), con espejo en `src/constants/motivosNCVenta.espejo.json` (su test y
+  `scripts/espejo-motivos-nc-venta.mjs`): descuentan `cliente_rechaza` y `error_pedido` (plata y
+  unidades) y `descuento_comercial` (sólo plata); `error_entrega`, `producto_vencido`,
+  `producto_danado` y `otro`, no. Su `mercaderia` (reingresa / merma / nada) está definida y todavía
+  sin uso: la nota no mueve stock. Qué resta se decide AL CREAR la nota
+  (`trg_notas_credito_venta_foto_vendedor`) y queda anotado: `resta_comision` si la comisión de la
+  boleta no estaba liquidada para su vendedor, y una fila en `nota_credito_venta_metas` por cada meta
+  del vendedor que estaba en su mes y sin cumplir (`_meta_logrado`, la misma cuenta de
+  `avance_metas_preventista`). Anular la nota devuelve sólo lo que no quedó congelado: lo liquidado y
+  la meta cumplida o fuera de su mes siguen restando aunque la nota esté anulada. Una meta creada
+  después de la nota no la ve; si la boleta cambia de vendedor, la comisión sigue a la boleta y las
+  metas del anterior dejan de contarla. Un camino nuevo que lea lo del vendedor sale de
+  `_nc_resta_comision` o de `_meta_logrado`, nunca de `_ventas_nc`.
   **El envío vive en `pedidos.cargo_envio`, dentro de `total`** (migs 389 y NNN cargo_1–4), y su
   desglose (`cargo_envio_desglose`) dentro de `total_neto`/`total_iva`, no de `total_real`. La plata
   a cobrar (saldo, cobranza, deuda, recorridos, rendiciones, transportista) usa `total`; la venta, la
@@ -351,12 +367,13 @@ suelta en `sucursales`.
   (`empleado_liquidacion_lineas`, un libro de deltas, con el vendedor de cada línea: si cambia
   `pedidos.usuario_id`, al anterior le sale como ajuste). `calcular_comisiones` es un cálculo y va
   por `pedidos.fecha`, así que su total puede no coincidir con lo liquidado.
-  **La nota de crédito resta de la comisión** (B16, #1545; decisión del dueño): `_comision_lineas`
-  baja cada clave por lo que acreditan las notas vigentes de la boleta en ella (de `_ventas_nc`, con
-  tope en lo que la clave vende; sin renglón, en la del mismo producto o, si la boleta no lo tiene, en
-  la de su renglón de mayor venta). Una nota emitida después de
-  liquidar sale como ajuste en la liquidación siguiente, y anularla lo devuelve. La base del
-  gerencial (`nc`) resta lo mismo.
+  **La nota de crédito que le descuenta al vendedor resta de la comisión** (B16, #1545; decisiones
+  del dueño del 16/11 y del 17/11): `_comision_lineas` baja cada clave por lo que acreditan las notas
+  con `resta_comision` de la boleta (`_nc_resta_comision`, con tope en lo que la clave vende; sin
+  renglón, en la del mismo producto o, si la boleta no lo tiene, en la de su renglón de mayor venta).
+  Como la foto se decide al crear, una nota no produce ajustes en el libro: lo ya liquidado no se
+  mueve. El factor del adelanto de sueldo va sobre la venta neta de esas notas (sin nota que
+  descuente, sobre el total). La base del gerencial (`nc`) resta lo mismo.
   El efectivo a entregar resta también los pagos al personal de esa rendición
   (`total_pagos_personal`), que el encargado ve sólo como un total. `confirmar_rendicion` rechaza
   si esa suma cambió desde que se abrió el cierre (`pagos_personal_visto`), como con los gastos.

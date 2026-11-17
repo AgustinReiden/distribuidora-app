@@ -74,6 +74,7 @@ correr "Resumen del bot"                     node scripts/check-bot.mjs
 correr "Paridad del tope de regalo"          node scripts/espejo-tope-regalo.mjs
 correr "Paridad del tope del sustituto"      node scripts/espejo-tope-sustituto.mjs
 correr "Espejo de formas de pago"            node scripts/espejo-formas-pago.mjs
+correr "Espejo de motivos de NC de venta"     node scripts/espejo-motivos-nc-venta.mjs
 
 # Los que leen el catálogo directo.
 correr "Realtime"                            node scripts/check-realtime.mjs

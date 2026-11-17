@@ -1129,7 +1129,15 @@ export interface NotaCreditoFormInput {
 // =============================================================================
 
 /** Motivo de una nota de crédito de venta. Espejo del CHECK de la tabla. */
-export type MotivoNotaCreditoVenta = 'producto_vencido' | 'producto_danado' | 'otro';
+/** Los de `nc_venta_motivos()` (B16 v3); espejo en `utils/notaCreditoVenta.ts`. */
+export type MotivoNotaCreditoVenta =
+  | 'cliente_rechaza'
+  | 'error_pedido'
+  | 'error_entrega'
+  | 'producto_vencido'
+  | 'producto_danado'
+  | 'descuento_comercial'
+  | 'otro';
 
 export interface NotaCreditoVentaItemDB {
   id: string;
@@ -1158,6 +1166,11 @@ export interface NotaCreditoVentaDB {
    */
   fecha: string;
   motivo: MotivoNotaCreditoVenta;
+  /**
+   * B16 v3: si resta de la comisión de su boleta (lo decide el server al crearla y
+   * al anularla). Opcional: un server anterior no la tiene.
+   */
+  resta_comision?: boolean;
   observaciones?: string | null;
   total: number;
   usuario_id?: string | null;
