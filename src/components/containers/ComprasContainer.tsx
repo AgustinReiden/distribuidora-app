@@ -179,8 +179,10 @@ export default function ComprasContainer(): React.ReactElement {
   const [aperturaEdicion, setAperturaEdicion] = useState(0)
   const [compraParaCambiarProveedor, setCompraParaCambiarProveedor] = useState<CompraDBExtended | null>(null)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
-  // STK-13: la edición que guardó la compra pero no pudo sincronizar sus lotes.
-  const [lotesPendientes, setLotesPendientes] = useState<LotesSinSincronizar | null>(null)
+  // STK-13: las ediciones que guardaron la compra pero no pudieron sincronizar sus lotes,
+  // una por compra: una edición posterior de la misma compra que sí sincroniza lo borra
+  // (su foto ya es vieja), y la de otra compra no lo pisa.
+  const [lotesPendientes, setLotesPendientes] = useState<Record<string, LotesSinSincronizar>>({})
 
   // Cerrar modales al cambiar de sucursal: las compras son por sucursal.
   useResetOnSucursalChange(() => {
@@ -194,16 +196,17 @@ export default function ComprasContainer(): React.ReactElement {
     setCompraParaEditar(null)
     setCompraParaCambiarProveedor(null)
     setConfirmConfig({ visible: false })
-    setLotesPendientes(null)
+    setLotesPendientes({})
   })
 
   // NC resumen for badges in list
   const ncResumenQuery = useNotasCreditoResumenQuery()
   const ncResumen = ncResumenQuery.data ?? []
-  // 1544-b4: si la consulta falló, `ncResumen` queda vacío y «Editar» aparecía en
-  // una compra que sí tiene notas (el server la rechaza igual, pero con un error
-  // al final de la edición). Sin saber qué notas hay, no se ofrece editar.
-  const puedeOfrecerEditar = !ncResumenQuery.isError
+  // 1544-b4: mientras la consulta carga o si falló sin haber traído nada, `ncResumen`
+  // queda vacío y «Editar» aparecía en una compra que sí tiene notas (el server la
+  // rechaza igual, pero con un error al final de la edición). Sin saber qué notas hay
+  // no se ofrece editar; si un refetch falla con datos buenos ya cargados, se siguen usando.
+  const puedeOfrecerEditar = ncResumenQuery.data !== undefined
 
   // La compra abierta en 'ver', fresca: la de la lista sirve mientras llega
   // (trae el mismo select), y después de anular el detalle se invalida y la
@@ -373,7 +376,10 @@ export default function ComprasContainer(): React.ReactElement {
       // Editar los items puede dejar el II declarado sin cuadrar (una línea que
       // se fue se lleva su alícuota). La RPC avisa; acá se muestra.
       avisosDeLaBase(notify, null, res.warningIiDeclarado, res.warningLotes, res.warningConceptos, res.warningMedidas)
-      if (res.lotesPendientes) setLotesPendientes(res.lotesPendientes)
+      setLotesPendientes(prev => {
+        const { [String(input.compraId)]: _vieja, ...resto } = prev
+        return res.lotesPendientes ? { ...resto, [String(input.compraId)]: res.lotesPendientes } : resto
+      })
       // Dos avisos de costo que se dicen distinto (mig 236). Van en dos y no en
       // uno porque el motivo no es el mismo, y "no es la última" mandado sobre
       // una compra que SÍ es la última manda a buscar donde no hay nada. Desde
@@ -457,11 +463,17 @@ export default function ComprasContainer(): React.ReactElement {
 
   return (
     <>
-      {lotesPendientes && (
-        <Suspense fallback={null}>
-          <AvisoLotesSinSincronizar pendiente={lotesPendientes} onTerminar={() => setLotesPendientes(null)} />
+      {Object.entries(lotesPendientes).map(([compraId, pendiente]) => (
+        <Suspense key={compraId} fallback={null}>
+          <AvisoLotesSinSincronizar
+            pendiente={pendiente}
+            onTerminar={() => setLotesPendientes(prev => {
+              const { [compraId]: _hecha, ...resto } = prev
+              return resto
+            })}
+          />
         </Suspense>
-      )}
+      ))}
       <Suspense fallback={<LoadingState />}>
         <VistaCompras
           compras={compras as any}

@@ -17,6 +17,8 @@ const estado = vi.hoisted(() => ({
   isAdmin: true,
   isEncargado: false,
   ncError: false,
+  /** 'cargando': sin datos todavía; 'refetchFalla': falla un refetch pero hay datos buenos. */
+  ncModo: 'ok' as 'ok' | 'cargando' | 'refetchFalla',
 }))
 
 vi.mock('../../hooks/queries', () => ({
@@ -27,9 +29,11 @@ vi.mock('../../hooks/queries', () => ({
   useProveedoresQuery: () => ({ data: [] }),
   useProductosQuery: () => ({ data: [] }),
   useNotasCreditoByCompraQuery: () => ({ data: [] }),
-  useNotasCreditoResumenQuery: () => (
-    estado.ncError ? { data: undefined, isError: true } : { data: [], isError: false }
-  ),
+  useNotasCreditoResumenQuery: () => {
+    if (estado.ncModo === 'cargando') return { data: undefined, isError: false }
+    if (estado.ncModo === 'refetchFalla') return { data: [], isError: true }
+    return estado.ncError ? { data: undefined, isError: true } : { data: [], isError: false }
+  },
   useRegistrarCompraMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useActualizarCompraMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAnularCompraMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -85,6 +89,7 @@ describe('ComprasContainer · crear producto rápido es sólo de admin (1557-b9)
     estado.isAdmin = true
     estado.isEncargado = false
     estado.ncError = false
+    estado.ncModo = 'ok'
   })
 
   it('el admin lo tiene', async () => {
@@ -109,6 +114,7 @@ describe('ComprasContainer · sin saber las notas de crédito no se ofrece edita
     estado.isAdmin = true
     estado.isEncargado = false
     estado.ncError = false
+    estado.ncModo = 'ok'
   })
 
   it('con las notas cargadas, «Editar» está', async () => {
@@ -121,5 +127,18 @@ describe('ComprasContainer · sin saber las notas de crédito no se ofrece edita
     render(<ComprasContainer />)
     await screen.findByText('Nueva compra')
     expect(screen.queryByText('Editar compra')).not.toBeInTheDocument()
+  })
+
+  it('mientras el resumen carga, «Editar» tampoco se ofrece', async () => {
+    estado.ncModo = 'cargando'
+    render(<ComprasContainer />)
+    await screen.findByText('Nueva compra')
+    expect(screen.queryByText('Editar compra')).not.toBeInTheDocument()
+  })
+
+  it('si falla un refetch pero ya hay datos buenos, «Editar» se sigue ofreciendo', async () => {
+    estado.ncModo = 'refetchFalla'
+    render(<ComprasContainer />)
+    expect(await screen.findByText('Editar compra')).toBeInTheDocument()
   })
 })

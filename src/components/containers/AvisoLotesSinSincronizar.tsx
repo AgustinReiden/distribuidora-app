@@ -19,6 +19,7 @@ import { reintentarSincronizarLotes } from '../../hooks/queries/useComprasQuery'
 import type { LotesSinSincronizar } from '../../hooks/queries/useComprasQuery'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { esErrorReintentable } from '../../utils/errorDeSupabase'
 
 interface AvisoLotesSinSincronizarProps {
   pendiente: LotesSinSincronizar
@@ -32,6 +33,8 @@ export default function AvisoLotesSinSincronizar({ pendiente, onTerminar }: Avis
   const notify = useNotification()
   const [reintentando, setReintentando] = useState(false)
   const [falla, setFalla] = useState<string | null>(null)
+  // Un rechazo del server por regla (más de 8 días, nota de crédito) falla igual cada vez.
+  const [permanente, setPermanente] = useState(!pendiente.reintentable)
 
   const reintentar = async () => {
     setReintentando(true)
@@ -43,6 +46,7 @@ export default function AvisoLotesSinSincronizar({ pendiente, onTerminar }: Avis
       onTerminar()
     } catch (err) {
       setFalla(err instanceof Error && err.message ? err.message : 'No se pudo sincronizar')
+      if (!(err as { sinServidor?: boolean })?.sinServidor && !esErrorReintentable(err)) setPermanente(true)
     } finally {
       setReintentando(false)
     }
@@ -59,12 +63,15 @@ export default function AvisoLotesSinSincronizar({ pendiente, onTerminar }: Avis
         <p>
           La compra se editó, pero sus lotes siguen como estaban: alguno puede tener más unidades que la compra.
           {falla ? ` Último intento: ${falla}` : ''}
+          {permanente ? ' Esto no se arregla reintentando: corregí los vencimientos desde la ficha del producto.' : ''}
         </p>
       </div>
       <div className="flex gap-2">
-        <Button type="button" variant="primary" size="sm" onClick={reintentar} disabled={reintentando}>
-          {reintentando ? 'Sincronizando...' : 'Reintentar'}
-        </Button>
+        {!permanente && (
+          <Button type="button" variant="primary" size="sm" onClick={reintentar} disabled={reintentando}>
+            {reintentando ? 'Sincronizando...' : 'Reintentar'}
+          </Button>
+        )}
         <Button type="button" variant="secondary" size="sm" onClick={onTerminar} disabled={reintentando}>
           Descartar
         </Button>

@@ -34,6 +34,8 @@ const DB: Fila[] = [
 ]
 
 const consultas: Array<{ ids: number[]; limite: number }> = []
+let enVuelo = 0
+let maximoEnVuelo = 0
 
 function builder() {
   let ids: number[] = []
@@ -49,7 +51,9 @@ function builder() {
       .filter(f => ids.includes(f.producto_id))
       .sort((a, c) => c.compra.fecha_compra.localeCompare(a.compra.fecha_compra) || c.compra_id - a.compra_id)
       .slice(0, limite)
-    return Promise.resolve({ data, error: null }).then(resolve)
+    enVuelo += 1
+    maximoEnVuelo = Math.max(maximoEnVuelo, enVuelo)
+    return new Promise(r => setTimeout(r, 3)).then(() => { enVuelo -= 1; return { data, error: null } }).then(resolve)
   }
   return b
 }
@@ -78,6 +82,8 @@ function setup(ids: string[]) {
 describe('costos anteriores: el límite no deja a un producto sin su compra anterior', () => {
   beforeEach(() => {
     consultas.length = 0
+    enVuelo = 0
+    maximoEnVuelo = 0
   })
 
   it('un producto con una compra vieja la sigue teniendo aunque otro llene la ventana', async () => {
@@ -95,5 +101,24 @@ describe('costos anteriores: el límite no deja a un producto sin su compra ante
 
     expect(result.current.data?.get('2')?.costoRealUnitario).toBe(777)
     expect(consultas).toHaveLength(1)
+  })
+
+  it('los productos sin resolver se piden de a pocos a la vez, no todos juntos', async () => {
+    // El producto 1 llena la ventana (275 = 25 x 11 productos); los otros diez no tienen ninguna compra.
+    const extra = Array.from({ length: 300 }, (_, i) => fila(1, 5000 + i, '2026-06-01', 50))
+    DB.push(...extra)
+    try {
+      const nuevos = Array.from({ length: 10 }, (_, i) => String(100 + i))
+      const { result } = setup(['1', ...nuevos])
+      await waitFor(() => expect(result.current.data).toBeDefined())
+
+      expect(result.current.data?.get('1')).toBeDefined()
+      // 1 consulta con la ventana + una por cada producto sin resolver...
+      expect(consultas).toHaveLength(1 + nuevos.length)
+      // ...pero nunca más de 4 en vuelo.
+      expect(maximoEnVuelo).toBeLessThanOrEqual(4)
+    } finally {
+      DB.splice(DB.length - extra.length, extra.length)
+    }
   })
 })

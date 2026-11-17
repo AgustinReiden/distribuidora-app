@@ -169,11 +169,15 @@ export default function ModalNotaCredito({
   // #1590-c: la devolución tiene el mismo tope, pero sólo si la compra ya tiene un
   // ajuste (decisión del dueño, #1565): sin ajustes, devolver toda la mercadería
   // entra siempre aunque acredite más que el total. Es la regla de
-  // `registrar_nota_credito`; acá se avisa antes de guardar y no por el error.
+  // `registrar_nota_credito`, pero acá es sólo un AVISO, no bloquea: el server
+  // compara el importe NETO de los descuentos de la compra
+  // (`_compra_factor_neto`, mig 523), un factor que el modal no tiene, y con
+  // un descuento de cabecera acepta lo que este total bruto parece pasar. Decide
+  // el server, y su rechazo ya se muestra.
   const tieneAjuste = notasExistentes.some(n => n.tipo === 'ajuste')
   const devolucionExcede = tieneAjuste && restanteCompra !== null && Math.round(totalDevolucion * 100) / 100 > restanteCompra
   const puedeGuardar = modo === 'devolucion'
-    ? itemsConCantidad.length > 0 && !devolucionExcede
+    ? itemsConCantidad.length > 0
     : ajuste.total > 0 && !ajusteExcede && motivo.trim() !== '' && (sinCredito || ajIvaCargado)
 
   const handleCantidadChange = (lineaId: string, value: string) => {
@@ -418,12 +422,12 @@ export default function ModalNotaCredito({
               </div>
               {tieneAjuste && restanteCompra !== null && (
                 <p
-                  role={devolucionExcede ? 'alert' : undefined}
+                  role={devolucionExcede ? 'status' : undefined}
                   data-testid="nc-devolucion-restante"
-                  className={`text-xs ${devolucionExcede ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}`}
+                  className={`text-xs ${devolucionExcede ? 'text-amber-700 dark:text-amber-400' : 'text-gray-600 dark:text-gray-400'}`}
                 >
                   {devolucionExcede
-                    ? `Supera lo que le queda a la compra: ${formatPrecio(Math.max(restanteCompra, 0))} (su total menos las notas que ya tiene, contando los ajustes).`
+                    ? `Puede superar lo que le queda a la compra: ${formatPrecio(Math.max(restanteCompra, 0))} (su total menos las notas que ya tiene, contando los ajustes). Al guardar, el sistema lo mide con el importe neto de los descuentos de la factura y avisa si no entra.`
                     : `Le quedan ${formatPrecio(Math.max(restanteCompra, 0))} por acreditar (su total menos las notas que ya tiene, contando los ajustes).`}
                 </p>
               )}

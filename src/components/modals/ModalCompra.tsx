@@ -2881,7 +2881,7 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
               commitOnChange
               className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
             />
-            {/* 1557-c5: cómo leyó la app lo tipeado («12.375» es doce mil, no doce con tres). */}
+            {/* 1557-c5: cómo leyó la app lo tipeado, a la vista en el mismo campo y no recién en el subtotal. */}
             {!ver && <MontoLeido monto={item.costoUnitario} />}
           </div>
           <div>

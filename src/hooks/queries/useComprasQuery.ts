@@ -5,7 +5,8 @@
 import { useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
-import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { errorDeSupabase, esErrorReintentable } from '../../utils/errorDeSupabase'
+import type { ErrorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { aplanarVencimientos } from '../../utils/vencimientos'
 import { fechaLocalISO } from '../../utils/formatters'
@@ -330,6 +331,8 @@ async function fetchComprasMismaFactura(
 
 /** Líneas que se piden por producto: sobra para saltear las dos o tres que se excluyen. */
 const POR_PRODUCTO_COSTO_ANTERIOR = 25
+/** Tope de consultas por producto en vuelo a la vez, cuando la ventana global se llena. */
+const CONSULTAS_SIMULTANEAS_COSTO_ANTERIOR = 4
 
 /**
  * Las líneas de compras anteriores de estos productos, para la variación de
@@ -392,7 +395,13 @@ async function fetchCostosAnteriores(
   const resueltos = elegirCostosAnteriores(filas, ref)
   const sinResolver = productoIds.filter(id => !resueltos.has(String(id)))
   if (sinResolver.length === 0) return filas
-  const aparte = await Promise.all(sinResolver.map(id => leer([id], POR_PRODUCTO_COSTO_ANTERIOR)))
+  // De a pocas a la vez: una factura grande con muchos productos sin compra anterior
+  // (los nuevos nunca se resuelven) no tiene que lanzar decenas de consultas juntas.
+  const aparte: FilaCostoAnterior[][] = []
+  for (let i = 0; i < sinResolver.length; i += CONSULTAS_SIMULTANEAS_COSTO_ANTERIOR) {
+    const tanda = sinResolver.slice(i, i + CONSULTAS_SIMULTANEAS_COSTO_ANTERIOR)
+    aparte.push(...await Promise.all(tanda.map(id => leer([id], POR_PRODUCTO_COSTO_ANTERIOR))))
+  }
   return [...filas, ...aparte.flat()]
 }
 
@@ -495,6 +504,12 @@ async function llamarSincronizarLotes(compraId: string | number, lotes: LotesDeC
 export interface LotesSinSincronizar {
   compraId: string
   lotes: LotesDeCompra
+  /**
+   * `false` si el server rechazó por regla (la compra pasó los 8 días, entró una
+   * nota de crédito): repetir la misma llamada falla siempre y el aviso no
+   * ofrece reintentar. `true` si fue de red o un fallo transitorio.
+   */
+  reintentable: boolean
 }
 
 /**
@@ -1050,11 +1065,16 @@ async function actualizarCompraItems(
   try {
     warningLotes = await llamarSincronizarLotes(result.compra_id, lotes)
   } catch (e) {
-    lotesPendientes = { compraId: String(result.compra_id), lotes }
+    // De red o transitorio se reintenta; un rechazo del server por regla (la
+    // compra pasó los 8 días, entró una nota de crédito) falla igual la segunda vez.
+    const reintentable = (e as Partial<ErrorDeSupabase>)?.sinServidor === true || esErrorReintentable(e)
+    lotesPendientes = { compraId: String(result.compra_id), lotes, reintentable }
     warningLotes = 'La compra se editó, pero los vencimientos no se pudieron sincronizar con las nuevas cantidades: ' +
       `${e instanceof Error ? e.message : 'error desconocido'}. ` +
       'Mientras no se sincronicen, un vencimiento de esta compra puede tener más unidades que la compra misma. ' +
-      'Reintentá la sincronización desde el aviso, o abrí la compra y guardala de nuevo.'
+      (reintentable
+        ? 'Reintentá la sincronización desde el aviso, o abrí la compra y guardala de nuevo.'
+        : 'Esto no se arregla reintentando: corregí los vencimientos desde la ficha del producto.')
   }
   const warningMedidas = await guardarMedidasDeFicha(input.medidasFicha)
 

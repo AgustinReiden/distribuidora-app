@@ -72,10 +72,12 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
   // 1557-b11: «Precio de venta» (o PVP, o «precio público») contiene «precio»
   // pero es lo que se le cobra al cliente, no lo que se le paga al proveedor.
   // Tomado como costo inflaba el stock valorizado y el costo promedio.
-  const NO_ES_COSTO = ['venta', 'pvp', 'publico', 'público'];
+  // Se miran PALABRAS enteras: «venta» no es «inventario».
+  const NO_ES_COSTO = new Set(['venta', 'ventas', 'pvp', 'publico']);
   const columnaDeCosto = (k: string): boolean => {
     const n = k.toLowerCase().trim();
-    return COLUMNAS.costoUnitario.some(nombre => n.includes(nombre)) && !NO_ES_COSTO.some(x => n.includes(x));
+    const palabras = n.normalize('NFD').replace(/[̀-ͯ]/g, '').split(/[^a-z0-9]+/);
+    return COLUMNAS.costoUnitario.some(nombre => n.includes(nombre)) && !palabras.some(p => NO_ES_COSTO.has(p));
   };
 
   const encontrarValor = (fila: ExcelRow, posiblesNombres: string[]): string | number | null | undefined => {
@@ -115,11 +117,11 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
     const erroresTemp: string[] = [];
 
     // Sin una columna de costo cada fila diría «el costo es 0», que manda a
-    // buscar el problema en la fila y no en el archivo.
+    // buscar el problema en la fila y no en el archivo: se dice acá, una vez. No
+    // se corta el archivo: las filas con bonificación del 100 % (regalos) no
+    // llevan costo y entran igual; las demás se rechazan por su costo 0.
     if (datos.length > 0 && !datos.some(fila => Object.keys(fila).some(columnaDeCosto))) {
-      setPreview([]);
-      setErroresParseo(prev => [...prev, 'No se encontró una columna de costo (por ejemplo "Costo"). Una columna "Precio de venta" no se toma como costo: es lo que se le cobra al cliente, no lo que se le paga al proveedor.']);
-      return;
+      erroresTemp.push('No se encontró una columna de costo (por ejemplo "Costo"). Una columna "Precio de venta" no se toma como costo: es lo que se le cobra al cliente, no lo que se le paga al proveedor. Sólo entran las filas con bonificación del 100 %.');
     }
 
     datos.forEach((fila, index) => {

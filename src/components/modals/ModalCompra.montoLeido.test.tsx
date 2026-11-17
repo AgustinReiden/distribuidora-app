@@ -1,8 +1,9 @@
 /**
- * 1557-c5: en la compra no había `MontoLeido`. Un costo tipeado «12.375» queda
- * leído como 12.375 (el punto es de miles) y recién se veía en el subtotal de la
- * línea; en un campo de plata, quien carga tiene que ver cómo lo leyó la app en
- * el mismo campo, como en los cobros.
+ * 1557-c5: en la compra no había `MontoLeido`: lo que la app leyó de un costo
+ * tipeado recién se veía en el subtotal de la línea. En un campo de plata, quien
+ * carga tiene que ver cómo lo leyó la app en el mismo campo, como en los cobros.
+ * El test no depende de cómo se lee el punto tipeado (es de otra tarjeta): usa el
+ * costo precargado de la ficha y una coma decimal.
  *
  * Datos sintéticos.
  */

@@ -75,7 +75,7 @@ describe('STK-13 · editar la compra y sincronizar los lotes', () => {
   })
 
   it('si fallan, la compra queda editada y el resultado dice qué falta y cómo reintentarlo', async () => {
-    rpcSegun(() => ({ data: null, error: { message: 'Failed to fetch' } }))
+    rpcSegun(() => ({ data: null, error: { message: 'TypeError: Failed to fetch', code: '' } }))
     const { result } = setup()
     const res = await result.current.mutateAsync(edicion)
 
@@ -84,7 +84,18 @@ describe('STK-13 · editar la compra y sincronizar los lotes', () => {
     expect(res.warningLotes).toMatch(/La compra se editó/)
     expect(res.warningLotes).toMatch(/vencimientos/)
     expect(res.warningLotes).toMatch(/más unidades que la compra/)
-    expect(res.lotesPendientes).toEqual({ compraId: '221', lotes: LOTES })
+    expect(res.lotesPendientes).toEqual({ compraId: '221', lotes: LOTES, reintentable: true })
+  })
+
+  it('si el server rechaza por regla (más de 8 días), muestra el motivo y no aconseja reintentar', async () => {
+    rpcSegun(() => ({ data: null, error: { code: 'P0001', message: 'La compra tiene más de 8 días: no se pueden sincronizar sus lotes.' } }))
+    const { result } = setup()
+    const res = await result.current.mutateAsync(edicion)
+
+    expect(res.warningLotes).toMatch(/más de 8 días/)
+    expect(res.warningLotes).toMatch(/ficha del producto/)
+    expect(res.warningLotes).not.toMatch(/Reintentá/)
+    expect(res.lotesPendientes).toMatchObject({ compraId: '221', reintentable: false })
   })
 
   it('el reintento manda la misma foto de lotes y deja la lista de lotes al día', async () => {
@@ -92,7 +103,7 @@ describe('STK-13 · editar la compra y sincronizar los lotes', () => {
     const qc = new QueryClient()
     qc.setQueryData(['lotes', 1, 'reporte', 14], [])
 
-    const aviso = await reintentarSincronizarLotes(qc, 1, { compraId: '221', lotes: LOTES })
+    const aviso = await reintentarSincronizarLotes(qc, 1, { compraId: '221', lotes: LOTES, reintentable: true })
 
     expect(aviso).toBeNull()
     expect(rpc).toHaveBeenCalledWith('sincronizar_lotes_compra', { p_compra_id: '221', p_lotes: LOTES })
@@ -100,8 +111,8 @@ describe('STK-13 · editar la compra y sincronizar los lotes', () => {
   })
 
   it('si el reintento vuelve a fallar, lanza el error para que la pantalla lo muestre y deje reintentar', async () => {
-    rpcSegun(() => ({ data: null, error: { message: 'Failed to fetch' } }))
+    rpcSegun(() => ({ data: null, error: { message: 'TypeError: Failed to fetch', code: '' } }))
     const qc = new QueryClient()
-    await expect(reintentarSincronizarLotes(qc, 1, { compraId: '221', lotes: LOTES })).rejects.toThrow()
+    await expect(reintentarSincronizarLotes(qc, 1, { compraId: '221', lotes: LOTES, reintentable: true })).rejects.toThrow()
   })
 })

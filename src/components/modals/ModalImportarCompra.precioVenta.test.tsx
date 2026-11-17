@@ -46,6 +46,27 @@ describe('ModalImportarCompra · un precio de venta no es un costo (1557-b11)', 
     expect(onImportar).not.toHaveBeenCalled()
   })
 
+  it('sin columna de costo no se corta el archivo: las filas con bonificación del 100 % (regalos) entran', async () => {
+    const { onImportar, user } = await subir([
+      { Codigo: 'A', Cantidad: 5, 'Precio de venta': 1500, 'Bonificacion%': 100 },
+      { Codigo: 'A', Cantidad: 2, 'Precio de venta': 1500 },
+    ])
+
+    expect(await screen.findByText(/No se encontró una columna de costo/)).toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: /Importar 1 item/ }))
+    await waitFor(() => expect(onImportar).toHaveBeenCalledTimes(1))
+    const items = onImportar.mock.calls[0][0] as { cantidad: number; bonificacion: number; costoUnitario: number }[]
+    expect(items.map(i => [i.cantidad, i.bonificacion, i.costoUnitario])).toEqual([[5, 100, 0]])
+  })
+
+  it('«Costo inventario» es un costo: «venta» no se busca adentro de «inventario»', async () => {
+    const { onImportar, user } = await subir([{ Codigo: 'A', Cantidad: 5, 'Costo inventario': 650 }])
+
+    await user.click(await screen.findByRole('button', { name: /Importar 1 item/ }))
+    await waitFor(() => expect(onImportar).toHaveBeenCalledTimes(1))
+    expect((onImportar.mock.calls[0][0] as { costoUnitario: number }[])[0].costoUnitario).toBe(650)
+  })
+
   it('con «Costo» y «Precio de venta» toma el costo, esté la columna donde esté', async () => {
     const { onImportar, user } = await subir([{ Codigo: 'A', Cantidad: 5, 'Precio de venta': 1500, Costo: 900 }])
 
