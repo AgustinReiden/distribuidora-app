@@ -9,8 +9,13 @@
 --        y el nuevo: la edición con el viejo se rechaza, con el nuevo pasa. El
 --        replay idempotente no devuelve versiones ni mueve nada.
 --   V2 · lo mismo con dividir_regalo_pedido.
---   F1 · regalo_mueve_stock_foto: el modo de la foto, aunque la promo cambie de
---        tipo; NULL en una línea de venta y fuera de la sucursal activa. Permisos.
+--   F1 · el modo de la foto (pedido_items.regalo_mueve_stock_foto), aunque la promo
+--        cambie de tipo; NULL en una línea de venta. Desde #1417 (mig 451) es una
+--        COLUMNA real y la función regalo_mueve_stock_foto(pedido_items) ya no existe
+--        (una columna computada sobre pedido_items rompe el select de todos los roles):
+--        el ensayo lee la columna, y lo que dependía de la función (SECURITY DEFINER,
+--        SEG-A, permisos, «fuera de la sucursal activa») lo cubren A7 y A8 de
+--        scripts/test-modo-foto-regalo-1417.sql.
 --
 -- Contra prod sin la migración fallan todos. Corre SIN dejar rastro: cada caso en
 -- un subbloque revertido, y todo termina en un RAISE. El veredicto es 'ENSAYO OK'
@@ -314,15 +319,14 @@ $fn$;
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION pg_temp.rv_foto(p_item bigint)
 RETURNS boolean LANGUAGE sql AS $fn$
-  SELECT public.regalo_mueve_stock_foto(pi) FROM public.pedido_items pi WHERE pi.id = p_item;
+  SELECT pi.regalo_mueve_stock_foto FROM public.pedido_items pi WHERE pi.id = p_item;
 $fn$;
 
 CREATE OR REPLACE FUNCTION pg_temp.rv_caso_f1(p_cli bigint, p_adm uuid, p_suc bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   f text[] := '{}'; v bigint; w bigint; r bigint; z bigint; v_frac bigint; v_entera bigint;
-  p1 bigint; p2 bigint; v_fn constant text := 'public.regalo_mueve_stock_foto(public.pedido_items)';
-  v_headers text := current_setting('request.headers', true);
+  p1 bigint; p2 bigint;
 BEGIN
   v := pg_temp.rv_prod(p_suc, p_adm, 'v');
   w := pg_temp.rv_prod(p_suc, p_adm, 'w');
@@ -345,16 +349,6 @@ BEGIN
   f := pg_temp.rv_si(f, pg_temp.rv_foto(pg_temp.rv_linea(p2, z)) IS TRUE,
                      'unidad entera que pasó a fracción: la foto leyó la promo de hoy');
 
-  -- Fuera de la sucursal activa no dice nada: puede_leer_pedido la mira.
-  PERFORM set_config('request.headers', json_build_object('x-sucursal-id', '-1')::text, true);
-  f := pg_temp.rv_si(f, pg_temp.rv_foto(pg_temp.rv_linea(p1, r)) IS NULL, 'fuera de la sucursal activa devolvió el modo');
-  PERFORM set_config('request.headers', v_headers, true);
-
-  f := pg_temp.rv_si(f, (SELECT prosecdef FROM pg_proc WHERE oid = v_fn::regprocedure), 'no es SECURITY DEFINER');
-  f := pg_temp.rv_si(f, NOT EXISTS (SELECT 1 FROM public.auditoria_definer_sin_rol() a WHERE a.firma LIKE 'regalo_mueve_stock_foto%'),
-                     'SEG-A la marca sin guard de rol');
-  f := pg_temp.rv_si(f, has_function_privilege('authenticated', v_fn, 'EXECUTE')
-                        AND NOT has_function_privilege('anon', v_fn, 'EXECUTE'), 'permisos');
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;

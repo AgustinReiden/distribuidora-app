@@ -18,7 +18,7 @@
  */
 import '@testing-library/jest-dom/vitest'
 import React from 'react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
@@ -111,6 +111,18 @@ beforeEach(() => {
 // corrida, el import en frío se come casi todo el segundo por defecto de
 // `findBy*`, y con la máquina cargada el primer caso del archivo se pasaba (#821).
 const ESPERA_VISTA = { timeout: 5000 }
+
+// #1587: ese margen de 5 s tampoco alcanza con la suite entera y la máquina cargada: el
+// import en frío de la vista se encola con los de los otros archivos en el servidor de
+// transformación de vitest, tarda más que eso, y fallaron DOS tests (los que se montaron con
+// el import todavía en vuelo) aunque el archivo solo pasa 14 de 14 (medido: el primero tarda
+// ~1 s en frío y el resto ~0,3 s, sin carga). Subir el timeout sólo corría el borde: lo que se
+// espera es un import, no la pantalla, así que se hace antes de todo, en un `beforeAll` con
+// margen propio, como `ConfirmacionSobreModalAMano`. Con la vista ya resuelta, el `findBy` de
+// `montar()` sólo espera un render.
+beforeAll(async () => {
+  await import('../../vistas/VistaMovimientos')
+}, 120_000)
 
 async function montar() {
   const vista = render(<MovimientosContainer />)

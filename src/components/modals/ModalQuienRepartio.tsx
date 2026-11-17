@@ -3,6 +3,7 @@ import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import CampoQuienRepartio from './CampoQuienRepartio'
 import { fechaLocalISO } from '../../utils/formatters'
+import { errorDeFechaEntrega, rangoFechaEntrega } from '../../utils/fechaEntrega'
 import type { PedidoDB, PerfilDB } from '../../types'
 import type { EleccionChofer } from '../../utils/choferDeEntrega'
 
@@ -15,6 +16,10 @@ export interface ModalQuienRepartioProps {
   /** Entrega elegida: quién la repartió y a qué día pertenece. */
   onConfirm: (eleccion: EleccionChofer, fechaEntrega: string) => void
   onClose: () => void
+  /** Sólo el admin fecha una entrega hasta 60 días atrás; el resto, hasta `diasAtrasFechaEntrega`. */
+  esAdmin?: boolean
+  /** `politicas_comerciales.dias_atras_fecha_pedido` de la sucursal (7 por defecto). */
+  diasAtrasFechaEntrega?: number | null
 }
 
 /**
@@ -28,9 +33,16 @@ const ModalQuienRepartio = memo(function ModalQuienRepartio({
   permitirRetiro,
   onConfirm,
   onClose,
+  esAdmin = false,
+  diasAtrasFechaEntrega,
 }: ModalQuienRepartioProps) {
   const [eleccion, setEleccion] = useState<EleccionChofer | null>(null)
-  const [fecha, setFecha] = useState<string>(fechaLocalISO())
+  const [hoy] = useState<string>(fechaLocalISO)
+  const [fecha, setFecha] = useState<string>(hoy)
+  // La regla del server (`_fecha_entrega_fuera_de_rango`), no sólo un `max`.
+  const regla = { esAdmin, diasAtras: diasAtrasFechaEntrega, hoy }
+  const rango = rangoFechaEntrega(regla)
+  const errorFecha = errorDeFechaEntrega(fecha, regla)
   const esCambio = pedido.canal === 'cambio'
 
   return (
@@ -60,13 +72,19 @@ const ModalQuienRepartio = memo(function ModalQuienRepartio({
             id="fecha-entrega-chofer"
             type="date"
             value={fecha}
-            max={fechaLocalISO()}
+            min={rango.min}
+            max={rango.max}
             onChange={e => setFecha(e.target.value)}
+            aria-invalid={errorFecha ? true : undefined}
             className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
           />
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Si estás cargando la entrega de un día anterior, cambiala: define en qué día se contabiliza.
-          </p>
+          {errorFecha ? (
+            <p role="alert" className="text-xs text-red-600 dark:text-red-400 mt-1">{errorFecha}</p>
+          ) : (
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Si estás cargando la entrega de un día anterior, cambiala: define en qué día se contabiliza.
+            </p>
+          )}
         </div>
       </div>
 
@@ -75,8 +93,8 @@ const ModalQuienRepartio = memo(function ModalQuienRepartio({
           Cancelar
         </Button>
         <Button
-          onClick={() => { if (eleccion && fecha) onConfirm(eleccion, fecha) }}
-          disabled={!eleccion || !fecha}
+          onClick={() => { if (eleccion && fecha && !errorFecha) onConfirm(eleccion, fecha) }}
+          disabled={!eleccion || !fecha || !!errorFecha}
           variant="primary"
           size="md"
         >

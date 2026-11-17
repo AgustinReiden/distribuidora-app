@@ -22,6 +22,7 @@ DECLARE
   v_prod    bigint;  -- producto activo de v_suc con stock
   v_compra  bigint;  -- compra de v_suc con un renglón todavía acreditable
   v_prod_nc bigint;  -- producto de ese renglón, con stock
+  v_cu_nc numeric;   -- su costo unitario en la compra
   v_pedido  bigint;
   v_id      bigint;
   v_antes   int;
@@ -86,10 +87,14 @@ BEGIN
   IF v_compra IS NULL THEN
     v_saltados := v_saltados || 'registrar_nota_credito: no hay renglón acreditable con stock'::text;
   ELSE
+    -- Desde la 466 (#1471) la nota por factura trae el importe de la propia línea (su costo neto con la bonificación): con
+    -- 1 de costo y 0 de IVA se rechaza. Se toma el costo del renglón de la compra y el IVA de la compra.
+    SELECT ci.costo_unitario INTO v_cu_nc FROM compra_items ci WHERE ci.compra_id = v_compra AND ci.producto_id = v_prod_nc LIMIT 1;
     EXECUTE 'SET LOCAL ROLE authenticated';
-    v_json := public.registrar_nota_credito(v_compra, 'ENSAYO-1043', 'ensayo #1043', 0, 0, 1, v_admin,
+    v_json := public.registrar_nota_credito(v_compra, 'ENSAYO-1043', 'ensayo #1043', v_cu_nc, round(v_cu_nc * 0.21, 2),
+      round(v_cu_nc * 1.21, 2), v_admin,
       jsonb_build_array(jsonb_build_object('producto_id', v_prod_nc, 'cantidad', 1,
-                                           'costo_unitario', 1, 'subtotal', 1)), 0);
+                                           'costo_unitario', v_cu_nc, 'subtotal', v_cu_nc)), 0);
     EXECUTE 'RESET ROLE';
     IF NOT COALESCE((v_json->>'success')::boolean, false) THEN
       v_saltados := v_saltados || format('registrar_nota_credito no corrió: %s', v_json);

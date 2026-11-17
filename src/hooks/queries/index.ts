@@ -53,6 +53,7 @@ export {
   useCrearMarcaMutation,
   useRenombrarMarcaMutation,
   useEliminarMarcaMutation,
+  useMetasDeMarcaQuery,
   useToggleMarcaActivaMutation,
   useAsignarMarcaMasivaMutation,
 } from './useMarcasQuery'

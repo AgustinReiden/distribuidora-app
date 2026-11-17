@@ -7,13 +7,25 @@ Supabase (Postgres + Auth + RLS) en el back, edge functions en Deno.
 
 En un worktree, `npm ci` primero (ver Trampas). Antes de dar algo por terminado corré las
 cuatro: `typecheck`, `lint`, `test:run`, `build`.
-El pre-commit ya corre `check-secrets.sh`, `lint-staged` y los tests.
+El pre-commit ya corre `check-secrets.sh`, `lint-staged` y los tests relacionados con lo que cambió (`npm run test:commit`, `scripts/tests-del-commit.sh`: `vitest related` más los tests que leen el árbol desde el disco). La suite entera corre en el CI (`ci.yml`, job `test`); el pre-commit sólo la corre si cambia la config, el setup de los tests o una dependencia.
 
 E2E: `npm run test:e2e` (Playwright, chromium).
 
 `npm run check:migrations` **no corre localmente**: necesita `SUPABASE_URL` y
 `SUPABASE_SERVICE_ROLE_KEY`, que no están en `.env`. Es un gate de CI
 (`.github/workflows/integridad.yml`), no un comando de desarrollo.
+
+Los gates de SQL y los ensayos `scripts/test-*.sql` corren **en cada PR que toca `migrations/` o
+`scripts/`** (`.github/workflows/sql-local.yml`, #1601): sobre una base local de Docker armada con
+la foto del esquema de prod (`esquema-base.yml`, sin datos; sin foto, o con más de 48 horas, el job
+falla: se dispara a mano) más las migraciones que la foto no tiene (las numeradas que se aplicaron
+después de tomarla y las `NNN_*.sql` del PR). El PR tiene que estar al día con main.
+El cron de `integridad.yml` queda para lo que sólo se ve con los datos de prod. Un gate o un
+ensayo nuevo corre ahí sin secrets; si encuentra algo que hoy está así a propósito, va a su lista
+de excepciones (`scripts/*-permitidas.json`, `ensayos-sql-excepciones.json`) con su motivo, y la
+lista **sólo se achica**. Localmente: `GATE_DB_CONTENEDOR=<contenedor> bash scripts/ci/gates-locales.sh`
+(la base se arma con `scripts/concurrencia/docker-local.mjs` y la semilla de `scripts/ci/`; esa semilla
+y ese criterio de «ensayo OK» son los del CI).
 
 Deploy: push a `main` → webhook de Coolify. La config de nginx de producción **vive en el
 panel de Coolify**, no en el `nginx.conf` del repo — editar el repo no cambia nada.
@@ -365,6 +377,16 @@ suelta en `sucursales`.
   deja tocar uno con una línea viva. El efectivo a entregar resta los dos.
   `total_pagos_personal` es sólo `tipo = 'pago'`: una suma nueva de movimientos por rendición
   elige sus tipos. Se deshace todo junto (`deshacer_resolucion_rendicion`), nunca un pedazo.
+- **En el personal, el empleado se toma antes que la rendición y que el gasto** (GTO-E, ola 2 de
+  #1603): los empleados por id, después la rendición, después la fila. Así lo hacen
+  `registrar_movimiento_empleado`, `liquidar_empleado`, `resolver_rendicion`, `_guardar_gasto` y
+  `_anular_gasto`; un camino nuevo que escriba la cuenta de un empleado lo toma primero, no confía
+  en el FOR KEY SHARE de la FK. Los rubros de gasto son de toda la empresa: los cambia sólo un admin
+  de todas las sucursales (decisión del dueño). La edición de un gasto manda `updated_at_esperado` y
+  el server rechaza si otro lo cambió (decisión del dueño), y el tope del IVA es el 27 % del neto más
+  un centavo por renglón de la factura (`gastos.renglones_factura`, de 1 a 99; decisión del dueño).
+  `_rubro_es_sueldo` frena «sac» y «vacaciones» como palabra en cualquier parte del nombre, y
+  «comisiones» salvo la de un medio de cobro (decisión del dueño).
 - **Un vale blanco está saldado por naturaleza** (migs 317/318): `tipo_factura = 'VB'` ⇒
   `monto_pagado = total`, `estado_pago = 'pagado'` y **cero** filas en `pagos` (lo fuerza
   `actualizar_estado_pago_pedido` y el CHECK `pedidos_vb_coherente`). No es deuda, no se

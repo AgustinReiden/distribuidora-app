@@ -10,6 +10,7 @@ import { QueryClient, QueryCache } from '@tanstack/react-query'
 import { notifyQueryError } from './queryErrorNotifier'
 import { esErrorReintentable } from '../utils/errorDeSupabase'
 import { crearFiltroDeAvisosDeConsulta } from './avisoConsultaFallida'
+import { mensajeDeConsultaFallida } from '../utils/mensajeDeConsultaFallida'
 
 const debeAvisarConsultaFallida = crearFiltroDeAvisosDeConsulta()
 
@@ -24,9 +25,11 @@ export const queryClient = new QueryClient({
   // cada intento (ver `avisoConsultaFallida`); `meta.silentError` ahora lo usa
   // la campana, que ya muestra su propio error.
   queryCache: new QueryCache({
-    onError: (_error, query) => {
+    onError: (error, query) => {
       if (!debeAvisarConsultaFallida(query)) return
-      notifyQueryError('No se pudo cargar la información. Verificá tu conexión.')
+      // 1563-b6: el texto depende de la causa. "Verificá tu conexión" para un 42501 o un
+      // PGRST201 mandaba al usuario a mirar la señal cuando la conexión estaba bien.
+      notifyQueryError(mensajeDeConsultaFallida(error))
     },
   }),
   defaultOptions: {

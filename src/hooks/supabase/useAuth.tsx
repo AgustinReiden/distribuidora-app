@@ -8,7 +8,9 @@ import { esFalloDeRed } from '../../utils/falloDeRed'
 import { fijarUsuarioRequestIds } from '../../utils/requestIdPersistente'
 import { fijarUsuarioNotificaciones } from '../../utils/notificacionesGuardadas'
 import { limpiarDatosSensiblesLocales } from '../../lib/limpiezaLocal'
+import { queryClient } from '../../lib/queryClient'
 import { guardarAvisoDeCierre } from '../../utils/avisoDeCierreDeSesion'
+import { EVENTO_REVALIDAR_PERFIL } from '../../utils/revalidarPerfil'
 import type { RolUsuario } from '../../types'
 
 /**
@@ -29,6 +31,10 @@ const INACTIVITY_TICK_MS = 60 * 1000
  * timers (app suspendida, pestania dormida): ese tiempo no es uso, no cuenta.
  */
 const INACTIVITY_SALTO_MAX_MS = INACTIVITY_TICK_MS * 3
+/** Cada cuánto se revalida el perfil con la sesión abierta (pestaña visible y con red). */
+const REVALIDACION_PERFIL_MS = 7 * 60 * 1000
+/** Mínimo entre dos revalidaciones por foco, visibilidad o intervalo. */
+const REVALIDACION_MIN_MS = 60 * 1000
 const AUTH_REQUEST_TIMEOUT_MS = 15000
 const AUTH_BOOTSTRAP_FAILSAFE_TIMEOUT_MS = AUTH_REQUEST_TIMEOUT_MS + 3000
 
@@ -52,6 +58,9 @@ const ACTIVITY_EVENTS: ActivityEventName[] = [
   'click',
   'input'
 ]
+
+/** Lo que dice el login. Contiene «perfil»: `LoginScreen` sólo muestra tal cual los mensajes que lo nombran. */
+const MENSAJE_PERFIL_DESACTIVADO = 'Tu perfil está desactivado. Consultá con el administrador.'
 
 export interface Perfil {
   id: string;
@@ -139,8 +148,9 @@ function leerPerfilCacheado(userId: string): Perfil | null {
     if (!crudo) return null
     const perfil = JSON.parse(crudo) as Perfil
     // Del usuario de ESTA sesión y de nadie más: en un teléfono compartido, el
-    // perfil cacheado del anterior le daría a este el rol del otro.
-    return perfil?.id === userId ? perfil : null
+    // perfil cacheado del anterior le daría a este el rol del otro. Y uno desactivado no
+    // sirve para arrancar sin señal (1600-b15).
+    return perfil?.id === userId && perfil.activo !== false ? perfil : null
   } catch {
     return null
   }
@@ -153,6 +163,11 @@ function leerPerfilCacheado(userId: string): Perfil | null {
 interface ResultadoPerfil {
   perfil: Perfil | null
   huboServidor: boolean
+  /**
+   * El servidor contestó y el perfil está desactivado (1600-b15): no es lo mismo que "no
+   * se pudo leer" (red) ni que "no existe". Con `desactivado`, `perfil` es null a propósito.
+   */
+  desactivado?: boolean
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
@@ -246,7 +261,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         )
 
         if (error) {
-          logger.error('[useAuth] Error fetching perfil:', error)
+          // Sin red no es un error de la app: con señal intermitente la revalidación del perfil
+          // falla una y otra vez y cada una mandaba un evento a Sentry (S1).
+          if (esFalloDeRed(error)) logger.warn('[useAuth] Sin red al leer el perfil:', error)
+          else logger.error('[useAuth] Error fetching perfil:', error)
           return { perfil: null, huboServidor: !esFalloDeRed(error) }
         }
 
@@ -256,14 +274,39 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
 
         const nextPerfil = data as Perfil
+        // Un desactivado con el token todavía vivo (el ban de Auth no invalida un access
+        // token ya emitido): el server ya le niega todo, y acá no se le arma la app. No
+        // se muestra ni se cachea (1600-b15).
+        if (nextPerfil.activo === false) {
+          logger.warn('[useAuth] El perfil está desactivado:', userId)
+          try {
+            localStorage.removeItem(CLAVE_PERFIL_CACHEADO)
+          } catch {
+            // Sin storage no hay nada que olvidar.
+          }
+          return { perfil: null, huboServidor: true, desactivado: true }
+        }
         guardarPerfilCacheado(nextPerfil)
         if (mountedRef.current && userIdRef.current === userId) {
+          // Sólo se pisa el estado si algo cambió: la revalidación a mitad de sesión (foco, red,
+          // intervalo) no tiene que re-renderizar toda la app cada vez.
+          const anterior = perfilRef.current
+          const cambio = perfilDesdeCacheRef.current
+            || JSON.stringify(anterior) !== JSON.stringify(nextPerfil)
+          // Cambió el rol con la sesión abierta (S2): lo que hay en el caché de TanStack se leyó con
+          // el rol anterior (un admin bajado a preventista seguiría viendo clientes ajenos en los
+          // selectores hasta que venza el staleTime). Se descarta y las pantallas abiertas releen.
+          if (!perfilDesdeCacheRef.current && anterior?.id === nextPerfil.id && anterior.rol !== nextPerfil.rol) {
+            logAuthEvent('cambio-de-rol', { userId: userId })
+            void queryClient.resetQueries()
+          }
           perfilDesdeCacheRef.current = false
-          setPerfil(nextPerfil)
+          if (cambio) setPerfil(nextPerfil)
         }
         return { perfil: nextPerfil, huboServidor: true }
       } catch (err) {
-        logger.error('[useAuth] Exception fetching perfil:', err)
+        if (esFalloDeRed(err)) logger.warn('[useAuth] Sin red al leer el perfil:', err)
+        else logger.error('[useAuth] Exception fetching perfil:', err)
         // Un timeout tampoco es una respuesta: el servidor no dijo nada.
         return { perfil: null, huboServidor: !esFalloDeRed(err) }
       } finally {
@@ -275,6 +318,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
     perfilRequestsRef.current.set(userId, request)
     return request
   }, [setPerfil])
+
+  /**
+   * Saca a un usuario desactivado y se lo dice en el login (1600-b15). Una sola vez: el
+   * `signOut` local deja `user` en null, así que nada vuelve a hidratarlo ni recarga la página.
+   */
+  const cerrarPorDesactivado = useCallback(async (source: string): Promise<void> => {
+    guardarAvisoDeCierre('desactivado')
+    await signOutLocal(`${source}:perfil-desactivado`)
+  }, [signOutLocal])
 
   const hydrateAuthenticatedUser = useCallback(async (nextUser: User, source: string): Promise<ResultadoPerfil> => {
     setUser(nextUser)
@@ -301,6 +353,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const resultado = await hydrateAuthenticatedUser(sessionUser, source)
     if (resultado.perfil) {
+      return resultado
+    }
+
+    // Desactivado: no hay nada que renovar ni que reintentar (el server ya contestó).
+    if (resultado.desactivado) {
+      await cerrarPorDesactivado(source)
       return resultado
     }
 
@@ -343,7 +401,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     return hydrateAuthenticatedUser(refreshData.session.user, `${source}:refresh`)
-  }, [clearLocalAuthState, hydrateAuthenticatedUser, setPerfil, signOutLocal])
+  }, [clearLocalAuthState, cerrarPorDesactivado, hydrateAuthenticatedUser, setPerfil, signOutLocal])
 
   const handleAuthStateChange = useCallback(async (event: string, session: Session | null) => {
     if (!mountedRef.current || event === 'INITIAL_SESSION') {
@@ -405,10 +463,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     try {
-      const { perfil: resolvedPerfil, huboServidor } = await handleSessionResolved(event, nextUser)
+      const { perfil: resolvedPerfil, huboServidor, desactivado } = await handleSessionResolved(event, nextUser)
       // Sin perfil Y con el servidor contestando: esta sesión no sirve. Si no
-      // hubo servidor, no se concluye nada — se espera a que vuelva la red.
-      if (!resolvedPerfil && huboServidor) {
+      // hubo servidor, no se concluye nada — se espera a que vuelva la red. El
+      // desactivado ya salió en `handleSessionResolved`.
+      if (!resolvedPerfil && huboServidor && !desactivado) {
         await signOutLocal(`${event}:missing-profile`)
       }
     } catch (err) {
@@ -525,7 +584,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       if (data.user) {
-        const { perfil: resolvedPerfil } = await handleSessionResolved('login', data.user)
+        const { perfil: resolvedPerfil, desactivado } = await handleSessionResolved('login', data.user)
+        if (desactivado) {
+          throw new Error(MENSAJE_PERFIL_DESACTIVADO)
+        }
         if (!resolvedPerfil) {
           await signOutLocal('login:missing-profile')
           throw new Error('No se pudo cargar el perfil del usuario. Intenta de nuevo.')
@@ -571,21 +633,57 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [clearLocalAuthState])
 
-  // Vuelve la red: se rehidrata lo que se resolvió a ciegas. Solo si lo que hay
-  // es el perfil cacheado (o no hay ninguno): si el del servidor ya se cargó,
-  // no hay nada que arreglar y una consulta de más al reconectar es ruido en
-  // la peor conexión.
+  // Revalidación del perfil con la sesión abierta (1600-b15; decisión del dueño: las sesiones no
+  // caducan, así que el desactivado también tiene que salir a mitad de sesión).
+  //
+  // Cuándo se vuelve a leer: al volver la red (también rehidrata lo que se resolvió a ciegas con el
+  // perfil cacheado), al volver el foco a la app, cada `REVALIDACION_PERFIL_MS` con la pestaña
+  // visible y con red, y a pedido (`pedirRevalidacionDelPerfil`: una RPC contestó «Usuario
+  // desactivado»). Las de foco, intervalo y visibilidad esperan al menos `REVALIDACION_MIN_MS`
+  // entre una y otra: el que está sin señal no paga consultas de más.
+  //
+  // Cuándo se cierra: SÓLO si el server devuelve la fila con `activo === false` (ver `fetchPerfil`).
+  // Una red caída, un timeout, una respuesta vacía, un 42501 o un `activo` nulo no cierran nada. Una
+  // sola vez: `signOutLocal` deja `user` en null y este efecto se desmonta.
   useEffect(() => {
     if (!user) return
 
-    const rehidratar = (): void => {
-      if (!perfilDesdeCacheRef.current && perfilRef.current) return
-      void fetchPerfil(user.id)
+    let ultima = 0
+    const revalidar = (origen: string, opciones: { forzar?: boolean } = {}): void => {
+      if (!mountedRef.current || userIdRef.current !== user.id) return
+      if (!opciones.forzar) {
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+        if (Date.now() - ultima < REVALIDACION_MIN_MS) return
+      }
+      ultima = Date.now()
+      void fetchPerfil(user.id).then(resultado => {
+        if (resultado.desactivado && mountedRef.current && userIdRef.current === user.id) {
+          return cerrarPorDesactivado(origen)
+        }
+      })
     }
 
-    window.addEventListener('online', rehidratar)
-    return () => window.removeEventListener('online', rehidratar)
-  }, [user, fetchPerfil])
+    const alVolverLaRed = (): void => revalidar('online', { forzar: true })
+    const alVolverElFoco = (): void => revalidar('foco')
+    const alCambiarVisibilidad = (): void => {
+      if (document.visibilityState === 'visible') revalidar('visible')
+    }
+    const aPedido = (): void => revalidar('pedido', { forzar: true })
+    const intervalId = setInterval(() => revalidar('intervalo'), REVALIDACION_PERFIL_MS)
+
+    window.addEventListener('online', alVolverLaRed)
+    window.addEventListener('focus', alVolverElFoco)
+    document.addEventListener('visibilitychange', alCambiarVisibilidad)
+    window.addEventListener(EVENTO_REVALIDAR_PERFIL, aPedido)
+    return () => {
+      clearInterval(intervalId)
+      window.removeEventListener('online', alVolverLaRed)
+      window.removeEventListener('focus', alVolverElFoco)
+      document.removeEventListener('visibilitychange', alCambiarVisibilidad)
+      window.removeEventListener(EVENTO_REVALIDAR_PERFIL, aPedido)
+    }
+  }, [user, fetchPerfil, cerrarPorDesactivado])
 
   useEffect(() => {
     if (!user) return

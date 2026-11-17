@@ -19,6 +19,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { escrituraIdempotente } from '../../utils/escrituraIdempotente'
+import { invalidarMora } from './invalidacionesDeuda'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { NotaCreditoVentaDB } from '../../types'
 import type { MotivoNCVenta } from '../../utils/notaCreditoVenta'
@@ -150,6 +151,8 @@ function useInvalidarTrasNC() {
     queryClient.invalidateQueries({ queryKey: ['notas_credito_venta'] })
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+    // 1544-b1: crear o anular una nota mueve la deuda de la boleta; la lista de mora quedaba vieja.
+    invalidarMora(queryClient)
   }
 }
 

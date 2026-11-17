@@ -8,7 +8,7 @@ import NumberInput from '../ui/NumberInput'
 import { Criterio } from '../ui/Criterio'
 import { Button } from '../ui/Button'
 import { linkAReportes } from '../../utils/paramsReporte'
-import { money, moneyC, pct, N, rolLabel, margenNetoMesPct } from './reportes-gerenciales/formato'
+import { money, moneyC, pct, pctSobre, N, rolLabel, margenNetoMesPct } from './reportes-gerenciales/formato'
 import {
   EvolucionChart, DiarioChart, VendedoresChart, CategoriasChart, WaterfallChart, CobranzaDonut, BonifPromosChart,
   MermasMotivoChart,
@@ -518,13 +518,13 @@ export default function VistaReportesGerenciales({
               delta={cmp && kp!.margen_real != null ? <Delta cur={k.margen_real ?? 0} prev={kp!.margen_real} /> : undefined} />
             <KpiCard label="Margen comercial" value={moneyC(k.margen_comercial)} sub={<><b>{pctMargen(margenSobreConCosto(k.margen_comercial, k.venta, sinCostoFueraDelMargen(k, k.ingreso_sin_costo)))}</b> s/ venta final con costo, antes de bonif.</>} accent={ACCENTS.cyan}
               delta={cmp ? <Delta cur={k.margen_comercial} prev={kp!.margen_comercial} /> : undefined} />
-            <KpiCard label="Bonificaciones" value={moneyC(k.bonif)} sub={<><b>{pct(k.bonif / k.venta)}</b> de la venta</>} accent={ACCENTS.amber}
+            <KpiCard label="Bonificaciones" value={moneyC(k.bonif)} sub={<><b>{pctSobre(k.bonif, k.venta)}</b> de la venta</>} accent={ACCENTS.amber}
               delta={cmp ? <Delta cur={k.bonif} prev={kp!.bonif} invert /> : undefined} />
             {/* #1193: informativo. El descuento del combo ya está adentro de la venta,
                 así que NO entra en la cascada ni en el margen neto (se contaría dos veces). */}
             {reporte.combos && reporte.combos.kpis.combos_vendidos > 0 && (
               <KpiCard label="Descuento por combos" value={moneyC(reporte.combos.kpis.descuento)}
-                sub={<><b>{pct(reporte.combos.kpis.descuento / (k.venta || 1))}</b> de la venta · {N.format(reporte.combos.kpis.combos_vendidos)} combos · informativo, ya está en la venta</>}
+                sub={<><b>{pctSobre(reporte.combos.kpis.descuento, k.venta)}</b> de la venta · {N.format(reporte.combos.kpis.combos_vendidos)} combos · informativo, ya está en la venta</>}
                 accent={ACCENTS.cyan}
                 delta={cmp && reporte.combos.kpis.descuento_anterior != null ? <Delta cur={reporte.combos.kpis.descuento} prev={reporte.combos.kpis.descuento_anterior} invert /> : undefined} />
             )}
@@ -558,13 +558,13 @@ export default function VistaReportesGerenciales({
                 REP-D (#1545): ya están restadas de la venta y de los márgenes (llega
                 venta_bruta); con un RPC anterior las resta la contribución. */}
             <KpiCard label="Notas de crédito" value={moneyC(k.notas_credito_venta ?? 0)}
-              sub={<>{N.format(k.notas_credito_venta_n ?? 0)} de venta · <b>{pct((k.notas_credito_venta ?? 0) / (k.venta_bruta ?? k.venta))}</b> de la venta{k.venta_bruta != null ? ', ya restadas' : ''}</>}
+              sub={<>{N.format(k.notas_credito_venta_n ?? 0)} de venta · <b>{pctSobre(k.notas_credito_venta ?? 0, k.venta_bruta ?? k.venta)}</b> de la venta{k.venta_bruta != null ? ', ya restadas' : ''}</>}
               accent={ACCENTS.red}
               delta={cmp && kp!.notas_credito_venta != null ? <Delta cur={k.notas_credito_venta ?? 0} prev={kp!.notas_credito_venta} invert /> : undefined} />
             {todos ? (
               <KpiCard label="Contribución est." value="—" sub={SOLO_ENTREGADAS} accent={ACCENTS.emerald} />
             ) : (
-              <KpiCard label="Contribución est." value={moneyC(derived.contrib)} sub={<><b>{pct(derived.contrib / k.venta)}</b> antes de gastos fijos</>} accent={ACCENTS.emerald}
+              <KpiCard label="Contribución est." value={moneyC(derived.contrib)} sub={<><b>{pctSobre(derived.contrib, k.venta)}</b> antes de gastos fijos</>} accent={ACCENTS.emerald}
                 delta={cmp && derivedPrev ? <Delta cur={derived.contrib} prev={derivedPrev.contrib} /> : undefined} />
             )}
             <KpiCard label="Ticket promedio" value={moneyC(k.ticket)} sub={`${N.format(k.clientes)} clientes · ${N.format(k.clientes_nuevos)} nuevos`} accent={ACCENTS.blue}
@@ -706,7 +706,7 @@ export default function VistaReportesGerenciales({
           <Card id="sec-evolucion" className="p-5">
             <SectionTitle icon={TrendingUp} title="Evolución mensual" hint="Venta, bonificaciones y margen neto por mes." right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'evolucion')!)} />
             <div className="grid lg:grid-cols-3 gap-5">
-              <div className="lg:col-span-2 h-72"><EvolucionChart data={reporte.mensual} /></div>
+              <div className="lg:col-span-2 h-72"><EvolucionChart data={reporte.mensual} sinCostoDe={m => sinCostoFueraDelMargen(k, m.ingreso_sin_costo)} /></div>
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead><tr className="border-b dark:border-gray-700">
@@ -722,7 +722,7 @@ export default function VistaReportesGerenciales({
                         <td className={`${td} text-right tabular-nums`}>{moneyC(m.venta)}</td>
                         <td className={`${td} text-right tabular-nums`}>{moneyC(m.bonif)}</td>
                         {descCombosMes.size > 0 && <td className={`${td} text-right tabular-nums`}>{moneyC(descCombosMes.get(m.mes) ?? 0)}</td>}
-                        <td className={`${td} text-right tabular-nums`}>{pct(margenNetoMesPct(m))}</td>
+                        <td className={`${td} text-right tabular-nums`}>{pctMargen(margenNetoMesPct(m, sinCostoFueraDelMargen(k, m.ingreso_sin_costo)))}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -740,7 +740,7 @@ export default function VistaReportesGerenciales({
                   <p>Contribución: —. {SOLO_ENTREGADAS}.</p>
                 </div>
               ) : (
-                <div className="h-72"><WaterfallChart venta={k.venta} cmv={k.cmv} bonif={k.bonif} mermas={k.mermas} comision={derived.comision} descuentos={k.descuentos_proveedores ?? 0} notasCredito={notasCreditoAparte(k)} /></div>
+                <div className="h-72"><WaterfallChart venta={k.venta} cmv={k.cmv} bonif={k.bonif} mermas={k.mermas} comision={derived.comision} descuentos={k.descuentos_proveedores ?? 0} notasCredito={notasCreditoAparte(k)} sinCosto={sinCostoFueraDelMargen(k, k.ingreso_sin_costo)} /></div>
               )}
             </Card>
             <Card className="p-5">
@@ -1080,7 +1080,7 @@ export default function VistaReportesGerenciales({
                         <tr className="bg-gray-50 dark:bg-gray-700/40">
                           <td colSpan={2} className={`${td} font-semibold text-gray-900 dark:text-white`}>
                             {g.promocion}
-                            <span className="ml-2 text-[10px] font-medium text-gray-400">{pct(g.valor_venta / (k.venta || 1))} de la venta</span>
+                            <span className="ml-2 text-[10px] font-medium text-gray-400">{pctSobre(g.valor_venta, k.venta)} de la venta</span>
                           </td>
                           <td className={`${td} text-right tabular-nums font-semibold`}>{moneyC(g.costo)}</td>
                           <td className={`${td} text-right tabular-nums font-semibold`}>{moneyC(g.valor_venta)}</td>

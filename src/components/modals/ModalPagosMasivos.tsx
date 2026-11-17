@@ -38,7 +38,9 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
   const hoy = fechaLocalISO()
   const fechaBloqueada = isEncargado && !isAdmin
   const [selectedFormaPago, setSelectedFormaPago] = useState('')
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  // Lo que el usuario tildó, visible o no. Lo que vale (se cuenta, se confirma y se manda) es
+  // `selectedIds`, que más abajo se acota a lo que el filtro deja ver (1598-b8).
+  const [tildados, setSelectedIds] = useState<Set<string>>(new Set())
   const [busqueda, setBusqueda] = useState('')
   // Arranca acotado al mes en curso. La query no filtra por fecha y trae TODO
   // el backlog de impagos de la sucursal (116 boletas / $6,6M al 18/08, la más
@@ -66,6 +68,11 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
     }
     return resultado
   }, [pedidos, busqueda, fechaDesde, fechaHasta])
+
+  const selectedIds = useMemo(() => {
+    const visibles = new Set(pedidosFiltrados.map(p => p.id))
+    return new Set([...tildados].filter(id => visibles.has(id)))
+  }, [tildados, pedidosFiltrados])
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -173,7 +180,7 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
             />
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               {fechaBloqueada
-                ? 'Como encargado solo podés registrar pagos con fecha de hoy. Si necesitás otra fecha pedíselo a un admin.'
+                ? 'Como encargado solo podés registrar pagos con fecha de hoy. Si necesitás otra fecha, pedíselo a un admin.'
                 : 'Se imputa a la rendición de esa fecha. Por defecto hoy.'}
             </p>
           </div>

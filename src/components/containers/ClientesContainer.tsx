@@ -24,6 +24,7 @@ import { useNotification } from '../../contexts/NotificationContext'
 import { usePagos } from '../../hooks/supabase'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { useQueryClient } from '@tanstack/react-query'
+import { invalidarMora } from '../../hooks/queries/invalidacionesDeuda'
 import { puedeRegistrarPagoCliente, puedeDesactivarCliente, puedeEliminarCliente } from '../../lib/permisos'
 import type { ClienteDB } from '../../types'
 import type { ClienteSaveData } from '../modals/ModalCliente'
@@ -349,8 +350,8 @@ export default function ClientesContainer(): React.ReactElement {
       clientRequestId: datosPago.clientRequestId,
     })
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
-    queryClient.invalidateQueries({ queryKey: ['ficha-cliente'] })
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
+    invalidarMora(queryClient) // 1544-b1: el cobro baja la deuda y el cliente puede salir de la lista de mora
     notify.success(pago.idempotentReplay
       ? 'Ese pago ya había entrado en tu intento anterior: no se cobró dos veces.'
       : 'Pago registrado correctamente')
@@ -368,8 +369,8 @@ export default function ClientesContainer(): React.ReactElement {
   }) => {
     const result = await registrarPagoFIFO(input)
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
-    queryClient.invalidateQueries({ queryKey: ['ficha-cliente'] })
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
+    invalidarMora(queryClient) // 1544-b1
     if (result.sobrante > 0) {
       notify.success(`Pago registrado. ${formatPrecio(result.sobrante)} quedó como saldo a favor.`)
     } else {
@@ -388,8 +389,8 @@ export default function ClientesContainer(): React.ReactElement {
   }) => {
     const result = await registrarPagoCombinadoFIFO(input)
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
-    queryClient.invalidateQueries({ queryKey: ['ficha-cliente'] })
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
+    invalidarMora(queryClient) // 1544-b1
     if (result.sobrante > 0) {
       notify.success(`Pago registrado. ${formatPrecio(result.sobrante)} quedó como saldo a favor.`)
     } else {

@@ -13,7 +13,7 @@
 --        renglón y en cuánto queda), sin dejar la compra ni tocar el producto. Con −500 entra y el
 --        costo real queda en 50. La edición con −2.000 también se rechaza.
 --   R1 · los rangos en la edición: bonificación −50, costo −100 e II 'NaN' se rechazan con su motivo.
---   R2 · los rangos en el alta: el II del renglón −90 % en una FC A, la alícuota 150, un IVA de
+--   R2 · los rangos en el alta: el II del renglón −90 % en una FC A (el mensaje es el del techo de 9900 de CAT-9, #1596), la alícuota 150, un IVA de
 --        cabecera 'NaN' y uno negativo se rechazan.
 --   F1 · FRG-1 · el bulto de $10.000 con 2.400 unidades: con el costo sin redondear (4,1666…) y el
 --        subtotal 10.000 se rechaza diciendo que da 10.008; con el costo al centavo (4,17) y su
@@ -167,7 +167,7 @@ BEGIN
     v_p := pg_temp.producto(v_s1, 'ZZ ensayo 1557 R2');
     v_j := pg_temp.alta('R2a', jsonb_build_array(pg_temp.renglon(v_p, 10, 100,
              '{"porcentaje_iva": 21, "impuestos_internos": -90}')), p_tipo => 'FC', p_iva => 210);
-    IF COALESCE((v_j->>'success')::boolean, false) OR v_j->>'error' NOT LIKE '%el impuesto interno es un porcentaje, de 0 a 100%' THEN
+    IF COALESCE((v_j->>'success')::boolean, false) OR v_j->>'error' NOT LIKE '%el impuesto interno sobre el neto va de 0 a 9900%' THEN
       v_fallas := v_fallas || ('R2 II -90: ' || v_j::text);
     END IF;
     v_j := pg_temp.alta('R2b', jsonb_build_array(pg_temp.renglon(v_p, 10, 100, '{"porcentaje_iva": 150}')),

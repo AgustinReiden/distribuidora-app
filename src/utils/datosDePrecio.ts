@@ -49,12 +49,16 @@ export interface ConsultaParaEntrada {
  */
 export function entradaDeConsulta(nombre: string, q: ConsultaParaEntrada, fallaConDato = false): EntradaDatoDePrecio {
   const hayDato = q.data !== undefined && q.data !== null
+  // El `onlineManager` de react-query arranca en «online» y sólo se entera de un corte por el
+  // evento: una app abierta ya sin señal no pausa la consulta, la deja cargando o en error
+  // (1559-c4). Sin dato y sin red es «sin señal», no «cargando» ni «falló».
+  const sinRed = !hayDato && typeof navigator !== 'undefined' && navigator.onLine === false
   return {
     nombre,
     hayDato,
-    cargando: q.isLoading === true,
-    fallo: q.isError === true && (fallaConDato || !hayDato),
-    sinSenal: !hayDato && q.isPaused === true,
+    cargando: q.isLoading === true && !sinRed,
+    fallo: q.isError === true && (fallaConDato || !hayDato) && !sinRed,
+    sinSenal: !hayDato && (q.isPaused === true || sinRed),
   }
 }
 

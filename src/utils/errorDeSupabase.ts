@@ -150,6 +150,33 @@ export async function respuestaDeErrorLegible(res: Response): Promise<Response> 
   )
 }
 
+/**
+ * Qué dice cada CHECK conocido cuando la base lo rechaza (23514). Se busca por un
+ * fragmento del nombre de la restricción; el primero que calza gana.
+ */
+const CHECKS_CONOCIDOS: Array<[RegExp, string]> = [
+  [/cantidad_minima_venta/, 'La cantidad mínima de venta tiene que ser mayor que 0 y de hasta 99.999.999 unidades (o quedar vacía, sin mínimo).'],
+  [/impuestos_internos/, 'El impuesto interno está fuera de rango.'],
+  [/(nombre|razon_social|direccion|fantasia).*(blank|vacio|trim|no_vacio|not_empty)|(blank|vacio|trim|no_vacio|not_empty).*(nombre|razon_social|direccion|fantasia)/, 'Hay un dato obligatorio vacío o con sólo espacios (nombre, razón social o dirección).'],
+]
+
+/**
+ * Un CHECK de la base rechazó el dato (23514). Postgres lo dice en inglés y con el
+ * nombre técnico de la restricción: acá se traduce, y si el nombre es conocido se
+ * dice qué dato es. Lo demás lleva un texto genérico que nombra la restricción
+ * para que se pueda reportar.
+ */
+export function mensajeDeCheckViolado(error: unknown): string {
+  const mensaje = String((error as { message?: unknown } | null | undefined)?.message ?? '')
+  const restriccion = /check constraint "([^"]+)"/i.exec(mensaje)?.[1]
+  if (restriccion) {
+    const conocido = CHECKS_CONOCIDOS.find(([patron]) => patron.test(restriccion))
+    if (conocido) return conocido[1]
+    return `Hay un dato fuera de rango o vacío (restricción «${restriccion}»). Revisá lo que cargaste e intentá de nuevo.`
+  }
+  return 'Hay un dato fuera de rango o vacío. Revisá lo que cargaste e intentá de nuevo.'
+}
+
 export function errorDeSupabase(error: unknown, mensajeSinConexion: string): ErrorDeSupabase {
   const code = (error as { code?: unknown } | null | undefined)?.code
   const huboServidor = typeof code === 'string' ? code !== '' : code != null
@@ -157,6 +184,10 @@ export function errorDeSupabase(error: unknown, mensajeSinConexion: string): Err
   if (!huboServidor && esFalloDeRed(error)) {
     return new ErrorDeSupabase(mensajeSinConexion, error, true)
   }
+  // Un CHECK violado (23514) llega en inglés y con el nombre técnico: se traduce. Sólo el
+  // mensaje crudo de Postgres: hay RAISE ... ERRCODE 'check_violation' con un motivo de negocio
+  // en castellano (compra mínima, precio 0, sin chofer...) que tiene que llegar intacto.
+  if (code === '23514' && /violates check constraint "/i.test(String((error as { message?: unknown } | null)?.message ?? ''))) return new ErrorDeSupabase(mensajeDeCheckViolado(error), error, false)
   // Un `message` vacío con `code` de servidor daría un Error en blanco: peor que el literal de la UI.
   return new ErrorDeSupabase(getErrorMessage(error).trim() || 'Error del servidor', error, false)
 }

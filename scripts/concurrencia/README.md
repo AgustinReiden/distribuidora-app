@@ -28,6 +28,8 @@ stock justo, cancelaciones, rendiciones, rutas y una carga de "cajas". Todo lo a
 | `controles-negativos-t6.sql`, `controles-negativos-t6b.sql` | Sacan, en dos grupos que no se corren juntos, las partes del arreglo de la tarjeta 6 de #1477 (#1473): los productos de los ítems nuevos en el pre-bloqueo del cambio de cliente (ADV-5), el de la RPC del regalo de una promo con el UPDATE REST de vuelta (ADV-2) y la espera acotada de los precios en masa (ADV-3); y el pre-bloqueo de productos entero del cambio de cliente (ADV-1) (ver sus encabezados). |
 | `controles-negativos-t6o.sql` | Con el arreglo de #1501 (punto 1) aplicado, el trigger de sentencia de los contenedores vuelve a ignorar el aviso de `cambiar_regalo_promocion`: T6o vuelve a dar `40P01` (ver su encabezado). |
 | `controles-negativos-a2.sql` | Saca los dos pre-bloqueos del alta de la tarjeta 2 de #1477 (#1469): la venta sigue aplicando el saldo a favor al final, pero toma la boleta y el crédito después del cliente (ver su encabezado). |
+| `semilla-ensayos.sql` | Personas, zonas, clientes, productos, boletas, un proveedor con su compra y lote, los vínculos del bot, los 18 rubros de gasto y algo de historia (mermas, un cancelado, FC) para que corran los `scripts/test-*.sql` en la base local. Se aplica con `docker-local.mjs semilla-ensayos` (ver «Los ensayos de `scripts/test-*.sql`»). **No sirve para medir y no se deshace.** |
+| `correr-ensayos.mjs` | Corre todos los `scripts/test-*.sql` contra el contenedor, uno por uno, y arma la tabla (pasa / falla / no corre, con la causa). |
 
 **Por qué no está en `supabase/functions/`:** `deploy-functions.yml` despliega esa carpeta a
 prod al mergear. Esto es JS plano (no TS) para que tampoco lo tomen `tsc` ni ESLint del front.
@@ -72,7 +74,11 @@ schema vivo y se verifica con la huella.
      normaliza a LF. En LF la huella de `funcion` no coincide.
    - La 437 trae un ensayo que pide un admin activo de las sucursales 1 y 2 (en prod existe).
      `docker-local.mjs semilla` lo siembra y `sin-semilla` lo borra (y lista las tablas que
-     hayan quedado con filas: ninguna, salvo `gasto_rubros` desde la 446, que siembra sus rubros como en prod). Las 440 y 442 también lo piden. **Nunca después de
+     hayan quedado con filas: ninguna, salvo `gasto_rubros` desde la 446, que siembra sus rubros como en prod). Las 440 y 442 también lo piden, y desde #1539
+     también tres que no lo decían y fallan sin la semilla: la **463_permisos** («no hay ningún admin activo»), la **463d**
+     («el ensayo necesita un admin con al menos una sucursal activa asignada») y la **468** («sin sucursales disponibles
+     para el usuario»). Una migración con un ensayo así se aplica **después** de `semilla` y se
+     deja la semilla puesta hasta la última de la lista; `sin-semilla` va al final, antes de `fixtures`. **Nunca después de
      `fixtures`:** sin la semilla, la secuencia les da a CONC-A y CONC-B los ids 1 y 2, y
      `sin-semilla` borra las sucursales 1 y 2 sin cascada. Los usuarios quedan apuntando a
      sucursales que no existen, y el próximo `fixtures` crea otras CONC-A y CONC-B. Una
@@ -232,6 +238,29 @@ Se corre con **una carpeta `--out` por variante** (`run.mjs` escribe `<grupo>.md
 variante anterior), **al final de la corrida** (deja datos rotos y la auditoría en rojo), se
 restauran las funciones desde `conc.mut_orig` (el `RESTAURAR` de `controles-negativos.sql`) y se
 repite la huella.
+
+## Los ensayos de `scripts/test-*.sql` en la base local (#1539, #1603)
+
+Los ensayos eligen sus personas y sus datos **de lo que hay en la base** («una sucursal con admin, encargado y tres
+preventistas», «un cliente sin asignar», «una boleta entregada con saldo»): están escritos para correr contra prod, que los
+tiene. La base del arnés nace casi vacía, y sin datos más de la mitad terminaba en «faltan fixtures». Para correrlos:
+
+1. La base armada como arriba (`up`, `dump`, `aplicar`…), con `docker-local.mjs semilla` (el admin de las sucursales 1 y 2).
+2. `docker-local.mjs semilla-ensayos`, **después** de `semilla`: siembra `semilla-ensayos.sql` y, como `supabase_admin`, le agrega al
+   `auth` de la imagen lo que los ensayos de permisos tocan y la imagen vieja no trae (`users.banned_until`, `sessions`,
+   `one_time_tokens` y el ledger `supabase_migrations`, vacío). Es idempotente (tres bloques, cada uno con su guarda).
+3. `CONC_NOMBRE=<contenedor> node scripts/concurrencia/correr-ensayos.mjs [filtro] [--salida tabla.md]`. Un ensayo **pasa** si en su salida
+   aparece `ENSAYO OK`: los que terminan en un `RAISE EXCEPTION` que deshace todo lo muestran como `ERROR:  ENSAYO OK …`, y esa
+   línea es el éxito. Un ensayo suelto: `docker exec -i <contenedor> psql -U postgres -h localhost -d postgres -v ON_ERROR_STOP=1 -1 -f - < scripts/test-….sql`. **Con `-1`** (una sola transacción): algunos ensayos (p. ej. `test-combo-fecha-1260`) terminan su `DO` con un NOTICE y deshacen todo con un `RAISE` aparte, y con el autocommit de `-f` solo dejaban productos, combos y clientes en la base.
+
+**Esa base ya no sirve para medir** (tiene datos: las huellas de datos y los ensayos de concurrencia asumen la base vacía). Va en un
+contenedor aparte, que se tira. Dos ensayos no corren acá: los dos `test-concurrencia-*`, que piden dos `psql` a mano y **commitean**
+(el corredor los salta). Los que necesitan datos que sólo hay en prod no se pueden sembrar sin inventar la historia, y fallan con su
+mensaje de «SIN DATOS»: `test-mermas-paginadas-1146` (más de 500 mermas), `test-venta-j-1098` (un rechazo total vigente de prod),
+`test-grants-rest-1134-1135` (una medida y un encuadre de impuesto interno con alícuota vigente).
+
+**Los ensayos no fijan el `md5` de una función ni la cuenta de checks de `auditoria_integridad()`**: se ponen rojos con cada
+migración posterior sin que nada se haya roto. Afirman comportamiento (#1603 B13b).
 
 ## Diferencias con Supabase real
 

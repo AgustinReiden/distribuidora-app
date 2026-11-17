@@ -50,6 +50,9 @@ vi.mock('../../contexts/SucursalContext', () => ({
 import { notifyError } from './base'
 import { conAbortSignal } from '../../test/conAbortSignal'
 
+// El DELETE de un pago pide las filas borradas (`.select('id')`) para saber si borró alguna.
+const delConSelect = (valor: unknown) => ({ select: () => conAbortSignal(valor) })
+
 const ERR_SERVIDOR = {
   message: 'Solo admin o encargado puede registrar pagos',
   details: 'detalle',
@@ -273,13 +276,13 @@ describe('usePagos — errores de supabase', () => {
   // id es idempotente (reintenta); la RPC de forma de pago no tiene clave (un solo intento).
   describe('eliminarPago (DELETE idempotente: reintenta red, no servidor)', () => {
     it('servidor: un solo intento y el mensaje llega', async () => {
-      mockEq.mockReturnValue(conAbortSignal({ error: ERR_SERVIDOR }))
+      mockEq.mockReturnValue(delConSelect({ data: null, error: ERR_SERVIDOR }))
       const { result } = renderHook(() => usePagos())
       esServidor(await capturar(() => result.current.eliminarPago('9')))
       expect(mockEq).toHaveBeenCalledTimes(1)
     })
     it('red: se reintenta (3 intentos) y pide revisar antes de reintentar', async () => {
-      mockEq.mockReturnValue(conAbortSignal({ error: ERR_RED }))
+      mockEq.mockReturnValue(delConSelect({ data: null, error: ERR_RED }))
       const { result } = renderHook(() => usePagos())
       const e = await capturar(() => result.current.eliminarPago('9'))
       esRed(e)
@@ -288,15 +291,16 @@ describe('usePagos — errores de supabase', () => {
     }, 15000)
     it('un fallo de red transitorio se repite y termina bien', async () => {
       mockEq
-        .mockReturnValueOnce(conAbortSignal({ error: ERR_RED }))
-        .mockReturnValueOnce(conAbortSignal({ error: null }))
+        .mockReturnValueOnce(delConSelect({ data: null, error: ERR_RED }))
+        // 0 filas en el reintento es legal: el primer intento pudo haber entrado (1559-b13).
+        .mockReturnValueOnce(delConSelect({ data: [], error: null }))
       const { result } = renderHook(() => usePagos())
       expect(await capturar(() => result.current.eliminarPago('9'))).toBeUndefined()
       expect(mockEq).toHaveBeenCalledTimes(2)
     }, 15000)
     it('le pasa un AbortSignal a supabase', async () => {
-      const abortSignal = vi.fn(() => Promise.resolve({ error: null }))
-      mockEq.mockReturnValue(Object.assign(Promise.resolve({ error: null }), { abortSignal }))
+      const abortSignal = vi.fn(() => Promise.resolve({ data: [{ id: '9' }], error: null }))
+      mockEq.mockReturnValue({ select: () => Object.assign(Promise.resolve({ data: [{ id: '9' }], error: null }), { abortSignal }) })
       const { result } = renderHook(() => usePagos())
       await capturar(() => result.current.eliminarPago('9'))
       expect(abortSignal).toHaveBeenCalledWith(expect.any(AbortSignal))
@@ -304,7 +308,7 @@ describe('usePagos — errores de supabase', () => {
     it('colgado: corta a los 20 s, un solo intento, y pide revisar antes de reintentar', async () => {
       vi.useFakeTimers()
       try {
-        mockEq.mockReturnValue(conAbortSignal(new Promise(() => {})))
+        mockEq.mockReturnValue(delConSelect(new Promise(() => {})))
         const { result } = renderHook(() => usePagos())
         const promesa = result.current.eliminarPago('9').catch((e: unknown) => e)
         await vi.advanceTimersByTimeAsync(PLAZO_ESCRITURA_MS)
@@ -313,7 +317,8 @@ describe('usePagos — errores de supabase', () => {
         expect((e as Error).message).toMatch(/revisá la cuenta del cliente/i)
         expect((e as Error).message).not.toMatch(/sin respuesta del servidor/i)
         expect(mockEq).toHaveBeenCalledTimes(1)
-        expect(ultimoAviso()).toMatch(/revisá la cuenta del cliente/i)
+        // El aviso lo muestra quien llama: el hook ya no notifica (1544-b5).
+        expect(notifyError).not.toHaveBeenCalled()
       } finally {
         vi.useRealTimers()
       }

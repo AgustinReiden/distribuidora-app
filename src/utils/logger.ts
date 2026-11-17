@@ -24,6 +24,26 @@ function formatArgs(args: unknown[]): unknown[] {
 }
 
 /**
+ * El `error` que devuelve supabase-js NO es un `Error`: es un objeto plano
+ * `{ message, details, hint, code }` (ver `errorDeSupabase`). Para un `logger.error` con uno de
+ * esos como argumento, la etiqueta sola no alcanza para diagnosticar (1600-b4).
+ */
+function esErrorPlano(arg: unknown): arg is { message: string; code?: unknown } {
+  return typeof arg === 'object' && arg !== null && !(arg instanceof Error)
+    && typeof (arg as { message?: unknown }).message === 'string'
+}
+
+/**
+ * Del error plano de supabase sale SÓLO el `code` (1600-b4, con la regla de #1266). El `message`,
+ * el `details` y el `hint` no viajan: el `details` de un 23505, 23514 o 23502 trae los valores de
+ * la fila (nombres, direcciones, CUIT), y un `message` de RAISE puede nombrar un cliente o un
+ * producto. El código (42501, PGRST201, 23505) es lo que diagnostica.
+ */
+function codigoDelErrorPlano(plano: { code?: unknown }): string {
+  return typeof plano.code === 'string' && plano.code !== '' ? plano.code : 'sin código'
+}
+
+/**
  * Logger principal
  */
 const logger = {
@@ -69,7 +89,21 @@ const logger = {
           extra: { message: mensaje, additionalInfo: resto }
         })
       } else {
-        captureMessage(mensaje, 'error')
+        const planoIndex = args.findIndex(esErrorPlano)
+        if (planoIndex !== -1) {
+          // Un error plano de supabase: sin esto sólo llegaba la etiqueta a Sentry y se perdía
+          // el `code`, que es lo que diagnostica. Se manda como excepción con la etiqueta y el
+          // código; el texto del server no viaja (ver `codigoDelErrorPlano`).
+          const plano = args[planoIndex] as { code?: unknown }
+          const codigo = codigoDelErrorPlano(plano)
+          const resto = sanitizedArgs.filter((_, i) => i !== planoIndex)
+          captureException(
+            new Error(`${mensaje} [${codigo}]`),
+            { extra: { message: mensaje, additionalInfo: resto, codigoSupabase: codigo } }
+          )
+        } else {
+          captureMessage(mensaje, 'error')
+        }
       }
     }
   },

@@ -23,6 +23,7 @@ import {
   useCrearMarcaMutation,
   useRenombrarMarcaMutation,
   useEliminarMarcaMutation,
+  useMetasDeMarcaQuery,
   useToggleMarcaActivaMutation,
   useAsignarMarcaMasivaMutation,
 } from '../../hooks/queries';
@@ -48,6 +49,8 @@ const ModalMarcas = memo(function ModalMarcas({ productos, onClose }: ModalMarca
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [editNombre, setEditNombre] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<MarcaDB | null>(null);
+  // Las metas de preventistas por esta marca se borran con ella (FK en cascada, #1596 b11).
+  const metasDeMarca = useMetasDeMarcaQuery(confirmDelete?.id ?? null);
 
   // Vista de asignación: null = lista de marcas.
   const [asignando, setAsignando] = useState<MarcaDB | null>(null);
@@ -492,7 +495,14 @@ const ModalMarcas = memo(function ModalMarcas({ productos, onClose }: ModalMarca
             {(conteoPorMarca.get(confirmDelete.id) || 0) > 0
               ? `${conteoPorMarca.get(confirmDelete.id)} producto(s) quedarán sin marca. No se borran productos.`
               : 'No hay productos asociados.'}
-            {' '}Los objetivos que apunten a esta marca se van a quedar sin nada que medir.
+            {' '}
+            {metasDeMarca.isError
+              ? 'No se pudo ver si hay metas de preventistas por esta marca: se borrarían junto con ella.'
+              : metasDeMarca.data === undefined
+                ? 'Revisando si hay metas de preventistas por esta marca…'
+                : metasDeMarca.data > 0
+                  ? `Se borran también ${metasDeMarca.data} ${metasDeMarca.data === 1 ? 'meta de preventista' : 'metas de preventistas'} por esta marca, de todos los períodos.`
+                  : 'No hay metas de preventistas por esta marca.'}
           </p>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmDelete(null)} disabled={deleteMut.isPending}>

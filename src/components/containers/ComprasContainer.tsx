@@ -26,6 +26,7 @@ import {
   useAsegurarCatalogo,
 } from '../../hooks/queries'
 import type { ActualizarCompraItemsInput } from '../../hooks/queries'
+import type { LotesSinSincronizar } from '../../hooks/queries/useComprasQuery'
 import type { CambiarProveedorPayload } from '../modals/ModalCambiarProveedor'
 import type { ProductoRapidoInput } from '../modals/ModalCompra'
 import { useAuthData } from '../../contexts/AuthDataContext'
@@ -47,6 +48,8 @@ const ModalCompra = lazyWithReload(() => import('../modals/ModalCompra'))
 const ModalNotaCredito = lazyWithReload(() => import('../modals/ModalNotaCredito'))
 const ModalCambiarProveedor = lazyWithReload(() => import('../modals/ModalCambiarProveedor'))
 const ModalConfirmacion = lazyWithReload(() => import('../modals/ModalConfirmacion'))
+// Lazy: arrastra el cliente de queries completo, y sólo hace falta si una edición dejó lotes sin sincronizar.
+const AvisoLotesSinSincronizar = lazyWithReload(() => import('./AvisoLotesSinSincronizar'))
 
 /**
  * Muestra los avisos blandos que devuelven las RPCs de compra.
@@ -136,6 +139,10 @@ export default function ComprasContainer(): React.ReactElement {
   const { currentSucursalId } = useSucursal()
   const notify = useNotification()
 
+  // 1557-b9: el INSERT de `productos` es sólo de admin (`mt_productos_insert`).
+  // Al encargado el botón le daba un 42501 crudo: sin permiso, no se le ofrece.
+  const puedeCrearProductoRapido = isAdmin
+
   // Queries
   const { data: compras = [], isLoading, isError, refetch } = useComprasQuery()
   // Neto de transferencias entre sucursales (mig YYY). Si falla, la vista no lo muestra.
@@ -172,6 +179,10 @@ export default function ComprasContainer(): React.ReactElement {
   const [aperturaEdicion, setAperturaEdicion] = useState(0)
   const [compraParaCambiarProveedor, setCompraParaCambiarProveedor] = useState<CompraDBExtended | null>(null)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
+  // STK-13: las ediciones que guardaron la compra pero no pudieron sincronizar sus lotes,
+  // una por compra: una edición posterior de la misma compra que sí sincroniza lo borra
+  // (su foto ya es vieja), y la de otra compra no lo pisa.
+  const [lotesPendientes, setLotesPendientes] = useState<Record<string, LotesSinSincronizar>>({})
 
   // Cerrar modales al cambiar de sucursal: las compras son por sucursal.
   useResetOnSucursalChange(() => {
@@ -185,10 +196,17 @@ export default function ComprasContainer(): React.ReactElement {
     setCompraParaEditar(null)
     setCompraParaCambiarProveedor(null)
     setConfirmConfig({ visible: false })
+    setLotesPendientes({})
   })
 
   // NC resumen for badges in list
-  const { data: ncResumen = [] } = useNotasCreditoResumenQuery()
+  const ncResumenQuery = useNotasCreditoResumenQuery()
+  const ncResumen = ncResumenQuery.data ?? []
+  // 1544-b4: mientras la consulta carga o si falló sin haber traído nada, `ncResumen`
+  // queda vacío y «Editar» aparecía en una compra que sí tiene notas (el server la
+  // rechaza igual, pero con un error al final de la edición). Sin saber qué notas hay
+  // no se ofrece editar; si un refetch falla con datos buenos ya cargados, se siguen usando.
+  const puedeOfrecerEditar = ncResumenQuery.data !== undefined
 
   // La compra abierta en 'ver', fresca: la de la lista sirve mientras llega
   // (trae el mismo select), y después de anular el detalle se invalida y la
@@ -358,6 +376,10 @@ export default function ComprasContainer(): React.ReactElement {
       // Editar los items puede dejar el II declarado sin cuadrar (una línea que
       // se fue se lleva su alícuota). La RPC avisa; acá se muestra.
       avisosDeLaBase(notify, null, res.warningIiDeclarado, res.warningLotes, res.warningConceptos, res.warningMedidas)
+      setLotesPendientes(prev => {
+        const { [String(input.compraId)]: _vieja, ...resto } = prev
+        return res.lotesPendientes ? { ...resto, [String(input.compraId)]: res.lotesPendientes } : resto
+      })
       // Dos avisos de costo que se dicen distinto (mig 236). Van en dos y no en
       // uno porque el motivo no es el mismo, y "no es la última" mandado sobre
       // una compra que SÍ es la última manda a buscar donde no hay nada. Desde
@@ -441,6 +463,17 @@ export default function ComprasContainer(): React.ReactElement {
 
   return (
     <>
+      {Object.entries(lotesPendientes).map(([compraId, pendiente]) => (
+        <Suspense key={compraId} fallback={null}>
+          <AvisoLotesSinSincronizar
+            pendiente={pendiente}
+            onTerminar={() => setLotesPendientes(prev => {
+              const { [compraId]: _hecha, ...resto } = prev
+              return resto
+            })}
+          />
+        </Suspense>
+      ))}
       <Suspense fallback={<LoadingState />}>
         <VistaCompras
           compras={compras as any}
@@ -454,7 +487,7 @@ export default function ComprasContainer(): React.ReactElement {
           onVerDetalle={handleVerDetalle}
           onAnularCompra={handleAnularCompra}
           onNotaCredito={handleNotaCredito}
-          onEditarCompra={handleEditarCompra}
+          onEditarCompra={puedeOfrecerEditar ? handleEditarCompra : undefined}
           ncResumen={ncResumen}
           transferenciasNetas={transferenciasNetas ?? null}
         />
@@ -470,7 +503,7 @@ export default function ComprasContainer(): React.ReactElement {
             marcas={marcas}
             onSave={handleGuardarCompra as unknown as Parameters<typeof ModalCompra>[0]['onSave']}
             onClose={() => setModalCompraOpen(false)}
-            onCrearProductoRapido={handleCrearProductoRapido}
+            onCrearProductoRapido={puedeCrearProductoRapido ? handleCrearProductoRapido : undefined}
             onCrearProveedor={handleCrearProveedorDesdeCompra as unknown as Parameters<typeof ModalCompra>[0]['onCrearProveedor']}
             // El borrador local es por sucursal y usuario (useBorradorCompra).
             sucursalId={currentSucursalId}
@@ -521,7 +554,7 @@ export default function ComprasContainer(): React.ReactElement {
               setModalEditarOpen(false)
               setCompraParaEditar(null)
             }}
-            onCrearProductoRapido={handleCrearProductoRapido}
+            onCrearProductoRapido={puedeCrearProductoRapido ? handleCrearProductoRapido : undefined}
             canCambiarProveedor={isAdmin}
             onCambiarProveedor={handleAbrirCambioProveedor}
             // undefined mientras carga: la precarga espera a que lleguen.

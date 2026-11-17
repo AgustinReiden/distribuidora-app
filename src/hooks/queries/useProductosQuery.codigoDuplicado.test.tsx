@@ -96,4 +96,12 @@ describe('crear producto con código duplicado', () => {
 
     expect(insert).toHaveBeenCalledTimes(1)
   })
+
+  it('si la lectura del código falla, no lo da por libre: no inserta', async () => {
+    maybeSingle.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'timeout de lectura' } })
+    const { result } = setup()
+
+    await expect(result.current.mutateAsync(productoNuevo)).rejects.toThrow('timeout de lectura')
+    expect(insert).not.toHaveBeenCalled()
+  })
 })

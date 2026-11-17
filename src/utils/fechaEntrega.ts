@@ -45,6 +45,30 @@ export function rangoFechaEntrega(regla: ReglaFechaEntrega): { min: string; max:
 }
 
 /**
+ * El campo de fecha de la confirmación de una entrega (`ModalConfirmacion.campoFecha`): arranca en
+ * hoy, lleva el piso y el techo del rol y valida con el texto del server. Sin esto el campo sólo
+ * tenía `max` y una fecha de hace años se confirmaba para que la rechazara el server.
+ */
+export function campoFechaDeEntrega(regla: ReglaFechaEntrega): {
+  label: string
+  valorInicial: string
+  min: string
+  max: string
+  ayuda: string
+  validar: (fecha: string) => string | null
+} {
+  const { min, max } = rangoFechaEntrega(regla)
+  return {
+    label: 'Fecha de entrega',
+    valorInicial: max,
+    min,
+    max,
+    ayuda: 'Si estás cargando la entrega de un día anterior, cambiala: define en qué día se contabiliza.',
+    validar: fecha => errorDeFechaEntrega(fecha, regla),
+  }
+}
+
+/**
  * Por qué una fecha de entrega no entra, con el texto del server, o null si entra. Una fecha
  * vacía no se juzga.
  */

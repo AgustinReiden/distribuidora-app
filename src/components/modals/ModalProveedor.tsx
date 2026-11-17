@@ -5,6 +5,7 @@ import { AddressAutocomplete } from '../AddressAutocomplete';
 import { Button } from '../ui/Button';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { formatCuitInput } from '../../utils/formatters';
+import { errorDeCuit } from './utils';
 import { useZonasEstandarizadasQuery } from '../../hooks/queries';
 import type { Proveedor } from '../../types';
 
@@ -156,6 +157,13 @@ export default function ModalProveedor({
     const result = validate(formData);
     if (!result.success) {
       setError(getFirstError() || 'Error de validacion');
+      return;
+    }
+
+    // Dígito verificador del CUIT (D37, #1561). Uno viejo que no se tocó no bloquea.
+    const errorCuit = errorDeCuit(formData.cuit, (proveedor as (Proveedor & { cuit?: string }) | null | undefined)?.cuit);
+    if (errorCuit) {
+      setError(errorCuit);
       return;
     }
 

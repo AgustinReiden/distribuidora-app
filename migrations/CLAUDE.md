@@ -93,9 +93,9 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
     parte `{"lote_id": null}`); lo que no se vuelve a cerrar vuelve a su lote. La edición
     (`actualizar_pedido_items`) todavía no lo hace.
   - El gate es el check **STK-F** de `auditoria_integridad()`: falla si una función de `public`
-    sube `productos.stock` de forma incremental sin mencionar `app.stock_origen`. Tiene dos
-    excepciones listadas a propósito (`registrar_compra_completa`, `registrar_ingreso_sucursal`):
-    suben mercadería nueva, que va a la bolsa por diseño. Si agregás una función que sube stock,
+    sube `productos.stock` de forma incremental sin mencionar `app.stock_origen`. **No tiene
+    excepciones** (#1594): `registrar_ingreso_sucursal` ya no existe y `registrar_compra_completa`
+    declara `'compra'`, que va a la bolsa por diseño. Si agregás una función que sube stock,
     etiquetala o el gate se pone rojo.
     Pero STK-F sólo ve **subidas** y sólo mira el código. En runtime, el check **STK-D** cuenta los
     movimientos nuevos con `origen='auto'` sin referencia (mig 336), y es `high` desde la 402
