@@ -325,8 +325,9 @@ BEGIN
   v_fallas := v_fallas || pg_temp.ver('M1 devuelto', p, 'stock=90 lotes=[50] bolsa=40');
   v_fallas := v_fallas || pg_temp.ver('M1 entregado', q, 'stock=87 lotes=[50] bolsa=37');
   -- 1594-b4 (#1594): la bajada es 'merma' de su fila de mermas_stock, como la merma manual.
+  -- Sin la fila del alta del producto del ensayo (0->90 'alta_producto', 1594-b1 de la ola 2 de #1603).
   SELECT string_agg(format('%s->%s %s %s', stock_anterior, stock_nuevo, origen, referencia_tipo), ' | ' ORDER BY id) INTO v_t
-    FROM stock_historico WHERE producto_id = p;
+    FROM stock_historico WHERE producto_id = p AND origen IS DISTINCT FROM 'alta_producto';
   IF v_t IS DISTINCT FROM '90->93 cambio_producto_merma cambios_productos | 93->90 merma mermas_stock' THEN
     v_fallas := v_fallas || format('M1: ledger del devuelto %s', COALESCE(v_t, '(nada)'));
   END IF;

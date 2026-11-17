@@ -39,6 +39,11 @@
  *
  * Los bloqueos tienen prioridad sobre los avisos, y entre sí van en ese orden.
  *
+ * Excepción (1596-b7, #1596): dos UNIDADES distintas de la misma puerta («Mitre
+ * 450, Local 1» y «Mitre 450, Local 2») no chocan por dirección ni bloquean por
+ * punto (Google les da el mismo): es un aviso. Hace falta que las dos digan su
+ * unidad y que sea distinta; si una sola la dice, chocan (`otraUnidadMismaPuerta`).
+ *
  * ---------------------------------------------------------------------------
  * Por qué NO hay una regla por nombre
  * ---------------------------------------------------------------------------
@@ -73,8 +78,15 @@ export function sinAcentos(texto: string): string {
   return texto.normalize('NFD').replace(/[̀-ͯ]/g, '')
 }
 
+function normalizarSegmento(segmento: string): string {
+  return sinAcentos(segmento)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
 /**
- * Clave de dirección para el bloqueo duro.
+ * Clave de dirección para el bloqueo duro: la calle y la altura.
  *
  * Toma el primer segmento de la dirección formateada de Google ("Pje. Vera y
  * Aragon 2551, T4002AFE San Miguel de Tucumán, Tucumán, Argentina" → "pje vera
@@ -83,16 +95,110 @@ export function sinAcentos(texto: string): string {
  *
  * Devuelve `null` si la clave no tiene ningún dígito: sin altura no identifica
  * una puerta, identifica un barrio entero.
+ *
+ * Espejo de `clave_direccion_cliente` (SQL), que está en un índice. La unidad
+ * dentro de la puerta va aparte: `unidadDireccion`.
  */
 export function claveDireccionConAltura(direccion: string | null | undefined): string | null {
   if (!direccion) return null
-  const primerSegmento = direccion.split(',')[0] ?? ''
-  const clave = sinAcentos(primerSegmento)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
+  const clave = normalizarSegmento(direccion.split(',')[0] ?? '')
   if (!clave || !/[0-9]/.test(clave)) return null
   return clave
+}
+
+/**
+ * Las palabras que nombran una unidad dentro de una puerta, con su sinónimo de
+ * base. Espejo de `unidad_direccion_cliente` (SQL).
+ */
+const PALABRAS_DE_UNIDAD = new Map<string, string>([
+  ['local', 'local'], ['loc', 'local'], ['lc', 'local'],
+  ['dpto', 'dpto'], ['depto', 'dpto'], ['dto', 'dpto'], ['departamento', 'dpto'],
+  ['piso', 'piso'],
+  ['of', 'of'], ['ofic', 'of'], ['oficina', 'of'],
+  ['puesto', 'puesto'], ['galpon', 'galpon'], ['deposito', 'deposito'],
+  ['box', 'box'], ['stand', 'stand'],
+  ['uf', 'uf'], ['unidad', 'uf'],
+  ['torre', 'torre'], ['block', 'block'], ['modulo', 'modulo'],
+])
+
+/** Lo que identifica a la unidad: un número (con una letra pegada) o una letra suelta. */
+const IDENTIFICADOR_DE_UNIDAD = /^([0-9]+[a-z]?|[a-z])$/
+
+/** Las palabras que dicen «número» antes del identificador («N°», «Nro.», «No.»). */
+const PALABRAS_DE_NUMERO = new Set(['n', 'nro', 'no', 'num', 'numero'])
+
+/** Entre una unidad y otra en lo que devuelve `unidadDireccion` («dpto b, piso 2»). */
+const SEPARADOR_DE_UNIDADES = ', '
+
+/**
+ * La unidad dentro de la puerta, normalizada (1596-b7, #1596): lo que viene
+ * después de la primera coma y dice «Local 2», «Dpto. B», «Piso 3», «PB»…
+ *
+ * - Los sinónimos van al mismo token: «Loc. 1» es «local 1», «Planta Baja» es
+ *   «pb», «Unidad Funcional 3» es «uf 3». Los ceros de adelante no cuentan.
+ * - Una palabra de unidad cuenta sólo con un identificador detrás (un número, o
+ *   una letra suelta); «PB» y «planta baja» no lo necesitan. «Puesto Viejo»,
+ *   «Planta Urbana» o «Unidad Turística» son localidades, no unidades.
+ * - «N°», «Nº», «Nro.», «No.» y «#» antes del número se descartan, y una letra
+ *   suelta después del número se le pega: «Dpto N° 3 B» es «dpto 3b».
+ * - El orden no importa: las unidades salen ordenadas, sin repetir y separadas
+ *   por coma («dpto b, piso 2»).
+ *
+ * Devuelve `null` si no hay ninguna. Espejo de `unidad_direccion_cliente` (SQL);
+ * el fixture que corren los dos es `direccionCliente.espejo.json`.
+ */
+export function unidadDireccion(direccion: string | null | undefined): string | null {
+  if (!direccion) return null
+  const unidades = new Set<string>()
+  for (const segmento of direccion.split(',').slice(1)) {
+    const t = normalizarSegmento(segmento).split(' ').filter(Boolean)
+    for (let i = 0; i < t.length; i++) {
+      if (t[i] === 'pb') { unidades.add('pb'); continue }
+      if (t[i] === 'planta' && t[i + 1] === 'baja') { unidades.add('pb'); i++; continue }
+      const palabra = PALABRAS_DE_UNIDAD.get(t[i])
+      if (!palabra) continue
+      let salto = t[i] === 'unidad' && t[i + 1] === 'funcional' ? 2 : 1
+      // «Local N° 2», «Nro. 2», «No. 2», «# 2»: el «número» no es el identificador.
+      if (PALABRAS_DE_NUMERO.has(t[i + salto]) && /^[0-9]/.test(t[i + salto + 1] ?? '')) salto++
+      let id = t[i + salto]
+      if (id && IDENTIFICADOR_DE_UNIDAD.test(id)) {
+        // «Dpto 3 B» es «dpto 3b», como «Dpto 3B».
+        const letra = t[i + salto + 1]
+        if (/^[0-9]+$/.test(id) && letra && /^[a-z]$/.test(letra) && letra !== 'y') {
+          id += letra
+          salto++
+        }
+        unidades.add(`${palabra} ${id.replace(/^0+(?=[0-9])/, '')}`)
+        i += salto
+      }
+    }
+  }
+  return unidades.size ? [...unidades].sort().join(SEPARADOR_DE_UNIDADES) : null
+}
+
+/**
+ * ¿Son dos unidades distintas de la misma puerta? (1596-b7, regla de la
+ * coordinadora): la misma calle y altura, y LAS DOS con una unidad, distinta (y
+ * ninguna contenida en la otra: «Local 1» y «Local 1, PB» son la misma puerta).
+ * Entonces no chocan por dirección ni bloquean por estar en el mismo punto (el
+ * punto de Google es el de la puerta): es un aviso. Si una sola tiene unidad, o
+ * es la misma, chocan. Espejo de `_otra_unidad_misma_puerta` (SQL).
+ */
+export function otraUnidadMismaPuerta(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  const clave = claveDireccionConAltura(a)
+  if (!clave || clave !== claveDireccionConAltura(b)) return false
+  const ua = unidadDireccion(a)
+  const ub = unidadDireccion(b)
+  if (ua == null || ub == null) return false
+  // La misma unidad con más detalle («Local 1» y «Local 1, PB») es la misma puerta:
+  // son otra unidad sólo si ninguna de las dos listas contiene a la otra.
+  const la = ua.split(SEPARADOR_DE_UNIDADES)
+  const lb = ub.split(SEPARADOR_DE_UNIDADES)
+  const contiene = (x: string[], y: string[]) => y.every(u => x.includes(u))
+  return !contiene(la, lb) && !contiene(lb, la)
 }
 
 /**
@@ -170,8 +276,10 @@ export function clasificarDuplicado(
   const clave = claveDireccionConAltura(entrada.direccion)
 
   // --- Bloqueo 1: misma dirección con altura ---------------------------
+  // Salvo otra unidad de la misma puerta («Local 1» y «Local 2», 1596-b7).
   if (clave) {
-    const porDireccion = candidatos.find(c => claveDireccionConAltura(c.direccion) === clave)
+    const porDireccion = candidatos.find(c =>
+      claveDireccionConAltura(c.direccion) === clave && !otraUnidadMismaPuerta(entrada.direccion, c.direccion))
     if (porDireccion) {
       const d = distanciaA(entrada, porDireccion)
       return {
@@ -191,16 +299,20 @@ export function clasificarDuplicado(
     .sort((a, b) => a.d - b.d)
 
   // --- Bloqueo 2: el mismo punto ---------------------------------------
-  const mismoPunto = conDistancia[0]
-  if (mismoPunto && mismoPunto.d < DUPLICADO_BLOQUEO_METROS) {
+  // Otra unidad de la misma puerta comparte el punto de Google: no bloquea, avisa
+  // (1596-b7). Cualquier otro a menos de 1 m bloquea, aunque esté detrás de ella.
+  const bloqueaPorPunto = conDistancia.find(x =>
+    x.d < DUPLICADO_BLOQUEO_METROS && !otraUnidadMismaPuerta(entrada.direccion, x.c.direccion))
+  if (bloqueaPorPunto) {
     return {
       bloquea: true,
       avisa: false,
       motivo: 'punto',
-      distancia_m: redondearMetros(mismoPunto.d),
-      candidato: mismoPunto.c,
+      distancia_m: redondearMetros(bloqueaPorPunto.d),
+      candidato: bloqueaPorPunto.c,
     }
   }
+  const mismoPunto = conDistancia[0]
 
   // --- Aviso: hay alguien cerca ----------------------------------------
   if (mismoPunto && mismoPunto.d <= DUPLICADO_AVISO_METROS) {
@@ -266,6 +378,8 @@ export function cambiaIdentidadDuplicado(
 ): boolean {
   return (
     claveDireccionConAltura(antes.direccion) !== claveDireccionConAltura(despues.direccion) ||
+    // La unidad también es identidad (1596-b7): pasar de «Local 1» a «Local 2» puede chocar.
+    unidadDireccion(antes.direccion) !== unidadDireccion(despues.direccion) ||
     coordenada(antes.latitud) !== coordenada(despues.latitud) ||
     coordenada(antes.longitud) !== coordenada(despues.longitud)
   )
@@ -393,8 +507,10 @@ export function mensajeDuplicado(v: VeredictoDuplicadoRPC): MensajeDuplicado {
         titulo: 'Ya hay un cliente en esa dirección',
         mensaje: nombre
           ? `${nombre} está cargado en la misma dirección.${avisado} ` +
-            'Si de verdad es otro comercio en la misma puerta, agregale el local a la dirección ' +
-            '(por ejemplo "Berutti 399 Local 2") y volvé a intentar.'
+            // La unidad cuenta después de una coma, y en las dos fichas (1596-b7).
+            'Si de verdad es otro comercio en la misma puerta, agregale el local a la dirección, ' +
+            'después de una coma (por ejemplo "Berutti 399, Local 2"), y volvé a intentar. ' +
+            'Si la ficha que ya existe no dice su local, cargáselo también.'
           : `Ya hay un cliente cargado en esa misma dirección. ${SIN_IDENTIDAD}`,
       }
 
@@ -407,6 +523,18 @@ export function mensajeDuplicado(v: VeredictoDuplicadoRPC): MensajeDuplicado {
       }
 
     case 'distancia':
+      // A menos de 1 m el server bloquea por punto, salvo que sea otra unidad de la
+      // misma puerta (1596-b7): un aviso a menos de 1 m es eso, y lo decimos así.
+      if (v.distancia_m != null && v.distancia_m < DUPLICADO_BLOQUEO_METROS) {
+        return {
+          titulo: 'Hay otra unidad en la misma puerta',
+          mensaje: nombre
+            ? `${nombre} es otra unidad de la misma puerta (otro local, depto o piso).${avisado} ` +
+              '¿Seguro que es otro comercio y querés crearlo igual?'
+            : `Hay otra unidad de la misma puerta. ${SIN_IDENTIDAD} ` +
+              '¿Seguro que es otro comercio y querés crearlo igual?',
+        }
+      }
       return {
         titulo: 'Hay un cliente muy cerca',
         mensaje: nombre

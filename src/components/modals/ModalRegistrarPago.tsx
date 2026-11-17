@@ -4,6 +4,7 @@ import { X, DollarSign, FileText, AlertCircle, Check, Plus, Trash2, Calendar } f
 import { formatPrecio as formatCurrency, fechaLocalISO } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
 import { faltantePedido, TOLERANCIA_CENTAVOS } from '../../utils/imputacionCredito'
+import { pagoACuentaPideConfirmacion, avisoPagoACuentaGrande } from '../../utils/pagoACuenta'
 import { FORMAS_PAGO_SELECCIONABLES } from '../../constants/formasPago'
 import NumberInput from '../ui/NumberInput'
 import MontoLeido from '../ui/MontoLeido'
@@ -356,6 +357,16 @@ export default function ModalRegistrarPago({
       : 'Esta boleta no tiene nada pendiente de cobro: el cobro se va a rechazar.'
   )
 
+  // 1559-b15 (#1559): el pago a cuenta (FIFO de la ficha) no tiene tope en el server; lo
+  // que sobra queda a favor (decisión del dueño D22). Si pasa el doble de la deuda se pide
+  // confirmar el monto: un cero de más quedaba a favor sin que nadie lo viera. Con la deuda
+  // sin cargar o caída no se sabe contra qué medir, y no se pide.
+  const vaACuenta = !pedidoSeleccionado && (pagoDividido ? !!onConfirmarCombinadoFIFO : !!onConfirmarFIFO)
+  const pideConfirmarMonto = vaACuenta && !saldoNoDisponible && !saldoCargando &&
+    pagoACuentaPideConfirmacion(montoIngresado, saldoPendiente)
+  const [montoConfirmado, setMontoConfirmado] = useState<number | null>(null)
+  const faltaConfirmarMonto = pideConfirmarMonto && montoConfirmado !== montoIngresado
+
   // El adelanto de sueldo se descuenta de la ficha del empleado: si el cliente no
   // lo es (o todavía no se sabe), no se puede confirmar. Se mira la forma elegida
   // ahora —en el pago simple o en alguna línea del dividido—, no sólo el permiso.
@@ -408,6 +419,10 @@ export default function ModalRegistrarPago({
     }
     if (pasaDeLaBoleta) {
       setError(textoPasaDeLaBoleta)
+      return
+    }
+    if (faltaConfirmarMonto) {
+      setError('Confirmá el monto antes de registrar el pago.')
       return
     }
 
@@ -793,6 +808,25 @@ export default function ModalRegistrarPago({
           </div>
         )}
 
+        {/* 1559-b15: un pago a cuenta de más del doble de la deuda se confirma. */}
+        {pideConfirmarMonto && (
+          <div role="alert" className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg flex items-start gap-2 text-amber-800 dark:text-amber-200">
+            <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <div className="text-sm space-y-2">
+              <p>{avisoPagoACuentaGrande(montoIngresado, saldoPendiente)}</p>
+              <label className="flex items-center gap-2 cursor-pointer font-medium">
+                <input
+                  type="checkbox"
+                  checked={montoConfirmado === montoIngresado}
+                  onChange={e => setMontoConfirmado(e.target.checked ? montoIngresado : null)}
+                  className="w-4 h-4 rounded border-amber-400 text-amber-600"
+                />
+                Sí, el monto es correcto
+              </label>
+            </div>
+          </div>
+        )}
+
         {/* Warning de saldo a favor (sin boleta: el pago a cuenta deja el sobrante a favor) */}
         {faltaBoleta === null && !cobroAnteriorFigura && !pagoDividido && parsePrecio(monto) > saldoPendiente && saldoPendiente > 0 && (
           <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg flex items-start gap-2 text-yellow-800 dark:text-yellow-200">
@@ -1052,7 +1086,7 @@ export default function ModalRegistrarPago({
               type="submit"
               variant="success"
               size="touch"
-              disabled={loading || adelantoBloqueado || pasaDeLaBoleta || (pagoDividido ? totalDividido <= 0 : !monto)}
+              disabled={loading || adelantoBloqueado || pasaDeLaBoleta || faltaConfirmarMonto || (pagoDividido ? totalDividido <= 0 : !monto)}
               className="flex-1"
             >
               {loading ? (

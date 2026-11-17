@@ -280,7 +280,9 @@ export function useAjustarLoteMutation() {
 }
 
 /**
- * Da de baja unidades de un lote como merma por vencimiento.
+ * Da de baja unidades de un lote como merma por vencimiento. Un lote que
+ * todavía no venció también se puede dar de baja (rotura, pérdida), con el
+ * motivo en `observaciones`: la RPC lo exige (#1558, 1558-b6).
  *
  * Es lo único de este módulo que mueve `productos.stock`, y lo hace por RPC
  * porque son tres escrituras que tienen que ir juntas y en orden: primero el

@@ -91,7 +91,7 @@ describe('useEntregaYPagoMasivosMutation', () => {
 
   it('sin errores, devuelve los totales de los dos pasos y sin `error`', async () => {
     rpc.mockResolvedValueOnce({ data: 1, error: null }) // marcar_entrega_y_pago_masivo: entregó el 1
-    rpc.mockResolvedValue({ data: null, error: null })
+    rpc.mockResolvedValue({ data: 2, error: null }) // marcar_pagos_masivo: cobró las 2
     const { result } = setup()
 
     result.current.mutate({
@@ -101,6 +101,22 @@ describe('useEntregaYPagoMasivosMutation', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toEqual({ entregados: 1, cobrados: 2 })
+  })
+
+  // 1559-b12 (#1559): marcar_pagos_masivo saltea lo que ya estaba cobrado. Lo que cuenta
+  // es lo que cobró, no los ids que se mandaron.
+  it('cuenta como cobrados los que la RPC cobró, no los que se mandaron', async () => {
+    rpc.mockResolvedValueOnce({ data: 1, error: null }) // marcar_entrega_y_pago_masivo
+    rpc.mockResolvedValue({ data: 1, error: null }) // marcar_pagos_masivo: una ya estaba cobrada
+    const { result } = setup()
+
+    result.current.mutate({
+      idsEntregar: ['1'], idsCobrar: ['2', '3'],
+      transportistaId: 't1', formaPago: 'efectivo', fecha: '2026-09-10',
+    })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toEqual({ entregados: 1, cobrados: 1 })
   })
 
   // #1318: la RPC saltea lo que ya estaba entregado (el chofer lo entregó con
