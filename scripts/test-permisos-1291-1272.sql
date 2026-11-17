@@ -141,6 +141,9 @@ BEGIN
   END IF;
 
   -- --------------------------------------------- 2 · desasignar (#1291) ---
+  -- desasignar_usuario_sucursal se borró en la migración de B9 del plan #1603 (nadie la llamaba,
+  -- decisión del dueño D48): sin ella, 2 no aplica.
+  IF to_regprocedure('public.desasignar_usuario_sucursal(uuid,bigint)') IS NOT NULL THEN
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_a2, 'role', 'authenticated')::text, true);
 
   -- 2.1 · El admin de v_s2 no saca a v_u1 (ahora de las dos) de la suya.
@@ -169,6 +172,7 @@ BEGIN
   IF NOT COALESCE((r->>'success')::boolean, false)
      OR EXISTS (SELECT 1 FROM usuario_sucursales WHERE usuario_id = v_u1 AND sucursal_id = v_s2) THEN
     v_fallas := v_fallas || format('2.3 · el admin de todas no pudo desasignar: %s', r);
+  END IF;
   END IF;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_a2, 'role', 'authenticated')::text, true);
 
@@ -346,8 +350,8 @@ BEGIN
     EXECUTE 'SELECT public.auditoria_rpcs_definer()' INTO r;
     SELECT count(*) INTO v_n FROM jsonb_array_elements(r->'gestion_usuarios') g
      WHERE g->>'nombre' IN ('asignar_usuario_sucursal', 'desasignar_usuario_sucursal') AND (g->>'acota')::boolean;
-    IF v_n <> 2 THEN
-      v_fallas := v_fallas || format('6.2 · el gate ve %s de las 2 RPCs de #1291 acotando al usuario', v_n);
+    IF v_n <> CASE WHEN to_regprocedure('public.desasignar_usuario_sucursal(uuid,bigint)') IS NULL THEN 1 ELSE 2 END THEN
+      v_fallas := v_fallas || format('6.2 · el gate ve %s de las RPCs de #1291 acotando al usuario', v_n);
     END IF;
     SELECT count(*) INTO v_n FROM jsonb_array_elements(r->'parametros') p
      WHERE p->>'nombre' = 'asignar_usuario_sucursal' AND p->>'parametro' = 'p_usuario_id' AND (p->>'acotado')::boolean;

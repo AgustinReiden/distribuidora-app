@@ -461,7 +461,8 @@ BEGIN
               WHERE h.firma ~ '^(crear_pedido_idempotente|crear_pedido_completo|actualizar_dias_atras_fecha_pedido)\(')
      OR (SELECT md5(prosrc) FROM pg_proc
           WHERE oid = 'public.crear_pedido_idempotente(bigint,numeric,uuid,jsonb,text,text,text,date,text,numeric,numeric,date,uuid,text)'::regprocedure)
-        IS DISTINCT FROM '63f0759223a668afdd04ce684aee18ef'
+        -- Ola 2 del plan #1603 (B4, 1559-b4): el replay sólo de quien cargó; antes, 63f0759223a668afdd04ce684aee18ef.
+        IS DISTINCT FROM '153a687adf8278c7a5c1ae9c3872e4ed'
      OR to_regprocedure('public.actualizar_dias_atras_fecha_pedido(integer)') IS NULL THEN
     v_fallas := v_fallas || 'L7 SEG-A ve una función del alta o la RPC nueva, o crear_pedido_idempotente cambió'::text;
   END IF;

@@ -88,6 +88,8 @@ export interface ResolucionItem {
   item_id: number
   accion: 'match_existente' | 'crear_nuevo'
   producto_destino_id?: number
+  /** El producto destino está desactivado y quien acepta confirmó reactivarlo (#1558, D7). */
+  reactivar?: boolean
 }
 
 export const movimientosKeys = {
@@ -202,14 +204,16 @@ async function crearMovimiento(input: {
   return r.movimiento_id!
 }
 
-async function aceptarMovimiento(input: { movimientoId: number; resoluciones: ResolucionItem[] }): Promise<void> {
+/** Acepta el envío. Devuelve los productos destino que se reactivaron (#1558, D7). */
+async function aceptarMovimiento(input: { movimientoId: number; resoluciones: ResolucionItem[] }): Promise<number[]> {
   const { data, error } = await supabase.rpc('aceptar_movimiento_sucursal', {
     p_movimiento_id: input.movimientoId,
     p_resoluciones: input.resoluciones,
   })
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la aceptación del movimiento. Revisá su estado antes de reintentar.')
-  const r = data as RPCResult
+  const r = data as RPCResult & { reactivados?: number[] | null }
   if (!r.success) throw new Error(r.error || 'Error al aceptar el movimiento')
+  return r.reactivados ?? []
 }
 
 async function denegarMovimiento(input: { movimientoId: number; motivo?: string | null }): Promise<void> {

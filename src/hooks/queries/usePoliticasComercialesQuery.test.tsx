@@ -12,14 +12,21 @@ const m = vi.hoisted(() => ({
   cache: null as Record<string, unknown> | null,
   colgar: false,
   rpc: vi.fn(),
+  // Lo que devuelve politica_comercial_reservada() (1564-b6): null = sin fila (no es admin ni encargado).
+  reservada: { data: null, error: null } as { data: unknown; error: unknown },
+  selects: [] as string[],
 }))
 
 vi.mock('../supabase/base', () => ({
   supabase: {
     from: () => ({
-      select: () => ({ maybeSingle: () => (m.colgar ? new Promise(() => {}) : Promise.resolve({ data: m.fila, error: null })) }),
+      select: (columnas: string) => {
+        m.selects.push(columnas)
+        return { maybeSingle: () => (m.colgar ? new Promise(() => {}) : Promise.resolve({ data: m.fila, error: null })) }
+      },
     }),
-    rpc: (...args: unknown[]) => m.rpc(...args),
+    rpc: (nombre: string, ...args: unknown[]) =>
+      nombre === 'politica_comercial_reservada' ? Promise.resolve(m.reservada) : m.rpc(nombre, ...args),
   },
 }))
 vi.mock('../../contexts/SucursalContext', () => ({
@@ -36,6 +43,8 @@ import {
   useActualizarAlertasCombosMutation,
   useActualizarDiasAtrasFechaPedidoMutation,
   POLITICAS_POR_DEFECTO,
+  POLITICA_COLUMNAS_PARA_VENDER,
+  POLITICA_COLUMNAS_RESERVADAS,
 } from './usePoliticasComercialesQuery'
 import { cacheData } from '../../lib/offlineDb'
 
@@ -48,8 +57,58 @@ beforeEach(() => {
   m.fila = null
   m.cache = null
   m.colgar = false
+  m.reservada = { data: null, error: null }
+  m.selects = []
   m.rpc.mockReset()
   vi.mocked(cacheData).mockClear()
+})
+
+describe('usePoliticasComercialesQuery — lo reservado va por RPC (1564-b6, plan #1603)', () => {
+  it('el select de REST pide sólo lo de vender: ni comisiones, ni alertas de combos, ni la ventana', async () => {
+    const { result } = renderHook(() => usePoliticasComercialesQuery(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(m.selects).toEqual([POLITICA_COLUMNAS_PARA_VENDER])
+    for (const reservada of POLITICA_COLUMNAS_RESERVADAS.split(', ')) {
+      expect(POLITICA_COLUMNAS_PARA_VENDER).not.toContain(reservada)
+    }
+    expect(POLITICA_COLUMNAS_PARA_VENDER).not.toContain('*')
+  })
+
+  it('admin o encargado: lo reservado sale de la RPC y se mergea con lo de vender', async () => {
+    m.fila = { monto_minimo_pedido: 5000 }
+    m.reservada = { data: [{ comision_pct_otros: 3, combo_margen_minimo_pct: 12, ventana_precio_anterior_horas: 48 }], error: null }
+    const { result } = renderHook(() => usePoliticasComercialesQuery(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.politicas.montoMinimoPedido).toBe(5000)
+    expect(result.current.politicas.comisionPctOtros).toBe(3)
+    expect(result.current.politicas.comboMargenMinimoPct).toBe(12)
+    expect(result.current.politicas.ventanaPrecioAnteriorHoras).toBe(48)
+  })
+
+  it('preventista o chofer: la RPC no da fila y quedan los defaults, sin error', async () => {
+    m.fila = { monto_minimo_pedido: 5000 }
+    const { result } = renderHook(() => usePoliticasComercialesQuery(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.politicas.montoMinimoPedido).toBe(5000)
+    expect(result.current.politicas.comisionPctOtros).toBe(POLITICAS_POR_DEFECTO.comisionPctOtros)
+  })
+
+  it('nunca pide lo reservado por REST: si la RPC falla (también PGRST202) es un error de la carga y manda el caché', async () => {
+    m.reservada = { data: null, error: { code: 'PGRST202', message: 'Could not find the function' } }
+    m.cache = { montoMinimoPedido: 7000 }
+    const { result } = renderHook(() => usePoliticasComercialesQuery(), { wrapper })
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(m.selects).toEqual([POLITICA_COLUMNAS_PARA_VENDER])
+    expect(result.current.politicas.montoMinimoPedido).toBe(7000)
+  })
+
+  it('otro error de la RPC es un error de la carga (manda el caché)', async () => {
+    m.reservada = { data: null, error: { code: '42501', message: 'permission denied' } }
+    m.cache = { montoMinimoPedido: 7000 }
+    const { result } = renderHook(() => usePoliticasComercialesQuery(), { wrapper })
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(result.current.politicas.montoMinimoPedido).toBe(7000)
+  })
 })
 
 describe('usePoliticasComercialesQuery — mostrarSinStock', () => {
@@ -195,6 +254,24 @@ describe('usePoliticasComercialesQuery — días hacia atrás de la fecha del pe
     const { result } = renderHook(() => usePoliticasComercialesQuery(), { wrapper })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.politicas.diasAtrasFechaPedido).toBe(0)
+  })
+
+  it('M10-2: manda lo que dice dias_atras_fecha_pedido(), aunque la RLS oculte la fila', async () => {
+    m.fila = null
+    m.rpc.mockImplementation((fn: string) => Promise.resolve(
+      fn === 'dias_atras_fecha_pedido' ? { data: 2, error: null } : { data: null, error: null }))
+    const { result } = renderHook(() => usePoliticasComercialesQuery(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(m.rpc).toHaveBeenCalledWith('dias_atras_fecha_pedido')
+    expect(result.current.politicas.diasAtrasFechaPedido).toBe(2)
+  })
+
+  it('M10-2: si la RPC falla (un server de antes), queda lo de la tabla', async () => {
+    m.fila = { dias_atras_fecha_pedido: 4 }
+    m.rpc.mockResolvedValue({ data: null, error: { message: 'Could not find the function', code: 'PGRST202' } })
+    const { result } = renderHook(() => usePoliticasComercialesQuery(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.politicas.diasAtrasFechaPedido).toBe(4)
   })
 
   it('la mutación llama la RPC con p_dias y guarda el caché con el campo, sin perder los demás', async () => {

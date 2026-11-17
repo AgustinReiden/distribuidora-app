@@ -21,6 +21,18 @@ function mismaVersion(a: string, b: string): boolean {
   return !Number.isNaN(ta) && ta === tb
 }
 
+/**
+ * El cambio de versión que devuelve una RPC que mueve el `updated_at` (sustituir o dividir un
+ * regalo, cambiar el preventista, guardar fechas y notas), o undefined si no trae las dos.
+ */
+export function cambioDeVersionDe(
+  respuesta: { updated_at_anterior?: string | null; updated_at?: string | null } | null | undefined,
+): CambioDeVersion | undefined {
+  return respuesta?.updated_at_anterior && respuesta.updated_at
+    ? { anterior: respuesta.updated_at_anterior, nueva: respuesta.updated_at }
+    : undefined
+}
+
 export function versionTrasCambioPropio(
   actual: string | null,
   cambio: CambioDeVersion | null | undefined,

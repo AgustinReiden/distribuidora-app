@@ -131,13 +131,15 @@ vi.mock('../vistas/VistaPedidos', () => ({
 }))
 
 vi.mock('../modals/ModalEditarPedido', () => ({
-  default: ({ onSave, onSaveItems }: {
+  default: ({ onSave, onSaveItems, onCambiarPreventista }: {
     onSave?: (data: Record<string, unknown>) => Promise<void>
     onSaveItems?: (items: unknown[]) => Promise<void>
+    onCambiarPreventista?: (id: string) => Promise<void>
   }) => (
     <>
       <button type="button" onClick={() => void onSave?.(datosGuardado.valor)}>Guardar edición</button>
       <button type="button" onClick={() => void onSaveItems?.([]).catch(() => {})}>Guardar líneas</button>
+      <button type="button" onClick={() => void onCambiarPreventista?.('u2').catch(() => {})}>Cambiar preventista</button>
     </>
   ),
 }))
@@ -213,6 +215,8 @@ describe('PedidosContainer — cambiarle la fecha a un pedido en camino (#1372, 
       p_fecha: null,
       p_fecha_entrega: null,
       p_fecha_entrega_programada: '2026-11-05',
+      // 1559-b10: la versión con la que se abrió la edición.
+      p_updated_at_esperado: V1,
     })
     expect(updatePedido).not.toHaveBeenCalled()
     expect(llamadas('volver_pedido_a_pendiente_por_edicion')).toHaveLength(0)
@@ -269,5 +273,57 @@ describe('PedidosContainer — cambiarle la fecha a un pedido en camino (#1372, 
 
     await waitFor(() => expect(llamadas('actualizar_pedido_items')).toHaveLength(1))
     expect(llamadas('actualizar_pedido_items')[0][1]).toMatchObject({ p_updated_at_esperado: V1 })
+  })
+
+  it('1559-b10: si otro guardó en el medio, avisa el rechazo y no dice que quedó actualizado', async () => {
+    supabaseStub.rpc.mockImplementation(() => Promise.resolve({
+      data: {
+        success: false, codigo: 'pedido_editado_por_otro',
+        errores: ['Otro usuario modificó este pedido mientras lo tenías abierto.'],
+      },
+      error: null,
+    }))
+
+    await guardarEdicion()
+
+    await waitFor(() => expect(avisos.error).toHaveBeenCalledWith(expect.stringContaining('Otro usuario modificó')))
+    expect(avisos.success).not.toHaveBeenCalled()
+    expect(avisos.warning).not.toHaveBeenCalled()
+  })
+})
+
+describe('PedidosContainer — la versión tras cambiar el preventista (1559-b9)', () => {
+  const V3 = '2026-11-04T13:10:00.111111+00:00'
+
+  it('el próximo guardado de líneas compara contra la versión nueva', async () => {
+    supabaseStub.rpc.mockImplementation((fn: string) => Promise.resolve(
+      fn === 'actualizar_preventista_pedido'
+        ? { data: { success: true, updated_at_anterior: V1, updated_at: V3 }, error: null }
+        : { data: { success: true, updated_at: V2 }, error: null },
+    ))
+
+    const user = await abrirEdicion()
+    await user.click(screen.getByRole('button', { name: 'Cambiar preventista' }))
+    await waitFor(() => expect(llamadas('actualizar_preventista_pedido')).toHaveLength(1))
+    await user.click(screen.getByRole('button', { name: 'Guardar líneas' }))
+
+    await waitFor(() => expect(llamadas('actualizar_pedido_items')).toHaveLength(1))
+    expect(llamadas('actualizar_pedido_items')[0][1]).toMatchObject({ p_updated_at_esperado: V3 })
+  })
+
+  it('con un server que no devuelve las versiones, la edición deja de comparar', async () => {
+    supabaseStub.rpc.mockImplementation((fn: string) => Promise.resolve(
+      fn === 'actualizar_preventista_pedido'
+        ? { data: { success: true }, error: null }
+        : { data: { success: true, updated_at: V2 }, error: null },
+    ))
+
+    const user = await abrirEdicion()
+    await user.click(screen.getByRole('button', { name: 'Cambiar preventista' }))
+    await waitFor(() => expect(llamadas('actualizar_preventista_pedido')).toHaveLength(1))
+    await user.click(screen.getByRole('button', { name: 'Guardar líneas' }))
+
+    await waitFor(() => expect(llamadas('actualizar_pedido_items')).toHaveLength(1))
+    expect(llamadas('actualizar_pedido_items')[0][1]).not.toHaveProperty('p_updated_at_esperado')
   })
 })
