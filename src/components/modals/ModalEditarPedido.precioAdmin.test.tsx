@@ -124,9 +124,42 @@ describe('ModalEditarPedido — precio puesto por el admin', () => {
 
     await waitFor(() => expect(screen.getByText('PLACER MANZANA 500 cc')).toBeInTheDocument())
     await user.click(screen.getByText('$1234.50 c/u'))
-    expect(screen.getByLabelText('Editar precio unitario')).toHaveValue('1234,5')
+    expect(screen.getByLabelText('Editar precio unitario')).toHaveValue('1.234,5')
     await user.click(screen.getByLabelText('Confirmar precio'))
     expect(screen.getByText('$1234.50 c/u')).toBeInTheDocument()
+  })
+
+  // B20 (D17): los miles los pone el campo; lo que no se entiende queda abierto y en rojo.
+  it('el precio tipeado «15000» se ve «15.000», y uno que no se entiende no se confirma', async () => {
+    const user = userEvent.setup()
+    const onSaveItems = vi.fn().mockResolvedValue(undefined)
+    render(
+      <ModalEditarPedido
+        productos={productos}
+        pedido={pedido}
+        isAdmin
+        onSave={vi.fn().mockResolvedValue(undefined)}
+        onSaveItems={onSaveItems}
+        onClose={vi.fn()}
+        guardando={false}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByText('PLACER MANZANA 500 cc')).toBeInTheDocument())
+    await user.click(screen.getByText('$7400.00 c/u'))
+    const input = screen.getByLabelText('Editar precio unitario')
+    expect(input).toHaveValue('7.400')
+    await user.clear(input)
+    await user.type(input, '1..5')
+    await user.click(screen.getByLabelText('Confirmar precio'))
+    expect(screen.getByLabelText('Editar precio unitario')).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('alert')).toHaveTextContent('No se entiende el número')
+
+    await user.clear(screen.getByLabelText('Editar precio unitario'))
+    await user.type(screen.getByLabelText('Editar precio unitario'), '15000')
+    expect(screen.getByLabelText('Editar precio unitario')).toHaveValue('15.000')
+    await user.click(screen.getByLabelText('Confirmar precio'))
+    expect(screen.getByText('$15000.00 c/u')).toBeInTheDocument()
   })
 
   it('al reabrir, la linea "manual" muestra el precio guardado y no el de lista', async () => {

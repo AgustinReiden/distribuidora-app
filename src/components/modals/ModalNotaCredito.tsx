@@ -4,6 +4,8 @@ import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
+import { leerNumero } from '../../utils/normalizarNumero'
+import { CampoNumero } from '../ui/CampoNumero'
 import { normalizarLetra, tipoParaCosto } from '../../utils/letraComprobante'
 import type { CondicionIva, NotaCreditoDB, NotaCreditoFormInput } from '../../types'
 import {
@@ -77,7 +79,8 @@ export default function ModalNotaCredito({
   // Arranca vacío y hay que cargarlo (0 si la nota no lleva).
   const [ajNeto, setAjNeto] = useState(0)
   const [ajIvaTexto, setAjIvaTexto] = useState('')
-  const ajIvaCargado = /\d/.test(ajIvaTexto)
+  // Cargado y legible (B20): lo que no se entiende no se guarda como un IVA 0.
+  const ajIvaCargado = leerNumero(ajIvaTexto) !== null
   const [ajII, setAjII] = useState(0)
   const [ajTotalZZ, setAjTotalZZ] = useState(0)
   // Todo lo que indexa las líneas va por `compra_items.id` y no por
@@ -515,14 +518,13 @@ function AjusteSinMercaderia({ esZZ, leyenda, neto, iva, ii, totalZZ, onNeto, on
       </div>
       <div>
         <label htmlFor="nc-aj-iva" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">IVA</label>
-        <input
+        {/* B20 (D17): los miles los pone el campo y el punto tipeado es la coma, como en el Neto. */}
+        <CampoNumero
           id="nc-aj-iva"
-          type="text"
-          inputMode="decimal"
           required
           placeholder="0 si no lleva"
           value={iva}
-          onChange={(e) => onIva(e.target.value.replace(/[^\d.,]/g, ''))}
+          onChange={onIva}
           className={inputClase}
         />
         {!/\d/.test(iva) && (

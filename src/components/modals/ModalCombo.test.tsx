@@ -175,22 +175,45 @@ describe('ModalCombo · validación (las mismas reglas del server)', () => {
     await guardarYVerError('El precio admite hasta 2 decimales', onSave)
   })
 
-  // #1560: el precio es plata y se lee con el punto de miles. `aNumero` leía «6.500» como 6,5.
+  // #1560 y B20 (D17, cambió de regla): tipeado, el punto y la coma son decimales y los miles los
+  // pone el campo («6500» se ve «6.500»); pegado, «6.500,50» se lee como se muestra la plata.
   it.each([
-    ['6.500', 6500],
-    ['6.500,50', 6500.5],
-    ['6500,5', 6500.5],
-    ['$ 7.200', 7200],
-  ])('lee el precio %j como %d', async (tipeado, esperado) => {
+    ['6500', 'tipea', '6.500', 6500],
+    ['6500,5', 'tipea', '6.500,5', 6500.5],
+    ['6500.5', 'tipea', '6.500,5', 6500.5],
+    ['6.500,50', 'pega', '6.500,50', 6500.5],
+    ['$ 7.200', 'pega', '7.200', 7200],
+  ])('el precio %j que se %s se ve %j y se lee %d', async (texto, como, visto, esperado) => {
     const { onSave } = renderModal()
-    await reemplazar('Precio del combo', tipeado)
+    const campo = screen.getByLabelText('Precio del combo') as HTMLInputElement
+    await userEvent.clear(campo)
+    if (como === 'tipea') await userEvent.type(campo, texto)
+    else { await userEvent.click(campo); await userEvent.paste(texto) }
+    expect(campo.value).toBe(visto)
     await userEvent.click(guardar())
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ precio: esperado }))
   })
 
+  it('un precio que no se entiende queda en rojo y no se guarda', async () => {
+    const { onSave } = renderModal()
+    const campo = screen.getByLabelText('Precio del combo')
+    await userEvent.clear(campo)
+    await userEvent.click(campo)
+    await userEvent.paste('1,234,567')
+    expect(campo).toHaveAttribute('aria-invalid', 'true')
+    await userEvent.click(guardar())
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('la cantidad tipeada «1500» se ve «1.500»', async () => {
+    renderModal()
+    await reemplazar('Cantidad (lugar 1)', '1500')
+    expect(screen.getByLabelText('Cantidad (lugar 1)')).toHaveValue('1.500')
+  })
+
   it('el precio guardado con centavos se muestra con coma', () => {
     renderModal(comboBase({ precio: 6500.5 }))
-    expect((screen.getByLabelText('Precio del combo') as HTMLInputElement).value).toBe('6500,5')
+    expect((screen.getByLabelText('Precio del combo') as HTMLInputElement).value).toBe('6.500,5')
   })
 
   it('exige fecha de inicio', async () => {
@@ -311,7 +334,7 @@ describe('ModalCombo · guardado', () => {
     const { onSave } = renderModal(null)
 
     await userEvent.type(screen.getByLabelText('Nombre'), '  Combo Fernet  ')
-    await userEvent.type(screen.getByLabelText('Precio del combo'), '6.500,50')
+    await userEvent.type(screen.getByLabelText('Precio del combo'), '6500,50')
     fireEvent.change(screen.getByLabelText('Fecha inicio'), { target: { value: '2026-10-15' } })
     fireEvent.change(screen.getByLabelText('Fecha fin (opcional)'), { target: { value: '2026-12-31' } })
 

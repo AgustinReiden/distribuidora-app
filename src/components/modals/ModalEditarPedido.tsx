@@ -21,7 +21,9 @@ import { cadenaDelRegalo, cantidadBaseDeLinea, conservarRepartos, regaloParaEdit
 import { avisosDeCupo, promosConRegalo } from '../../utils/cupoPromo';
 import { AvisoCupoPromo } from '../ui/AvisoCupoPromo';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
-import { calcularNetoVenta, numeroEditable, parsePrecio } from '../../utils/calculations';
+import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
+import { motivoPrecioTipeado, numeroConMiles } from '../../utils/normalizarNumero';
+import { CampoNumero } from '../ui/CampoNumero';
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta';
 import { esTipoVB } from '../../utils/valeBlanco';
 import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente, esDescuentoDeCategoria } from '../../utils/descuentoCliente';
@@ -956,6 +958,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // forma confiable, asi que damos una via explicita para commitear el valor.
   const commitEditingPrice = (): void => {
     if (editingPriceId == null) return;
+    // Lo que no se entiende (o un precio 0) queda abierto, en rojo y con el motivo: ni Enter, ni el
+    // botón, ni tocar afuera lo descartan en silencio (B20, como el alta).
+    if (motivoPrecioTipeado(editingPriceValue)) return;
     const newPrice = parsePrecio(editingPriceValue);
     if (newPrice > 0) handlePrecioChange(editingPriceId, newPrice);
     setEditingPriceId(null);
@@ -1440,12 +1445,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                           {editingPriceId === item.productoId ? (
                             <div className="flex items-center gap-1">
                               <span className="text-orange-600">$</span>
-                              <input
-                                type="text"
-                                inputMode="decimal"
+                              {/* B20 (D17): los miles los pone el campo y el punto tipeado es la coma. */}
+                              <CampoNumero
                                 aria-label="Editar precio unitario"
                                 value={editingPriceValue}
-                                onChange={e => setEditingPriceValue(e.target.value)}
+                                onChange={setEditingPriceValue}
+                                motivo={motivoPrecioTipeado(editingPriceValue)}
                                 onKeyDown={e => {
                                   if (e.key === 'Enter') {
                                     commitEditingPrice();
@@ -1474,7 +1479,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                               onClick={() => {
                                 if (puedeEditarPrecios) {
                                   setEditingPriceId(item.productoId);
-                                  setEditingPriceValue(numeroEditable(precioResuelto));
+                                  setEditingPriceValue(numeroConMiles(precioResuelto));
                                 }
                               }}
                             >

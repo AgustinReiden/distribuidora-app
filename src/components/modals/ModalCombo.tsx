@@ -21,7 +21,9 @@ import { AlertTriangle, ArrowDown, ArrowUp, Check, Plus, Search, Tag, Trash2, X 
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { fechaLocalISO, formatPrecio } from '../../utils/formatters'
-import { leerPlataTipeada, numeroEditable } from '../../utils/calculations'
+import { leerPlataTipeada } from '../../utils/calculations'
+import { leerNumero, numeroConMiles } from '../../utils/normalizarNumero'
+import { CampoNumero } from '../ui/CampoNumero'
 import type { ProductoDB } from '../../types'
 import type { ComboAdmin, ComboFormInput } from '../../hooks/queries/useCombosQuery'
 import type { CategoriaDB } from '../../hooks/queries/useCategoriasQuery'
@@ -133,12 +135,13 @@ interface LugarForm {
   categorias: string[]
 }
 
-/** Número de un campo de texto, "" => NaN. Para las cantidades y el tope; el precio va por `leerPlataTipeada`. */
+/**
+ * Número de un campo de texto, "" => NaN. Para las cantidades y el tope; el precio va por
+ * `leerPlataTipeada`. Lo lee `leerNumero` (B20, D17): los puntos son los miles que pone el campo
+ * («1.500» son 1500) y la coma es decimal, que el schema rechaza porque van enteros.
+ */
 function aNumero(raw: string): number {
-  const t = raw.trim()
-  if (t === '') return NaN
-  const normalizado = t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t
-  return /^-?\d*\.?\d+$/.test(normalizado) ? Number(normalizado) : NaN
+  return leerNumero(raw) ?? NaN
 }
 
 /** Los lugares de un combo, comparables: para saber si el admin los cambió. */
@@ -168,16 +171,16 @@ export default function ModalCombo({
   const hoy = fechaLocalISO()
 
   const [nombre, setNombre] = useState(combo?.nombre ?? '')
-  const [precio, setPrecio] = useState(combo ? numeroEditable(combo.precio) : '')
+  const [precio, setPrecio] = useState(combo ? numeroConMiles(combo.precio) : '')
   const [fechaInicio, setFechaInicio] = useState(combo?.fechaInicio ?? hoy)
   const [fechaFin, setFechaFin] = useState(combo?.fechaFin ?? '')
   const [combinaEscalas, setCombinaEscalas] = useState(combo?.combinaEscalas ?? false)
-  const [topeCombos, setTopeCombos] = useState(combo?.topeCombos != null ? String(combo.topeCombos) : '')
+  const [topeCombos, setTopeCombos] = useState(combo?.topeCombos != null ? numeroConMiles(combo.topeCombos) : '')
   const [productoAMoverId, setProductoAMoverId] = useState(combo?.productoAMoverId ?? '')
   const [lugares, setLugares] = useState<LugarForm[]>(() =>
     combo && combo.componentes.length > 0
       ? combo.componentes.map((c, i) => ({
-        key: i, cantidad: String(c.cantidad), sueltos: [...c.sueltos], categorias: [...c.categorias],
+        key: i, cantidad: numeroConMiles(c.cantidad), sueltos: [...c.sueltos], categorias: [...c.categorias],
       }))
       : [{ key: 0, cantidad: '1', sueltos: [], categorias: [] }]
   )
@@ -397,12 +400,11 @@ export default function ModalCombo({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label htmlFor="combo-precio" className={labelCls}>Precio del combo</label>
-            <input
+            {/* B20 (D17): los miles los pone el campo y el punto tipeado es la coma. */}
+            <CampoNumero
               id="combo-precio"
-              type="text"
-              inputMode="decimal"
               value={precio}
-              onChange={e => setPrecio(e.target.value)}
+              onChange={setPrecio}
               placeholder="Ej: 15000"
               className={inputCls}
             />
@@ -468,12 +470,11 @@ export default function ModalCombo({
                       <label htmlFor={`combo-cantidad-${lugar.key}`} className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                         Cantidad (lugar {idx + 1})
                       </label>
-                      <input
+                      <CampoNumero
                         id={`combo-cantidad-${lugar.key}`}
-                        type="text"
-                        inputMode="numeric"
+                        entero
                         value={lugar.cantidad}
-                        onChange={e => actualizarLugar(lugar.key, { cantidad: e.target.value })}
+                        onChange={cantidad => actualizarLugar(lugar.key, { cantidad })}
                         className={inputCls}
                       />
                     </div>
@@ -773,12 +774,11 @@ export default function ModalCombo({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="combo-tope" className={labelCls}>Tope de combos (opcional)</label>
-            <input
+            <CampoNumero
               id="combo-tope"
-              type="text"
-              inputMode="numeric"
+              entero
               value={topeCombos}
-              onChange={e => setTopeCombos(e.target.value)}
+              onChange={setTopeCombos}
               placeholder="Sin tope"
               className={inputCls}
             />
