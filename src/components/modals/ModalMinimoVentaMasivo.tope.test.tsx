@@ -1,5 +1,5 @@
 /**
- * El mínimo de venta masivo no deja pasar más de 100.000 unidades: la base lo frena con un
+ * El mínimo de venta masivo no deja pasar más de 99.999.999 unidades: la base lo frena con un
  * CHECK y el usuario vería el 23514 crudo. Se avisa en el formulario y no se deja aplicar.
  */
 import '@testing-library/jest-dom/vitest'
@@ -24,24 +24,24 @@ function abrir() {
   fireEvent.change(screen.getByLabelText('Categoría'), { target: { value: 'c1' } })
 }
 
-describe('ModalMinimoVentaMasivo — tope de 100.000', () => {
+describe('ModalMinimoVentaMasivo — tope de 99.999.999', () => {
   it('con un mínimo razonable deja aplicar', () => {
     abrir()
     expect(screen.getByRole('button', { name: 'Aplicar mínimo' })).toBeEnabled()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
-  it('con más de 100.000 muestra el motivo y no deja aplicar', () => {
+  it('con más de 99.999.999 muestra el motivo y no deja aplicar', () => {
     abrir()
-    fireEvent.change(screen.getByLabelText('Mínimo de unidades'), { target: { value: '100001' } })
+    fireEvent.change(screen.getByLabelText('Mínimo de unidades'), { target: { value: '100000000' } })
 
-    expect(screen.getByRole('alert')).toHaveTextContent('no puede superar las 100.000 unidades')
+    expect(screen.getByRole('alert')).toHaveTextContent('no puede superar las 99.999.999 unidades')
     expect(screen.getByRole('button', { name: 'Aplicar mínimo' })).toBeDisabled()
   })
 
-  it('con exactamente 100.000 deja aplicar', () => {
+  it('con exactamente 99.999.999 deja aplicar', () => {
     abrir()
-    fireEvent.change(screen.getByLabelText('Mínimo de unidades'), { target: { value: '100000' } })
+    fireEvent.change(screen.getByLabelText('Mínimo de unidades'), { target: { value: '99999999' } })
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Aplicar mínimo' })).toBeEnabled()

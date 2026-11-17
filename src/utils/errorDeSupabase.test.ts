@@ -406,7 +406,7 @@ describe('errorDeSupabase — CHECK violado (23514)', () => {
 
   it('dice qué dato es cuando conoce la restricción', () => {
     const e = errorDeSupabase(check('productos_cantidad_minima_venta_techo'), SIN_CONEXION)
-    expect(e.message).toMatch(/cantidad mínima de venta.*100\.000/)
+    expect(e.message).toMatch(/cantidad mínima de venta.*99\.999\.999/)
   })
 
   it('sin nombre de restricción da el texto genérico', () => {

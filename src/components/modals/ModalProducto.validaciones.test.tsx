@@ -2,7 +2,7 @@
  * Validaciones de la ficha de producto que la base también hace cumplir con un CHECK:
  * así nadie llega al 23514 crudo (#1561 c7, #1603 ola 2).
  *
- *  - cantidad mínima de venta: de 1 a 100.000, o vacío (sin mínimo);
+ *  - cantidad mínima de venta: de 1 a 99.999.999, o vacío (sin mínimo);
  *  - impuesto interno: de 0 a 9900 (tasa efectiva, 99 % nominal; ya no el 100 de antes);
  *  - nombre: ni vacío ni con espacios solos.
  * Y el campo Subrubro de un producto con el rubro desactivado (CAT-11, resto).
@@ -28,10 +28,10 @@ const mensajes = (datos: Record<string, unknown>) => {
 }
 
 describe('modalProductoSchema — mínimo de venta', () => {
-  it('100.000 pasa; 100.001 se rechaza con el motivo', () => {
-    expect(mensajes({ cantidad_minima_venta: 100000 })).toEqual([])
-    expect(mensajes({ cantidad_minima_venta: 100001 })).toEqual([
-      'cantidad_minima_venta: El mínimo de venta no puede superar las 100.000 unidades. Dejalo vacío si no hay mínimo.',
+  it('99.999.999 pasa; 100.000.000 se rechaza con el motivo', () => {
+    expect(mensajes({ cantidad_minima_venta: 99999999 })).toEqual([])
+    expect(mensajes({ cantidad_minima_venta: 100000000 })).toEqual([
+      'cantidad_minima_venta: El mínimo de venta no puede superar las 99.999.999 unidades. Dejalo vacío si no hay mínimo.',
     ])
   })
 

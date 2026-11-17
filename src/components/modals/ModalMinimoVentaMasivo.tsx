@@ -67,7 +67,7 @@ export default function ModalMinimoVentaMasivo({
   }, [productos, categoriaSeleccionada])
 
   const quitaMinimo = cantidad <= 0
-  // La base frena un mínimo de más de 100.000 con un CHECK: se avisa acá, antes de mandarlo.
+  // La base frena un mínimo de más de 99.999.999 con un CHECK: se avisa acá, antes de mandarlo.
   const errorCantidad = errorDeMinimoVenta(cantidad)
   const puedeAplicar = Boolean(categoriaId) && afectados.length > 0 && !mutation.isPending && !errorCantidad
 

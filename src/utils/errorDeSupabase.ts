@@ -155,7 +155,7 @@ export async function respuestaDeErrorLegible(res: Response): Promise<Response> 
  * fragmento del nombre de la restricción; el primero que calza gana.
  */
 const CHECKS_CONOCIDOS: Array<[RegExp, string]> = [
-  [/cantidad_minima_venta/, 'La cantidad mínima de venta tiene que ser mayor que 0 y de hasta 100.000 unidades (o quedar vacía, sin mínimo).'],
+  [/cantidad_minima_venta/, 'La cantidad mínima de venta tiene que ser mayor que 0 y de hasta 99.999.999 unidades (o quedar vacía, sin mínimo).'],
   [/impuestos_internos/, 'El impuesto interno está fuera de rango.'],
   [/(nombre|razon_social|direccion|fantasia).*(blank|vacio|trim|no_vacio|not_empty)|(blank|vacio|trim|no_vacio|not_empty).*(nombre|razon_social|direccion|fantasia)/, 'Hay un dato obligatorio vacío o con sólo espacios (nombre, razón social o dirección).'],
 ]

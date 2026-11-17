@@ -82,7 +82,7 @@ export const modalProductoSchema = z.object({
     .number({ error: 'El mínimo de venta debe ser un número' })
     .int({ message: 'El mínimo de venta debe ser un número entero' })
     .nonnegative({ message: 'El mínimo de venta no puede ser negativo' })
-    // La base lo frena con un CHECK (> 0 y hasta 100.000): se valida acá antes.
+    // La base lo frena con un CHECK (> 0 y hasta 99.999.999): se valida acá antes.
     .max(CANTIDAD_MINIMA_VENTA_MAXIMA, { message: MENSAJE_MINIMO_VENTA_MAXIMO })
     .optional()
     .nullable(),
