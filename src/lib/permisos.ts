@@ -151,9 +151,15 @@ export function puedeAccederGastos(rol: RolUsuario | null | undefined): boolean 
   return rol === 'admin' || rol === 'encargado'
 }
 
-/** Crear y editar rubros de gasto: sólo admin (espejo de `guardar_rubro_gasto`). */
-export function puedeCrearRubroGasto(rol: RolUsuario | null | undefined): boolean {
-  return rol === 'admin'
+/**
+ * Crear y editar rubros de gasto: sólo un admin de todas las sucursales activas (espejo de
+ * `guardar_rubro_gasto`; 1597-b5, #1597, decisión del dueño: los rubros son de toda la empresa).
+ */
+export function puedeCrearRubroGasto(
+  rol: RolUsuario | null | undefined,
+  tieneTodasLasSucursales: boolean,
+): boolean {
+  return rol === 'admin' && tieneTodasLasSucursales
 }
 
 export function puedeAccederPromociones(rol: RolUsuario | null | undefined): boolean {

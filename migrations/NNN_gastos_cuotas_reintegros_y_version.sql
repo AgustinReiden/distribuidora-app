@@ -27,8 +27,9 @@
 -- sobre 254,34, y el tope da 54,07. Decisión del dueño (15/11, D40 en #1562):
 -- el tope tolera un centavo por renglón de la factura. El gasto no sabía
 -- cuántos renglones tiene su factura: ahora lo guarda,
--- `gastos.renglones_factura` (1 por defecto, de 1 a 999), y el tope es el de
--- antes más `0,01 × renglones`. Sólo cuenta en una factura A o M; en el resto
+-- `gastos.renglones_factura` (1 por defecto, de 1 a 99: decisión del dueño del
+-- 17/11, porque con 999 una factura A de $10 entraba con $9,99 de IVA), y el
+-- tope es el de antes más `0,01 × renglones`. Sólo cuenta en una factura A o M; en el resto
 -- queda en 1. En una edición, la clave ausente conserva el valor guardado (un
 -- PWA de antes no la manda). Espejo: `topeIvaGastoCentavos` y `errorDeDesglose`
 -- (src/utils/gastos.ts), y el campo «Renglones» del bloque de IVA de ModalGasto.
@@ -52,8 +53,9 @@
 -- `trg_gastos_cuenta_empleado` no miraba `fecha`. Ahora la mira, y el reintegro
 -- que nació con la fecha del gasto pasa a la fecha nueva, siempre que no esté
 -- dentro de una liquidación (lo pagado es la foto: una liquidación toma los
--- movimientos por id, `_liquidacion_json`). Las correcciones de monto siguen con
--- el día en que se hicieron.
+-- movimientos por id, `_liquidacion_json`). Sólo se mueve ese, el que no lleva
+-- motivo: las correcciones de monto (con motivo) siguen con el día en que se
+-- hicieron, aunque sea el mismo día del gasto.
 --
 -- =========================================================================
 -- 4 · 1597-b5 · LOS RUBROS DE GASTO LOS CAMBIA UN ADMIN DE TODAS LAS SUCURSALES
@@ -70,14 +72,17 @@
 -- Decisión del dueño (15/11, D45 en #1545): «remuneraciones» y «comisiones» se
 -- detectan como rubro de sueldo (la comisión sale de la liquidación: como gasto
 -- se contaría dos veces), en cualquier parte del nombre como las demás. La
--- comisión del banco, de la tarjeta o de Mercado Pago sigue siendo gasto: el
--- ensayo de la 488 la tiene como tal («Comisiones bancarias»), y esa excepción
--- la decidió la tarjeta, no el dueño (va en el informe); «sac» y
--- «vacaciones» pasan a palabra entera: cuentan sólo si son todo el nombre, así
--- «Bolsas SAC» y «Seguro de vacaciones del vehículo» son gasto. Los puntos y los
--- espacios no cuentan para ese nombre entero: «S.A.C.» es «sac». El CHECK
--- `gasto_rubros_nombre_check` se vuelve a crear para que valide las filas con
--- la regla nueva; antes, la premisa lista los rubros que dejaría afuera.
+-- comisión de un medio de cobro (banco, tarjeta, Mercado Pago o Libre, Posnet,
+-- Naranja, Ualá, MODO, Rapipago, Pago Fácil, transferencia) sigue siendo gasto:
+-- el ensayo de la 488 tiene «Comisiones bancarias» como tal; la lista la armó la
+-- tarjeta con la revisión adversarial. «sac» y «vacaciones» se frenan como
+-- palabra dentro del nombre, como hoy (decisión del dueño del 17/11: «Pago de
+-- SAC», «SAC 2026» y «Vacaciones del personal» se siguen frenando; «Bolsas SAC»
+-- y «Seguro de vacaciones del vehículo» también). Las letras sueltas separadas
+-- por puntos, guiones, espacios o guiones bajos se juntan antes de comparar:
+-- «S.A.C.», «S-A-C» y «S_A_C» son «sac». El CHECK `gasto_rubros_nombre_check`
+-- se vuelve a crear para que valide las filas con la regla nueva; antes, un
+-- bloque lista los rubros que dejaría afuera y aborta.
 --
 -- =========================================================================
 -- 6 · GTO-E · EL EMPLEADO SE TOMA ANTES QUE LA RENDICIÓN Y QUE LA FILA
@@ -130,13 +135,14 @@ END
 $lf$;
 
 -- ---------------------------------------------------------------------------
--- Premisas: los cuerpos vivos del 16/11 (ledger en la 512), normalizados a LF
+-- Premisas: los cuerpos vivos, normalizados a LF. Leídos el 16/11 (ledger en la 512) y
+-- comprobados el 17/11 sobre prod en la 519 con la 520, la 521 y la 522 aplicadas encima: esas
+-- tres no tocan ninguna de estas funciones.
 -- ---------------------------------------------------------------------------
 DO $premisas$
 DECLARE
   r record;
   v text;
-  v_malos text;
 BEGIN
   FOR r IN SELECT * FROM (VALUES
     ('public._guardar_gasto(jsonb,boolean)', 'd0549186969d159b154f4adba99f04fc'),
@@ -174,18 +180,6 @@ BEGIN
               WHERE table_schema = 'public' AND table_name = 'gastos' AND column_name = 'renglones_factura') THEN
     RAISE EXCEPTION 'mig NNN · gastos.renglones_factura ya existe';
   END IF;
-
-  -- GTO-B · premisa de datos: ningún rubro existente queda afuera con la regla nueva. La misma
-  -- cuenta que la función de abajo.
-  SELECT string_agg(format('%s (id %s)', g.nombre, g.id), ', ' ORDER BY g.id) INTO v_malos
-    FROM gasto_rubros g
-         CROSS JOIN LATERAL (SELECT translate(lower(COALESCE(g.nombre, '')), 'áéíóúüàèìòù', 'aeiouuaeiou') AS n) x
-   WHERE x.n ~ '\m(sueldos?|salarios?|haberes|aguinaldos?|jornal(es)?|horas? extras?|presentismo|indemnizacion(es)?|remuneracion(es)?)\M'
-      OR (x.n ~ '\mcomision(es)?\M' AND x.n !~ '\m(banc[a-z]*|tarjetas?|mercado ?pago)\M')
-      OR regexp_replace(x.n, '[.[:space:]]', '', 'g') IN ('sac', 'vacaciones');
-  IF v_malos IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · estos rubros de gasto pasan a ser de sueldo con GTO-B: % (renombrarlos o darlos de baja antes de aplicar)', v_malos;
-  END IF;
 END
 $premisas$;
 
@@ -215,10 +209,10 @@ $f$;
 -- =========================================================================
 ALTER TABLE public.gastos
   ADD COLUMN renglones_factura integer NOT NULL DEFAULT 1
-  CONSTRAINT gastos_renglones_factura_rango CHECK (renglones_factura BETWEEN 1 AND 999);
+  CONSTRAINT gastos_renglones_factura_rango CHECK (renglones_factura BETWEEN 1 AND 99);
 
 COMMENT ON COLUMN public.gastos.renglones_factura IS
-  '1562-c1 (#1562, D40): cuántos renglones tiene la factura A o M del gasto. El tope del IVA tolera un centavo por renglón (el IVA redondeado por renglón). 1 en el resto de los comprobantes. La escribe sólo _guardar_gasto.';
+  '1562-c1 (#1562, D40): cuántos renglones tiene la factura A o M del gasto, de 1 a 99 (decisión del dueño, 17/11). El tope del IVA tolera un centavo por renglón (el IVA redondeado por renglón). 1 en el resto de los comprobantes. La escribe sólo _guardar_gasto.';
 
 -- =========================================================================
 -- 2 · 1562-b1 · _gasto_cuota
@@ -254,19 +248,37 @@ CREATE OR REPLACE FUNCTION public._rubro_es_sueldo(p_nombre text)
 AS $function$
   -- #1521 (GTO-9): los sueldos no son un gasto, salen de las liquidaciones del personal. Sin
   -- tildes ni mayúsculas. Las cargas sociales, el sindicato y la ART sí son gasto: no están.
-  -- #1545 (GTO-B, decisión del dueño 15/11): la palabra en cualquier parte del nombre, y se
-  -- suman «remuneraciones» y «comisiones» (la comisión sale de la liquidación: como gasto se
-  -- contaría dos veces), salvo la del banco o la tarjeta, que es gasto («Comisiones bancarias»,
-  -- como en el ensayo de la 488). «sac» y «vacaciones» cuentan sólo como el nombre entero, sin
-  -- puntos ni espacios («S.A.C.» sí; «Bolsas SAC» y «Seguro de vacaciones del vehículo» no).
-  SELECT x.n ~ '\m(sueldos?|salarios?|haberes|aguinaldos?|jornal(es)?|horas? extras?|presentismo|indemnizacion(es)?|remuneracion(es)?)\M'
-      OR (x.n ~ '\mcomision(es)?\M' AND x.n !~ '\m(banc[a-z]*|tarjetas?|mercado ?pago)\M')
-      OR regexp_replace(x.n, '[.[:space:]]', '', 'g') IN ('sac', 'vacaciones')
-    FROM (SELECT translate(lower(COALESCE(p_nombre, '')), 'áéíóúüàèìòù', 'aeiouuaeiou') AS n) x;
+  -- #1545 (GTO-B, decisiones del dueño del 15/11 y del 17/11): la palabra en cualquier parte del
+  -- nombre, «sac» y «vacaciones» también («Pago de SAC», «Vacaciones del personal»), y se suman
+  -- «remuneraciones» y «comisiones» (la comisión sale de la liquidación: como gasto se contaría
+  -- dos veces), salvo la de un medio de cobro, que es gasto («Comisiones bancarias», «Comisión
+  -- Posnet»). Las letras sueltas separadas por puntos, guiones, espacios o guiones bajos se juntan
+  -- antes de comparar: «S.A.C.», «S-A-C» y «S_A_C» son «sac». Los espacios repetidos cuentan uno.
+  SELECT y.n ~ '\m(sueldos?|salarios?|haberes|aguinaldos?|sac|jornal(es)?|vacaciones|horas? extras?|presentismo|indemnizacion(es)?|remuneracion(es)?)\M'
+      OR (y.n ~ '\mcomision(es)?\M'
+          AND y.n !~ '\m(banc[a-z]*|tarjetas?|mercado ?(pago|libre)|posnet|naranja|uala|modo|rapipago|pago ?facil|transferencias?)\M')
+    FROM (SELECT translate(lower(COALESCE(p_nombre, '')), 'áéíóúüàèìòù_', 'aeiouuaeiou ') AS t) x
+         CROSS JOIN LATERAL (
+           SELECT regexp_replace(regexp_replace(x.t, '\m([a-z])[^a-z0-9]+(?=[a-z]\M)', '\1', 'g'), '\s+', ' ', 'g') AS n) y;
 $function$;
 
+-- GTO-B · premisa de datos, con la función ya reemplazada (una sola regla): ningún rubro
+-- existente queda afuera. Si alguno queda, aborta toda la migración con la lista.
+DO $rubros$
+DECLARE
+  v_malos text;
+BEGIN
+  SELECT string_agg(format('%s (id %s)', g.nombre, g.id), ', ' ORDER BY g.id) INTO v_malos
+    FROM gasto_rubros g
+   WHERE public._rubro_es_sueldo(g.nombre);
+  IF v_malos IS NOT NULL THEN
+    RAISE EXCEPTION 'mig NNN · estos rubros de gasto pasan a ser de sueldo con GTO-B: % (renombrarlos o darlos de baja antes de aplicar)', v_malos;
+  END IF;
+END
+$rubros$;
+
 -- Se vuelve a crear para que valide las filas con la regla nueva (reemplazar la función no las
--- revisa). La premisa ya comprobó que todas cumplen.
+-- revisa).
 ALTER TABLE public.gasto_rubros DROP CONSTRAINT gasto_rubros_nombre_check;
 ALTER TABLE public.gasto_rubros
   ADD CONSTRAINT gasto_rubros_nombre_check CHECK (btrim(nombre) <> '' AND NOT public._rubro_es_sueldo(nombre));
@@ -341,7 +353,7 @@ $r$    IF NOT FOUND THEN
     -- anuló en el medio, este guardado no lo pisa. Sin la clave (un PWA de antes) no compara.
     -- Se vuelve a mirar con la fila tomada (8b).
     IF v_esperado IS NOT NULL AND v_viejo.updated_at IS DISTINCT FROM v_esperado THEN
-      RAISE EXCEPTION 'Otro usuario cambió este gasto mientras lo editabas: cerralo y volvé a abrirlo para ver cómo quedó';
+      RAISE EXCEPTION 'Este gasto cambió desde que lo abriste (se guardó o se anuló en el medio): cerralo y volvé a abrirlo para ver cómo quedó';
     END IF;
     -- Antes que el vehiculo: si no, cambiar de sucursal un gasto con vehiculo
 $r$, '_guardar_gasto (versión al leer)');
@@ -361,8 +373,8 @@ $r$  IF v_tipo IN ('factura_a', 'factura_m') THEN
     -- 1562-c1 (#1562, D40): los renglones de la factura. En una edición, la clave ausente
     -- conserva los guardados.
     v_renglones := COALESCE(v_renglones, v_viejo.renglones_factura, 1);
-    IF v_renglones NOT BETWEEN 1 AND 999 THEN
-      RAISE EXCEPTION 'Los renglones de la factura van de 1 a 999';
+    IF v_renglones NOT BETWEEN 1 AND 99 THEN
+      RAISE EXCEPTION 'Los renglones de la factura van de 1 a 99';
     END IF;
     IF v_total - v_iva - v_piva - v_piibb - v_otros <= 0 THEN
       RAISE EXCEPTION 'Con factura A o M el neto tiene que ser mayor a cero';
@@ -412,7 +424,7 @@ $a$      v_viejo := v_releido;
 $a$,
 $r$      v_viejo := v_releido;
       IF v_esperado IS NOT NULL AND v_viejo.updated_at IS DISTINCT FROM v_esperado THEN
-        RAISE EXCEPTION 'Otro usuario cambió este gasto mientras lo editabas: cerralo y volvé a abrirlo para ver cómo quedó';
+        RAISE EXCEPTION 'Este gasto cambió desde que lo abriste (se guardó o se anuló en el medio): cerralo y volvé a abrirlo para ver cómo quedó';
       END IF;
 $r$, '_guardar_gasto (versión con la fila tomada)');
 
@@ -497,8 +509,10 @@ BEGIN
   IF TG_OP = 'UPDATE' THEN
     -- 1597-b4 (#1597): la fecha del reintegro sigue a la del gasto. Se mueve el que nació con la
     -- fecha del gasto, del mismo empleado y fuera de toda liquidación (una liquidación toma los
-    -- movimientos por id, como _liquidacion_json: lo pagado no se toca). Las correcciones de
-    -- monto quedan con el día en que se hicieron. El empleado ya está tomado (_guardar_gasto, GTO-E).
+    -- movimientos por id, como _liquidacion_json: lo pagado no se toca). Es el que no lleva motivo
+    -- (_cuenta_empleado_conciliar le pone motivo a toda corrección): las correcciones de monto
+    -- quedan con el día en que se hicieron, aunque sea el del gasto. El empleado ya está tomado
+    -- (_guardar_gasto, GTO-E).
     IF NEW.fecha IS DISTINCT FROM OLD.fecha
        AND OLD.origen_pago = 'empleado' AND NEW.origen_pago = 'empleado'
        AND OLD.empleado_id = NEW.empleado_id
@@ -513,6 +527,7 @@ BEGIN
          AND m.empleado_id = NEW.empleado_id
          AND m.tipo = 'reintegro'
          AND m.fecha = OLD.fecha
+         AND m.observacion IS NULL
          AND m.id > COALESCE(v_corte, 0);
     END IF;
     v_motivo := CASE WHEN NEW.anulado_at IS NOT NULL AND OLD.anulado_at IS NULL THEN 'Se anuló el gasto'
@@ -561,10 +576,11 @@ BEGIN
      OR public._gasto_cuota(20.15, 2, 1) <> 10.08 OR public._gasto_cuota(20.15, 2, 2) <> 10.07 THEN
     RAISE EXCEPTION 'mig NNN · _gasto_cuota no da lo esperado';
   END IF;
-  IF NOT public._rubro_es_sueldo('S.A.C.') OR NOT public._rubro_es_sueldo('Remuneraciones')
-     OR NOT public._rubro_es_sueldo('Comisiones de vendedores')
-     OR public._rubro_es_sueldo('Comisiones bancarias')
-     OR public._rubro_es_sueldo('Bolsas SAC') OR public._rubro_es_sueldo('Seguro de vacaciones del vehículo') THEN
+  IF NOT public._rubro_es_sueldo('S.A.C.') OR NOT public._rubro_es_sueldo('S-A-C')
+     OR NOT public._rubro_es_sueldo('Pago de SAC') OR NOT public._rubro_es_sueldo('Vacaciones del personal')
+     OR NOT public._rubro_es_sueldo('Remuneraciones') OR NOT public._rubro_es_sueldo('Comisiones de vendedores')
+     OR public._rubro_es_sueldo('Comisiones bancarias') OR public._rubro_es_sueldo('Comisión Posnet')
+     OR public._rubro_es_sueldo('Luz, agua y gas') OR public._rubro_es_sueldo('Saco') THEN
     RAISE EXCEPTION 'mig NNN · _rubro_es_sueldo no da lo esperado';
   END IF;
   IF (SELECT pg_get_triggerdef(oid) FROM pg_trigger

@@ -543,10 +543,10 @@ describe('ModalGasto — edición', () => {
 
   it('si otro lo cambió, muestra el aviso del server y no se cierra', async () => {
     const onSave = vi.fn<OnSave>(() => Promise.reject(new Error(
-      'Otro usuario cambió este gasto mientras lo editabas: cerralo y volvé a abrirlo para ver cómo quedó')))
+      'Este gasto cambió desde que lo abriste (se guardó o se anuló en el medio): cerralo y volvé a abrirlo para ver cómo quedó')))
     const { user, onClose } = renderModal({ gasto: libreria, onSave })
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
-    expect(await screen.findByText(/Otro usuario cambió este gasto mientras lo editabas/)).toBeInTheDocument()
+    expect(await screen.findByText(/Este gasto cambió desde que lo abriste/)).toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()
   })
 })
@@ -589,7 +589,19 @@ describe('ModalGasto — renglones de la factura', () => {
     poner('Renglones de la factura', '0')
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
     expect(onSave).not.toHaveBeenCalled()
-    expect(screen.getByText('Los renglones de la factura van de 1 a 999')).toBeInTheDocument()
+    expect(screen.getByText('Los renglones de la factura van de 1 a 99')).toBeInTheDocument()
+  })
+
+  it.each(['', 'abc', '100'])('renglones «%s» no guarda y avisa en castellano', async (texto) => {
+    const { user, onSave } = renderModal()
+    await elegirRubro(user, 'Librería')
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
+    poner(/Monto total/, '254,34')
+    poner('IVA', '54,09')
+    poner('Renglones de la factura', texto)
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText('Los renglones de la factura van de 1 a 99')).toBeInTheDocument()
   })
 
   it('editar un gasto guardado con 2 renglones (la lista no los trae) no lo frena ni pisa los guardados', async () => {

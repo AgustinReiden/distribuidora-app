@@ -125,7 +125,7 @@ export interface GuardarGastoPayload {
   renglones_factura?: number
   /**
    * 1599-b9 (#1599): el `updated_at` del gasto que vio quien edita. Si otro lo cambió en el medio,
-   * el server rechaza («Otro usuario cambió este gasto…»). Sin la clave no compara.
+   * el server rechaza («Este gasto cambió desde que lo abriste…»). Sin la clave no compara.
    */
   updated_at_esperado?: string
 }

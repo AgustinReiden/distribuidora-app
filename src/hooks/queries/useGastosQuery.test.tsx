@@ -148,7 +148,7 @@ describe('useGuardarGastoMutation', () => {
   it('manda updated_at_esperado y, si el server rechaza, vuelve a leer los gastos', async () => {
     rpcResult = {
       data: null,
-      error: { message: 'Otro usuario cambió este gasto mientras lo editabas: cerralo y volvé a abrirlo para ver cómo quedó', code: 'P0001' },
+      error: { message: 'Este gasto cambió desde que lo abriste (se guardó o se anuló en el medio): cerralo y volvé a abrirlo para ver cómo quedó', code: 'P0001' },
     }
     const qc = nuevoCliente()
     const invalidar = vi.spyOn(qc, 'invalidateQueries')
@@ -157,7 +157,7 @@ describe('useGuardarGastoMutation', () => {
 
     const error = await result.current.mutateAsync(conVersion).catch((e: unknown) => e)
 
-    expect((error as Error).message).toMatch(/^Otro usuario cambió este gasto/)
+    expect((error as Error).message).toMatch(/^Este gasto cambió desde que lo abriste/)
     expect(rpcCalls).toEqual([{ fn: 'guardar_gasto', args: { p_gasto: conVersion } }])
     await waitFor(() => expect(invalidar).toHaveBeenCalledTimes(1))
     expect((invalidar.mock.calls[0][0] as { queryKey: unknown[] }).queryKey).toEqual(['gastos', 1])

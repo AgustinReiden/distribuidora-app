@@ -11,8 +11,10 @@
 -- 1562-c1 · el tope del IVA tolera un centavo por renglón de la factura (decisión del dueño, D40).
 --   C1 · factura A de 254,34 al 27 % con dos renglones de neto 100,13: IVA 54,08 (27,04 + 27,04)
 --        entra con 1 renglón (el tope estricto da 54,07); 54,09 no con 1 y sí con 2; 54,10 no con 2.
---        Renglones 0 y 1000 no entran. Editar sin mandar los renglones conserva los guardados (2) y
---        el gasto de 54,09 se sigue guardando. Una factura B queda con 1.
+--        Renglones 0 y 100 no entran (de 1 a 99, decisión del dueño del 17/11); 99 sí. Una factura A
+--        de $10 con $9,99 de IVA no entra ni con 99 renglones (tope 2,13 + 0,99). Editar sin mandar
+--        los renglones conserva los guardados (2) y el gasto de 54,09 se sigue guardando. Una
+--        factura B queda con 1.
 -- 1562-b1 · _gasto_cuota no da una cuota negativa.
 --   B1 · 0,60 en 120: 119 cuotas de 0,00 y la última 0,60. Para varios costos chicos y grandes y n de
 --        1 a 120: ninguna cuota negativa, la suma es el costo al centavo, y donde la regla vieja no
@@ -21,16 +23,19 @@
 --   F1 · gasto de 1.000 pagado por el empleado E1 hace 5 días: reintegro +1.000 a hace 5 días, saldo
 --        1.000. Fecha a hace 10 días: el mismo movimiento pasa a hace 10, saldo 1.000, un solo
 --        movimiento. Fecha a hace 8 y monto 1.200: el reintegro original pasa a hace 8 y la
---        corrección (+200) es de hoy; saldo 1.200.
+--        corrección (+200) es de hoy; saldo 1.200. Un gasto de hoy de 500 que pasa a 600 (corrección
+--        +100 de hoy) y después a hace 3 días: el original va a hace 3 y la corrección queda hoy.
 --   F2 · un reintegro que ya está dentro de una liquidación no se mueve: queda con su fecha.
 -- 1597-b5 · los rubros de gasto los cambia sólo un admin de todas las sucursales (D46).
 --   R1 · el admin de una sola sucursal no crea ni edita un rubro; el de todas, sí.
--- GTO-B · las palabras de sueldo (D45).
---   S1 · son sueldo: «S.A.C.», «SAC», «Vacaciones», «Remuneraciones», «Remuneración», «Comisiones de
---        vendedores», «Comisión»; no: «Bolsas SAC», «Seguro de vacaciones del vehículo», «Saco»,
---        «Cargas sociales», «Combustible», «Comisiones bancarias» (y la de la tarjeta o Mercado
---        Pago). Los de antes siguen («Sueldos», «Aguinaldo»).
---   S2 · guardar_rubro_gasto rechaza «Remuneraciones» y crea «Bolsas SAC».
+-- GTO-B · las palabras de sueldo (D45 y la decisión del dueño del 17/11).
+--   S1 · son sueldo: «S.A.C.», «S-A-C», «S_A_C», «s. a. c.», «SAC», «Pago de SAC», «SAC 2026»,
+--        «Vacaciones», «Vacaciones del personal», «Bolsas SAC» y «Seguro de vacaciones del vehículo»
+--        (como hoy), «Remuneraciones», «Remuneración», «Comisiones de vendedores», «Comisión»; no:
+--        «Saco», «Cargas sociales», «Combustible», «Luz, agua y gas», y la comisión de un medio de
+--        cobro (banco, tarjeta, Mercado Pago o Libre, Posnet, Naranja X, Ualá, MODO, Rapipago,
+--        transferencia). Los de antes siguen («Sueldos», «Aguinaldo»).
+--   S2 · guardar_rubro_gasto rechaza «Remuneraciones» y «Pago de SAC», y crea «Comisión Posnet».
 -- GTO-E · el reintegro toma el empleado FOR UPDATE (pgrowlocks), antes que la rendición.
 --   E1 · anular un gasto que pagó un empleado deja su fila tomada FOR UPDATE (antes, sólo la FOR KEY
 --        SHARE de la FK del movimiento).
@@ -38,8 +43,9 @@
 --   E3 · regresión: con el reintegro de 500 anulado, un pago de 500 al mismo empleado no entra
 --        (saldo 0 después de la anulación).
 -- 1599-b9 · la edición compara la versión (D47).
---   V1 · con el `updated_at` que vio entra; si otro lo cambió en el medio, no («Otro usuario cambió
---        este gasto…») y el gasto queda como lo dejó el otro; sin la clave (un PWA de antes) entra.
+--   V1 · con el `updated_at` que vio entra; si alguien lo cambió en el medio, no («Este gasto cambió
+--        desde que lo abriste…») y el gasto queda como lo dejó el otro guardado; sin la clave (un PWA
+--        de antes) entra.
 --
 -- Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ …' con la lista de fallas, siempre como excepción.
 --
@@ -55,6 +61,7 @@ DECLARE
   v_e1     bigint;
   v_e2     bigint;
   v_e3     bigint;
+  v_e4     bigint;
   v_g      bigint;
   v_g2     bigint;
   v_liq    bigint;
@@ -64,7 +71,7 @@ DECLARE
   v_x      numeric;
   v_t      text;
   v_tope   text := 'El IVA no puede pasar del 27 % del neto';
-  v_ver    text := 'Otro usuario cambió este gasto mientras lo editabas';
+  v_ver    text := 'Este gasto cambió desde que lo abriste';
   v_locks  boolean := true;
   v_notas  text := '';
   v_fallas text[] := '{}';
@@ -105,6 +112,8 @@ BEGIN
   RETURNING id INTO v_e2;
   INSERT INTO empleados (sucursal_id, nombre, puesto, creado_por) VALUES (v_s1, 'ZZ b8a tres', 'ayudante', v_ua)
   RETURNING id INTO v_e3;
+  INSERT INTO empleados (sucursal_id, nombre, puesto, creado_por) VALUES (v_s1, 'ZZ b8a cuatro', 'ayudante', v_ua)
+  RETURNING id INTO v_e4;
   PERFORM set_config('eb8a.ua', v_ua::text, true);
   PERFORM set_config('eb8a.s1', v_s1::text, true);
   PERFORM set_config('eb8a.rubro', v_rubro::text, true);
@@ -221,9 +230,20 @@ BEGIN
       (SELECT iva = 54.09 AND renglones_factura = 2 FROM gastos WHERE id = v_g), 'C1 IVA 54,09 con 2 renglones no quedó');
     v_fallas := v_fallas || pg_temp.falla('C1 IVA 54,10 con 2 renglones', pg_temp.fa(54.10, '{"renglones_factura": 2}'), v_tope);
     v_fallas := v_fallas || pg_temp.falla('C1 renglones 0', pg_temp.fa(54.08, '{"renglones_factura": 0}'),
-                  'Los renglones de la factura van de 1 a 999');
-    v_fallas := v_fallas || pg_temp.falla('C1 renglones 1000', pg_temp.fa(54.08, '{"renglones_factura": 1000}'),
-                  'Los renglones de la factura van de 1 a 999');
+                  'Los renglones de la factura van de 1 a 99');
+    v_fallas := v_fallas || pg_temp.falla('C1 renglones 100', pg_temp.fa(54.08, '{"renglones_factura": 100}'),
+                  'Los renglones de la factura van de 1 a 99');
+    v_fallas := v_fallas || pg_temp.anda('C1 renglones 99', pg_temp.fa(54.08, '{"renglones_factura": 99}'));
+    -- La revisión adversarial: con 999 renglones una factura A de $10 entraba con $9,99 de IVA.
+    v_fallas := v_fallas || pg_temp.falla('C1 factura A de 10 con IVA 9,99 y 99 renglones',
+                  pg_temp.gg('{"comprobante": "factura_a", "monto_total": 10, "iva": 9.99, "alicuota_iva": 27, "renglones_factura": 99}'),
+                  v_tope);
+    -- Y el CHECK de la columna, aunque alguien escriba directo.
+    BEGIN
+      UPDATE gastos SET renglones_factura = 100 WHERE id = v_g;
+      v_fallas := v_fallas || 'C1 el CHECK dejó 100 renglones'::text;
+    EXCEPTION WHEN check_violation THEN NULL;
+    END;
     -- Editar sin la clave (el PWA de antes) conserva los 2 renglones: el IVA de 54,09 sigue entrando.
     v_fallas := v_fallas || pg_temp.anda('C1 editar sin los renglones',
                   pg_temp.fa(54.09, jsonb_build_object('id', v_g, 'observacion', 'ensayo b8a editado')));
@@ -318,6 +338,24 @@ BEGIN
     v_fallas := v_fallas || ('F ' || SQLERRM);
   END;
 
+  -- F1 · la corrección del mismo día no se mueve (revisión adversarial, hallazgo 5): gasto de hoy de
+  -- 500 de E4 que pasa a 600 (+100 con motivo, hoy) y después a hace 3 días.
+  BEGIN
+    v_g := pg_temp.id(pg_temp.gg(jsonb_build_object('monto_total', 500, 'origen_pago', 'empleado', 'empleado_id', v_e4)));
+    v_fallas := v_fallas || pg_temp.anda('F1 subir el gasto de hoy a 600',
+                  pg_temp.gg(jsonb_build_object('id', v_g, 'monto_total', 600, 'origen_pago', 'empleado', 'empleado_id', v_e4)));
+    v_fallas := v_fallas || pg_temp.anda('F1 pasar el gasto a hace 3 días',
+                  pg_temp.gg(jsonb_build_object('id', v_g, 'monto_total', 600, 'fecha', v_hoy - 3,
+                                                'origen_pago', 'empleado', 'empleado_id', v_e4)));
+    SELECT string_agg(fecha::text || ':' || monto, ' ' ORDER BY id) INTO v_t
+      FROM empleado_movimientos WHERE empleado_id = v_e4 AND gasto_id = v_g;
+    v_fallas := v_fallas || pg_temp.chk(v_t = format('%s:500.00 %s:100.00', v_hoy - 3, v_hoy),
+                  format('F1 la corrección del mismo día: %s (esperado %s:500.00 %s:100.00)', v_t, v_hoy - 3, v_hoy));
+  EXCEPTION WHEN OTHERS THEN
+    RESET ROLE;
+    v_fallas := v_fallas || ('F1b ' || SQLERRM);
+  END;
+
   -- ============================================================== 1597-b5 ===
   BEGIN
     v_fallas := v_fallas || pg_temp.falla('R1 el admin de una sola sucursal crea un rubro',
@@ -339,21 +377,27 @@ BEGIN
   -- ================================================================ GTO-B ===
   BEGIN
     SELECT string_agg(x.nombre, ', ') INTO v_t
-      FROM unnest(ARRAY['S.A.C.', 'SAC', 's. a. c.', 'Vacaciones', 'Remuneraciones', 'Remuneración',
-                        'Comisiones de vendedores', 'Comisión', 'Sueldos', 'Aguinaldo']) x(nombre)
+      FROM unnest(ARRAY['S.A.C.', 'S-A-C', 'S_A_C', 's. a. c.', 'SAC', 'Pago de SAC', 'SAC 2026', 'Vacaciones',
+                        'Vacaciones del personal', 'Bolsas SAC', 'Seguro de vacaciones del vehículo',
+                        'Remuneraciones', 'Remuneración', 'Comisiones de vendedores', 'Comisión', 'Sueldos',
+                        'Aguinaldo']) x(nombre)
      WHERE NOT public._rubro_es_sueldo(x.nombre);
     v_fallas := v_fallas || pg_temp.chk(v_t IS NULL, 'S1 no los toma por sueldo: ' || v_t);
     SELECT string_agg(x.nombre, ', ') INTO v_t
-      FROM unnest(ARRAY['Bolsas SAC', 'Seguro de vacaciones del vehículo', 'Saco', 'Cargas sociales',
-                        'Combustible', 'Faltantes de caja', 'Comisiones bancarias',
-                        'Comisión de tarjeta de crédito', 'Comisiones Mercado Pago']) x(nombre)
+      FROM unnest(ARRAY['Saco', 'Cargas sociales', 'Combustible', 'Faltantes de caja', 'Luz, agua y gas',
+                        'Comisiones bancarias', 'Comisión de tarjeta de crédito', 'Comisiones Mercado  Pago',
+                        'Comisión Mercado Libre', 'Comisión Posnet', 'Comisión Naranja X', 'Comisión Ualá',
+                        'Comisión MODO', 'Comisión Rapipago', 'Comisión por transferencia']) x(nombre)
      WHERE public._rubro_es_sueldo(x.nombre);
     v_fallas := v_fallas || pg_temp.chk(v_t IS NULL, 'S1 los toma por sueldo: ' || v_t);
     v_fallas := v_fallas || pg_temp.falla('S2 rubro «Remuneraciones»',
                   'SELECT public.guardar_rubro_gasto(p_rubro => ''{"nombre": "Remuneraciones", "grupo": "otros"}''::jsonb)',
                   'Los sueldos no son un gasto');
-    v_fallas := v_fallas || pg_temp.anda('S2 rubro «Bolsas SAC»',
-                  'SELECT public.guardar_rubro_gasto(p_rubro => ''{"nombre": "ZZ b8a Bolsas SAC", "grupo": "otros"}''::jsonb)');
+    v_fallas := v_fallas || pg_temp.falla('S2 rubro «Pago de SAC»',
+                  'SELECT public.guardar_rubro_gasto(p_rubro => ''{"nombre": "Pago de SAC", "grupo": "otros"}''::jsonb)',
+                  'Los sueldos no son un gasto');
+    v_fallas := v_fallas || pg_temp.anda('S2 rubro «Comisión Posnet»',
+                  'SELECT public.guardar_rubro_gasto(p_rubro => ''{"nombre": "ZZ b8a Comisión Posnet", "grupo": "otros"}''::jsonb)');
   EXCEPTION WHEN OTHERS THEN
     RESET ROLE;
     v_fallas := v_fallas || ('S ' || SQLERRM);

@@ -239,9 +239,12 @@ describe('errorDeDesglose', () => {
     expect(errorDeDesglose({ ...fa, iva: 54.09 })).toBe(tope)
     expect(errorDeDesglose({ ...fa, iva: 54.09, renglones_factura: 2 })).toBeNull()
     expect(errorDeDesglose({ ...fa, iva: 54.10, renglones_factura: 2 })).toBe(tope)
-    const rango = 'Los renglones de la factura van de 1 a 999'
+    const rango = 'Los renglones de la factura van de 1 a 99'
     expect(errorDeDesglose({ ...fa, iva: 54.08, renglones_factura: 0 })).toBe(rango)
-    expect(errorDeDesglose({ ...fa, iva: 54.08, renglones_factura: 1000 })).toBe(rango)
+    // De 1 a 99 (decisión del dueño, 17/11): con 999, una factura A de $10 entraba con $9,99 de IVA.
+    expect(errorDeDesglose({ ...fa, iva: 54.08, renglones_factura: 100 })).toBe(rango)
+    expect(errorDeDesglose({ ...fa, iva: 54.08, renglones_factura: 99 })).toBeNull()
+    expect(errorDeDesglose({ ...base, monto_total: 10, iva: 9.99, renglones_factura: 99 })).toBe(tope)
     expect(errorDeDesglose({ ...fa, iva: 54.08, renglones_factura: 1.5 })).toBe(rango)
     expect(errorDeDesglose({ ...fa, iva: 54.08, renglones_factura: Number.NaN })).toBe(rango)
     // Sin factura A o M los renglones no cuentan.
@@ -255,7 +258,7 @@ describe('errorDeDesglose', () => {
     expect(renglonesParaIva({ ...fa, iva: 54.08 })).toBe(1)
     expect(renglonesParaIva({ ...fa, iva: 54.09 })).toBe(2)
     expect(renglonesParaIva({ ...fa, iva: 54.12 })).toBe(5)
-    expect(renglonesParaIva({ ...fa, iva: 250 })).toBe(999)
+    expect(renglonesParaIva({ ...fa, iva: 250 })).toBe(99)
   })
 
   it('el tope en centavos', () => {

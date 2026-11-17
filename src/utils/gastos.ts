@@ -210,7 +210,7 @@ export function topeIvaGastoCentavos(g: {
   return Math.round((base * 27) / 127) + renglones
 }
 
-export const RENGLONES_FACTURA_MAXIMO = 999
+export const RENGLONES_FACTURA_MAXIMO = 99
 
 /**
  * Los renglones que necesita un IVA para entrar en el tope: uno por cada centavo que pasa del 27 %
@@ -244,7 +244,7 @@ export function errorDeDesglose(g: {
   if (daCreditoFiscal(g.comprobante)) {
     const renglones = g.renglones_factura ?? 1
     if (!Number.isInteger(renglones) || renglones < 1 || renglones > RENGLONES_FACTURA_MAXIMO) {
-      return 'Los renglones de la factura van de 1 a 999'
+      return 'Los renglones de la factura van de 1 a 99'
     }
     if (netoDeGasto(g) <= 0) return 'Con factura A o M el neto tiene que ser mayor a cero'
     if (Math.round(g.iva * 100) > topeIvaGastoCentavos(g, renglones)) {

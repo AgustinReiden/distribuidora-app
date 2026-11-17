@@ -320,7 +320,9 @@ suelta en `sucursales`.
   en el FOR KEY SHARE de la FK. Los rubros de gasto son de toda la empresa: los cambia sólo un admin
   de todas las sucursales (decisión del dueño). La edición de un gasto manda `updated_at_esperado` y
   el server rechaza si otro lo cambió (decisión del dueño), y el tope del IVA es el 27 % del neto más
-  un centavo por renglón de la factura (`gastos.renglones_factura`, decisión del dueño).
+  un centavo por renglón de la factura (`gastos.renglones_factura`, de 1 a 99; decisión del dueño).
+  `_rubro_es_sueldo` frena «sac» y «vacaciones» como palabra en cualquier parte del nombre, y
+  «comisiones» salvo la de un medio de cobro (decisión del dueño).
 - **Un vale blanco está saldado por naturaleza** (migs 317/318): `tipo_factura = 'VB'` ⇒
   `monto_pagado = total`, `estado_pago = 'pagado'` y **cero** filas en `pagos` (lo fuerza
   `actualizar_estado_pago_pedido` y el CHECK `pedidos_vb_coherente`). No es deuda, no se

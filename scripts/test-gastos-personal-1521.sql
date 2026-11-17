@@ -472,11 +472,12 @@ BEGIN
 
   -- ===================================== 8 · GTO-9 los nombres de sueldo ===
   BEGIN
-    -- GTO-B (#1545, ola 2 de #1603, decisión del dueño 15/11): «remuneraciones» y «comisiones» se
-    -- suman a las palabras sueltas; «sac» y «vacaciones» cuentan sólo como el nombre entero (por eso
-    -- van sin el «ZZ … 1521»: rechazados, no se insertan). Los rubros los toca el admin de todas.
-    FOREACH v_txt IN ARRAY ARRAY['ZZ Haberes 1521', 'ZZ Aguinaldo diciembre 1521', 'S.A.C.', 'ZZ Horas extra 1521',
-                                 'ZZ Indemnización 1521', 'VACACIONES', 'ZZ Salario 1521', 'ZZ Sueldos de octubre 1521',
+    -- GTO-B (#1545, ola 2 de #1603, decisiones del dueño del 15/11 y del 17/11): se suman
+    -- «remuneraciones» y «comisiones» (no la de un medio de cobro), y «S.A.C.» con puntos. Los
+    -- rubros los toca el admin de todas.
+    FOREACH v_txt IN ARRAY ARRAY['ZZ Haberes 1521', 'ZZ Aguinaldo diciembre 1521', 'ZZ Pago de SAC 1521',
+                                 'ZZ S.A.C. 1521', 'ZZ Horas extra 1521', 'ZZ Indemnización 1521',
+                                 'ZZ VACACIONES 1521', 'ZZ Salario 1521', 'ZZ Sueldos de octubre 1521',
                                  'ZZ Jornales 1521', 'ZZ Presentismo 1521', 'ZZ Remuneraciones 1521',
                                  'ZZ Comisiones de vendedores 1521']
     LOOP
@@ -485,7 +486,7 @@ BEGIN
                     'Los sueldos no son un gasto: salen de las liquidaciones del personal');
     END LOOP;
     FOREACH v_txt IN ARRAY ARRAY['Cargas sociales', 'Comisiones bancarias', 'Sacos de arpillera', 'Sindicato', 'ART',
-                                 'Bolsas SAC', 'Seguro de vacaciones del vehículo']
+                                 'Comisión Posnet']
     LOOP
       v_n := pg_temp.como(v_todas, v_t, pg_temp.rub(jsonb_build_object('nombre', 'ZZ ' || v_txt || ' 1521', 'grupo', 'otros')))::bigint;
       v_fallas := v_fallas || pg_temp.chk(v_n IS NOT NULL, format('8 %s entra', v_txt));

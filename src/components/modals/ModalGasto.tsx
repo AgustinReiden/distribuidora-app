@@ -106,8 +106,10 @@ export const modalGastoSchema = z
       .optional(),
     empleado_id: z.coerce.number().int().positive().nullable().optional(),
     observacion: z.string().nullable().optional(),
-    // 1562-c1: el rango lo valida errorDeDesglose (con el mensaje del server); acá sólo viaja.
-    renglones_factura: z.number().optional(),
+    // 1562-c1: el rango lo valida errorDeDesglose (con el mensaje del server); acá sólo viaja. El
+    // campo vacío o con letras llega como NaN, que zod rechaza antes del superRefine: con el mismo
+    // mensaje, no el suyo en inglés.
+    renglones_factura: z.number({ error: 'Los renglones de la factura van de 1 a 99' }).optional(),
     // 1599-b9: la versión que vio quien edita. Sin declararla, zod la sacaría del payload.
     updated_at_esperado: z.string().optional(),
   })

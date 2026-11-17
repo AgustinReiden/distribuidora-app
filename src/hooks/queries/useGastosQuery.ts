@@ -100,7 +100,7 @@ export function useGuardarGastoMutation() {
       queryClient.invalidateQueries({ queryKey: personalKeys.all(currentSucursalId) })
     },
     // 1599-b9 (#1599): si otro cambió el gasto mientras se editaba, el server rechaza con
-    // «Otro usuario cambió este gasto…». La lista se vuelve a leer, así al reabrirlo se ve cómo quedó
+    // «Este gasto cambió desde que lo abriste…». La lista se vuelve a leer, así al reabrirlo se ve cómo quedó
     // y se edita con su versión nueva.
     onError: () => {
       queryClient.invalidateQueries({ queryKey: gastosKeys.all(currentSucursalId) })
