@@ -598,7 +598,9 @@ BEGIN
     -- Y después la del tope del sustituto (#1592, PRM-1); antes, c15aa49005a602eb48b7d527e698b748.
     -- Y después la de la ola 2 del plan #1603 (B4: 1558-b2, 1592-b1, 1595-b9, 1559-b3); antes,
     -- b6e7138c67b92ea84196e0856cf37fca.
-    ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)', '387beb9228d1751823bc2a6c710b9098',
+    -- Y después la de B19 de la ola 2 (#1603: la barra mueve sólo la diferencia); antes,
+    -- 387beb9228d1751823bc2a6c710b9098.
+    ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)', 'c0f975290ab517f535d0a91ee22bc410',
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.pedidos_cliente_asignado()', '84754c312560f862e6f0c53d213b2f21',
      '{postgres=X/postgres,service_role=X/postgres}'),
