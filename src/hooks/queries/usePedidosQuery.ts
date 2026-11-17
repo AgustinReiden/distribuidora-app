@@ -677,9 +677,10 @@ async function actualizarEstado(input: ActualizarEstadoInput): Promise<PedidoDB>
   // entrega (la fecha del recorrido). Sin eso se cae en hoy, que es lo que hacía
   // siempre: marcar el martes las entregas del lunes las contabilizaba el martes.
   const fechaDeEntrega = input.fechaEntrega || fechaLocalISO()
+  // Sin `updated_at`: la versión del pedido la pone el server (pedidos_proteger_columnas,
+  // 1595-b6). La hora del teléfono no es una versión.
   const updateData: Record<string, unknown> = {
     estado: input.nuevoEstado,
-    updated_at: new Date().toISOString(),
     fecha_entrega: input.nuevoEstado === 'entregado' ? `${fechaDeEntrega}T12:00:00-03:00` : null,
   }
   if (input.nuevoEstado === 'entregado') {

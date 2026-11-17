@@ -208,7 +208,8 @@ BEGIN
   -- L3 · los cuerpos y los EXECUTE
   IF (SELECT md5(prosrc) || ' ' || proacl::text || ' ' || prosecdef::text FROM pg_proc
        WHERE oid = 'public.crear_pedido_idempotente(bigint,numeric,uuid,jsonb,text,text,text,date,text,numeric,numeric,date,uuid,text)'::regprocedure)
-     IS DISTINCT FROM '63f0759223a668afdd04ce684aee18ef {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} true'
+     -- Ola 2 del plan #1603 (B4, 1559-b4): el replay sólo de quien cargó; antes, 63f0759223a668afdd04ce684aee18ef.
+     IS DISTINCT FROM '153a687adf8278c7a5c1ae9c3872e4ed {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} true'
      OR (SELECT md5(prosrc) || ' ' || proacl::text || ' ' || prosecdef::text FROM pg_proc
           WHERE oid = 'public._rendicion_pagos(bigint,date,date,bigint)'::regprocedure)
      IS DISTINCT FROM '8f3bf05f8fd2690373baeb4915f62a4c {postgres=X/postgres,service_role=X/postgres} false' THEN

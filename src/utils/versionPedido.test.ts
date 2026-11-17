@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { versionTrasCambioPropio } from './versionPedido'
+import { cambioDeVersionDe, versionTrasCambioPropio } from './versionPedido'
 
 const V1 = '2026-11-03T12:00:00.123456+00:00'
 const V2 = '2026-11-03T12:05:00.654321+00:00'
@@ -26,5 +26,17 @@ describe('versionTrasCambioPropio (#1376)', () => {
 
   it('un replay idempotente no trae versiones: no cambia nada', () => {
     expect(versionTrasCambioPropio(V1, undefined)).toBe(V1)
+  })
+})
+
+describe('cambioDeVersionDe (1559-b9)', () => {
+  it('arma el cambio con las dos versiones de la respuesta', () => {
+    expect(cambioDeVersionDe({ updated_at_anterior: V1, updated_at: V2 })).toEqual({ anterior: V1, nueva: V2 })
+  })
+
+  it('sin alguna de las dos (un server de antes) no hay cambio', () => {
+    expect(cambioDeVersionDe({ updated_at: V2 })).toBeUndefined()
+    expect(cambioDeVersionDe({ updated_at_anterior: V1, updated_at: null })).toBeUndefined()
+    expect(cambioDeVersionDe(null)).toBeUndefined()
   })
 })

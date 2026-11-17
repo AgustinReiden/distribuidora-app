@@ -437,6 +437,18 @@ suelta en `sucursales`.
   cambia. Un camino nuevo que fije `pedidos.fecha_entrega` con una fecha del usuario la llama. Un
   ensayo que entrega con una fecha de 2099 para no cruzarse con prod ya no entra: usa una fecha
   dentro del rango.
+- **La entrega programada va de hoy a 60 días adelante** (1559-b6, decisión del dueño). La regla
+  es `_fecha_entrega_programada_fuera_de_rango`, con el techo espejado en
+  `src/utils/fechaEntregaProgramada.ts`; el piso es la fecha del pedido si es anterior a hoy (la
+  cola, el admin), y en la edición rige sólo si cambia (`pedidos_proteger_columnas`).
+- **El alta no acepta un regalo sin promoción ni una sucursal inactiva** (1558-b2 y 1561-b4,
+  decisiones del dueño). Un regalo sin promoción no bajaba stock y nada lo devuelve: no nace, y la
+  edición sólo conserva el que el pedido ya tenía. La sucursal inactiva se mira en el alta, no en
+  `current_sucursal_id()`. El cambio de cliente (`app.cambio_cliente_desde`) recrea y pasa.
+- **La versión de un pedido (`updated_at`) la pone el server** (1595-b6): un UPDATE de
+  `authenticated` que cambia algo la mueve a `now()` en `pedidos_proteger_columnas`, y uno que no
+  cambia nada la deja. Lo que mande el cliente en esa columna no cuenta. Una RPC que la mueve
+  devuelve `updated_at_anterior` y `updated_at` (la edición adopta con `versionTrasCambioPropio`).
 - **El límite de usos de una promo cuenta el corte, no la línea, y lo hace cumplir un trigger**
   (`trg_limite_usos_promo`, #1300) → `migrations/CLAUDE.md`. Al editar o cambiar el cliente, el
   regalo de una promo que se apagó se conserva (`promosConRegalo`): la política rige el alta.
