@@ -36,6 +36,48 @@
 -- Fixtures: una sucursal activa con un admin activo. El resto nace en el ensayo. Los montos
 -- superan el mínimo y el envío gratis.
 
+-- Ola 2 de #1603 (B1, 1595-b5; decisión del dueño D23): una salvedad se registra sólo sobre un
+-- pedido en camino o entregado. El ensayo carga pedidos y les registra salvedades enseguida: este
+-- envoltorio pone el pedido en camino (asignado) para la salvedad y lo devuelve al estado que tenía,
+-- así el resto del caso no cambia.
+CREATE OR REPLACE FUNCTION pg_temp.ola2_estado_pedido(p_ped bigint, p_estado text)
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER AS $ola2$
+DECLARE
+  v_prev   text;
+  v_claims text := current_setting('request.jwt.claims', true);
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_ped;
+  IF v_prev IS DISTINCT FROM p_estado THEN
+    PERFORM set_config('request.jwt.claims', '', true);
+    UPDATE public.pedidos SET estado = p_estado WHERE id = p_ped;
+    PERFORM set_config('request.jwt.claims', COALESCE(v_claims, ''), true);
+  END IF;
+  RETURN v_prev;
+END
+$ola2$;
+
+CREATE OR REPLACE FUNCTION pg_temp.salvedad_en_camino(p_pedido_id bigint, p_pedido_item_id bigint,
+  p_cantidad_afectada integer, p_motivo character varying, p_descripcion text DEFAULT NULL,
+  p_foto_url text DEFAULT NULL, p_devolver_stock boolean DEFAULT true, p_client_request_id uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql AS $ola2$
+DECLARE
+  v_prev text;
+  v_res  jsonb;
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_pedido_id;
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, 'asignado');
+  END IF;
+  v_res := public.registrar_salvedad(p_pedido_id, p_pedido_item_id, p_cantidad_afectada, p_motivo,
+                                     p_descripcion, p_foto_url, p_devolver_stock, p_client_request_id);
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, v_prev);
+  END IF;
+  RETURN v_res;
+END
+$ola2$;
+
+
 CREATE OR REPLACE FUNCTION pg_temp.t_como(p_uid uuid, p_suc bigint)
 RETURNS void LANGUAGE plpgsql AS $fn$
 BEGIN
@@ -152,7 +194,7 @@ BEGIN
   END IF;
 
   -- S1 · una salvedad de 5 de B en X: devuelve 5, el regalo cae y su bloque se deshace
-  v_j := public.registrar_salvedad(v_ped, (SELECT id FROM pedido_items WHERE pedido_id = v_ped AND producto_id = v_b),
+  v_j := pg_temp.salvedad_en_camino(v_ped, (SELECT id FROM pedido_items WHERE pedido_id = v_ped AND producto_id = v_b),
                                    5, 'cliente_rechaza', 'ensayo 1460', NULL, true, NULL);
   v_txt := format('ok=%s B=%s C=%s barra=%s regalo=%s', v_j->>'success', (SELECT stock FROM productos WHERE id = v_b),
                   (SELECT stock FROM productos WHERE id = v_c), (SELECT usos_pendientes FROM promociones WHERE id = v_promo),

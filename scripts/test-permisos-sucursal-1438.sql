@@ -171,15 +171,17 @@ BEGIN
     WHEN OTHERS THEN v_fallas := v_fallas || format('P5 dio %s: %s', SQLSTATE, SQLERRM);
   END;
 
-  -- A1 · la auditoría, sólo para el servidor
+  -- A1 · la auditoría, sólo para el servidor. Desde la migración de B9 del plan #1603 las dos
+  -- no existen (nadie las llamaba, decisión del dueño D48): borradas, tampoco son alcanzables.
   IF EXISTS (SELECT 1
-               FROM unnest(ARRAY['public.get_audit_history(text,text,integer)'::regprocedure,
-                                 'public.get_suspicious_activity(integer)'::regprocedure]) f(oid)
-              WHERE has_function_privilege('authenticated', f.oid, 'EXECUTE')
+               FROM unnest(ARRAY[to_regprocedure('public.get_audit_history(text,text,integer)'),
+                                 to_regprocedure('public.get_suspicious_activity(integer)')]) f(oid)
+              WHERE f.oid IS NOT NULL
+                AND (has_function_privilege('authenticated', f.oid, 'EXECUTE')
                  OR has_function_privilege('anon', f.oid, 'EXECUTE')
                  OR NOT has_function_privilege('service_role', f.oid, 'EXECUTE')
                  OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) x
-                             WHERE p.oid = f.oid AND x.grantee = 0)) THEN
+                             WHERE p.oid = f.oid AND x.grantee = 0))) THEN
     v_fallas := v_fallas || 'A1 get_audit_history o get_suspicious_activity siguen alcanzables desde la API'::text;
   END IF;
 

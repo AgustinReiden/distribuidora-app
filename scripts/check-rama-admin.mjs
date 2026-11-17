@@ -41,10 +41,9 @@ import { hallazgosRamaAdmin } from './lib/acceso.mjs';
  *     FROM pg_policies WHERE tablename = '<t>' AND policyname = '<p>';
  */
 const EXCEPCIONES = [
-  // Globales por diseño: los encuadres de impuestos internos no son de una
-  // sucursal (la tabla no tiene sucursal_id) y los edita el admin.
-  { tabla: 'ii_encuadres', policy: 'ii_encuadres_insert', huella: '0bcae601192312c63aba2ebc31827615', motivo: 'tabla global' },
-  { tabla: 'ii_encuadres', policy: 'ii_encuadres_update', huella: '77e233987c85e988e18df94f4683306d', motivo: 'tabla global' },
+  // Los encuadres de impuestos internos (tabla global, sin sucursal_id) salieron de acá con la
+  // migración de B9 del plan #1603 (1564-b4): los edita sólo un admin de todas las sucursales
+  // (es_admin_de_todas_las_sucursales()), que ya mira la sucursal.
   // Los rubros de gasto son un catálogo global, como cargo_conceptos (mig 411):
   // sin sucursal_id; cada gasto lleva la suya.
   { tabla: 'gasto_rubros', policy: 'gasto_rubros_select', huella: 'd7f9b6728061df3dc8f05661dc918460', motivo: 'tabla global' },

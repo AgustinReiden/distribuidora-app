@@ -548,6 +548,8 @@
   {"caso": "misma categoría con otra cantidad: también proporcional (mostraba B×12 y se guardaba B×8)", "cantidad": 8, "original": 4, "sustituta": 6, "esperado": 12},
   {"caso": "mismo número: la cantidad que vino", "cantidad": 24, "original": 12, "sustituta": 12, "esperado": 24},
   {"caso": "nunca menos de 1", "cantidad": 1, "original": 19, "sustituta": 1, "esperado": 1},
-  {"caso": "un eslabón sin cantidad original no convierte", "cantidad": 5, "original": 0, "sustituta": 3, "esperado": 5}
+  {"caso": "un eslabón sin cantidad original no convierte", "cantidad": 5, "original": 0, "sustituta": 3, "esperado": 5},
+  {"caso": "un eslabón sin cantidad sustituta no convierte (1556-b3: el TS daba 0)", "cantidad": 4, "original": 4, "sustituta": null, "esperado": 4},
+  {"caso": "un eslabón sin cantidad sustituta no convierte, con otra cantidad (1556-b3: el TS daba 1)", "cantidad": 2, "original": 4, "sustituta": null, "esperado": 2}
  ]
 }

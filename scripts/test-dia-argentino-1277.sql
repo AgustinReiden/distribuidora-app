@@ -191,6 +191,9 @@ BEGIN
    LIMIT 1;
   IF v_id IS NULL THEN
     v_notas := v_notas || 'D7 · ningun pago de 21 a 24 en esta sucursal'::text;
+  ELSIF to_regprocedure('public.tablero_ficha_cliente(bigint)') IS NULL THEN
+    -- Se borró en la migración de B9 del plan #1603 (nadie la llamaba, decisión del dueño D48).
+    v_notas := v_notas || 'D7 · tablero_ficha_cliente ya no existe: la ficha del tablero no aplica'::text;
   ELSE
     v_j := public.tablero_ficha_cliente(v_id);
     SELECT count(*) INTO v_n

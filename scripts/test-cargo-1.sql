@@ -54,6 +54,47 @@
 --   psql "$DATABASE_URL" -f scripts/test-cargo-1.sql
 
 
+-- Ola 2 de #1603 (B1, 1595-b5; decisión del dueño D23): una salvedad se registra sólo sobre un
+-- pedido en camino o entregado. El ensayo carga pedidos y les registra salvedades enseguida: este
+-- envoltorio pone el pedido en camino (asignado) para la salvedad y lo devuelve al estado que tenía,
+-- así el resto del caso no cambia.
+CREATE OR REPLACE FUNCTION pg_temp.ola2_estado_pedido(p_ped bigint, p_estado text)
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER AS $ola2$
+DECLARE
+  v_prev   text;
+  v_claims text := current_setting('request.jwt.claims', true);
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_ped;
+  IF v_prev IS DISTINCT FROM p_estado THEN
+    PERFORM set_config('request.jwt.claims', '', true);
+    UPDATE public.pedidos SET estado = p_estado WHERE id = p_ped;
+    PERFORM set_config('request.jwt.claims', COALESCE(v_claims, ''), true);
+  END IF;
+  RETURN v_prev;
+END
+$ola2$;
+
+CREATE OR REPLACE FUNCTION pg_temp.salvedad_en_camino(p_pedido_id bigint, p_pedido_item_id bigint,
+  p_cantidad_afectada integer, p_motivo character varying, p_descripcion text DEFAULT NULL,
+  p_foto_url text DEFAULT NULL, p_devolver_stock boolean DEFAULT true, p_client_request_id uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql AS $ola2$
+DECLARE
+  v_prev text;
+  v_res  jsonb;
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_pedido_id;
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, 'asignado');
+  END IF;
+  v_res := public.registrar_salvedad(p_pedido_id, p_pedido_item_id, p_cantidad_afectada, p_motivo,
+                                     p_descripcion, p_foto_url, p_devolver_stock, p_client_request_id);
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, v_prev);
+  END IF;
+  RETURN v_res;
+END
+$ola2$;
+
 DO $ensayo$
 DECLARE
   v_fallas text[] := '{}';
@@ -252,10 +293,10 @@ BEGIN
     FOR v_n IN 1..4 LOOP
       -- 1 alta · 2 salvedad parcial (5 de 12) · 3 rechazo total (las 7) · 4 anular el rechazo
       IF v_n = 2 THEN
-        r := public.registrar_salvedad(v_ped, v_item, 5, 'cliente_rechaza', 'ensayo cargo 1: parcial', NULL, true, NULL);
+        r := pg_temp.salvedad_en_camino(v_ped, v_item, 5, 'cliente_rechaza', 'ensayo cargo 1: parcial', NULL, true, NULL);
         IF NOT COALESCE((r->>'success')::boolean, false) THEN RAISE EXCEPTION 'A3 salvedad parcial: %', r; END IF;
       ELSIF v_n = 3 THEN
-        r := public.registrar_salvedad(v_ped, v_item, 7, 'cliente_rechaza', 'ensayo cargo 1: total', NULL, true, NULL);
+        r := pg_temp.salvedad_en_camino(v_ped, v_item, 7, 'cliente_rechaza', 'ensayo cargo 1: total', NULL, true, NULL);
         IF NOT COALESCE((r->>'success')::boolean, false) THEN RAISE EXCEPTION 'A3 rechazo total: %', r; END IF;
         v_salv := (r->>'salvedad_id')::bigint;
       ELSIF v_n = 4 THEN
