@@ -79,9 +79,26 @@ jobs:
       # tilde sin haber corrido nada se lee como «verificado» (el mismo error de las 52 corridas de
       # integridad.yml sin secrets). Pasa hasta que alguien dispara «Esquema base» por primera vez, y
       # de nuevo si GitHub desaloja el cache (lo hace a los 7 días sin uso).
+      #
+      # Única excepción, que se apaga sola: el PR que TRAE `esquema-base.yml` no puede tener foto, porque
+      # un workflow sólo se puede disparar a mano si está en la rama por defecto, y todavía no está. En
+      # ese caso (pull_request, sin foto, y el archivo no existe en la rama base del PR) avisa y termina
+      # en verde. En cuanto `esquema-base.yml` está en la base, deja de aplicar: sin foto, rojo. En `push`
+      # y `workflow_dispatch` no hay excepción. Lo único del PR que se interpola es `github.base_ref`,
+      # por `env:` y entre comillas.
       - name: Sin foto del esquema
         if: steps.foto.outputs.cache-matched-key == ''
+        env:
+          EVENTO: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
         run: |
+          if [ "$EVENTO" = "pull_request" ] && [ -n "$BASE" ]; then
+            git fetch --no-tags --depth=1 origin "$BASE"
+            if ! git cat-file -e "FETCH_HEAD:.github/workflows/esquema-base.yml" 2>/dev/null; then
+              echo "::warning::Primer PR que trae el workflow de la foto: los gates de SQL no corrieron. Después del merge, disparar «Esquema base» una vez (Actions > Esquema base > Run workflow)."
+              exit 0
+            fi
+          fi
           echo "::error::No hay foto del esquema de prod en el cache, así que este PR NO pudo correr los gates ni los ensayos de SQL. Generarla: Actions > «Esquema base» > Run workflow (tarda un minuto), y después volver a correr este job."
           exit 1
 
