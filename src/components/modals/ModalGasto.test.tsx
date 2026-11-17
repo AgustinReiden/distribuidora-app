@@ -393,6 +393,8 @@ describe('ModalGasto — guardar', () => {
       rendicion_fecha: null,
       empleado_id: null,
       observacion: null,
+      // 1562-c1 (ola 2 de #1603): una factura A o M manda sus renglones (uno, si nadie los tocó).
+      renglones_factura: 1,
     }
     expect(onSave).toHaveBeenCalledTimes(1)
     expect(onSave).toHaveBeenCalledWith(esperado)
@@ -513,6 +515,98 @@ describe('ModalGasto — edición', () => {
     expect(onSave.mock.calls[0][0]).toMatchObject({
       id: 41, rubro_id: 3, monto_total: 8500, mes_imputado: '2026-09-01', observacion: 'Resmas',
     })
+  })
+
+  // 1599-b9 (#1599, decisión del dueño 15/11): la edición manda la versión que abrió.
+  const libreria = {
+    id: 41, sucursal_id: 1, compartido: false, fecha: '2026-10-15', rubro_id: 3, monto_total: 8500,
+    comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
+    percepcion_iibb: 0, otros_impuestos: 0, neto: 8500, costo: 8500, vehiculo_id: null, litros: null,
+    mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'oficina' as const,
+    observacion: null, creado_por: 'u-1', rendicion_transportista_id: null, rendicion_fecha: null, empleado_id: null,
+    anulado_at: null, created_at: '2026-10-15T10:00:00Z', updated_at: '2026-10-15T10:00:00.123456+00:00',
+  }
+
+  it('manda el updated_at del gasto que abrió como updated_at_esperado', async () => {
+    const { user, onSave } = renderModal({ gasto: libreria })
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ id: 41, updated_at_esperado: '2026-10-15T10:00:00.123456+00:00' })
+  })
+
+  it('un alta no manda versión', async () => {
+    const { user, onSave } = renderModal()
+    await elegirRubro(user, 'Librería')
+    poner(/Monto total/, '8500')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty('updated_at_esperado')
+  })
+
+  it('si otro lo cambió, muestra el aviso del server y no se cierra', async () => {
+    const onSave = vi.fn<OnSave>(() => Promise.reject(new Error(
+      'Otro usuario cambió este gasto mientras lo editabas: cerralo y volvé a abrirlo para ver cómo quedó')))
+    const { user, onClose } = renderModal({ gasto: libreria, onSave })
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(await screen.findByText(/Otro usuario cambió este gasto mientras lo editabas/)).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+})
+
+// 1562-c1 (#1562, decisión del dueño 15/11): el tope del IVA tolera un centavo por renglón.
+describe('ModalGasto — renglones de la factura', () => {
+  it('una factura A de 254,34 con IVA 54,08 entra con un renglón y manda renglones_factura 1', async () => {
+    const { user, onSave } = renderModal()
+    await elegirRubro(user, 'Librería')
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
+    poner(/Monto total/, '254,34')
+    poner('IVA', '54,08')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ comprobante: 'factura_a', iva: 54.08, renglones_factura: 1 })
+  })
+
+  it('con 54,09 pide los renglones: con 1 no guarda, con 2 sí', async () => {
+    const { user, onSave } = renderModal()
+    await elegirRubro(user, 'Librería')
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
+    poner(/Monto total/, '254,34')
+    expect(screen.queryByLabelText('Renglones de la factura')).not.toBeInTheDocument()
+    poner('IVA', '54,09')
+    expect(screen.getByLabelText('Renglones de la factura')).toHaveValue('1')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText('El IVA no puede pasar del 27 % del neto: revisá el IVA y las percepciones')).toBeInTheDocument()
+
+    poner('Renglones de la factura', '2')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ iva: 54.09, renglones_factura: 2 })
+  })
+
+  it('renglones fuera de rango no guarda', async () => {
+    const { user, onSave } = renderModal()
+    await elegirRubro(user, 'Librería')
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
+    poner(/Monto total/, '254,34')
+    poner('IVA', '54,09')
+    poner('Renglones de la factura', '0')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText('Los renglones de la factura van de 1 a 999')).toBeInTheDocument()
+  })
+
+  it('editar un gasto guardado con 2 renglones (la lista no los trae) no lo frena ni pisa los guardados', async () => {
+    const gasto = {
+      id: 42, sucursal_id: 1, compartido: false, fecha: '2026-10-15', rubro_id: 3, monto_total: 254.34,
+      comprobante: 'factura_a' as const, comprobante_numero: null, alicuota_iva: 27, iva: 54.09, percepcion_iva: 0,
+      percepcion_iibb: 0, otros_impuestos: 0, neto: 200.25, costo: 200.25, vehiculo_id: null, litros: null,
+      mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'oficina' as const,
+      observacion: null, creado_por: 'u-1', rendicion_transportista_id: null, rendicion_fecha: null, empleado_id: null,
+      anulado_at: null, created_at: '2026-10-15T10:00:00Z',
+    }
+    const { user, onSave } = renderModal({ gasto })
+    expect(screen.getByLabelText('Renglones de la factura')).toHaveValue('2')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave.mock.calls[0][0]).toMatchObject({ id: 42, iva: 54.09 })
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty('renglones_factura')
   })
 })
 

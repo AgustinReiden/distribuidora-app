@@ -51,8 +51,9 @@
 --   10 origen: rendicion sin transportista y dia -> 'Elegí de qué rendición
 --      salió la plata' (desde gastos 3); empleado sin
 --      empleado_id -> 'Elegí qué empleado pagó el gasto' (desde gastos 4)
---   11 rubros: encargado, "Sueldos…", grupo con gastos, nombre repetido y
---      sacarle litros y km a Combustible fallan
+--   11 rubros: encargado, admin de una sola sucursal (1597-b5, ola 2 de #1603),
+--      "Sueldos…", grupo con gastos, nombre repetido y sacarle litros y km a
+--      Combustible fallan; el resto lo hace un admin de todas las sucursales
 --   12 permisos de funciones y tablas, SEG-A y auditoria_grants_tablas
 --
 --   psql "$DATABASE_URL" -f scripts/test-gastos-1.sql
@@ -569,36 +570,41 @@ BEGIN
   BEGIN
     v_fallas := v_fallas || pg_temp.falla('11 el encargado crea un rubro', v_enc, v_a,
                   format('SELECT public.guardar_rubro_gasto(%L::jsonb)', '{"nombre":"Fletes","grupo":"otros"}'), 'Sólo un admin');
-    v_fallas := v_fallas || pg_temp.falla('11 rubro de sueldos', v_adm_a, v_a,
+    -- 1597-b5 (#1597, mig NNN de la ola 2 de #1603): los rubros son de toda la empresa, los toca
+    -- sólo un admin de todas las sucursales. El resto del caso va con él.
+    v_fallas := v_fallas || pg_temp.falla('11 el admin de una sucursal crea un rubro', v_adm_a, v_a,
+                  format('SELECT public.guardar_rubro_gasto(%L::jsonb)', '{"nombre":"Fletes","grupo":"otros"}'),
+                  'Los rubros de gasto son de toda la empresa');
+    v_fallas := v_fallas || pg_temp.falla('11 rubro de sueldos', v_todas, v_a,
                   format('SELECT public.guardar_rubro_gasto(%L::jsonb)', '{"nombre":"Sueldos administrativos","grupo":"administracion"}'),
                   'Los sueldos no son un gasto');
-    v_fallas := v_fallas || pg_temp.falla('11 cambiar el grupo de un rubro con gastos', v_adm_a, v_a,
+    v_fallas := v_fallas || pg_temp.falla('11 cambiar el grupo de un rubro con gastos', v_todas, v_a,
                   format('SELECT public.guardar_rubro_gasto(%L::jsonb)', jsonb_build_object('id', r_lib, 'nombre', 'Librería', 'grupo', 'otros')),
                   'Este rubro ya tiene gastos: no se le puede cambiar el grupo');
-    r_nuevo := pg_temp.como(v_adm_a, v_a, format('SELECT public.guardar_rubro_gasto(%L::jsonb)',
+    r_nuevo := pg_temp.como(v_todas, v_a, format('SELECT public.guardar_rubro_gasto(%L::jsonb)',
                  '{"nombre":"  Fletes  ","grupo":"otros","palabras_busqueda":"flete camion","reparto_sugerido_meses":6}'))::bigint;
     SELECT * INTO g FROM gasto_rubros WHERE id = r_nuevo;
     v_fallas := v_fallas || pg_temp.chk(g.nombre = 'Fletes' AND g.grupo = 'otros' AND g.palabras_busqueda = 'flete camion'
                                          AND g.reparto_sugerido_meses = 6 AND g.activo,
                   format('11 rubro nuevo guardado como %s', row_to_json(g)));
     -- sin gastos el grupo si cambia; una edicion parcial conserva lo que no manda
-    PERFORM pg_temp.como(v_adm_a, v_a, format('SELECT public.guardar_rubro_gasto(%L::jsonb)',
+    PERFORM pg_temp.como(v_todas, v_a, format('SELECT public.guardar_rubro_gasto(%L::jsonb)',
               jsonb_build_object('id', r_nuevo, 'grupo', 'vehiculos', 'activo', false)));
     SELECT * INTO g FROM gasto_rubros WHERE id = r_nuevo;
     v_fallas := v_fallas || pg_temp.chk(g.nombre = 'Fletes' AND g.grupo = 'vehiculos' AND g.palabras_busqueda = 'flete camion'
                                          AND g.reparto_sugerido_meses = 6 AND NOT g.activo,
                   format('11 la edicion parcial del rubro dejo %s', row_to_json(g)));
-    v_fallas := v_fallas || pg_temp.falla('11 nombre repetido', v_adm_b, v_b,
+    v_fallas := v_fallas || pg_temp.falla('11 nombre repetido', v_todas, v_b,
                   format('SELECT public.guardar_rubro_gasto(%L::jsonb)', '{"nombre":"fletes","grupo":"otros"}'), 'Ya hay un rubro llamado');
     v_fallas := v_fallas || pg_temp.falla('11 gasto con rubro inactivo', v_adm_a, v_a,
                   pg_temp.gg(v_base || jsonb_build_object('rubro_id', r_nuevo)), 'dado de baja');
     -- pide_litros_km se protege como el grupo: Combustible ya tiene cargas con litros.
-    v_fallas := v_fallas || pg_temp.falla('11 sacarle litros y km a Combustible', v_adm_a, v_a,
+    v_fallas := v_fallas || pg_temp.falla('11 sacarle litros y km a Combustible', v_todas, v_a,
                   format('SELECT public.guardar_rubro_gasto(%L::jsonb)', jsonb_build_object('id', r_comb, 'pide_litros_km', false)),
                   'Este rubro ya tiene gastos con litros o km: no se le puede sacar');
-    PERFORM pg_temp.como(v_adm_a, v_a, format('SELECT public.guardar_rubro_gasto(%L::jsonb)',
+    PERFORM pg_temp.como(v_todas, v_a, format('SELECT public.guardar_rubro_gasto(%L::jsonb)',
               jsonb_build_object('id', r_nuevo, 'pide_litros_km', true)));
-    PERFORM pg_temp.como(v_adm_a, v_a, format('SELECT public.guardar_rubro_gasto(%L::jsonb)',
+    PERFORM pg_temp.como(v_todas, v_a, format('SELECT public.guardar_rubro_gasto(%L::jsonb)',
               jsonb_build_object('id', r_nuevo, 'pide_litros_km', false)));
     v_fallas := v_fallas || pg_temp.chk(NOT (SELECT pide_litros_km FROM gasto_rubros WHERE id = r_nuevo),
                   '11 un rubro sin cargas no pudo prender y apagar pide_litros_km');

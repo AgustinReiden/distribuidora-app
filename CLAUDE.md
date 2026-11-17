@@ -299,6 +299,14 @@ suelta en `sucursales`.
   deja tocar uno con una línea viva. El efectivo a entregar resta los dos.
   `total_pagos_personal` es sólo `tipo = 'pago'`: una suma nueva de movimientos por rendición
   elige sus tipos. Se deshace todo junto (`deshacer_resolucion_rendicion`), nunca un pedazo.
+- **En el personal, el empleado se toma antes que la rendición y que el gasto** (GTO-E, ola 2 de
+  #1603): los empleados por id, después la rendición, después la fila. Así lo hacen
+  `registrar_movimiento_empleado`, `liquidar_empleado`, `resolver_rendicion`, `_guardar_gasto` y
+  `_anular_gasto`; un camino nuevo que escriba la cuenta de un empleado lo toma primero, no confía
+  en el FOR KEY SHARE de la FK. Los rubros de gasto son de toda la empresa: los cambia sólo un admin
+  de todas las sucursales (decisión del dueño). La edición de un gasto manda `updated_at_esperado` y
+  el server rechaza si otro lo cambió (decisión del dueño), y el tope del IVA es el 27 % del neto más
+  un centavo por renglón de la factura (`gastos.renglones_factura`, decisión del dueño).
 - **Un vale blanco está saldado por naturaleza** (migs 317/318): `tipo_factura = 'VB'` ⇒
   `monto_pagado = total`, `estado_pago = 'pagado'` y **cero** filas en `pagos` (lo fuerza
   `actualizar_estado_pago_pedido` y el CHECK `pedidos_vb_coherente`). No es deuda, no se

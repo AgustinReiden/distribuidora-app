@@ -15,7 +15,7 @@
   },
   "tablas": {
     "bot_admin_guardar_aviso_atrasados(uuid,boolean,integer,integer[])": "se acota al perfil, no a la sucursal: pide bot_admin_puede_gestionar(auth.uid(), p_perfil_id) antes de leer bot_usuarios y de escribir la configuración de ese perfil",
-    "guardar_rubro_gasto(jsonb)": "sólo admin; los rubros son un catálogo de toda la red (gasto_rubros no tiene sucursal). Mira gastos y vehiculo_km de cualquier sucursal a propósito: para saber si el rubro ya tiene uso antes de cambiarle el grupo o los litros",
+    "guardar_rubro_gasto(jsonb)": "sólo un admin de todas las sucursales (1597-b5, #1597); los rubros son un catálogo de toda la red (gasto_rubros no tiene sucursal). Mira gastos y vehiculo_km de cualquier sucursal a propósito: para saber si el rubro ya tiene uso antes de cambiarle el grupo o los litros",
     "marcar_notificacion_leida(bigint)": "se acota al que llama: sólo escribe sus notificaciones (usuario_id = auth.uid())",
     "marcar_todas_notificaciones_leidas()": "se acota al que llama: sólo escribe sus notificaciones (usuario_id = auth.uid())",
     "recalcular_recorrido(bigint)": "encargado o admin; no cambia ningún dato de negocio: realinea las paradas de la ruta con el estado de sus pedidos y rehace los contadores desde las paradas, o sea que sólo corrige lo que está desalineado"

@@ -163,10 +163,15 @@ export function mesSugerido(fechaISO: string, rubro: Pick<RubroGasto, 'sugiere_m
  * absorbe el redondeo. Se calcula en centavos enteros para dar el mismo centavo que
  * `_gasto_cuota` en el server: en punto flotante, 20,15 en 2 cuotas daba 10,07 + 10,08
  * y el server 10,08 + 10,07.
+ *
+ * 1562-b1 (#1562): si las n−1 primeras redondeadas pasan el costo (0,60 en 120: 119 × 0,01), la
+ * última quedaría negativa (−0,59); ahí van truncadas al centavo y la última se lleva el resto
+ * (0,00 × 119 y 0,60). Lo que no daba una última negativa queda igual.
  */
 export function cuotaDeGasto(costo: number, n: number, k: number): number {
   const centavos = Math.round(costo * 100)
-  const base = Math.round(centavos / n)
+  let base = Math.round(centavos / n)
+  if (Math.abs(base) * (n - 1) > Math.abs(centavos)) base = Math.trunc(centavos / n)
   return (k >= n ? centavos - base * (n - 1) : base) / 100
 }
 
@@ -190,15 +195,37 @@ export function normalizarPatente(s: string): string {
  * sobre el total menos las percepciones y los otros impuestos, `base × 27/127` (el 27 % del neto),
  * al centavo (GTO-2, #1562). Una factura con dos alícuotas es legal, así que no se fija el IVA
  * exacto. Espejo de `_guardar_gasto`; 127 es impar, así que la cuenta nunca cae en un medio centavo.
+ *
+ * 1562-c1 (decisión del dueño, 15/11): más un centavo por renglón de la factura, que redondea el IVA
+ * de cada uno. Dos renglones de neto 100,13 al 27 % son 27,04 + 27,04 = 54,08 sobre 254,34, y el
+ * 27 % del neto da 54,07. Sin `renglones`, el 27 % pelado: `errorDeDesglose` le pasa los del gasto.
  */
 export function topeIvaGastoCentavos(g: {
   monto_total: number
   percepcion_iva: number
   percepcion_iibb: number
   otros_impuestos: number
-}): number {
+}, renglones = 0): number {
   const base = Math.round((g.monto_total - g.percepcion_iva - g.percepcion_iibb - g.otros_impuestos) * 100)
-  return Math.round((base * 27) / 127)
+  return Math.round((base * 27) / 127) + renglones
+}
+
+export const RENGLONES_FACTURA_MAXIMO = 999
+
+/**
+ * Los renglones que necesita un IVA para entrar en el tope: uno por cada centavo que pasa del 27 %
+ * del neto, y nunca menos de uno. El modal arranca la edición de un gasto con esto cuando no sabe
+ * cuántos tiene guardados (la lista no los trae): lo que el server ya aceptó vuelve a entrar.
+ */
+export function renglonesParaIva(g: {
+  monto_total: number
+  iva: number
+  percepcion_iva: number
+  percepcion_iibb: number
+  otros_impuestos: number
+}): number {
+  const exceso = Math.round(g.iva * 100) - topeIvaGastoCentavos(g)
+  return Math.min(RENGLONES_FACTURA_MAXIMO, Math.max(1, exceso))
 }
 
 /** Mensaje de error del desglose o `null` si es coherente. Mismos textos que el server. */
@@ -209,12 +236,18 @@ export function errorDeDesglose(g: {
   percepcion_iva: number
   percepcion_iibb: number
   otros_impuestos: number
+  /** Los renglones de la factura A o M (1562-c1). Sin el dato, uno. */
+  renglones_factura?: number
 }): string | null {
   const importes = [g.monto_total, g.iva, g.percepcion_iva, g.percepcion_iibb, g.otros_impuestos]
   if (importes.some(i => i < 0)) return 'Ningún importe puede ser negativo'
   if (daCreditoFiscal(g.comprobante)) {
+    const renglones = g.renglones_factura ?? 1
+    if (!Number.isInteger(renglones) || renglones < 1 || renglones > RENGLONES_FACTURA_MAXIMO) {
+      return 'Los renglones de la factura van de 1 a 999'
+    }
     if (netoDeGasto(g) <= 0) return 'Con factura A o M el neto tiene que ser mayor a cero'
-    if (Math.round(g.iva * 100) > topeIvaGastoCentavos(g)) {
+    if (Math.round(g.iva * 100) > topeIvaGastoCentavos(g, renglones)) {
       return 'El IVA no puede pasar del 27 % del neto: revisá el IVA y las percepciones'
     }
     return null

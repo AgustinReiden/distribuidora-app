@@ -99,6 +99,12 @@ export function useGuardarGastoMutation() {
       // Un gasto que pagó un empleado le suma a su cuenta (y lo cambia o lo anula, se la resta).
       queryClient.invalidateQueries({ queryKey: personalKeys.all(currentSucursalId) })
     },
+    // 1599-b9 (#1599): si otro cambió el gasto mientras se editaba, el server rechaza con
+    // «Otro usuario cambió este gasto…». La lista se vuelve a leer, así al reabrirlo se ve cómo quedó
+    // y se edita con su versión nueva.
+    onError: () => {
+      queryClient.invalidateQueries({ queryKey: gastosKeys.all(currentSucursalId) })
+    },
   })
 }
 

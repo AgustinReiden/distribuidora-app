@@ -54,6 +54,7 @@ export function usePropsModalGasto(): PropsComunesModalGasto {
     esAdmin: isAdmin,
     usuarioId: user?.id,
     tieneTodasLasSucursales,
-    onCrearRubro: isAdmin ? crearRubro : undefined,
+    // 1597-b5 (#1597): los rubros son de toda la empresa; los crea sólo un admin de todas las sucursales.
+    onCrearRubro: isAdmin && tieneTodasLasSucursales ? crearRubro : undefined,
   }
 }
