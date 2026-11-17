@@ -27,7 +27,7 @@
 --   B      · otra sucursal activa con un admin de solo B (adm_b)
 --   todas  · admin activo con todas las sucursales activas
 --
---   1  semilla: los 18 rubros del spec con grupo y marcas
+--   1  semilla: los 18 rubros del spec con grupo y marcas, más Faltantes de caja (la 446): 19
 --   2  vehiculos: patente normalizada, repetida falla, RLS (el encargado de A
 --      lee vehiculos y km; B no), km manual
 --   3  gasto minimo: ticket de 8500 -> costo y neto 8500, mes_fin = mes
@@ -199,7 +199,8 @@ BEGIN
   -- ========================================================= 1 · semilla ===
   BEGIN
     SELECT count(*) INTO v_n FROM gasto_rubros;
-    v_fallas := v_fallas || pg_temp.chk(v_n = 18, format('1 la semilla tiene %s rubros (esperado 18)', v_n));
+    -- 18 del spec de la 411 + el rubro de sistema 'Faltantes de caja' (clave faltantes_caja) que sumó la 446 (gastos 6).
+    v_fallas := v_fallas || pg_temp.chk(v_n = 19, format('1 la semilla tiene %s rubros (esperado 19: los 18 del spec y Faltantes de caja)', v_n));
     FOR g IN
       WITH esperado(nombre, grupo, litros, reparto, mes_ant, palabras) AS (VALUES
         ('Combustible', 'vehiculos', true, NULL::int, false, 'nafta gasoil gnc'),
@@ -279,7 +280,7 @@ BEGIN
     v_txt := pg_temp.como(v_adm_b, v_b, format('SELECT count(*) FROM public.vehiculo_km WHERE vehiculo_id = %s', v_veh));
     v_fallas := v_fallas || pg_temp.chk(v_txt = '0', format('2 adm_b ve %s lecturas de km de A (esperado 0)', v_txt));
     v_txt := pg_temp.como(v_enc, v_a, 'SELECT count(*) FROM public.gasto_rubros');
-    v_fallas := v_fallas || pg_temp.chk(v_txt = '18', format('2 el encargado ve %s rubros (esperado 18)', v_txt));
+    v_fallas := v_fallas || pg_temp.chk(v_txt = '19', format('2 el encargado ve %s rubros (esperado 19)', v_txt));
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('2 · error: %s', SQLERRM);
   END;
 

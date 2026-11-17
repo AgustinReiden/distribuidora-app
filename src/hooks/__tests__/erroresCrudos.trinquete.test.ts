@@ -230,24 +230,43 @@ export function lineasCrudas(codigo: string): string[] {
     .filter((l) => RE_THROW_VARIABLE.test(l) || RE_THROW_MENSAJE.test(l) || RE_THROW_PLANTILLA.test(l))
 }
 
+/**
+ * El código de src/ se lee UNA vez por archivo de test y lo comparten los dos barridos: cada
+ * uno recorría y leía ~800 archivos con `fs` síncrono. Con la suite entera y la máquina cargada
+ * (antivirus, otras sesiones) cada lectura se paga carísima y el test pasaba de 3 s a los 30 s
+ * del timeout (#1587). La causa es sólo E/S: la lógica de los detectores no cambia.
+ */
+let fuentesCache: Array<[string, string]> | null = null
+function fuentes(): Array<[string, string]> {
+  if (!fuentesCache) {
+    fuentesCache = []
+    for (const raiz of RAICES) {
+      for (const archivo of listar(path.join(SRC, raiz))) {
+        fuentesCache.push([path.relative(SRC, archivo).split(path.sep).join('/'), fs.readFileSync(archivo, 'utf8')])
+      }
+    }
+  }
+  return fuentesCache
+}
+
+// Margen propio de los dos barridos (el resto del archivo corre en milisegundos): bajo carga
+// son lecturas de disco lentas, no un test colgado.
+const MARGEN_BARRIDO = 120_000
+
 function contar(): Record<string, string[]> {
   const out: Record<string, string[]> = {}
-  for (const raiz of RAICES) {
-    for (const archivo of listar(path.join(SRC, raiz))) {
-      const lineas = lineasCrudas(fs.readFileSync(archivo, 'utf8'))
-      if (lineas.length > 0) out[path.relative(SRC, archivo).split(path.sep).join('/')] = lineas.map((l) => l.trim())
-    }
+  for (const [ruta, codigo] of fuentes()) {
+    const lineas = lineasCrudas(codigo)
+    if (lineas.length > 0) out[ruta] = lineas.map((l) => l.trim())
   }
   return out
 }
 
 function contarMensajes(): Record<string, string[]> {
   const out: Record<string, string[]> = {}
-  for (const raiz of RAICES) {
-    for (const archivo of listar(path.join(SRC, raiz))) {
-      const lineas = mensajesCrudosDeSupabase(fs.readFileSync(archivo, 'utf8'))
-      if (lineas.length > 0) out[path.relative(SRC, archivo).split(path.sep).join('/')] = lineas.map((l) => l.trim())
-    }
+  for (const [ruta, codigo] of fuentes()) {
+    const lineas = mensajesCrudosDeSupabase(codigo)
+    if (lineas.length > 0) out[ruta] = lineas.map((l) => l.trim())
   }
   return out
 }
@@ -291,7 +310,7 @@ describe('trinquete: código que lanza el error crudo de supabase (#760, #1011)'
       .join('\n')
     const cuenta = Object.fromEntries(Object.entries(encontrados).map(([f, ls]) => [f, ls.length]))
     expect(cuenta, `Throws crudos:\n${detalle}`).toEqual(PERMITIDOS)
-  })
+  }, MARGEN_BARRIDO)
 })
 
 describe('trinquete: código que ENTREGA el message crudo de supabase (#1062)', () => {
@@ -392,5 +411,5 @@ describe('trinquete: código que ENTREGA el message crudo de supabase (#1062)', 
       .join('\n')
     const cuenta = Object.fromEntries(Object.entries(encontrados).map(([f, ls]) => [f, ls.length]))
     expect(cuenta, `Mensajes crudos entregados:\n${detalle}`).toEqual(PERMITIDOS_MENSAJE)
-  })
+  }, MARGEN_BARRIDO)
 })

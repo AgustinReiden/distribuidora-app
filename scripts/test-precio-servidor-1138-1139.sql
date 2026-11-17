@@ -946,13 +946,13 @@ BEGIN
   -- los necesitan los ponen en su subbloque).
   SELECT id INTO v_cliente FROM clientes cl
    WHERE sucursal_id = v_suc AND activo AND tipo_factura_default IS DISTINCT FROM 'VB'
-     AND preventista_id IS NULL AND NOT COALESCE(reservado_admin, false)
+     AND NOT EXISTS (SELECT 1 FROM cliente_preventistas cp WHERE cp.cliente_id = cl.id) AND NOT COALESCE(reservado_admin, false)
      AND COALESCE(descuento_porcentaje, 0) = 0
      AND NOT EXISTS (SELECT 1 FROM cliente_descuentos_categoria d WHERE d.cliente_id = cl.id)
    ORDER BY id LIMIT 1;
   SELECT id INTO v_cli2 FROM clientes cl
    WHERE sucursal_id = v_suc AND activo AND tipo_factura_default IS DISTINCT FROM 'VB'
-     AND preventista_id IS NULL AND NOT COALESCE(reservado_admin, false) AND id <> v_cliente
+     AND NOT EXISTS (SELECT 1 FROM cliente_preventistas cp WHERE cp.cliente_id = cl.id) AND NOT COALESCE(reservado_admin, false) AND id <> v_cliente
    ORDER BY id LIMIT 1;
   IF v_admin IS NULL OR v_prev IS NULL OR v_cliente IS NULL OR v_cli2 IS NULL THEN
     RAISE EXCEPTION 'ENSAYO FALLO · hace falta una sucursal activa con un admin, un preventista y dos clientes sin asignar';

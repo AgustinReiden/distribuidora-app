@@ -7,7 +7,7 @@ Supabase (Postgres + Auth + RLS) en el back, edge functions en Deno.
 
 En un worktree, `npm ci` primero (ver Trampas). Antes de dar algo por terminado corré las
 cuatro: `typecheck`, `lint`, `test:run`, `build`.
-El pre-commit ya corre `check-secrets.sh`, `lint-staged` y los tests.
+El pre-commit ya corre `check-secrets.sh`, `lint-staged` y los tests relacionados con lo que cambió (`npm run test:commit`, `scripts/tests-del-commit.sh`: `vitest related` más los tests que leen el árbol desde el disco). La suite entera corre en el CI (`ci.yml`, job `test`); el pre-commit sólo la corre si cambia la config, el setup de los tests o una dependencia.
 
 E2E: `npm run test:e2e` (Playwright, chromium).
 

@@ -278,9 +278,10 @@ BEGIN
       v_fallas := v_fallas || format('#1296 · %s no bloquea los productos por id antes de tocarlos (lock en %s, primero en %s)',
         r.firma, v_n, v_m);
     END IF;
-    IF md5(regexp_replace(v_src, '  -- #1296 · .*?      FOR UPDATE;\n\n', '')) <> r.md5 THEN
-      v_fallas := v_fallas || format('#1296 · %s: el cuerpo sin el bloque del lock no es el de prod del 2026-11-02 (431b y 431c)', r.firma);
-    END IF;
+    -- Acá había una segunda aserción: el md5 del cuerpo SIN el bloque del lock tenía que ser el de prod del 2026-11-02 (431b y
+    -- 431c), para probar que la migración sólo había agregado el lock. Se pone rojo con cualquier migración posterior que toque
+    -- estas dos funciones (la 478, la 482, la 505…) aunque el lock siga ahí, y su propósito era del momento de aplicarla. Se
+    -- sacó (#1603 B13b): lo que vale hoy es lo de arriba, que el lock por id va ANTES de tocar un producto.
   END LOOP;
 
   -- -------------------------------------------------------------- 3 · humo ---

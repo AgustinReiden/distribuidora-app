@@ -8,7 +8,7 @@
 --   E1 · La misma salvedad con una clave nueva entra como una salvedad nueva: el total baja y el stock vuelve.
 --   E2 · El reintento de una salvedad viva con los mismos datos sigue contestando idempotent_replay, sin mover
 --        nada, y con otros datos sigue contestando 'salvedad_ya_registrada'.
---   L3 · El cuerpo y los EXECUTE de registrar_salvedad son los de la migración.
+--   L3 · registrar_salvedad conserva su rama 'salvedad_anulada' y sus EXECUTE (antes fijaba el md5 del cuerpo).
 --
 -- Corre contra prod sin dejar rastro (salvo valores de secuencia): un único DO que termina siempre en una excepción,
 -- y cada caso en un sub-bloque que se revierte. Antes de aplicar la migración se corre pegado detrás de su cuerpo,
@@ -199,10 +199,13 @@ DECLARE
   f text[] := '{}';
   r record;
 BEGIN
-  SELECT md5(prosrc) AS h, proacl::text AS a INTO r
+  -- Antes fijaba el md5 del cuerpo (2319b689…): se pone rojo con cada migración que toca registrar_salvedad (la 478, la 505…)
+  -- sin que nada se haya roto. El comportamiento del replay lo afirman L1, L2 y E2; acá queda que el cuerpo conserva su rama
+  -- 'salvedad_anulada' y los EXECUTE (#1603 B13b).
+  SELECT position('salvedad_anulada' IN prosrc) > 0 AS tiene_rama, proacl::text AS a INTO r
     FROM pg_proc
    WHERE oid = 'public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)'::regprocedure;
-  f := pg_temp.sa_si(f, r.h = '2319b68994b913717cd3283d4123f823', format('registrar_salvedad tiene el md5 %s', r.h));
+  f := pg_temp.sa_si(f, r.tiene_rama, 'registrar_salvedad perdió su rama salvedad_anulada');
   f := pg_temp.sa_si(f, r.a = '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}',
                      format('registrar_salvedad tiene los EXECUTE %s', r.a));
   RETURN jsonb_build_object('fallas', to_jsonb(f));

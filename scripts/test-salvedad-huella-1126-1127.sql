@@ -669,7 +669,9 @@ BEGIN
 END
 $fn$;
 
--- B2 · la baja es una sola (#1080): 'anulado' se rechaza igual.
+-- B2 · la baja es una sola (#1080): 'anulado' ya no es un estado (mig 487, #1520: pedidos_estado_check). Antes este caso
+--      dejaba el pedido en 'anulado' y esperaba que la salvedad se rechazara; hoy el propio UPDATE se rechaza (23514) y
+--      nada cambia: se afirma eso, y que el pedido, su stock y sus líneas quedan como estaban.
 CREATE OR REPLACE FUNCTION pg_temp.caso_b2(p_cli bigint, p_adm uuid, p_suc bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -680,16 +682,18 @@ BEGIN
   v_prod := v->>'prod';
   p := pg_temp.t_pedido(p_cli, p_adm, v_prod, 20);
   v_ped := p->>'pedido'; v_item := p->>'item';
-  UPDATE public.pedidos SET estado = 'anulado' WHERE id = v_ped;
   v_f0 := pg_temp.t_foto(v_prod);
-  v_res := pg_temp.t_salvedad_res(v_ped, v_item, 5, 'producto_danado');
+  BEGIN
+    UPDATE public.pedidos SET estado = 'anulado' WHERE id = v_ped;
+    f := f || 'poner un pedido en anulado tenia que fallar (pedidos_estado_check)'::text;
+  EXCEPTION WHEN check_violation THEN
+    NULL;   -- lo esperado
+  END;
   v_f1 := pg_temp.t_foto(v_prod);
-  f := pg_temp.t_si(f, NOT COALESCE((v_res->>'success')::boolean, false) AND v_res->>'codigo' = 'pedido_cancelado',
-                    format('la salvedad sobre el anulado tendria que rechazarse: %s', v_res));
-  f := pg_temp.t_si(f, v_f1 = v_f0 AND pg_temp.t_cant(v_item) = 20
+  f := pg_temp.t_si(f, (SELECT estado FROM public.pedidos WHERE id = v_ped) <> 'anulado' AND v_f1 = v_f0
+                       AND pg_temp.t_cant(v_item) = 20
                        AND NOT EXISTS (SELECT 1 FROM public.salvedades_items WHERE pedido_id = v_ped),
-                    format('la salvedad sobre el anulado dejo efectos: foto %s (antes %s), linea %s', v_f1, v_f0,
-                           pg_temp.t_cant(v_item)));
+                    format('el UPDATE rechazado dejo efectos: foto %s (antes %s), linea %s', v_f1, v_f0, pg_temp.t_cant(v_item)));
   RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', format('respuesta %s', v_res));
 END
 $fn$;

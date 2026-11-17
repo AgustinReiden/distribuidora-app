@@ -166,12 +166,14 @@ BEGIN
     IF v_m > 0 THEN
       v_fallas := v_fallas || format('4.1 · el depósito lee %s línea(s) de nota de crédito de compra con su costo', v_m);
     END IF;
-    -- 4.2 · La cabecera de la compra, como antes.
+    -- 4.2 · La cabecera de la compra: desde #1557 (CMP-6, decisión del dueño) el depósito tampoco la lee (compras, notas_credito,
+    -- compra_cargos y compra_cargo_repartos: sus totales son costos). Antes este caso afirmaba lo contrario ("como antes": la
+    -- veía entera), que fue la regla de la 405 y quedó superada.
     EXECUTE 'SET LOCAL ROLE authenticated';
     EXECUTE 'SELECT count(*) FROM compras' INTO v_n;
     EXECUTE 'RESET ROLE';
-    IF v_n <> (SELECT count(*) FROM compras WHERE sucursal_id = v_suc) THEN
-      v_fallas := v_fallas || '4.2 · la cabecera de la compra cambió para el depósito (no era parte de la decisión)'::text;
+    IF v_n <> 0 THEN
+      v_fallas := v_fallas || format('4.2 · el depósito lee %s cabecera(s) de compra: sus totales son costos (CMP-6)', v_n);
     END IF;
 
     -- 4.3 · Admin y encargado leen todas las de su sucursal.

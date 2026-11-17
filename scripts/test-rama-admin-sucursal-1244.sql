@@ -171,7 +171,7 @@ BEGIN
     END IF;
   END IF;
 
-  -- 2.6 · El que no es admin edita su perfil y no el de otro.
+  -- 2.6 · El que no es admin no edita ningún perfil, ni el suyo (#1474) ni el de otro.
   IF v_prev IS NULL THEN
     v_saltados := v_saltados || '2.6: no hay preventista activo'::text;
   ELSE
@@ -184,8 +184,10 @@ BEGIN
     EXECUTE 'WITH u AS (UPDATE perfiles SET nombre = nombre WHERE id <> $1 RETURNING 1) SELECT count(*) FROM u'
       INTO v_m USING v_prev;
     EXECUTE 'RESET ROLE';
-    IF v_n <> 1 THEN
-      v_fallas := v_fallas || '2.6 · un preventista no puede editar su propio perfil'::text;
+    -- Regla vigente: NADIE edita su propio perfil (decisión del dueño, #1474; CLAUDE.md): perfiles se escribe sólo por
+    -- perfiles_update_admin. Este caso afirmaba lo contrario (que el no-admin editaba el suyo, 1 fila); hoy son 0.
+    IF v_n <> 0 THEN
+      v_fallas := v_fallas || format('2.6 · un preventista editó %s fila(s) de su propio perfil: nadie edita su perfil (#1474)', v_n);
     END IF;
     IF v_m > 0 THEN
       v_fallas := v_fallas || format('2.6 · un preventista editó %s perfil(es) ajenos', v_m);
