@@ -25,8 +25,8 @@
 --         su sucursal
 --   H2b · el mismo preventista con el extra, desactivado: no es transportista ni preventista
 -- usuario_sucursales.rol (SEG-F-3)
---   U1  · rol NULL → 23502 y rol fuera de dominio → 23514; ningún miembro tiene
---         _rol_en_sucursal NULL
+--   U1  · la columna ya no existe (#1525: el rol es perfiles.rol en toda sucursal);
+--         ningún miembro tiene _rol_en_sucursal NULL
 -- perfiles (SEG-F-4)
 --   P1  · un preventista PATCH de su nombre, su email o su zona → 0 filas
 --   P2  · el admin de sus sucursales PATCH del nombre del preventista y del suyo → 1 fila
@@ -198,16 +198,11 @@ BEGIN
   -- ------------------------------------------------------------------- U1 ---
   BEGIN
     PERFORM pg_temp.servidor();
-    BEGIN
-      UPDATE usuario_sucursales SET rol = NULL WHERE usuario_id = v_p1;
-      v_fallas := v_fallas || text 'U1 · rol NULL en usuario_sucursales pasó';
-    EXCEPTION WHEN not_null_violation THEN NULL;
-    END;
-    BEGIN
-      UPDATE usuario_sucursales SET rol = 'jefe' WHERE usuario_id = v_p1;
-      v_fallas := v_fallas || text 'U1 · rol ''jefe'' en usuario_sucursales pasó';
-    EXCEPTION WHEN check_violation THEN NULL;
-    END;
+    -- #1525: la sucursal no tiene rol propio; la columna ya no existe.
+    IF EXISTS (SELECT 1 FROM pg_attribute
+                WHERE attrelid = 'public.usuario_sucursales'::regclass AND attname = 'rol' AND NOT attisdropped) THEN
+      v_fallas := v_fallas || text 'U1 · usuario_sucursales todavía tiene la columna rol';
+    END IF;
     SELECT count(*) INTO v_n FROM usuario_sucursales WHERE public._rol_en_sucursal(usuario_id, sucursal_id) IS NULL;
     IF v_n > 0 THEN
       v_fallas := v_fallas || format('U1 · %s miembros con _rol_en_sucursal NULL', v_n);

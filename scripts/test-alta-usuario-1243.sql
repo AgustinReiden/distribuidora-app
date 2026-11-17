@@ -1,6 +1,7 @@
 -- Ensayo de #1243 (migración 403b): el alta de un usuario no le cree al usuario.
 --   1 · El metadata del usuario no da rol ni sucursal: un signup con
---       data {rol: 'admin', sucursal_id: <otra>} nace preventista de la 1.
+--       data {rol: 'admin', sucursal_id: <otra>} nace preventista de la primera sucursal
+--       activa (la 1 en prod; desde 1596-b5 no hay sucursal fija).
 --   2 · app_metadata sí (el alta por la admin API o por SQL): rol y sucursal,
 --       con la sucursal como texto o como número.
 --   3 · El nombre sigue saliendo de user_metadata; sin nombre, el del email.
@@ -23,7 +24,8 @@
 DO $ensayo$
 DECLARE
   v_fallas text[] := '{}';
-  v_otra   bigint;  -- una sucursal que no es la 1
+  v_otra   bigint;  -- una sucursal que no es la primera activa
+  v_prim   bigint;  -- la primera sucursal activa: la del alta sin app_metadata (1596-b5)
   v_id     uuid;
   v_rol    text;
   v_activo boolean;
@@ -34,9 +36,10 @@ DECLARE
   v_cuerpo text;
   v_app    jsonb := '{"provider":"email","providers":["email"]}';
 BEGIN
-  SELECT id INTO v_otra FROM sucursales WHERE id <> 1 ORDER BY id LIMIT 1;
-  IF v_otra IS NULL THEN
-    RAISE EXCEPTION 'ENSAYO FALLÓ: hace falta una sucursal además de la 1';
+  SELECT id INTO v_prim FROM sucursales WHERE activa ORDER BY id LIMIT 1;
+  SELECT id INTO v_otra FROM sucursales WHERE id <> v_prim ORDER BY id LIMIT 1;
+  IF v_prim IS NULL OR v_otra IS NULL THEN
+    RAISE EXCEPTION 'ENSAYO FALLÓ: hace falta una sucursal activa y otra más';
   END IF;
 
   -- -------------------------------- 1 · el metadata del usuario no da nada ---
@@ -51,8 +54,8 @@ BEGIN
   IF v_rol IS DISTINCT FROM 'preventista' THEN
     v_fallas := v_fallas || format('1.1 · un signup con data.rol = admin nació %s', COALESCE(v_rol, '(sin perfil)'));
   END IF;
-  IF v_sucs IS DISTINCT FROM ARRAY[1::bigint] THEN
-    v_fallas := v_fallas || format('1.2 · un signup con data.sucursal_id = %s quedó en %s, no en la 1', v_otra, v_sucs);
+  IF v_sucs IS DISTINCT FROM ARRAY[v_prim] THEN
+    v_fallas := v_fallas || format('1.2 · un signup con data.sucursal_id = %s quedó en %s, no en la %s', v_otra, v_sucs, v_prim);
   END IF;
   -- ------------------------------------------------- 3 · el nombre, igual ---
   IF v_nombre IS DISTINCT FROM 'Atacante' THEN
@@ -97,14 +100,14 @@ BEGIN
     v_fallas := v_fallas || format('2.4 · app_metadata con sucursal_id numérico dio %s en %s', v_rol, v_sucs);
   END IF;
 
-  -- 2.5 · Sin nada (el alta del panel): preventista activo de la 1, como siempre.
+  -- 2.5 · Sin nada (el alta del panel): preventista activo de la primera sucursal activa.
   v_id := gen_random_uuid();
   INSERT INTO auth.users (id, instance_id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
   VALUES (v_id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
           'ensayo-1243-d@ensayo.invalid', v_app, '{"email_verified": true}', now(), now());
   SELECT rol, activo INTO v_rol, v_activo FROM perfiles WHERE id = v_id;
   SELECT array_agg(sucursal_id ORDER BY sucursal_id) INTO v_sucs FROM usuario_sucursales WHERE usuario_id = v_id;
-  IF v_rol IS DISTINCT FROM 'preventista' OR v_activo IS DISTINCT FROM true OR v_sucs IS DISTINCT FROM ARRAY[1::bigint] THEN
+  IF v_rol IS DISTINCT FROM 'preventista' OR v_activo IS DISTINCT FROM true OR v_sucs IS DISTINCT FROM ARRAY[v_prim] THEN
     v_fallas := v_fallas || format('2.5 · el alta del panel nació %s / activo %s / %s', v_rol, v_activo, v_sucs);
   END IF;
 
@@ -130,7 +133,7 @@ BEGIN
   EXCEPTION WHEN raise_exception THEN v_ok := true;
   END;
   IF NOT v_ok THEN
-    v_fallas := v_fallas || '4.2 · una app_metadata.sucursal_id que no existe no frenó el alta (cayó en la 1)'::text;
+    v_fallas := v_fallas || '4.2 · una app_metadata.sucursal_id que no existe no frenó el alta (cayó en la primera activa)'::text;
   END IF;
 
   -- ------------------------------------------------- 5 · auditoria_auth() ---
