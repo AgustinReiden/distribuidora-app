@@ -20,6 +20,14 @@ export const PARAM_DESDE = 'desde'
 export const PARAM_HASTA = 'hasta'
 export const PARAM_SUC = 'suc'
 export const PARAM_TAB = 'tab'
+/**
+ * El preset que eligió el usuario en el gerencial («Este mes», «Mes pasado»…), por su `key`. Va
+ * además de `desde`/`hasta`: las fechas son el dato que se comparte con /reportes, pero un preset
+ * como «Este mes» termina HOY, y con sólo las fechas, pasada la medianoche, el rango de la URL ya no
+ * coincide con ningún preset y el selector cae en «Personalizado» con el rango de ayer (1597-b3).
+ * Sólo lo lee el gerencial; /reportes lo ignora.
+ */
+export const PARAM_PRESET = 'pr'
 
 /** `suc=red` es el consolidado. Se escribe explícito para distinguirlo de "no vino nada". */
 export const SUC_RED = 'red'
@@ -80,6 +88,20 @@ export function escribirRango(sp: URLSearchParams, desde: string | null, hasta: 
     next.delete(PARAM_DESDE)
     next.delete(PARAM_HASTA)
   }
+  return next
+}
+
+/** El preset de la URL (su `key`), o null si no vino. */
+export function leerPreset(sp: URLSearchParams): string | null {
+  const raw = sp.get(PARAM_PRESET)
+  return raw ? raw : null
+}
+
+/** Escribe (o, con null, borra) el preset sobre una copia de los params. */
+export function escribirPreset(sp: URLSearchParams, key: string | null): URLSearchParams {
+  const next = new URLSearchParams(sp)
+  if (key) next.set(PARAM_PRESET, key)
+  else next.delete(PARAM_PRESET)
   return next
 }
 

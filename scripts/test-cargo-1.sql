@@ -14,19 +14,12 @@
 -- puro regalo paga envio, el neto/IVA no tiene el envio, faltan las puras);
 -- despues, pasar.
 --
--- Tiene DOS PARTES, separadas por la linea que EMPIEZA con la marca
--- "-- @@ MIGRACION": la parte 0 va ANTES de la migracion (arma pedidos con la
--- forma de la 389 para el backfill, caso H) y el DO del ensayo DESPUES. Ensayo
--- en seco de la migracion:
---
---   BEGIN; SET LOCAL lock_timeout = '5s';
---   <este archivo hasta la marca>        (sed -n '1,/^-- @@ MIGRACION/p')
---   <migrations/394_cargo_1_base.sql>
---   <este archivo desde la marca>        (sed -n '/^-- @@ MIGRACION/,$p')
---   ROLLBACK;
---
--- Ensayo solo: el archivo entero, de corrido (el caso H falla: sin la
--- migracion nadie completa el neto/IVA).
+-- UNA SOLA PARTE (#1405-f). Antes tenia dos: una PARTE 0 que corria ANTES de la migracion 394 y armaba pedidos con la
+-- forma de la 389 (cargo cobrado sin cargo_envio_estado) para los casos H e I, que probaban el backfill de esa migracion.
+-- Desde la 394 el CHECK pedidos_cargo_estado_coherente prohibe esa forma (cargo > 0 exige estado 'cobrado'): la PARTE 0
+-- cortaba con 23514 antes de ninguna asercion, y H e I dependian de ella. El backfill corrio una sola vez, sobre las filas
+-- de prod, y no se puede repetir: sus casos se sacaron. Lo que dejo (cargo, estado y desglose neto/IVA del envio) se
+-- ejercita en A a G, y el CHECK en A6.
 --
 -- Casos (politica forzada en cada uno):
 --   A · escalas 5000/15000/500
@@ -43,35 +36,24 @@
 --          y 'gratis' con cargo 500
 --   B · bloquear (cargo 500 cargado) -> alta 'no_aplica', cargo 0
 --   C · vale blanco con la politica cobrando -> 'no_aplica', cargo 0
---   D · cargo 15000/500, alta de puro regalo -> cargo 0, total 0, VENTA-A en 0
+--   D · cargo 15000/500, alta de puro regalo -> se rechaza ("al menos un producto que
+--       no sea regalo") sin crear pedido, VENTA-A en 0. Antes se daba de alta con cargo 0,
+--       total 0 y 'gratis': el puro regalo ya no se puede dar de alta
 --   E · las puras dan seis casos del fixture; permisos: anon y authenticated
 --       sin EXECUTE, service_role si
---   R · reatribucion (cambiar_cliente_pedido): R1 un puro regalo con cargo 500 /
---       cobrado -> el nuevo sin cargo, total 0, gratis, VENTA-A 0; R2 no_aplica y
+--   R · reatribucion (cambiar_cliente_pedido): R1 (sacado: ya no se puede armar un puro
+--       regalo, ver el caso D); R2 no_aplica y
 --       R3 bonificado conservan el estado (no renacen gratis); R4 cobrado con
 --       productos conserva cargo y estado aunque la politica ya no cobre
 --   G · bot: crear_pedido_completo_bot con una confirmacion pendiente -> cargo,
 --       estado y neto/IVA
 --   F · crear_pedido_idempotente sigue exenta en SEG-A (md5 de la lista blanca)
---   H · backfill de la 389: un FC y un ZZ entregados a los que la parte 0 les
---       cobro 500 con la forma de la 389 (total += 500, neto/IVA sin el envio)
---       -> FC neto + 413,22 e IVA + 86,78; ZZ neto + 500 e IVA igual. Un rechazo
---       total con cargo 500 (total 0, cargo efectivo 0) y un cancelado con
---       cargo no se tocan.
---   I · backfill del estado 'gratis': la parte 0 pone a cobrar (escalas) la
---       politica de la sucursal del pedido vivo sin cargo mas nuevo, con
---       actualizado_en = su created_at -> ese pedido queda 'gratis'; uno de la
---       misma sucursal creado ANTES de actualizado_en queda 'no_aplica'.
 --
--- El estado se lee con to_jsonb(p)->>'cargo_envio_estado' y se afirma aparte:
--- antes de la migracion da NULL y cada canario falla por lo suyo (cargo, total,
--- VENTA-A), no por la columna que falta.
+-- El estado se lee con to_jsonb(p)->>'cargo_envio_estado' y se afirma aparte.
 --
 --   psql "$DATABASE_URL" -f scripts/test-cargo-1.sql
 
--- ============================================================ PARTE 0 =====
--- Pedidos con la forma de la 389 (se deshacen con el ROLLBACK). Corre antes
--- de la migracion: sin cargo_envio_estado, como estaba prod.
+
 -- Ola 2 de #1603 (B1, 1595-b5; decisión del dueño D23): una salvedad se registra sólo sobre un
 -- pedido en camino o entregado. El ensayo carga pedidos y les registra salvedades enseguida: este
 -- envoltorio pone el pedido en camino (asignado) para la salvedad y lo devuelve al estado que tenía,
@@ -112,98 +94,6 @@ BEGIN
   RETURN v_res;
 END
 $ola2$;
-
-
-DROP TABLE IF EXISTS pg_temp._cargo1_canario;
-CREATE TEMP TABLE _cargo1_canario (
-  caso          text PRIMARY KEY,
-  id            bigint NOT NULL,
-  esperado_neto numeric,
-  esperado_iva  numeric
-);
-
--- Caso I (backfill del estado 'gratis'): caso -> pedido y estado esperado.
-DROP TABLE IF EXISTS pg_temp._cargo1_canario_estado;
-CREATE TEMP TABLE _cargo1_canario_estado (
-  caso     text PRIMARY KEY,
-  id       bigint NOT NULL,
-  esperado text NOT NULL
-);
-
-DO $antes$
-DECLARE
-  r record;
-  r_old record;
-BEGIN
-  -- Un FC y un ZZ entregados con productos y sin cargo: la 389 les cobraba el
-  -- envio en total y dejaba el neto/IVA como estaban.
-  FOR r IN
-    SELECT DISTINCT ON (p.tipo_factura) p.id, p.tipo_factura, p.total_neto, p.total_iva
-      FROM pedidos p
-     WHERE p.estado = 'entregado' AND p.canal <> 'cambio' AND p.tipo_factura IN ('FC', 'ZZ')
-       AND p.total > 0 AND p.cargo_envio = 0
-       AND p.total_neto IS NOT NULL AND p.total_iva IS NOT NULL
-     ORDER BY p.tipo_factura, p.id DESC
-  LOOP
-    UPDATE pedidos SET cargo_envio = 500, total = total + 500, monto_pagado = monto_pagado WHERE id = r.id;
-    INSERT INTO _cargo1_canario VALUES (r.tipo_factura, r.id,
-      r.total_neto + CASE WHEN r.tipo_factura = 'FC' THEN 413.22 ELSE 500 END,
-      r.total_iva + CASE WHEN r.tipo_factura = 'FC' THEN 86.78 ELSE 0 END);
-  END LOOP;
-
-  -- Un rechazo total con cargo (total 0: el envio no se cobra): no se toca.
-  SELECT p.id, p.total_neto, p.total_iva INTO r
-    FROM pedidos p
-   WHERE p.estado = 'entregado' AND p.canal <> 'cambio' AND p.tipo_factura IS DISTINCT FROM 'VB'
-     AND p.total = 0 AND p.cargo_envio = 0 AND p.total_neto IS NOT NULL
-     AND NOT EXISTS (SELECT 1 FROM pedido_items i WHERE i.pedido_id = p.id)
-   ORDER BY p.id DESC LIMIT 1;
-  IF r.id IS NOT NULL THEN
-    UPDATE pedidos SET cargo_envio = 500, total = total, monto_pagado = monto_pagado WHERE id = r.id;
-    INSERT INTO _cargo1_canario VALUES ('sin_productos', r.id, r.total_neto, r.total_iva);
-  END IF;
-
-  -- Un cancelado con cargo (dato viejo): no se toca.
-  SELECT p.id, p.total_neto, p.total_iva INTO r
-    FROM pedidos p
-   WHERE p.estado = 'cancelado' AND p.cargo_envio = 0 AND p.total_neto IS NOT NULL
-   ORDER BY p.id DESC LIMIT 1;
-  IF r.id IS NOT NULL THEN
-    UPDATE pedidos SET cargo_envio = 500, total = total, monto_pagado = monto_pagado WHERE id = r.id;
-    INSERT INTO _cargo1_canario VALUES ('cancelado', r.id, r.total_neto, r.total_iva);
-  END IF;
-
-  -- I · Un pedido vivo sin cargo (con productos, no VB, no canje) nacido bajo
-  -- una politica que ya cobraba: la 389 lo dejaba sin marca. Se toma el mas
-  -- nuevo y se fecha la politica de su sucursal en su created_at; otro de la
-  -- misma sucursal, creado antes, nacio con otra politica.
-  SELECT p.id, p.sucursal_id, p.created_at INTO r
-    FROM pedidos p
-   WHERE p.cargo_envio = 0 AND p.total > 0 AND p.estado NOT IN ('cancelado', 'anulado')
-     AND p.tipo_factura IS DISTINCT FROM 'VB' AND p.canal <> 'cambio'
-     AND p.id NOT IN (SELECT id FROM _cargo1_canario)
-   ORDER BY p.created_at DESC, p.id DESC LIMIT 1;
-  SELECT p.id INTO r_old
-    FROM pedidos p
-   WHERE p.sucursal_id = r.sucursal_id AND p.created_at < r.created_at
-     AND p.cargo_envio = 0 AND p.total > 0 AND p.estado NOT IN ('cancelado', 'anulado')
-     AND p.tipo_factura IS DISTINCT FROM 'VB' AND p.canal <> 'cambio'
-     AND p.id NOT IN (SELECT id FROM _cargo1_canario)
-   ORDER BY p.created_at DESC, p.id DESC LIMIT 1;
-  IF r.id IS NOT NULL AND r_old.id IS NOT NULL THEN
-    INSERT INTO politicas_comerciales (sucursal_id, modo_minimo_pedido, monto_minimo_pedido,
-                                       monto_envio_gratis, cargo_envio_pedido, actualizado_en)
-    VALUES (r.sucursal_id, 'escalas', 5000, 15000, 500, r.created_at)
-    ON CONFLICT (sucursal_id) DO UPDATE SET modo_minimo_pedido = EXCLUDED.modo_minimo_pedido,
-      monto_minimo_pedido = EXCLUDED.monto_minimo_pedido, monto_envio_gratis = EXCLUDED.monto_envio_gratis,
-      cargo_envio_pedido = EXCLUDED.cargo_envio_pedido, actualizado_en = EXCLUDED.actualizado_en;
-    INSERT INTO _cargo1_canario_estado VALUES ('gratis_bajo_politica', r.id, 'gratis'),
-                                              ('anterior_a_la_politica', r_old.id, 'no_aplica');
-  END IF;
-END
-$antes$;
-
--- @@ MIGRACION @@ ============================================ PARTE 1 =====
 
 DO $ensayo$
 DECLARE
@@ -499,20 +389,19 @@ BEGIN
            jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 2, 'precio_unitario', 0,
                                                 'es_bonificacion', true)),
            'ensayo cargo 1', 'efectivo', 'pendiente', NULL, 'ZZ');
-    IF NOT COALESCE((r->>'success')::boolean, false) THEN
-      RAISE EXCEPTION 'D alta de puro regalo: %', r;
+    -- Regla vigente (#1603 B13b): el alta de un pedido de PURO REGALO se rechaza (crear_pedido_completo pide al menos un
+    -- producto que no sea regalo). Antes este caso daba de alta el puro regalo y esperaba cargo 0, total 0, estado
+    -- 'gratis' y VENTA-A en 0: ya no hay un puro regalo vivo al que cobrarle el envío. Lo que se afirma ahora es que se
+    -- rechaza SIN crear pedido (ni, por lo tanto, cargo), y que VENTA-A sigue en 0.
+    IF COALESCE((r->>'success')::boolean, false)
+       OR r->>'pedido_id' IS NOT NULL
+       OR COALESCE(r->>'errores', '') NOT ILIKE '%al menos un producto que no sea regalo%' THEN
+      v_fallas := v_fallas || format('D alta de puro regalo: tenía que rechazarse sin crear pedido; devolvió %s', r);
     END IF;
-    SELECT * INTO p FROM pedidos WHERE id = (r->>'pedido_id')::bigint;
     SELECT (c->>'violaciones')::int INTO v_n
       FROM jsonb_array_elements(public.auditoria_integridad()->'checks') c WHERE c->>'id' = 'VENTA-A';
-    -- Primero lo que no depende de la columna nueva: asi, antes de la
-    -- migracion, el canario muestra el cargo y VENTA-A mordiendo por si solos.
-    IF p.cargo_envio <> 0 OR p.total <> 0 OR v_n IS DISTINCT FROM 0 THEN
-      v_fallas := v_fallas || format('D puro regalo: cargo %s, total %s, VENTA-A %s; esperado 0, 0, 0',
-                                     p.cargo_envio, p.total, v_n);
-    END IF;
-    IF (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'gratis' THEN
-      v_fallas := v_fallas || format('D puro regalo: estado %s; esperado gratis', to_jsonb(p)->>'cargo_envio_estado');
+    IF v_n IS DISTINCT FROM 0 THEN
+      v_fallas := v_fallas || format('D puro regalo: VENTA-A %s; esperado 0', v_n);
     END IF;
     RAISE EXCEPTION USING ERRCODE = 'P0099';
   EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
@@ -520,45 +409,10 @@ BEGIN
   END;
 
   -- ===================================== R · reatribucion de cliente ===
-  -- R1 · un pedido de puro regalo con cargo 500 / cobrado (como los que dejaba
-  --      la 389) se reatribuye: el nuevo no paga envio, nace gratis, VENTA-A 0.
-  BEGIN
-    INSERT INTO politicas_comerciales (sucursal_id, modo_minimo_pedido, monto_minimo_pedido, monto_envio_gratis, cargo_envio_pedido)
-    VALUES (v_suc, 'cargo', 15000, 0, 500)
-    ON CONFLICT (sucursal_id) DO UPDATE SET modo_minimo_pedido = EXCLUDED.modo_minimo_pedido,
-      monto_minimo_pedido = EXCLUDED.monto_minimo_pedido, monto_envio_gratis = EXCLUDED.monto_envio_gratis,
-      cargo_envio_pedido = EXCLUDED.cargo_envio_pedido;
-    r := public.crear_pedido_completo(v_cli, 0, v_admin,
-           jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 2, 'precio_unitario', 0,
-                                                'es_bonificacion', true)),
-           'ensayo cargo 1', 'efectivo', 'pendiente', NULL, 'ZZ');
-    IF NOT COALESCE((r->>'success')::boolean, false) THEN RAISE EXCEPTION 'R1 alta: %', r; END IF;
-    v_ped := (r->>'pedido_id')::bigint;
-    IF v_hay_estado THEN
-      EXECUTE 'UPDATE pedidos SET cargo_envio = 500, cargo_envio_estado = ''cobrado'', total = 500,
-                      monto_pagado = monto_pagado WHERE id = $1' USING v_ped;
-    ELSE
-      UPDATE pedidos SET cargo_envio = 500, total = 500, monto_pagado = monto_pagado WHERE id = v_ped;
-    END IF;
-    r := public.cambiar_cliente_pedido(v_ped, v_cli2, v_admin,
-           jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 2, 'precio_unitario', 0,
-                                                'es_bonificacion', true)),
-           0, NULL, 0, 'ensayo cargo 1');
-    IF NOT COALESCE((r->>'success')::boolean, false) THEN RAISE EXCEPTION 'R1 reatribucion: %', r; END IF;
-    SELECT * INTO p FROM pedidos WHERE id = (r->>'nuevo_pedido_id')::bigint;
-    SELECT (c->>'violaciones')::int INTO v_n
-      FROM jsonb_array_elements(public.auditoria_integridad()->'checks') c WHERE c->>'id' = 'VENTA-A';
-    IF p.cargo_envio <> 0 OR p.total <> 0 OR v_n IS DISTINCT FROM 0 THEN
-      v_fallas := v_fallas || format('R1 puro regalo reatribuido: cargo %s, total %s, VENTA-A %s; esperado 0, 0, 0',
-                                     p.cargo_envio, p.total, v_n);
-    END IF;
-    IF (to_jsonb(p)->>'cargo_envio_estado') IS DISTINCT FROM 'gratis' THEN
-      v_fallas := v_fallas || format('R1 puro regalo reatribuido: estado %s; esperado gratis', to_jsonb(p)->>'cargo_envio_estado');
-    END IF;
-    RAISE EXCEPTION USING ERRCODE = 'P0099';
-  EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
-    WHEN OTHERS THEN v_fallas := v_fallas || format('R1 · error: %s', SQLERRM);
-  END;
+  -- R1 · (se sacó, #1405-f) un pedido de puro regalo con cargo 500 / cobrado, como los que dejaba la 389, reatribuido:
+  --      el nuevo no pagaba envío, nacía gratis, VENTA-A 0. Su armado pasaba por el alta de un puro regalo, que desde la 343 y
+  --      la 463c se rechaza (ver D), y un pedido con productos no se vuelve puro regalo editándolo (la 343 pide uno cobrado):
+  --      no hay forma de armar la fila. Si en prod quedara un puro regalo de aquella época, lo vigila VENTA-A.
 
   -- R2 · no_aplica (nacio con bloquear) se reatribuye con la politica ya
   --      cobrando: sigue no_aplica, sin cargo (no lo gana por reatribuirse).
@@ -661,8 +515,10 @@ BEGIN
     ON CONFLICT (sucursal_id) DO UPDATE SET modo_minimo_pedido = EXCLUDED.modo_minimo_pedido,
       monto_minimo_pedido = EXCLUDED.monto_minimo_pedido, monto_envio_gratis = EXCLUDED.monto_envio_gratis,
       cargo_envio_pedido = EXCLUDED.cargo_envio_pedido;
-    INSERT INTO bot_pedidos_pendientes (perfil_id, sucursal_id, cliente_id, items, total)
-    VALUES (v_admin, v_suc, v_cli, v_items12, 12000)
+    -- cargo_mostrado: lo que la vista previa le mostró al cliente; crear_pedido_completo_bot lo compara con el cargo de ahora
+    -- y rechaza si cambió («El costo de envío cambió desde la vista previa»). Con NULL, la vista previa nunca lo mostró.
+    INSERT INTO bot_pedidos_pendientes (perfil_id, sucursal_id, cliente_id, items, total, cargo_mostrado)
+    VALUES (v_admin, v_suc, v_cli, v_items12, 12000, 500)
     RETURNING id INTO v_bot;
     r := public.crear_pedido_completo_bot(v_admin, v_bot);
     IF NOT COALESCE((r->>'success')::boolean, false) THEN RAISE EXCEPTION 'G bot: %', r; END IF;
@@ -730,46 +586,10 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('F · error: %s', SQLERRM);
   END;
 
-  -- ================================================ H · backfill de la 389 ===
-  BEGIN
-    IF (SELECT count(*) FROM _cargo1_canario WHERE caso IN ('FC', 'ZZ')) <> 2 THEN
-      v_fallas := v_fallas || 'H sin un FC y un ZZ de la 389 (falta la parte 0 o no hay blancos)'::text;
-    END IF;
-    FOR p IN
-      SELECT c.caso, c.id, c.esperado_neto, c.esperado_iva, pe.total_neto, pe.total_iva
-        FROM _cargo1_canario c JOIN pedidos pe ON pe.id = c.id
-       ORDER BY c.caso
-    LOOP
-      IF p.total_neto IS DISTINCT FROM p.esperado_neto OR p.total_iva IS DISTINCT FROM p.esperado_iva THEN
-        v_fallas := v_fallas || format('H backfill %s (pedido %s): neto/IVA %s/%s, esperado %s/%s',
-                                       p.caso, p.id, p.total_neto, p.total_iva, p.esperado_neto, p.esperado_iva);
-      END IF;
-    END LOOP;
-  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('H · error: %s', SQLERRM);
-  END;
-
-  -- ======================================= I · backfill del estado gratis ===
-  BEGIN
-    IF (SELECT count(*) FROM _cargo1_canario_estado) <> 2 THEN
-      v_fallas := v_fallas || 'I sin los dos pedidos del backfill del estado (falta la parte 0 o no hay blancos)'::text;
-    END IF;
-    FOR p IN
-      SELECT c.caso, c.id, c.esperado, to_jsonb(pe)->>'cargo_envio_estado' AS estado
-        FROM _cargo1_canario_estado c JOIN pedidos pe ON pe.id = c.id
-       ORDER BY c.caso
-    LOOP
-      IF p.estado IS DISTINCT FROM p.esperado THEN
-        v_fallas := v_fallas || format('I backfill del estado %s (pedido %s): %s, esperado %s',
-                                       p.caso, p.id, COALESCE(p.estado, 'NULL'), p.esperado);
-      END IF;
-    END LOOP;
-  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('I · error: %s', SQLERRM);
-  END;
-
   -- ---------------------------------------------------------- veredicto --
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' | ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · alta (cobrado/gratis/no_aplica/VB/puro regalo), desglose FC en alta, salvedades, anulacion y ZZ<->FC, idempotente, CHECK, reatribucion R1-R4, bot, puras, SEG-A, backfill de la 389 y backfill del estado gratis';
+  RAISE EXCEPTION 'ENSAYO OK · alta (cobrado/gratis/no_aplica/VB; el puro regalo se rechaza), desglose FC en alta, salvedades, anulacion y ZZ<->FC, idempotente, CHECK, reatribucion R2-R4, bot, puras, SEG-A';
 END
 $ensayo$;

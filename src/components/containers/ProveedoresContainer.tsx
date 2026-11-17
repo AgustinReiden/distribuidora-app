@@ -94,8 +94,8 @@ export default function ProveedoresContainer(): React.ReactElement {
         try {
           await eliminarProveedor.mutateAsync(id)
           notify.success(`Proveedor "${nombre}" eliminado`)
-        } catch {
-          notify.error('Error al eliminar proveedor')
+        } catch (err) {
+          notify.error(err instanceof Error && err.message ? err.message : 'Error al eliminar proveedor')
         }
       },
     })
@@ -105,8 +105,8 @@ export default function ProveedoresContainer(): React.ReactElement {
     try {
       await toggleActivo.mutateAsync({ id: proveedor.id, activo: !proveedor.activo })
       notify.success(proveedor.activo ? 'Proveedor desactivado' : 'Proveedor activado')
-    } catch {
-      notify.error('Error al cambiar estado')
+    } catch (err) {
+      notify.error(err instanceof Error && err.message ? err.message : 'Error al cambiar estado')
     }
   }, [toggleActivo, notify])
 
@@ -122,9 +122,12 @@ export default function ProveedoresContainer(): React.ReactElement {
       setModalProveedorOpen(false)
       setProveedorEditando(null)
       return { success: true }
-    } catch {
-      notify.error('Error al guardar proveedor')
-      return { success: false, error: 'Error al guardar' }
+    } catch (err) {
+      // El motivo del server (CUIT duplicado, permiso, rango) es lo que el usuario
+      // necesita para corregirlo: no se reemplaza por un genérico (#1599, b1).
+      const msg = err instanceof Error && err.message ? err.message : 'Error al guardar proveedor'
+      notify.error(msg)
+      return { success: false, error: msg }
     }
   }, [proveedorEditando, actualizarProveedor, crearProveedor, notify])
 

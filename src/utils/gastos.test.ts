@@ -19,6 +19,7 @@ import {
   errorDeFechaGasto,
   puedeTocarGasto,
   rangoMesImputado,
+  renglonesParaIva,
   topeIvaGastoCentavos,
 } from './gastos'
 import type { ComprobanteGasto } from '../types/gastos'
@@ -134,6 +135,37 @@ describe('cuotas del reparto', () => {
     expect(Math.round(s * 100) / 100).toBe(1000)
   })
 
+  // 1562-b1 (#1562): los casos de scripts/test-gastos-personal-ola2-1603.sql (B1), que corre el server.
+  it('montos chicos en muchas cuotas: ninguna negativa (0,60 en 120 da 0,00 × 119 y 0,60)', () => {
+    expect(cuotaDeGasto(0.6, 120, 1)).toBe(0)
+    expect(cuotaDeGasto(0.6, 120, 119)).toBe(0)
+    expect(cuotaDeGasto(0.6, 120, 120)).toBe(0.6)
+    // 5,55 en 100 daba 0,06 × 99 y −0,39.
+    expect(cuotaDeGasto(5.55, 100, 1)).toBe(0.05)
+    expect(cuotaDeGasto(5.55, 100, 100)).toBe(0.6)
+  })
+
+  it('para costos chicos y grandes y de 1 a 120 cuotas: suman el costo, ninguna negativa, y lo que no daba negativo no cambia', () => {
+    const vieja = (costo: number, n: number, k: number): number => {
+      const c = Math.round(costo * 100)
+      const b = Math.round(c / n)
+      return (k >= n ? c - b * (n - 1) : b) / 100
+    }
+    for (const costo of [0.01, 0.05, 0.37, 0.59, 0.6, 0.61, 1.19, 1.2, 5.55, 20.15, 99.99, 1000.01, 123456.78]) {
+      for (let n = 1; n <= 120; n++) {
+        let suma = 0
+        const ultimaViejaNegativa = vieja(costo, n, n) < 0
+        for (let k = 1; k <= n; k++) {
+          const c = cuotaDeGasto(costo, n, k)
+          expect(c).toBeGreaterThanOrEqual(0)
+          if (!ultimaViejaNegativa) expect(c).toBe(vieja(costo, n, k))
+          suma += Math.round(c * 100)
+        }
+        expect(suma).toBe(Math.round(costo * 100))
+      }
+    }
+  })
+
   it('cuotaDelMes cruza de año y devuelve null fuera del reparto', () => {
     const g = { costo: 100, mes_imputado: '2026-11-01', repartir_meses: 3 }
     expect(cuotaDelMes(g, '2027-01-01')).toEqual({ k: 3, n: 3, monto: 33.34 })
@@ -176,21 +208,57 @@ describe('errorDeDesglose', () => {
   })
 
   // GTO-2 (#1562): espejo de `_guardar_gasto`, los mismos casos que scripts/test-gastos-rendicion-e-iva-1562.sql.
-  it('el IVA no pasa de (total − percepciones − otros) × 27/127, al centavo', () => {
+  // Cambió de regla con 1562-c1 (ola 2 de #1603): el tope suma un centavo por renglón, y sin decirlos
+  // la factura tiene uno. Lo que antes fallaba por un centavo (257,25; 235,99; 233,87) ahora entra.
+  it('el IVA no pasa de (total − percepciones − otros) × 27/127 más un centavo por renglón', () => {
     const tope = 'El IVA no puede pasar del 27 % del neto: revisá el IVA y las percepciones'
     const fa = { ...base, monto_total: 1210 }
     expect(errorDeDesglose({ ...fa, iva: 210 })).toBeNull()
     expect(errorDeDesglose({ ...fa, iva: 257.24 })).toBeNull()
-    expect(errorDeDesglose({ ...fa, iva: 257.25 })).toBe(tope)
+    expect(errorDeDesglose({ ...fa, iva: 257.25 })).toBeNull()
+    expect(errorDeDesglose({ ...fa, iva: 257.26 })).toBe(tope)
     expect(errorDeDesglose({ ...fa, iva: 500 })).toBe(tope)
     expect(errorDeDesglose({ ...fa, iva: 999.99 })).toBe(tope)
     expect(errorDeDesglose({ ...fa, iva: 235.98, percepcion_iva: 100 })).toBeNull()
-    expect(errorDeDesglose({ ...fa, iva: 235.99, percepcion_iva: 100 })).toBe(tope)
-    // base 1.100: tope 233,86
-    expect(errorDeDesglose({ ...fa, comprobante: 'factura_m', iva: 233.86, percepcion_iibb: 50, otros_impuestos: 60 }))
-      .toBeNull()
+    expect(errorDeDesglose({ ...fa, iva: 235.99, percepcion_iva: 100 })).toBeNull()
+    expect(errorDeDesglose({ ...fa, iva: 236, percepcion_iva: 100 })).toBe(tope)
+    // base 1.100: tope 233,86 (+ 0,01 de un renglón)
     expect(errorDeDesglose({ ...fa, comprobante: 'factura_m', iva: 233.87, percepcion_iibb: 50, otros_impuestos: 60 }))
+      .toBeNull()
+    expect(errorDeDesglose({ ...fa, comprobante: 'factura_m', iva: 233.88, percepcion_iibb: 50, otros_impuestos: 60 }))
       .toBe(tope)
+  })
+
+  // 1562-c1 (#1562, decisión del dueño 15/11): los casos de scripts/test-gastos-personal-ola2-1603.sql (C1).
+  it('un centavo por renglón: la factura de 254,34 al 27 % con el IVA redondeado por renglón', () => {
+    const tope = 'El IVA no puede pasar del 27 % del neto: revisá el IVA y las percepciones'
+    const fa = { ...base, monto_total: 254.34 }
+    // Dos renglones de neto 100,13: 27,04 + 27,04 = 54,08; el 27 % del neto da 54,07.
+    expect(topeIvaGastoCentavos(fa)).toBe(5407)
+    expect(errorDeDesglose({ ...fa, iva: 54.08 })).toBeNull()
+    expect(errorDeDesglose({ ...fa, iva: 54.09 })).toBe(tope)
+    expect(errorDeDesglose({ ...fa, iva: 54.09, renglones_factura: 2 })).toBeNull()
+    expect(errorDeDesglose({ ...fa, iva: 54.10, renglones_factura: 2 })).toBe(tope)
+    const rango = 'Los renglones de la factura van de 1 a 99'
+    expect(errorDeDesglose({ ...fa, iva: 54.08, renglones_factura: 0 })).toBe(rango)
+    // De 1 a 99 (decisión del dueño, 17/11): con 999, una factura A de $10 entraba con $9,99 de IVA.
+    expect(errorDeDesglose({ ...fa, iva: 54.08, renglones_factura: 100 })).toBe(rango)
+    expect(errorDeDesglose({ ...fa, iva: 54.08, renglones_factura: 99 })).toBeNull()
+    expect(errorDeDesglose({ ...base, monto_total: 10, iva: 9.99, renglones_factura: 99 })).toBe(tope)
+    expect(errorDeDesglose({ ...fa, iva: 54.08, renglones_factura: 1.5 })).toBe(rango)
+    expect(errorDeDesglose({ ...fa, iva: 54.08, renglones_factura: Number.NaN })).toBe(rango)
+    // Sin factura A o M los renglones no cuentan.
+    expect(errorDeDesglose({ ...fa, comprobante: 'ticket', iva: 0, renglones_factura: 0 })).toBeNull()
+  })
+
+  it('los renglones que necesita un IVA guardado', () => {
+    const fa = { monto_total: 254.34, percepcion_iva: 0, percepcion_iibb: 0, otros_impuestos: 0 }
+    expect(renglonesParaIva({ ...fa, iva: 50 })).toBe(1)
+    expect(renglonesParaIva({ ...fa, iva: 54.07 })).toBe(1)
+    expect(renglonesParaIva({ ...fa, iva: 54.08 })).toBe(1)
+    expect(renglonesParaIva({ ...fa, iva: 54.09 })).toBe(2)
+    expect(renglonesParaIva({ ...fa, iva: 54.12 })).toBe(5)
+    expect(renglonesParaIva({ ...fa, iva: 250 })).toBe(99)
   })
 
   it('el tope en centavos', () => {

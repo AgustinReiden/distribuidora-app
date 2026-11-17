@@ -9,6 +9,7 @@
 import React, { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Download, Pencil, Plus, Settings2, Trash2 } from 'lucide-react'
 import PageHeader from '../layout/PageHeader'
+import QueryErrorState from '../layout/QueryErrorState'
 import { Button } from '../ui/Button'
 import Card from '../ui/Card'
 import { Badge } from '../ui/Badge'
@@ -41,6 +42,9 @@ export interface VistaGastosProps {
   /** Claves (`claveRendicion`) de las rendiciones cerradas: sus gastos se cambian desde «Editar cierre». */
   rendicionesCerradas: Set<string>
   loading: boolean
+  /** La carga de los gastos del mes falló: sin gastos en pantalla no se dice «no hay gastos» (#1561). */
+  error?: boolean
+  onRetry?: () => void
   usuarioId: string
   esAdmin: boolean
   /** El usuario tiene todas las sucursales activas: puede tocar cualquier compartido. */
@@ -81,7 +85,7 @@ function Pastilla({ activa, onClick, children }: { activa: boolean; onClick: () 
 }
 
 export default function VistaGastos({
-  mes, onCambiarMes, gastos, rubros, vehiculos, transportistas, empleados, rendicionesCerradas, loading, usuarioId, esAdmin, tieneTodasLasSucursales,
+  mes, onCambiarMes, gastos, rubros, vehiculos, transportistas, empleados, rendicionesCerradas, loading, error = false, onRetry, usuarioId, esAdmin, tieneTodasLasSucursales,
   sucursalActual, onNuevoGasto, onEditarGasto, onAnularGasto, onAbrirRubros, onExportar,
 }: VistaGastosProps): React.ReactElement {
   const [grupo, setGrupo] = useState<FiltroGrupo>('todos')
@@ -147,7 +151,11 @@ export default function VistaGastos({
     ...vehiculos.map(v => ({ key: String(v.id), label: `${v.patente} · ${v.descripcion}`, texto: v.descripcion })),
   ]
 
-  const conteo = `${gastos.length} ${gastos.length === 1 ? 'GASTO' : 'GASTOS'}`
+  // La carga falló y no hay nada en pantalla: no se sabe cuántos gastos hay ni cuánto suman. «0 GASTOS»,
+  // «$0» y un Excel vacío dirían que el mes está vacío (H7 de la revisión de #1561).
+  const sinDatos = error && gastos.length === 0 && !loading
+  const conteo = sinDatos ? '— GASTOS' : `${gastos.length} ${gastos.length === 1 ? 'GASTO' : 'GASTOS'}`
+  const monto = (x: number): string => (sinDatos ? '—' : formatPrecio(x))
 
   return (
     <div className="space-y-6">
@@ -164,7 +172,7 @@ export default function VistaGastos({
                 Rubros
               </Button>
             )}
-            <Button type="button" variant="secondary" size="md" onClick={onExportar}>
+            <Button type="button" variant="secondary" size="md" onClick={onExportar} disabled={sinDatos}>
               <Download className="w-4 h-4" aria-hidden="true" />
               Exportar
             </Button>
@@ -204,12 +212,12 @@ export default function VistaGastos({
         {GRUPOS_GASTO.map(g => (
           <Card key={g.valor} variant="stat" data-testid={`total-${g.valor}`}>
             <p className="text-xs text-gray-500 dark:text-gray-400">{g.etiqueta}</p>
-            <p className="text-lg font-bold text-gray-800 dark:text-white">{formatPrecio(totales.porGrupo.get(g.valor) ?? 0)}</p>
+            <p className="text-lg font-bold text-gray-800 dark:text-white">{monto(totales.porGrupo.get(g.valor) ?? 0)}</p>
           </Card>
         ))}
         <Card variant="stat" accent="brand" data-testid="total-todos">
           <p className="text-xs text-gray-500 dark:text-gray-400">Total del mes</p>
-          <p className="text-lg font-bold text-gray-800 dark:text-white">{formatPrecio(totales.todos)}</p>
+          <p className="text-lg font-bold text-gray-800 dark:text-white">{monto(totales.todos)}</p>
         </Card>
       </div>
 
@@ -262,6 +270,8 @@ export default function VistaGastos({
       {/* Lista */}
       {loading ? (
         <p className="text-sm text-gray-500" role="status">Cargando gastos…</p>
+      ) : error && gastos.length === 0 ? (
+        <QueryErrorState onRetry={onRetry} />
       ) : visibles.length === 0 ? (
         <Card variant="section">
           <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-6">

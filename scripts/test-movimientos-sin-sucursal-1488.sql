@@ -9,7 +9,8 @@
 -- Simula PostgREST como test-permisos-1474.sql: `SET LOCAL ROLE authenticated`, el `sub` de un
 -- perfil real en request.jwt.claims y la sucursal en x-sucursal-id. Las personas salen de prod:
 -- un admin sólo de la 1 (crea el envío de la 1 a la 2), un admin sólo de la 2, un preventista
--- sólo de la 1 y uno sólo de la 2. El producto nace en el ensayo, en la 1 con stock 10; el envío
+-- sólo de la 1 y uno sólo de la 2. La que falte (en la base local del arnés falta el preventista
+-- sólo de la 2) se crea en el ensayo y se deshace con él (#1539-4). El producto nace en el ensayo, en la 1 con stock 10; el envío
 -- lleva 2.
 --
 -- No miembro: el header nombra una sucursal que no es suya, current_sucursal_id() da NULL y
@@ -74,6 +75,23 @@ BEGIN
   SELECT id INTO v_a2 FROM perfiles WHERE rol = 'admin' AND activo AND pg_temp.sucs(id) = '2' ORDER BY id LIMIT 1;
   SELECT id INTO v_p1 FROM perfiles WHERE rol = 'preventista' AND activo AND pg_temp.sucs(id) = '1' ORDER BY id LIMIT 1;
   SELECT id INTO v_p2 FROM perfiles WHERE rol = 'preventista' AND activo AND pg_temp.sucs(id) = '2' ORDER BY id LIMIT 1;
+  -- Las personas que falten se crean acá (#1539-4): en prod existen las cuatro y no se crea nada; la base local del arnés
+  -- no tiene al preventista sólo de la 2 (ni a nadie sin la semilla). El alta de auth.users arma el perfil y la sucursal
+  -- (handle_new_user) y todo se deshace con el resto, porque el ensayo termina siempre en una excepción.
+  CREATE FUNCTION pg_temp.alta(p_rol text, p_suc bigint) RETURNS uuid LANGUAGE plpgsql AS $f$
+  DECLARE v_id uuid := gen_random_uuid();
+  BEGIN
+    INSERT INTO auth.users (instance_id, id, aud, role, email, encrypted_password, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    VALUES ('00000000-0000-0000-0000-000000000000', v_id, 'authenticated', 'authenticated',
+            format('ens1488-%s-%s@ensayos.test', p_rol, v_id), '',
+            jsonb_build_object('rol', p_rol, 'sucursal_id', p_suc), jsonb_build_object('nombre', 'Ensayo 1488'), now(), now());
+    RETURN v_id;
+  END
+  $f$;
+  IF v_a1 IS NULL THEN v_a1 := pg_temp.alta('admin', 1); END IF;
+  IF v_a2 IS NULL THEN v_a2 := pg_temp.alta('admin', 2); END IF;
+  IF v_p1 IS NULL THEN v_p1 := pg_temp.alta('preventista', 1); END IF;
+  IF v_p2 IS NULL THEN v_p2 := pg_temp.alta('preventista', 2); END IF;
   IF v_a1 IS NULL OR v_a2 IS NULL OR v_p1 IS NULL OR v_p2 IS NULL THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · sin fixtures: a1 % a2 % p1 % p2 %', v_a1, v_a2, v_p1, v_p2;
   END IF;

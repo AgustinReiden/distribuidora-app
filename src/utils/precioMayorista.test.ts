@@ -19,6 +19,7 @@ import {
   precioEfectivoEscala,
   resolverPreciosMayorista,
   moqQueBloqueaLaEdicion,
+  cantidadesPorProducto,
   validarMOQPedido,
   type EscalaPrecio,
   type GrupoPrecioInfo,
@@ -462,6 +463,32 @@ describe('mínimo de venta', () => {
 
   it('sin el mapa de mínimos no hay violaciones', () => {
     expect(validarMOQPedido([item('p1', 2)])).toHaveLength(0)
+  })
+})
+
+describe('cantidadesPorProducto (1559-c1)', () => {
+  it('suma las líneas de un mismo producto en vez de quedarse con la última', () => {
+    // Un combo parte el producto en dos líneas (la del combo y la suelta): 4 + 6.
+    const m = cantidadesPorProducto([
+      { productoId: 'p1', cantidad: 4 },
+      { productoId: 'p2', cantidad: 1 },
+      { productoId: 'p1', cantidad: 6 },
+    ])
+    expect(m.get('p1')).toBe(10)
+    expect(m.get('p2')).toBe(1)
+  })
+
+  it('con las líneas sumadas, un producto que baja bloquea aunque la última línea fuera menor', () => {
+    // Antes: `new Map(lineas.map(...))` guardaba 6 (la última línea). Bajar de 10 a 8 parecía
+    // «subir» de 6 a 8 y no bloqueaba.
+    const original = cantidadesPorProducto([{ productoId: 'p1', cantidad: 4 }, { productoId: 'p1', cantidad: 6 }])
+    const minimos = new Map([['p1', 12]])
+    expect(moqQueBloqueaLaEdicion(validarMOQPedido([item('p1', 8)], minimos), original))
+      .toEqual([{ productoId: 'p1', cantidadActual: 8, cantidadMinima: 12 }])
+  })
+
+  it('un número como string o un id numérico se leen igual', () => {
+    expect(cantidadesPorProducto([{ productoId: 7 as unknown as string, cantidad: '2' as unknown as number }]).get('7')).toBe(2)
   })
 })
 

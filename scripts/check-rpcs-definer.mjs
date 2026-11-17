@@ -63,6 +63,17 @@
  */
 import { readFileSync } from 'node:fs';
 import { hallazgosRpcsDefiner } from './lib/acceso.mjs';
+import { guardasNegadasAbiertas } from './lib/guardas.mjs';
+import { consultaJson, destino } from './lib/pg.mjs';
+
+// Las funciones de public que tienen un `NOT (` (el prefiltro del complemento de guardas).
+const SQL_FUENTES_CON_NOT = String.raw`
+SELECT COALESCE(jsonb_agg(jsonb_build_object('firma', p.oid::regprocedure::text, 'src', p.prosrc)
+                          ORDER BY p.oid::regprocedure::text), '[]'::jsonb)
+  FROM pg_proc p
+ WHERE p.pronamespace = 'public'::regnamespace
+   AND p.prokind = 'f'
+   AND p.prosrc ~* '\mnot\s*\('`;
 
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -110,6 +121,22 @@ const { gestion, parametros, sobrantes, tablas, sobrantesTablas, guardas } = hal
   permitidas,
   tablasPermitidas,
 );
+// Complemento de `guardas_nulas` (#1601, SEG-1b): el RPC sólo mira el PRIMER término de
+// `IF NOT (x = uid OR …)`, y deja pasar `NOT (rol IN (…) OR col = uid)`. Se lee el texto
+// de las funciones por conexión directa y se mira cada término (scripts/lib/guardas.mjs).
+let guardasExtra = [];
+if (destino()) {
+  const yaMarcadas = new Set(guardas.map((g) => g.firma));
+  for (const f of consultaJson(SQL_FUENTES_CON_NOT)) {
+    const h = guardasNegadasAbiertas(f.src);
+    if (h.length && !yaMarcadas.has(f.firma)) guardasExtra.push({ firma: f.firma, detalle: h });
+  }
+} else {
+  console.log(
+    'ℹ️  Sin GATE_DB_CONTENEDOR / GATE_DB_URL / SUPABASE_DB_URL: se omite el complemento de guardas con NOT (… OR …).',
+  );
+}
+
 const sinAcotar = r.parametros.filter((p) => !p.acotado).length;
 const sinSucursal = r.tablas_sucursal.filter((t) => !t.nombra_sucursal).length;
 
@@ -119,7 +146,7 @@ console.log(
     `parámetros de usuario o sucursal: ${r.parametros.length} (sin acotar: ${sinAcotar}, ` +
     `permitidos: ${sinAcotar - parametros.length}) | tocan una tabla con sucursal: ${r.tablas_sucursal.length} ` +
     `(sin nombrarla: ${sinSucursal}, permitidas: ${sinSucursal - tablas.length}) | ` +
-    `guardas que fallan abiertas con NULL: ${guardas.length}`,
+    `guardas que fallan abiertas con NULL: ${guardas.length + guardasExtra.length}`,
 );
 
 if (sobrantes.length || sobrantesTablas.length) {
@@ -166,13 +193,18 @@ if (tablas.length) {
   falla = true;
 }
 
-if (guardas.length) {
+if (guardas.length || guardasExtra.length) {
   console.error('\n❌ RPCs con una guarda que no corta cuando la sucursal o el rol dan NULL:');
   for (const g of guardas) console.error(`  ${g.firma}`);
+  for (const g of guardasExtra) {
+    console.error(`  ${g.firma}`);
+    for (const t of g.detalle) console.error(`      ${t}`);
+  }
   console.error(
     '\n   Arreglo: rechazar primero si current_sucursal_id() IS NULL y comparar con\n' +
       "   IS DISTINCT FROM; el rol, con COALESCE(_rol_en_sucursal(…), '') NOT IN (…).\n" +
-      '   Como los movimientos entre sucursales (mig 469, #1488).',
+      '   Como los movimientos entre sucursales (mig 469, #1488). Un `IF NOT (col = uid OR …)`\n' +
+      '   se escribe con COALESCE(col, …) o IS NOT DISTINCT FROM (#1601, SEG-1).',
   );
   falla = true;
 }

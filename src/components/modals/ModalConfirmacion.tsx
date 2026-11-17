@@ -18,8 +18,16 @@ export interface ModalConfirmacionCampoFecha {
   label: string;
   /** Valor inicial, `YYYY-MM-DD`. */
   valorInicial: string;
+  /** Fecha mínima seleccionable, `YYYY-MM-DD`. */
+  min?: string;
   /** Fecha máxima seleccionable, `YYYY-MM-DD`. */
   max?: string;
+  /**
+   * Por qué una fecha no vale (el texto va debajo del campo y no deja confirmar), o `null` si
+   * vale. `min` y `max` sólo limitan el selector: lo que se tipea a mano pasa, así que esto es lo
+   * que de verdad frena una fecha fuera de la regla del server.
+   */
+  validar?: (fecha: string) => string | null;
   /** Texto de ayuda debajo del input. */
   ayuda?: string;
 }
@@ -109,6 +117,7 @@ const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }: M
   // compara como texto porque `YYYY-MM-DD` ordena igual que el calendario).
   const maxFecha = config.campoFecha?.max;
   const fechaPasaDelMax = !!maxFecha && !!fecha && fecha > maxFecha;
+  const errorDeFecha = config.campoFecha?.validar && fecha ? config.campoFecha.validar(fecha) : null;
 
   return (
     <Dialog open={config.visible} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -161,12 +170,16 @@ const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }: M
                 id={fechaId}
                 type="date"
                 value={fecha}
+                min={config.campoFecha.min}
                 max={config.campoFecha.max}
                 onChange={e => setFecha(e.target.value)}
-                aria-invalid={fechaPasaDelMax || undefined}
+                aria-invalid={fechaPasaDelMax || !!errorDeFecha || undefined}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
               />
-              {fechaPasaDelMax && maxFecha && (
+              {errorDeFecha && (
+                <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">{errorDeFecha}</p>
+              )}
+              {!errorDeFecha && fechaPasaDelMax && maxFecha && (
                 <p className="mt-1 text-xs text-red-600 dark:text-red-400">
                   La fecha no puede ser posterior al {maxFecha.split('-').reverse().join('/')}.
                 </p>
@@ -203,7 +216,7 @@ const ModalConfirmacion = memo(function ModalConfirmacion({ config, onClose }: M
           <button
             type="button"
             onClick={() => config.onConfirm(config.campoFecha ? fecha : undefined)}
-            disabled={!!config.campoFecha && (!fecha || fechaPasaDelMax)}
+            disabled={!!config.campoFecha && (!fecha || fechaPasaDelMax || !!errorDeFecha)}
             className={`flex-1 px-4 py-3 border-l dark:border-gray-700 rounded-br-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${btn}`}
           >
             {config.textoConfirmar ?? 'Confirmar'}

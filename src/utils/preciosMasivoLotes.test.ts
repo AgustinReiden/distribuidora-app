@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   armarLotesPreciosMasivo,
   esErrorDeEscala,
+  escalasCambiaron,
   escalasDeSeleccion,
   seleccionTrasErrorMasivo,
   type ErrorDeCorridaMasiva,
@@ -131,5 +132,28 @@ describe('seleccionTrasErrorMasivo', () => {
     expect(seleccionTrasErrorMasivo({ actualizados: 0 })).toEqual({ seleccionar: null, nivel: 'error' })
     expect(seleccionTrasErrorMasivo(new Error('se requiere rol admin') as ErrorDeCorridaMasiva)).toEqual({ seleccionar: null, nivel: 'error' })
     expect(seleccionTrasErrorMasivo(null)).toEqual({ seleccionar: null, nivel: 'error' })
+  })
+})
+
+describe('escalasCambiaron (FRG2-3)', () => {
+  const escala = (precio: number, minimos: Array<{ producto_id: string; precio_unitario_override: number }> = []) => ({
+    escala: { escala_id: 'e1', precio_unitario: precio, minimos },
+    grupo: 'Almacén', cantidadMinima: 10, precioAnterior: 900, productoIds: ['1', '2'],
+  })
+
+  it('las mismas escalas no cambiaron, en cualquier orden', () => {
+    expect(escalasCambiaron([escala(990), { ...escala(10), escala: { escala_id: 'e2', precio_unitario: 10, minimos: [] } }],
+      [{ ...escala(10), escala: { escala_id: 'e2', precio_unitario: 10, minimos: [] } }, escala(990)])).toBe(false)
+  })
+
+  it('otro precio nuevo, una escala de más o de menos y otro precio por producto cambian', () => {
+    expect(escalasCambiaron([escala(990)], [escala(1000)])).toBe(true)
+    expect(escalasCambiaron([escala(990)], [])).toBe(true)
+    expect(escalasCambiaron([], [escala(990)])).toBe(true)
+    expect(escalasCambiaron([escala(990)], [escala(990, [{ producto_id: '1', precio_unitario_override: 800 }])])).toBe(true)
+  })
+
+  it('una lista y otra vacías no cambiaron', () => {
+    expect(escalasCambiaron([], [])).toBe(false)
   })
 })

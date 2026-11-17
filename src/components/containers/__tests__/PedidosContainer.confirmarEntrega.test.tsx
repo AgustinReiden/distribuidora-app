@@ -210,8 +210,12 @@ function renderContainer() {
   )
 }
 
-// Cualquier día anterior a hoy sirve: el input sólo tiene `max`.
-const AYER_DEL_REPARTO = '2026-01-15'
+// Un día anterior a hoy y dentro del rango de la entrega (1598: el campo ya no acepta cualquier
+// fecha vieja: el admin llega hasta 60 días atrás).
+const AYER_DEL_REPARTO = (() => {
+  const [y, m, d] = fechaLocalISO().split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d - 3)).toISOString().slice(0, 10)
+})()
 
 // La confirmación es lazy: la primera vez que se abre en la corrida, el import
 // en frío se come casi todo el segundo por defecto de `findBy*`.
@@ -235,6 +239,9 @@ describe('PedidosContainer — «Confirmar entrega» de un pedido pagado (#804)'
     const fecha = screen.getByLabelText('Fecha de entrega')
     expect(fecha).toHaveValue(fechaLocalISO())
     expect(fecha).toHaveAttribute('max', fechaLocalISO())
+    // 1598: y con el piso de la regla de la entrega (el admin de este test: 60 días atrás).
+    const [y, m, d] = fechaLocalISO().split('-').map(Number)
+    expect(fecha).toHaveAttribute('min', new Date(Date.UTC(y, m - 1, d - 60)).toISOString().slice(0, 10))
   })
 
   it('sin tocar la fecha, a cambiarEstado le llega la de hoy', async () => {

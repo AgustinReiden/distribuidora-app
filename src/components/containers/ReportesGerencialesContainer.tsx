@@ -4,9 +4,10 @@ import { Loader2 } from 'lucide-react'
 import { useReporteGerencialQuery, useReporteCombosQuery, useReporteCombosRotacionQuery, useAnalisisMensualQuery, useMetasGerencialQuery, useGuardarMetaMutation, useCalcularComisionesQuery, useSucursalesActivasQuery } from '../../hooks/queries'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { useAlertasCombos } from '../../hooks/useAlertasCombos'
+import { useDiaArgentino } from '../../hooks/useDiaArgentino'
 import type { PeriodoOpt, SucursalOpt } from '../vistas/VistaReportesGerenciales'
 import { lazyWithReload } from '../../utils/lazyWithReload'
-import { escribirRango, escribirSucursal, leerRango, leerSucursal } from '../../utils/paramsReporte'
+import { escribirPreset, escribirRango, escribirSucursal, leerPreset, leerRango, leerSucursal } from '../../utils/paramsReporte'
 import { ymdLocalDate as ymd, primerDiaMesAtras, hoyArgentinaLocal } from '../../utils/fechaLocal'
 
 const VistaReportesGerenciales = lazyWithReload(() => import('../vistas/VistaReportesGerenciales'))
@@ -18,8 +19,7 @@ const MESES_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio'
  * trimestre hardcodeado. Además del listado, el usuario puede elegir un rango
  * personalizado (manejado vía onRango en la vista).
  */
-function generarPeriodos(): PeriodoOpt[] {
-  const hoy = hoyArgentinaLocal()
+function generarPeriodos(hoy: Date): PeriodoOpt[] {
   const y = hoy.getFullYear()
   const m = hoy.getMonth()
   const hoyYmd = ymd(hoy)
@@ -60,13 +60,20 @@ function periodoCustom(desde: string, hasta: string): PeriodoOpt {
 }
 
 export default function ReportesGerencialesContainer(): React.ReactElement {
-  const periodos = useMemo(() => generarPeriodos(), [])
+  // «Este mes» y los demás presets llegan hasta hoy: se rearman cuando cambia el día argentino, no
+  // quedan fijos en el día en que se montó la pantalla (#1597, 1597-b3).
+  const hoyArgentina = useDiaArgentino()
+  // Hoy como `Date` local a mediodía (el mismo que `hoyArgentinaLocal`), pero atado a ese día.
+  const hoy = useMemo(() => {
+    const [anio, mes, dia] = hoyArgentina.split('-').map(Number)
+    return new Date(anio, mes - 1, dia, 12)
+  }, [hoyArgentina])
+  const periodos = useMemo(() => generarPeriodos(hoy), [hoy])
   // Opción "Personalizado" al final del selector (rango default: últimos 30 días).
   const customDefault = useMemo(() => {
-    const hoy = hoyArgentinaLocal()
     const hace30 = new Date(hoy.getTime() - 29 * 24 * 60 * 60 * 1000)
     return periodoCustom(ymd(hace30), ymd(hoy))
-  }, [])
+  }, [hoy])
   const opcionesPeriodo = useMemo<PeriodoOpt[]>(() => [...periodos, customDefault], [periodos, customDefault])
 
   // El período y la sucursal viven en la URL para que "Ver detalle" pueda
@@ -74,32 +81,42 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
   // Los toggles de abajo NO: son exclusivos de esta pantalla.
   const [searchParams, setSearchParams] = useSearchParams()
   const rangoUrl = leerRango(searchParams)
+  const presetUrl = leerPreset(searchParams)
 
   /**
-   * El preset se deriva del rango, no se guarda: así una URL compartida marca
-   * el preset correcto si coincide con alguno, y "Personalizado" si no. Las dos
-   * pantallas ofrecen juegos de presets distintos, por eso lo que viaja son las
-   * fechas y no el id del preset.
+   * Con un preset elegido, manda el preset (por su key), no las fechas: «Este mes» termina hoy, y
+   * con las fechas de ayer en la URL el selector caía en «Personalizado» pasada la medianoche
+   * (1597-b3). Sin preset —un link de /reportes, o un rango tipeado— el preset se deriva del rango:
+   * una URL compartida marca el preset que coincida, y «Personalizado» si no. Las dos pantallas
+   * ofrecen juegos de presets distintos, por eso lo que viaja entre ellas son las fechas.
    */
   const periodoSel = useMemo<PeriodoOpt>(() => {
+    const elegido = presetUrl ? periodos.find(p => p.key === presetUrl) : undefined
+    if (elegido) return elegido
     if (!rangoUrl.desde || !rangoUrl.hasta) return periodos[0] // default: Este mes
     return (
       periodos.find(p => p.desde === rangoUrl.desde && p.hasta === rangoUrl.hasta) ??
       periodoCustom(rangoUrl.desde, rangoUrl.hasta)
     )
-  }, [periodos, rangoUrl.desde, rangoUrl.hasta])
+  }, [periodos, presetUrl, rangoUrl.desde, rangoUrl.hasta])
 
   const [incluirNoEntregados, setIncluirNoEntregados] = useState(false)
   const [comparar, setComparar] = useState(true)
 
   const onPeriodo = useCallback((p: PeriodoOpt): void => {
-    setSearchParams(escribirRango(searchParams, p.desde, p.hasta), { replace: true })
+    // Un preset se guarda por su key y SIN fechas: el rango se recalcula con el día argentino (un
+    // «Este mes» con las fechas de ayer en la URL se quedaría atrás). «Personalizado» guarda las fechas.
+    if (p.key === 'custom') {
+      setSearchParams(escribirPreset(escribirRango(searchParams, p.desde, p.hasta), null), { replace: true })
+    } else {
+      setSearchParams(escribirPreset(escribirRango(searchParams, null, null), p.key), { replace: true })
+    }
   }, [searchParams, setSearchParams])
 
-  // Cambia el rango personalizado (date pickers de la vista).
+  // Cambia el rango personalizado (date pickers de la vista): deja de haber preset.
   const onRango = useCallback((desde: string, hasta: string): void => {
     if (!desde || !hasta || desde > hasta) return
-    setSearchParams(escribirRango(searchParams, desde, hasta), { replace: true })
+    setSearchParams(escribirPreset(escribirRango(searchParams, desde, hasta), null), { replace: true })
   }, [searchParams, setSearchParams])
 
   const { sucursales, hasMultipleSucursales, loading: sucLoading, currentSucursalId } = useSucursal()

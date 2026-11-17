@@ -30,6 +30,7 @@ import { mermasReporteKeys } from './useMermasReporteQuery'
 import { salvedadesKeys } from './useSalvedadesQuery'
 import type { AnularSalvedadInput } from '../../types'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { invalidarCuposPromo } from './cuposPromoCache'
 
 /** Lo que devuelve `anular_salvedad` cuando anula, ya como numeros. */
 export interface ResultadoAnularSalvedad {
@@ -91,6 +92,8 @@ export function useAnularSalvedadMutation() {
       queryClient.invalidateQueries({ queryKey: ['mermas'] })
       queryClient.invalidateQueries({ queryKey: mermasReporteKeys.all })
       queryClient.invalidateQueries({ queryKey: salvedadesKeys.all })
+      // Anular restituye la línea: puede devolver un cupo de promo (1543-b4).
+      void invalidarCuposPromo(queryClient)
     },
   })
 }

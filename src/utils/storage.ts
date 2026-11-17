@@ -34,19 +34,11 @@ export function setStorageItem<T>(key: string, value: T): boolean {
 
     localStorage.setItem(key, JSON.stringify(value));
     return true;
-  } catch (error) {
-    // Si es error de cuota, intentar liberar espacio
-    if (error instanceof Error && error.name === 'QuotaExceededError') {
-      try {
-        // Limpiar notificaciones antiguas si existen
-        const notifications = getStorageItem<unknown[]>('notifications', []);
-        if (Array.isArray(notifications) && notifications.length > 10) {
-          setStorageItem('notifications', notifications.slice(0, 10));
-        }
-      } catch {
-        // Ignorar
-      }
-    }
+  } catch {
+    // Sin lugar (cuota llena) o sin storage: no se guardó. Esto recortaba la clave
+    // `notifications` para liberar espacio, pero esa clave ya no existe: las notificaciones
+    // son de cada usuario (`notifications:<id>`, `notificacionesGuardadas`) y la vieja se
+    // borra al entrar, así que era código muerto.
     return false;
   }
 }

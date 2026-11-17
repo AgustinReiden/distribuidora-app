@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase, setSucursalHeader } from '../lib/supabase'
 import type { UsuarioSucursalDB, RolUsuario } from '../types'
+import { notifyError } from '../hooks/supabase/base'
+import { esMotivoDeUsuarioDesactivado, pedirRevalidacionDelPerfil } from '../utils/revalidarPerfil'
 import { logger } from '../utils/logger'
 import { esFalloDeRed } from '../utils/falloDeRed'
 import { SUCURSAL_STORAGE_KEY } from '../lib/sucursalStorageKey'
@@ -77,6 +79,25 @@ function leerSucursalesCacheadas(userId: string): SucursalInfo[] | null {
 }
 
 const SIN_ROLES_EXTRA: RolUsuario[] = []
+
+const MENSAJE_CAMBIO_SUCURSAL_FALLO = 'No se pudo cambiar de sucursal. Revisá tu conexión y probá de nuevo.'
+const MENSAJE_CAMBIO_SUCURSAL_RECHAZADO = 'No tenés acceso a esa sucursal, así que no se cambió.'
+
+/** `cambiar_sucursal` contesta `{ success: false, error }` (no un error) cuando rechaza el cambio. */
+function cambioDeSucursalRechazado(data: unknown): boolean {
+  return (data as { success?: unknown } | null | undefined)?.success === false
+}
+
+/**
+ * El motivo que manda el server («No autorizado para esta sucursal», «Usuario desactivado»…),
+ * cuando viene. Sin motivo, el texto genérico: decir «no tenés acceso» a un desactivado era mentir.
+ */
+function mensajeDeCambioRechazado(data: unknown): string {
+  const motivo = (data as { error?: unknown } | null | undefined)?.error
+  return typeof motivo === 'string' && motivo.trim() !== ''
+    ? `No se cambió de sucursal: ${motivo.trim()}.`
+    : MENSAJE_CAMBIO_SUCURSAL_RECHAZADO
+}
 
 const SucursalContext = createContext<SucursalContextValue | null>(null)
 
@@ -220,9 +241,21 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
 
     try {
       // Call RPC to update es_default in DB
-      const { error } = await supabase.rpc('cambiar_sucursal', { p_sucursal_id: sucursalId })
+      const { data, error } = await supabase.rpc('cambiar_sucursal', { p_sucursal_id: sucursalId })
       if (error) {
         logger.error('[SucursalContext] Error switching sucursal:', error)
+        notifyError(MENSAJE_CAMBIO_SUCURSAL_FALLO)
+        return
+      }
+      // 1563-b3: `cambiar_sucursal` NO lanza cuando rechaza: contesta
+      // `{ success: false, error }` con status 200 ("No autorizado para esta
+      // sucursal"). Mirar sólo `error` daba el cambio por hecho: el header y la
+      // sucursal activa quedaban en una sucursal que el servidor no confirmó.
+      if (cambioDeSucursalRechazado(data)) {
+        logger.warn('[SucursalContext] cambiar_sucursal rechazó el cambio:', data)
+        notifyError(mensajeDeCambioRechazado(data))
+        // «Usuario desactivado»: que `useAuth` lo confirme con el perfil y lo saque.
+        if (esMotivoDeUsuarioDesactivado((data as { error?: unknown }).error)) pedirRevalidacionDelPerfil()
         return
       }
 
@@ -234,6 +267,7 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
       await queryClient.invalidateQueries()
     } catch (err) {
       logger.error('[SucursalContext] Exception switching sucursal:', err)
+      notifyError(MENSAJE_CAMBIO_SUCURSAL_FALLO)
     }
   }, [currentSucursalId, userId, queryClient])
 

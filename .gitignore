@@ -52,6 +52,11 @@ temp/
 backups/
 !supabase/migrations/*.sql
 !scripts/verify-multi-tenant.sql
+# Los .sql de CI y los ensayos/migraciones: sin esto un archivo nuevo se pierde sin avisar (#1645)
+!scripts/ci/*.sql
+!scripts/gates-sql/*.sql
+!scripts/test-*.sql
+!migrations/*.sql
 !scripts/fix-pedido-3602-pagos-duplicados.sql
 !scripts/auditoria-permisos.sql
 !scripts/test-concurrencia-pago-fifo.sql

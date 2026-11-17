@@ -10,7 +10,7 @@ import { armarLotesPreciosMasivo, esErrorDeEscala, TOPE_LOTE_SERVIDOR, type Esca
 import type { ProductoDB, ProductoFormInput } from '../../types'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
-import { conCostos } from './costosProductos'
+import { conCostos, usePuedeVerCostos } from './costosProductos'
 import { traerTodo } from '../../utils/paginacion'
 
 // Query keys
@@ -29,15 +29,15 @@ export const productosKeys = {
 // sólo los trae para admin y encargado. Ver productoColumnas.ts.
 // PostgREST corta en 1.000 filas sin avisar: el catálogo de un súper tiene miles
 // de productos (#1561). Paginado, con un orden único (`id` de desempate).
-async function fetchProductos(): Promise<ProductoDB[]> {
+async function fetchProductos(puedeVerCostos = true): Promise<ProductoDB[]> {
   const data = await traerTodo<ProductoDB>(
     () => supabase.from('productos').select(PRODUCTO_COLUMNAS).order('nombre').order('id') as never,
     { etiqueta: 'los productos', sinConexion: 'Sin conexión: no se pudo cargar los productos. Revisá la señal e intentá de nuevo.' },
   )
-  return conCostos(data)
+  return conCostos(data, { puedeVerCostos })
 }
 
-async function fetchProductoById(id: string): Promise<ProductoDB | null> {
+async function fetchProductoById(id: string, puedeVerCostos = true): Promise<ProductoDB | null> {
   const { data, error } = await supabase
     .from('productos')
     .select(PRODUCTO_COLUMNAS)
@@ -45,7 +45,7 @@ async function fetchProductoById(id: string): Promise<ProductoDB | null> {
     .single()
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar el producto. Revisá la señal e intentá de nuevo.')
-  const [conCosto] = await conCostos([data as unknown as ProductoDB])
+  const [conCosto] = await conCostos([data as unknown as ProductoDB], { puedeVerCostos })
   return conCosto
 }
 
@@ -85,6 +85,37 @@ function errorDeConflicto(mensaje: string): Error {
 }
 
 // Mutation functions
+/**
+ * Valida que ningún otro producto tenga ese código. `productos.codigo` no
+ * tiene UNIQUE (ver mig 210), así que esta es la única guarda: si no corta
+ * acá, no corta en ningún lado. La RLS acota la consulta a la sucursal activa
+ * (el código es único por sucursal, decisión D31 de #1561). En la edición se
+ * excluye el propio producto (`excluirId`): guardar la ficha con su mismo
+ * código no es un duplicado (#1561, 1561-b1).
+ */
+async function verificarCodigoLibre(codigo: string | null | undefined, excluirId?: string): Promise<void> {
+  if (!codigo) return
+  let consulta = supabase
+    .from('productos')
+    .select('id, nombre')
+    .eq('codigo', codigo)
+  if (excluirId !== undefined) consulta = consulta.neq('id', excluirId)
+  const { data: existente, error } = await consulta.limit(1).maybeSingle()
+  // Si la lectura falla no se puede decir que el código está libre: se corta (H8).
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo verificar que el código no esté repetido. Revisá la señal e intentá de nuevo.')
+  if (existente) {
+    // El mensaje tiene que decir qué hacer, no sólo que no se pudo: el que
+    // llega acá casi siempre está cargando una factura y no sabe que el
+    // producto ya lo creó él mismo un minuto antes, en la línea anterior.
+    throw errorDeConflicto(
+      `Ya existe un producto con código "${codigo}": «${existente.nombre}». ` +
+      (excluirId === undefined
+        ? 'Buscalo por nombre o código y agregalo, o cargá este con otro código.'
+        : 'Buscalo por nombre o código, o dejale a este otro código.')
+    )
+  }
+}
+
 async function createProducto(producto: ProductoFormInput, sucursalId: number | null): Promise<ProductoDB> {
   // La RLS multi-tenant requiere sucursal_id = current_sucursal_id() y la
   // columna es NOT NULL. Sin esto el INSERT falla.
@@ -92,25 +123,7 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
     throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
   }
 
-  // Validar código duplicado. `productos.codigo` no tiene UNIQUE (ver mig 210),
-  // así que esta es la única guarda: si no corta acá, no corta en ningún lado.
-  if (producto.codigo) {
-    const { data: existente } = await supabase
-      .from('productos')
-      .select('id, nombre')
-      .eq('codigo', producto.codigo)
-      .limit(1)
-      .maybeSingle()
-    if (existente) {
-      // El mensaje tiene que decir qué hacer, no sólo que no se pudo: el que
-      // llega acá casi siempre está cargando una factura y no sabe que el
-      // producto ya lo creó él mismo un minuto antes, en la línea anterior.
-      throw errorDeConflicto(
-        `Ya existe un producto con código "${producto.codigo}": «${existente.nombre}». ` +
-        'Buscalo por nombre o código y agregalo, o cargá este con otro código.'
-      )
-    }
-  }
+  await verificarCodigoLibre(producto.codigo)
 
   const { data, error } = await supabase
     .from('productos')
@@ -162,6 +175,19 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
 }
 
 async function updateProducto({ id, data: producto }: { id: string; data: Partial<ProductoFormInput> }): Promise<ProductoDB> {
+  // Cambiar el código a uno que ya tiene otro producto: se rechaza antes de escribir. Sólo si
+  // el código CAMBIÓ: la ficha manda el formulario entero, y dos productos que ya comparten
+  // código (la base no tiene UNIQUE) tienen que poder seguir editándose.
+  if (producto.codigo) {
+    const { data: guardado, error: errorLeer } = await supabase
+      .from('productos')
+      .select('codigo')
+      .eq('id', id)
+      .maybeSingle()
+    if (errorLeer) throw errorDeSupabase(errorLeer, 'Sin conexión: no se pudo verificar el código del producto. Revisá la señal e intentá de nuevo.')
+    if ((guardado?.codigo ?? '') !== producto.codigo) await verificarCodigoLibre(producto.codigo, id)
+  }
+
   const updateData: Record<string, unknown> = {}
   if (producto.nombre !== undefined) updateData.nombre = producto.nombre
   if (producto.codigo !== undefined) updateData.codigo = producto.codigo || null
@@ -272,9 +298,10 @@ async function deleteProducto(id: string): Promise<void> {
  */
 export function useProductosQuery(opts?: { enabled?: boolean }) {
   const { currentSucursalId } = useSucursal()
+  const puedeVerCostos = usePuedeVerCostos()
   return useQuery({
     queryKey: productosKeys.lists(currentSucursalId),
-    queryFn: fetchProductos,
+    queryFn: () => fetchProductos(puedeVerCostos),
     enabled: opts?.enabled ?? true,
     staleTime: 10 * 60 * 1000, // 10 minutos - productos cambian poco
   })
@@ -285,9 +312,10 @@ export function useProductosQuery(opts?: { enabled?: boolean }) {
  */
 export function useProductoQuery(id: string) {
   const { currentSucursalId } = useSucursal()
+  const puedeVerCostos = usePuedeVerCostos()
   return useQuery({
     queryKey: productosKeys.detail(currentSucursalId, id),
-    queryFn: () => fetchProductoById(id),
+    queryFn: () => fetchProductoById(id, puedeVerCostos),
     enabled: !!id,
   })
 }

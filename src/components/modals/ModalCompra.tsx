@@ -14,6 +14,7 @@ import { OPCIONES_CONDICION_IVA, OPCIONES_CONDICION_SIN_ALICUOTA, alicuotaIvaCom
 import { prorratearCargo, calcularCostosCompra, calcularTotalesCompra, pesosEntrePagados } from '../../utils/prorrateoCompra'
 import type { CostosCompra, TotalesCompra, ResultadoBasesII } from '../../utils/prorrateoCompra'
 import NumberInput from '../ui/NumberInput'
+import MontoLeido from '../ui/MontoLeido'
 import { Button } from '../ui/Button'
 import { supabase, getSucursalHeader } from '../../lib/supabase'
 import AuthDataContext from '../../contexts/AuthDataContext'
@@ -2880,6 +2881,8 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
               commitOnChange
               className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
             />
+            {/* 1557-c5: cómo leyó la app lo tipeado, a la vista en el mismo campo y no recién en el subtotal. */}
+            {!ver && <MontoLeido monto={item.costoUnitario} />}
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">IVA</label>
@@ -2940,6 +2943,7 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
             commitOnChange
             className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
           />
+          {!ver && <MontoLeido monto={item.costoUnitario} />}
         </div>
         <div className="col-span-2">
           {selectCondicion()}

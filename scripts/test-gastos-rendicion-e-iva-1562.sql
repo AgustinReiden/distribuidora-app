@@ -24,10 +24,11 @@
 --   R6 · una fila en rendiciones_control no alcanza (decisión del dueño, 12/11): cerrar vacía una
 --        rendición de hace 85 días que no existe anda, pero «Editar cierre» con un gasto de ese día
 --        no entra.
--- GTO-2 · el IVA de una factura A o M no pasa de (total − percepciones − otros) × 27/127.
+-- GTO-2 · el IVA de una factura A o M no pasa de (total − percepciones − otros) × 27/127, más un
+--        centavo por renglón de la factura (1562-c1, ola 2 de #1603: sin decirlos, un renglón).
 --   I1 · sobre 1.210: IVA 210 entra, también con alícuota 10,5 (dos alícuotas son legales); 257,24
---        (el 27 %) entra; 257,25, 500, 999 y 999,99 no.
---   I2 · con percepción de IVA de 100 la base es 1.110: 235,98 entra y 235,99 no.
+--        (el 27 %) entra; 257,26 (el tope de un renglón es 257,25), 500, 999 y 999,99 no.
+--   I2 · con percepción de IVA de 100 la base es 1.110: 235,98 entra y 236,00 no.
 --   I3 · una factura B no cambia: sin IVA.
 --   I4 · la posición fiscal suma sólo lo que entró.
 --
@@ -289,13 +290,13 @@ BEGIN
     v_fallas := v_fallas || pg_temp.anda('I1 IVA 210 al 21', pg_temp.fa(210, 21, 0));
     v_fallas := v_fallas || pg_temp.anda('I1 IVA 210 al 10,5', pg_temp.fa(210, 10.5, 0));
     v_fallas := v_fallas || pg_temp.anda('I1 IVA 257,24 (el 27 %)', pg_temp.fa(257.24, 27, 0));
-    v_fallas := v_fallas || pg_temp.falla('I1 IVA 257,25', pg_temp.fa(257.25, 27, 0), v_tope);
+    v_fallas := v_fallas || pg_temp.falla('I1 IVA 257,26', pg_temp.fa(257.26, 27, 0), v_tope);
     v_fallas := v_fallas || pg_temp.falla('I1 IVA 500', pg_temp.fa(500, 21, 0), v_tope);
     v_fallas := v_fallas || pg_temp.falla('I1 IVA 999', pg_temp.fa(999, 21, 0), v_tope);
     v_fallas := v_fallas || pg_temp.falla('I1 IVA 999,99 sin alícuota', pg_temp.fa(999.99, NULL, 0), v_tope);
     -- I2 · la percepción sale de la base
     v_fallas := v_fallas || pg_temp.anda('I2 IVA 235,98 con percepción 100', pg_temp.fa(235.98, 27, 100));
-    v_fallas := v_fallas || pg_temp.falla('I2 IVA 235,99 con percepción 100', pg_temp.fa(235.99, 27, 100), v_tope);
+    v_fallas := v_fallas || pg_temp.falla('I2 IVA 236,00 con percepción 100', pg_temp.fa(236.00, 27, 100), v_tope);
     -- I3 · una factura B no lleva IVA, como siempre
     v_fallas := v_fallas || pg_temp.falla('I3 factura B con IVA',
                   pg_temp.gg(jsonb_build_object('comprobante', 'factura_b', 'iva', 10)),

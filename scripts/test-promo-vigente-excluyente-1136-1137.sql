@@ -792,7 +792,7 @@ BEGIN
   -- para todos, mig 028) y no reservado al admin (mig 214).
   SELECT id INTO v_cliente FROM clientes
    WHERE sucursal_id = v_suc AND activo AND tipo_factura_default IS DISTINCT FROM 'VB'
-     AND preventista_id IS NULL AND NOT COALESCE(reservado_admin, false)
+     AND NOT EXISTS (SELECT 1 FROM cliente_preventistas cp WHERE cp.cliente_id = clientes.id) AND NOT COALESCE(reservado_admin, false)
    ORDER BY id LIMIT 1;
   IF v_admin IS NULL OR v_prev IS NULL OR v_cliente IS NULL THEN
     RAISE EXCEPTION 'ENSAYO FALLO · hace falta una sucursal activa con un admin, un preventista y un cliente sin asignar';

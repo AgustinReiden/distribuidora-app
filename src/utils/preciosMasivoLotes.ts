@@ -107,6 +107,25 @@ export function escalasDeSeleccion(
   return { aplicables, parciales, condicionesParciales }
 }
 
+/**
+ * ¿Cambiaron las escalas que se iban a aplicar entre lo que se vio y lo que hay ahora en
+ * la base (FRG2-3, #1599)? Compara cuáles son, a qué precio nuevo quedarían y sus precios
+ * por producto: si otro admin tocó una condición mayorista mientras la pantalla estaba
+ * abierta, no se aplica sobre la foto vieja.
+ */
+export function escalasCambiaron(vistas: readonly EscalaDeCondicion[], frescas: readonly EscalaDeCondicion[]): boolean {
+  const clave = (e: EscalaDeCondicion): string => JSON.stringify([
+    e.escala.escala_id,
+    e.escala.precio_unitario,
+    [...e.escala.minimos].map(m => [m.producto_id, m.precio_unitario_override]).sort(),
+    e.precioAnterior,
+    [...e.productoIds].sort(),
+  ])
+  const a = vistas.map(clave).sort()
+  const b = frescas.map(clave).sort()
+  return a.length !== b.length || a.some((k, i) => k !== b[i])
+}
+
 export interface LotePreciosMasivo {
   items: ItemPrecioMasivo[]
   escalas: EscalaPrecioMasivo[]

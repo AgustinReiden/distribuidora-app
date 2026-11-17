@@ -94,6 +94,18 @@ describe('comprasMismaFactura', () => {
     expect(comprasMismaFactura(conEmbed, { proveedorId: '', proveedorNombre: 'MANAOS SA', numeroFactura: '1-1234' })).toHaveLength(1)
   })
 
+  it('1557-c2: un proveedor renombrado se reconoce por su nombre de hoy y por el que guardó la compra', () => {
+    // La compra guarda el nombre que tenía el proveedor cuando se hizo (496); el vinculado ya trae el de hoy.
+    const renombrado: FilaCompraFactura[] = [
+      { id: 1, numero_factura: '0001-00001234', fecha_compra: '2026-10-01', proveedor_id: 3, proveedor_nombre: 'Distribuidora Vieja SA', proveedor: { nombre: 'Distribuidora Nueva SA' } },
+    ]
+    const buscar = (proveedorNombre: string) =>
+      comprasMismaFactura(renombrado, { proveedorId: null, proveedorNombre, numeroFactura: '1-1234' })
+    expect(buscar('Distribuidora Nueva SA')).toHaveLength(1)
+    expect(buscar('distribuidora vieja sa')).toHaveLength(1)
+    expect(buscar('Otra Distribuidora SA')).toHaveLength(0)
+  })
+
   it('no chequea números con menos de 4 dígitos', () => {
     expect(comprasMismaFactura(filas, { proveedorId: '7', proveedorNombre: '', numeroFactura: '00006' })).toEqual([])
   })

@@ -55,8 +55,6 @@ describe('permisos por rol', () => {
       ['puedeAccederReportes', puedeAccederReportes],
       ['puedeAccederComisiones', puedeAccederComisiones],
       ['puedeAccederProveedores', puedeAccederProveedores],
-      // Espejo de guardar_rubro_gasto (entrega 1 de gastos).
-      ['puedeCrearRubroGasto', puedeCrearRubroGasto],
       // Espejo de guardar_vehiculo / registrar_km_vehiculo (entrega 1 de gastos).
       ['puedeAccederVehiculos', puedeAccederVehiculos],
       // Espejo de las RPCs de personal (entrega 3 de gastos): sólo un admin ve y carga el personal.
@@ -71,6 +69,20 @@ describe('permisos por rol', () => {
       }
       expect(fn(null)).toBe(false)
       expect(fn(undefined)).toBe(false)
+    })
+  })
+
+  // Espejo de guardar_rubro_gasto. Cambió de regla con 1597-b5 (#1597, ola 2 de #1603): los rubros
+  // son de toda la empresa y los toca sólo un admin de todas las sucursales.
+  describe('puedeCrearRubroGasto', () => {
+    it('sólo un admin de todas las sucursales', () => {
+      expect(puedeCrearRubroGasto('admin', true)).toBe(true)
+      expect(puedeCrearRubroGasto('admin', false)).toBe(false)
+      for (const rol of ROLES.filter((r) => r !== 'admin')) {
+        expect(puedeCrearRubroGasto(rol, true)).toBe(false)
+      }
+      expect(puedeCrearRubroGasto(null, true)).toBe(false)
+      expect(puedeCrearRubroGasto(undefined, true)).toBe(false)
     })
   })
 

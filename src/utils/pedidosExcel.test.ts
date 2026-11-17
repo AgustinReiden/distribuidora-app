@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { filasPedidosExcel } from './pedidosExcel'
+import { filasPedidosExcel, resumenPagosExcel } from './pedidosExcel'
 
 const ped = (over: Record<string, unknown> = {}) => ({ id: 1, estado: 'entregado', total: 12500, ...over })
 
@@ -32,5 +32,22 @@ describe('filasPedidosExcel', () => {
     expect(f[1]['Entrega marcada el']).toContain('12/11/2026')
     expect(f[2]['Entrega marcada por']).toBe('')
     expect(f[2]['Entrega marcada el']).toBe('')
+  })
+})
+
+describe('resumenPagosExcel (1598-b3)', () => {
+  it('el vale blanco no se cuenta como pagado: va en su propia fila de consumo interno', () => {
+    const r = resumenPagosExcel([
+      ped({ estado_pago: 'pagado', total: 1000 }),
+      ped({ id: 2, estado_pago: 'pagado', tipo_factura: 'VB', total: 400 }),
+      ped({ id: 3, estado_pago: 'pendiente', total: 300 }),
+    ])
+    expect(r.find(f => f['Estado Pago'] === 'pagado')).toEqual({ 'Estado Pago': 'pagado', Cantidad: 1, 'Total $': 1000 })
+    expect(r.find(f => f['Estado Pago'] === 'consumo_interno')).toEqual({ 'Estado Pago': 'consumo_interno', Cantidad: 1, 'Total $': 400 })
+    expect(r.find(f => f['Estado Pago'] === 'pendiente')?.Cantidad).toBe(1)
+  })
+
+  it('un pedido sin estado de pago cuenta como pendiente', () => {
+    expect(resumenPagosExcel([ped()])).toEqual([{ 'Estado Pago': 'pendiente', Cantidad: 1, 'Total $': 12500 }])
   })
 })

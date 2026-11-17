@@ -115,8 +115,21 @@ export function hojaMetadatos(r: ReporteGerencial): SheetConfig {
 function filasKpis(k: ReporteKpis): Fila[] {
   const ventaReal = k.venta_real ?? k.venta
   const margenReal = k.margen_real ?? k.margen_comercial
+  // Con el server nuevo la venta ya es neta de las notas de crédito y manda `venta_bruta` (REP-D, #1545):
+  // se abre en bruta, menos las notas, y la venta como RESULTADO, para que nadie vuelva a restar las
+  // notas de una cifra que ya las restó. Sin `venta_bruta` (server anterior o respuesta cacheada) queda
+  // la fila de siempre, con las notas aparte.
+  const ventaBruta = k.venta_bruta
+  const conBruta = ventaBruta != null
+  const filasVenta: Fila[] = conBruta
+    ? [
+        { Indicador: 'Venta bruta (antes de notas de crédito)', Valor: n(ventaBruta) },
+        { Indicador: '− Notas de crédito de venta', Valor: n(k.notas_credito_venta ?? 0) },
+        { Indicador: 'Venta (neta de notas de crédito) = bruta − notas', Valor: n(k.venta) },
+      ]
+    : [{ Indicador: 'Venta', Valor: n(k.venta) }]
   return [
-    { Indicador: 'Venta', Valor: n(k.venta) },
+    ...filasVenta,
     { Indicador: 'Venta real', Valor: n(ventaReal) },
     { Indicador: 'Venta neta (venta − IVA débito)', Valor: n(k.venta_neta ?? 0) },
     { Indicador: 'IVA débito', Valor: n(k.iva_debito ?? 0) },
@@ -137,8 +150,9 @@ function filasKpis(k: ReporteKpis): Fila[] {
     { Indicador: 'Mermas — pérdida', Valor: n(k.mermas_perdida ?? 0) },
     { Indicador: 'Mermas — ajustes', Valor: n(k.mermas_ajuste ?? 0) },
     { Indicador: 'Mermas — muestras', Valor: n(k.mermas_muestra ?? 0) },
-    // mig 289 (#845): no tocan los márgenes; la contribución las resta.
-    { Indicador: 'Notas de crédito de venta', Valor: n(k.notas_credito_venta ?? 0) },
+    // mig 289 (#845): no tocan los márgenes; la contribución las resta. Con `venta_bruta` ya van
+    // arriba (bruta − notas = venta) y esta fila repetiría el mismo número: sólo queda la cantidad.
+    ...(conBruta ? [] : [{ Indicador: 'Notas de crédito de venta', Valor: n(k.notas_credito_venta ?? 0) }]),
     { Indicador: 'Notas de crédito de venta (cantidad)', Valor: n(k.notas_credito_venta_n ?? 0) },
     // Vales blancos: consumo interno a costo, FUERA de la venta (0 si la respuesta es vieja).
     { Indicador: 'Consumo interno (vales blancos, a costo)', Valor: n(k.consumo_interno?.monto ?? 0) },
@@ -312,11 +326,16 @@ export function hojasCobranza(r: ReporteGerencial): SheetConfig[] {
   }))
   // Los totales van en el mismo archivo: si no, hay que sumarlos a mano para
   // confirmar que es el mismo reporte que la pantalla. COBRADO es sólo plata;
-  // COBRADO + CRÉDITO APLICADO + PENDIENTE = venta del período.
+  // COBRADO + CRÉDITO APLICADO + PENDIENTE = lo que había que cobrar en el período, o sea el
+  // total de los pedidos CON el envío adentro, no la venta de productos (#1562, 1562-b10).
+  const cobrado = n(r.cobranza?.cobrado)
+  const creditoAplicado = n(r.cobranza?.credito_aplicado ?? 0)
+  const pendiente = n(r.cobranza?.pendiente)
   formas.push(
-    { 'Forma de pago': 'COBRADO (plata)', Monto: n(r.cobranza?.cobrado), 'No dineraria': '' },
-    { 'Forma de pago': 'CRÉDITO APLICADO (NC y adelantos)', Monto: n(r.cobranza?.credito_aplicado ?? 0), 'No dineraria': '' },
-    { 'Forma de pago': 'PENDIENTE', Monto: n(r.cobranza?.pendiente), 'No dineraria': '' },
+    { 'Forma de pago': 'COBRADO (plata)', Monto: cobrado, 'No dineraria': '' },
+    { 'Forma de pago': 'CRÉDITO APLICADO (NC y adelantos)', Monto: creditoAplicado, 'No dineraria': '' },
+    { 'Forma de pago': 'PENDIENTE', Monto: pendiente, 'No dineraria': '' },
+    { 'Forma de pago': 'TOTAL A COBRAR', Monto: cobrado + creditoAplicado + pendiente, 'No dineraria': '' },
   )
   return [hoja('Cobranza', formas, [34, 18, 14], { formatos: { Monto: M } })]
 }
@@ -337,12 +356,31 @@ export function hojasMermas(r: ReporteGerencial): SheetConfig[] {
  * (eso es el CMV, que va en Resumen y en Evolución).
  */
 export function hojasCompras(r: ReporteGerencial): SheetConfig[] {
-  const filas = (r.mensual ?? []).map(m => ({
-    Mes: m.mes,
-    Compras: n(m.compras),
-  }))
-  if (filas.length === 0) return []
-  return [hoja('Compras', filas, [12, 18], { formatos: { Compras: M } })]
+  const mensual = r.mensual ?? []
+  if (mensual.length === 0) return []
+  // Con el server nuevo cada mes manda sus notas de crédito de compra (`compras_notas_credito`, 1557-b3)
+  // y `compras` ya viene NETO de ellas: se abre en columnas para que cierre (Facturas + Notas +
+  // Transferencias = Compras) y un SUMA de «Compras» no las reste dos veces. Las notas van en negativo
+  // en su propia columna, nunca en la de los meses. Sin la clave (server anterior) queda Mes + Compras.
+  const conNotas = mensual.some(m => m.compras_notas_credito != null)
+  if (!conNotas) {
+    const filas = mensual.map(m => ({ Mes: m.mes, Compras: n(m.compras) }))
+    return [hoja('Compras', filas, [12, 18], { formatos: { Compras: M } })]
+  }
+  const filas = mensual.map(m => {
+    const notas = Math.abs(n(m.compras_notas_credito ?? 0))
+    const transferencias = n(m.compras_transferencias ?? 0)
+    return {
+      Mes: m.mes,
+      Facturas: n(m.compras) - transferencias + notas,
+      'Notas de crédito': notas ? -notas : 0,
+      Transferencias: transferencias,
+      Compras: n(m.compras),
+    }
+  })
+  return [hoja('Compras', filas, [12, 16, 18, 16, 18], {
+    formatos: { Facturas: M, 'Notas de crédito': M, Transferencias: M, Compras: M },
+  })]
 }
 
 // ---------------------------------------------------------------------------
@@ -507,6 +545,9 @@ function hojasCombosVenta(r: ReporteGerencial): SheetConfig[] {
 // Alertas
 // ---------------------------------------------------------------------------
 
+/** Alertas cuyo `valor` es una cantidad (clientes, categorías), no un monto: las demás son plata. */
+const ALERTAS_CON_CONTEO: readonly string[] = ['clientes_inactivos', 'margen_categoria_negativo']
+
 export function hojasAlertas(r: ReporteGerencial): SheetConfig[] {
   const filas = (r.alertas ?? []).map(a => ({
     Severidad: a.severidad,
@@ -517,7 +558,13 @@ export function hojasAlertas(r: ReporteGerencial): SheetConfig[] {
     Sección: a.seccion,
   }))
   if (filas.length === 0) return []
-  return [hoja('Alertas', filas, [12, 24, 30, 50, 16, 18], { formatos: { Valor: M } })]
+  // `Valor` mezcla plata y conteos según la alerta: un conteo no lleva formato de moneda (#1544, 1544-b7).
+  return [hoja('Alertas', filas, [12, 24, 30, 50, 16, 18], {
+    formatoCelda: (fila, columna) => {
+      if (columna !== 'Valor') return undefined
+      return ALERTAS_CON_CONTEO.includes(String(fila['Código'])) ? E : M
+    },
+  })]
 }
 
 // ---------------------------------------------------------------------------

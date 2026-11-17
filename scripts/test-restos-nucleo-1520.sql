@@ -1,14 +1,14 @@
 -- Ensayo de la migración de los restos del núcleo: el NaN, las promos y 'anulado' (tarjeta 9 de #1524; #1515, #1520).
 --
---   N1 · productos: precio, precio_sin_iva e impuestos_internos en 'NaN' dan 23514 (productos_precios_no_nan), y un
+--   N1 · productos: precio, precio_sin_iva (productos_precios_no_nan) e impuestos_internos (el rango de CAT-9) en 'NaN' dan 23514, y un
 --        precio_sin_iva NULL entra.
 --   N2 · crear_condicion_para_producto con precio 'NaN' da 23514 (grupo_precio_escalas_precio_unitario_no_nan) y no
 --        deja la condición a medias; con un precio válido entra.
 --   N3 · actualizar_politica_minimo_pedido con el mínimo, el envío gratis o el cargo en 'NaN', y
 --        actualizar_monto_minimo_pedido con 'NaN', dan 23514 (politicas_comerciales_montos_no_nan).
 --   N4 · guardar_meta_gerencial y guardar_meta_preventista con 'NaN' o 'Infinity' dan 23514.
---   N5 · actualizar_precios_masivo con un precio_final 'NaN' no cambia ese producto y lo informa en sus errores con el
---        nombre del CHECK. El otro producto del lote sí cambia.
+--   N5 · actualizar_precios_masivo con un precio_final 'NaN' no cambia ese producto y lo informa en sus errores (con el
+--        nombre del CHECK o con su mensaje de precio inválido). El otro producto del lote sí cambia.
 --   E1 · Un pedido no pasa a 'anulado' (23514, pedidos_estado_check), y a 'cancelado' sí.
 --   P1 · promociones: limite_usos 0, fecha_fin antes del inicio, unidades_por_bloque 0 y stock_por_bloque 0 dan 23514.
 --        Una promo válida entra.
@@ -23,8 +23,7 @@
 --        el orden de las partes y sus cantidades.
 --   G1 · auditoria_nan() recorre más de 100 columnas y no encuentra filas; auditoria_locks() devuelve las sentencias
 --        con lock, entre ellas las de sustituir_regalo_pedido. Las dos son sólo de la service_role.
---   L1 · Los cuerpos de sustituir y dividir tienen el md5 de la migración, siguen SECURITY DEFINER y con los mismos
---        EXECUTE.
+--   L1 · sustituir y dividir siguen SECURITY DEFINER y con los mismos EXECUTE (antes, además, el md5 del cuerpo).
 --
 -- Corre contra prod sin dejar rastro (salvo valores de secuencia): un único DO que termina siempre en una excepción, y
 -- cada caso en un sub-bloque que se revierte. Antes de aplicar la migración se corre pegado detrás de su cuerpo, sin
@@ -132,8 +131,11 @@ DECLARE
   c   text;
 BEGIN
   FOREACH c IN ARRAY ARRAY['precio', 'precio_sin_iva', 'impuestos_internos'] LOOP
+    -- impuestos_internos: desde CAT-9 (#1596) lo frena el CHECK de rango (0 a 9900), que deja afuera el NaN igual que el de
+    -- productos_precios_no_nan (que ahora cubre sólo los dos precios): se mira el nombre que corresponde a cada columna.
     f := pg_temp.r9_si(f, pg_temp.r9_cae(format('UPDATE public.productos SET %I = ''NaN'' WHERE id = %s', c, v_a),
-                                         'productos_precios_no_nan'),
+                                         CASE WHEN c = 'impuestos_internos' THEN 'productos_impuestos_internos_rango'
+                                              ELSE 'productos_precios_no_nan' END),
                        format('%s = NaN: %s', c,
                               pg_temp.r9_err(format('UPDATE public.productos SET %I = ''NaN'' WHERE id = %s', c, v_a))));
   END LOOP;
@@ -219,8 +221,12 @@ BEGIN
   v_res := public.actualizar_precios_masivo(jsonb_build_array(
     jsonb_build_object('producto_id', v_a, 'precio_final', 'NaN'),
     jsonb_build_object('producto_id', v_b, 'precio_final', 150)));
+  -- Antes el error traía el nombre del CHECK (productos_precios_no_nan); hoy el masivo valida el precio y contesta con su
+  -- propio mensaje («el precio tiene que ser un número mayor que 0»). Lo que importa no cambió: el NaN no entra, se
+  -- informa con el producto, y el otro producto del lote sí se actualiza (abajo).
   f := pg_temp.r9_si(f, NOT COALESCE((v_res->>'success')::boolean, true)
-                        AND (v_res->>'errores') LIKE '%productos_precios_no_nan%',
+                        AND ((v_res->>'errores') LIKE '%productos_precios_no_nan%'
+                             OR (v_res->>'errores') LIKE '%el precio tiene que ser un número mayor que 0%'),
                      format('el masivo contestó %s', v_res));
   f := pg_temp.r9_si(f, (SELECT precio FROM public.productos WHERE id = v_a) = 100,
                      format('el producto con NaN quedó en %s', (SELECT precio FROM public.productos WHERE id = v_a)));
@@ -616,14 +622,13 @@ DECLARE
   f text[] := '{}';
   r record;
 BEGIN
-  FOR r IN SELECT pr.oid::regprocedure::text AS firma, md5(pr.prosrc) AS h, pr.proacl::text AS a,
-                  pr.prosecdef AS d, e.esperado
-             FROM (VALUES ('public.sustituir_regalo_pedido(bigint,bigint,numeric,text,bigint,uuid)',
-                           '0dc69aa6a22ad0ec698147008fd5b498'),  -- #1556 (PRM-D): la marca del corte
-                          ('public.dividir_regalo_pedido(bigint,jsonb,text,uuid)',
-                           '81e56ea614d582b4719ff6f405884d53')) AS e(fn, esperado)  -- #1556 (PRM-A y PRM-D)
+  -- Acá se fijaba el md5 de cada cuerpo (0dc69aa6…, 81e56ea6…, que ya habían cambiado con #1556 y con la ola 1): se ponía rojo con
+  -- cada migración que toca estas dos funciones, sin que nada se rompiera. Se sacó (#1603 B13b): lo que no debe cambiar
+  -- nunca es que sigan siendo SECURITY DEFINER y quién las ejecuta; el comportamiento lo cubren los casos de arriba.
+  FOR r IN SELECT pr.oid::regprocedure::text AS firma, pr.proacl::text AS a, pr.prosecdef AS d
+             FROM (VALUES ('public.sustituir_regalo_pedido(bigint,bigint,numeric,text,bigint,uuid)'),
+                          ('public.dividir_regalo_pedido(bigint,jsonb,text,uuid)')) AS e(fn)
              JOIN pg_proc pr ON pr.oid = e.fn::regprocedure LOOP
-    f := pg_temp.r9_si(f, r.h = r.esperado, format('%s tiene el md5 %s', r.firma, r.h));
     f := pg_temp.r9_si(f, r.d, format('%s dejó de ser SECURITY DEFINER', r.firma));
     f := pg_temp.r9_si(f, r.a = '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}',
                        format('%s tiene los EXECUTE %s', r.firma, r.a));

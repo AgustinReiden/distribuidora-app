@@ -117,7 +117,9 @@ export function useRealtimeInvalidation({
   // reconexión: los eventos de pedidos no pasan por acá. Timer propio y
   // compartido a propósito: los tres canales vuelven casi juntos, y una sola
   // invalidación alcanza (mismo criterio que `invalidatePedidosList`, #1347).
-  // `['pagos']` es el prefijo que ya usa `useImputarCreditoMutation`.
+  // Lo que depende de los cobros y vive en TanStack es el saldo: los deudores en
+  // mora (`['deudores-mora']`, el mismo prefijo que invalida
+  // `useImputarCreditoMutation`). Ninguna consulta usa `['pagos']` (1563-b4).
   const invalidateTrasReconexion = useCallback(() => {
     if (!enabled) return
     if (reconexionTimerRef.current) {
@@ -125,7 +127,7 @@ export function useRealtimeInvalidation({
     }
     reconexionTimerRef.current = setTimeout(() => {
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
-      queryClient.invalidateQueries({ queryKey: ['pagos'] })
+      queryClient.invalidateQueries({ queryKey: ['deudores-mora'] })
       reconexionTimerRef.current = null
     }, debounceMs)
   }, [queryClient, debounceMs, enabled, currentSucursalId])

@@ -246,9 +246,10 @@ BEGIN
   SELECT md5(prosrc) AS h, proacl::text AS a, prosrc AS s, prosecdef AS d INTO r
     FROM pg_proc
    WHERE oid = 'public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)'::regprocedure;
-  -- El cuerpo lo cambió después la migración de M4 (#1603: la foto de VTA-1); antes, ce4dcadfe8f7bdeec5f10b2851efb031.
-  -- Y después la de B1 de la ola 2 (#1603: 1583-a, 1595-b5 y 1564-b2); antes, 4d5fd79e669f045c8a3decc1c74387c7.
-  f := pg_temp.sl_si(f, r.h = 'a8232d05d0fc8f1124b7974f490db222', format('registrar_salvedad tiene el md5 %s', r.h));
+  -- Acá se fijaba el md5 del cuerpo de registrar_salvedad (ce4dcadf…, después 4d5fd79e…): se ponía rojo con cada migración que
+  -- toca la función (la foto de VTA-1, la 505…) sin que el lock del replay se hubiera movido. Se sacó (#1603 B13b): lo que
+  -- vale es lo que sigue, que el SELECT del replay termina en FOR SHARE, que sigue siendo definer y sus EXECUTE; el
+  -- comportamiento lo cubren S1 y S1b del arnés de concurrencia.
   -- El SELECT del replay es el que lleva el lock: la clave, la sucursal, el pedido y FOR SHARE, en ese orden.
   f := pg_temp.sl_si(f, r.s ~ 'WHERE client_request_id = p_client_request_id\s+AND sucursal_id = v_sucursal\s+AND pedido_id = p_pedido_id\s+(--[^\n]*\n\s*)*FOR SHARE;',
                      'el SELECT del replay no termina en FOR SHARE');
