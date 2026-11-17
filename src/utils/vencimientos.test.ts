@@ -2,6 +2,7 @@ import process from 'node:process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   aplanarVencimientos,
+  bajaDeLotePideMotivo,
   bolsaSinVencimiento,
   diasHasta,
   estadoVencimiento,
@@ -89,6 +90,26 @@ describe('estadoVencimiento', () => {
 
   it('una fecha ilegible no inventa una alarma', () => {
     expect(estadoVencimiento('', ALERTA, CRITICO, HOY)).toBe('ok')
+  })
+})
+
+describe('bajaDeLotePideMotivo (1558-b6)', () => {
+  it('el lote vencido no pide motivo', () => {
+    expect(bajaDeLotePideMotivo('2026-09-08', HOY)).toBe(false)
+    expect(bajaDeLotePideMotivo('2025-01-01', HOY)).toBe(false)
+  })
+
+  it('el que vence hoy todavía no venció: pide motivo, como dar_de_baja_lote', () => {
+    expect(bajaDeLotePideMotivo(HOY, HOY)).toBe(true)
+  })
+
+  it('el que vence más adelante pide motivo', () => {
+    expect(bajaDeLotePideMotivo('2026-09-10', HOY)).toBe(true)
+    expect(bajaDeLotePideMotivo('2027-03-01', HOY)).toBe(true)
+  })
+
+  it('una fecha ilegible pide motivo (el lado seguro)', () => {
+    expect(bajaDeLotePideMotivo('', HOY)).toBe(true)
   })
 })
 

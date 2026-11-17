@@ -120,6 +120,20 @@ async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComer
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la política comercial. Revisá la señal e intentá de nuevo.')
 
+  // M10-2 (ola 1 del plan #1603): los días hacia atrás de la fecha del pedido, los mismos que
+  // aplica el server (`dias_atras_fecha_pedido()`, que lee `_dias_atras_fecha_pedido`). La
+  // RLS le oculta la fila al depósito con el rol extra de chofer, y con la columna el front
+  // le ofrecía el 7. Si la RPC no contesta (un server de antes de la migración), queda lo de
+  // la tabla.
+  let diasAtrasFechaPedido = Number(data?.dias_atras_fecha_pedido ?? DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO)
+  try {
+    const respuesta = await supabase.rpc('dias_atras_fecha_pedido')
+    const dias = respuesta?.error ? null : respuesta?.data
+    if (dias !== null && dias !== undefined && Number.isFinite(Number(dias))) diasAtrasFechaPedido = Number(dias)
+  } catch {
+    // Sin la RPC sigue lo de la tabla.
+  }
+
   // Sin fila = sin política. La mig 204 siembra una por sucursal, pero una
   // sucursal creada después todavía no la tendría, y eso no es un error.
   const politicas: PoliticasComerciales = {
@@ -142,7 +156,7 @@ async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComer
     comboMargenMinimoPct: Number(data?.combo_margen_minimo_pct ?? 10),
     comboDescuentoMaximoPct: Number(data?.combo_descuento_maximo_pct ?? 30),
     // `??`: 0 días es un valor (sólo la fecha de hoy), no un hueco.
-    diasAtrasFechaPedido: Number(data?.dias_atras_fecha_pedido ?? DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO),
+    diasAtrasFechaPedido,
     // `||` y no `??`: el CHECK no deja un 0, así que un 0 sólo puede ser un hueco.
     multiploRedondeoPrecio: Number(data?.multiplo_redondeo_precio ?? MULTIPLO_REDONDEO_PRECIO) || MULTIPLO_REDONDEO_PRECIO,
   }
