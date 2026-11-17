@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { respuestaDeErrorLegible } from '../utils/errorDeSupabase'
+import { esMotivoDeUsuarioDesactivado, pedirRevalidacionDelPerfil } from '../utils/revalidarPerfil'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -56,6 +57,12 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
         headers.set('X-Sucursal-ID', String(currentSucursalId))
       }
       const respuesta = await fetch(input, { ...init, headers })
+      if (!respuesta.ok && String(input).includes('/rest/v1/rpc/')) {
+        // Una RPC que rechaza con «Usuario desactivado»: `useAuth` confirma con el perfil (1600-b15).
+        void respuesta.clone().text().then(cuerpo => {
+          if (esMotivoDeUsuarioDesactivado(cuerpo)) pedirRevalidacionDelPerfil()
+        }).catch(() => {})
+      }
       return String(input).includes('/rest/v1/') ? respuestaDeErrorLegible(respuesta) : respuesta
     },
   },

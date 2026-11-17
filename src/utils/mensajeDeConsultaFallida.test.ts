@@ -66,6 +66,12 @@ describe('mensajeDeConsultaFallida', () => {
     expect(mensajeDeConsultaFallida({ message: 'x', code: 'PGRST201' })).not.toMatch(/conexión/)
   })
 
+  it('el aviso de permiso no descarta la sesión: manda a reintentar y a volver a entrar', () => {
+    const texto = mensajeDeConsultaFallida({ message: 'x', code: '42501' })
+    expect(texto).toMatch(/sesión/)
+    expect(texto).toMatch(/volvé a entrar/)
+  })
+
   it('no muestra códigos ni el texto crudo del server', () => {
     const texto = mensajeDeConsultaFallida({ message: 'permission denied for table pagos', code: '42501' })
     expect(texto).not.toMatch(/42501|pagos|PGRST|permission denied/)

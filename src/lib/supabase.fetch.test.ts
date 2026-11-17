@@ -95,6 +95,47 @@ describe('fetch de supabase.ts', () => {
     }
   })
 
+  // 1600-b15: una RPC que contesta «Usuario desactivado» le pide a useAuth que revalide el perfil.
+  describe('una RPC que rechaza con «Usuario desactivado»', () => {
+    it('pide revalidar el perfil, y el error le llega igual a quien llamó', async () => {
+      const pedidos = vi.fn()
+      window.addEventListener('perfil:revalidar', pedidos)
+      try {
+        fetchFalso.mockResolvedValue(new Response(
+          JSON.stringify({ code: 'P0001', message: 'Usuario desactivado', details: null, hint: null }),
+          { status: 400 },
+        ))
+        const { supabase } = await cargarCliente()
+
+        const { error } = await supabase.rpc('crear_pedido_completo', {})
+
+        await vi.waitFor(() => expect(pedidos).toHaveBeenCalledTimes(1))
+        expect(error?.message).toBe('Usuario desactivado')
+      } finally {
+        window.removeEventListener('perfil:revalidar', pedidos)
+      }
+    })
+
+    it('otro rechazo no lo pide', async () => {
+      const pedidos = vi.fn()
+      window.addEventListener('perfil:revalidar', pedidos)
+      try {
+        fetchFalso.mockResolvedValue(new Response(
+          JSON.stringify({ code: 'P0001', message: 'Stock insuficiente', details: null, hint: null }),
+          { status: 400 },
+        ))
+        const { supabase } = await cargarCliente()
+
+        await supabase.rpc('crear_pedido_completo', {})
+        await new Promise(r => setTimeout(r, 20))
+
+        expect(pedidos).not.toHaveBeenCalled()
+      } finally {
+        window.removeEventListener('perfil:revalidar', pedidos)
+      }
+    })
+  })
+
   describe('un error de gateway en PostgREST (#1304)', () => {
     it('llega con su status como code, no con el HTML', async () => {
       fetchFalso.mockResolvedValue(new Response(html524, { status: 524 }))

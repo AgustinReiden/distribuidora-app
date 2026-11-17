@@ -9,6 +9,7 @@ import { fijarUsuarioRequestIds } from '../../utils/requestIdPersistente'
 import { fijarUsuarioNotificaciones } from '../../utils/notificacionesGuardadas'
 import { limpiarDatosSensiblesLocales } from '../../lib/limpiezaLocal'
 import { guardarAvisoDeCierre } from '../../utils/avisoDeCierreDeSesion'
+import { EVENTO_REVALIDAR_PERFIL } from '../../utils/revalidarPerfil'
 import type { RolUsuario } from '../../types'
 
 /**
@@ -29,6 +30,10 @@ const INACTIVITY_TICK_MS = 60 * 1000
  * timers (app suspendida, pestania dormida): ese tiempo no es uso, no cuenta.
  */
 const INACTIVITY_SALTO_MAX_MS = INACTIVITY_TICK_MS * 3
+/** Cada cuánto se revalida el perfil con la sesión abierta (pestaña visible y con red). */
+const REVALIDACION_PERFIL_MS = 7 * 60 * 1000
+/** Mínimo entre dos revalidaciones por foco, visibilidad o intervalo. */
+const REVALIDACION_MIN_MS = 60 * 1000
 const AUTH_REQUEST_TIMEOUT_MS = 15000
 const AUTH_BOOTSTRAP_FAILSAFE_TIMEOUT_MS = AUTH_REQUEST_TIMEOUT_MS + 3000
 
@@ -279,8 +284,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
         guardarPerfilCacheado(nextPerfil)
         if (mountedRef.current && userIdRef.current === userId) {
+          // Sólo se pisa el estado si algo cambió: la revalidación a mitad de sesión (foco, red,
+          // intervalo) no tiene que re-renderizar toda la app cada vez.
+          const cambio = perfilDesdeCacheRef.current
+            || JSON.stringify(perfilRef.current) !== JSON.stringify(nextPerfil)
           perfilDesdeCacheRef.current = false
-          setPerfil(nextPerfil)
+          if (cambio) setPerfil(nextPerfil)
         }
         return { perfil: nextPerfil, huboServidor: true }
       } catch (err) {
@@ -611,26 +620,56 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [clearLocalAuthState])
 
-  // Vuelve la red: se rehidrata lo que se resolvió a ciegas. Solo si lo que hay
-  // es el perfil cacheado (o no hay ninguno): si el del servidor ya se cargó,
-  // no hay nada que arreglar y una consulta de más al reconectar es ruido en
-  // la peor conexión.
+  // Revalidación del perfil con la sesión abierta (1600-b15; decisión del dueño: las sesiones no
+  // caducan, así que el desactivado también tiene que salir a mitad de sesión).
+  //
+  // Cuándo se vuelve a leer: al volver la red (también rehidrata lo que se resolvió a ciegas con el
+  // perfil cacheado), al volver el foco a la app, cada `REVALIDACION_PERFIL_MS` con la pestaña
+  // visible y con red, y a pedido (`pedirRevalidacionDelPerfil`: una RPC contestó «Usuario
+  // desactivado»). Las de foco, intervalo y visibilidad esperan al menos `REVALIDACION_MIN_MS`
+  // entre una y otra: el que está sin señal no paga consultas de más.
+  //
+  // Cuándo se cierra: SÓLO si el server devuelve la fila con `activo === false` (ver `fetchPerfil`).
+  // Una red caída, un timeout, una respuesta vacía, un 42501 o un `activo` nulo no cierran nada. Una
+  // sola vez: `signOutLocal` deja `user` en null y este efecto se desmonta.
   useEffect(() => {
     if (!user) return
 
-    const rehidratar = (): void => {
-      if (!perfilDesdeCacheRef.current && perfilRef.current) return
+    let ultima = 0
+    const revalidar = (origen: string, opciones: { forzar?: boolean } = {}): void => {
+      if (!mountedRef.current || userIdRef.current !== user.id) return
+      if (!opciones.forzar) {
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+        if (Date.now() - ultima < REVALIDACION_MIN_MS) return
+      }
+      ultima = Date.now()
       void fetchPerfil(user.id).then(resultado => {
-        // Se arrancó a ciegas con el perfil cacheado y ahora el server dice que está
-        // desactivado (1600-b15).
         if (resultado.desactivado && mountedRef.current && userIdRef.current === user.id) {
-          return cerrarPorDesactivado('online')
+          return cerrarPorDesactivado(origen)
         }
       })
     }
 
-    window.addEventListener('online', rehidratar)
-    return () => window.removeEventListener('online', rehidratar)
+    const alVolverLaRed = (): void => revalidar('online', { forzar: true })
+    const alVolverElFoco = (): void => revalidar('foco')
+    const alCambiarVisibilidad = (): void => {
+      if (document.visibilityState === 'visible') revalidar('visible')
+    }
+    const aPedido = (): void => revalidar('pedido', { forzar: true })
+    const intervalId = setInterval(() => revalidar('intervalo'), REVALIDACION_PERFIL_MS)
+
+    window.addEventListener('online', alVolverLaRed)
+    window.addEventListener('focus', alVolverElFoco)
+    document.addEventListener('visibilitychange', alCambiarVisibilidad)
+    window.addEventListener(EVENTO_REVALIDAR_PERFIL, aPedido)
+    return () => {
+      clearInterval(intervalId)
+      window.removeEventListener('online', alVolverLaRed)
+      window.removeEventListener('focus', alVolverElFoco)
+      document.removeEventListener('visibilitychange', alCambiarVisibilidad)
+      window.removeEventListener(EVENTO_REVALIDAR_PERFIL, aPedido)
+    }
   }, [user, fetchPerfil, cerrarPorDesactivado])
 
   useEffect(() => {

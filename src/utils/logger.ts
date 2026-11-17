@@ -33,14 +33,14 @@ function esErrorPlano(arg: unknown): arg is { message: string; code?: unknown } 
     && typeof (arg as { message?: unknown }).message === 'string'
 }
 
-/** Lo que diagnostica de un error plano, con el texto redactado (`details` suele traer valores). */
-function errorPlanoLegible(plano: object): Record<string, string> {
-  const salida: Record<string, string> = {}
-  for (const campo of ['code', 'message', 'details', 'hint']) {
-    const valor = (plano as Record<string, unknown>)[campo]
-    if (typeof valor === 'string' && valor !== '') salida[campo] = redactarTexto(valor)
-  }
-  return salida
+/**
+ * Del error plano de supabase sale SÓLO el `code` (1600-b4, con la regla de #1266). El `message`,
+ * el `details` y el `hint` no viajan: el `details` de un 23505, 23514 o 23502 trae los valores de
+ * la fila (nombres, direcciones, CUIT), y un `message` de RAISE puede nombrar un cliente o un
+ * producto. El código (42501, PGRST201, 23505) es lo que diagnostica.
+ */
+function codigoDelErrorPlano(plano: { code?: unknown }): string {
+  return typeof plano.code === 'string' && plano.code !== '' ? plano.code : 'sin código'
 }
 
 /**
@@ -91,16 +91,15 @@ const logger = {
       } else {
         const planoIndex = args.findIndex(esErrorPlano)
         if (planoIndex !== -1) {
-          // Un error plano de supabase: sin esto sólo llegaba la etiqueta a Sentry, y el
-          // `code` (42501, PGRST201) y el texto del server, que son lo que diagnostica, se
-          // perdían. Se manda como excepción, con el texto redactado como el resto.
-          const plano = args[planoIndex] as { message: string; code?: unknown }
-          const etiqueta = typeof args[0] === 'string' ? mensaje : ''
-          const codigo = typeof plano.code === 'string' && plano.code !== '' ? ` [${plano.code}]` : ''
+          // Un error plano de supabase: sin esto sólo llegaba la etiqueta a Sentry y se perdía
+          // el `code`, que es lo que diagnostica. Se manda como excepción con la etiqueta y el
+          // código; el texto del server no viaja (ver `codigoDelErrorPlano`).
+          const plano = args[planoIndex] as { code?: unknown }
+          const codigo = codigoDelErrorPlano(plano)
           const resto = sanitizedArgs.filter((_, i) => i !== planoIndex)
           captureException(
-            new Error(redactarTexto(`${etiqueta ? `${etiqueta} ` : ''}${plano.message}${codigo}`)),
-            { extra: { message: mensaje, additionalInfo: resto, errorPlano: errorPlanoLegible(plano) } }
+            new Error(`${mensaje} [${codigo}]`),
+            { extra: { message: mensaje, additionalInfo: resto, codigoSupabase: codigo } }
           )
         } else {
           captureMessage(mensaje, 'error')

@@ -190,8 +190,48 @@ describe('SucursalContext.switchSucursal', () => {
     expect(setSucursalHeaderMock).not.toHaveBeenCalled()
     expect(localStorage.getItem('distribuidora_sucursal_activa')).toBe('3')
     expect(notifyErrorMock).toHaveBeenCalledTimes(1)
-    // El texto del server no se le muestra tal cual.
-    expect(notifyErrorMock.mock.calls[0][0]).not.toMatch(/No autorizado/)
+    // Se muestra el motivo que manda el server.
+    expect(notifyErrorMock.mock.calls[0][0]).toContain('No autorizado para esta sucursal')
+  })
+
+  it('si el motivo es que el usuario está desactivado, lo dice (no «no tenés acceso a esa sucursal»)', async () => {
+    const { result } = await montar()
+    vi.mocked(supabase.rpc).mockResolvedValue({
+      data: { success: false, error: 'Usuario desactivado' },
+      error: null,
+    } as never)
+
+    await act(async () => { await result.current.switchSucursal(4) })
+
+    expect(result.current.currentSucursalId).toBe(3)
+    expect(notifyErrorMock.mock.calls[0][0]).toContain('Usuario desactivado')
+    expect(notifyErrorMock.mock.calls[0][0]).not.toMatch(/No tenés acceso/)
+  })
+
+  it('«Usuario desactivado» le pide a useAuth que revalide el perfil; otro motivo no', async () => {
+    const pedidos = vi.fn()
+    window.addEventListener('perfil:revalidar', pedidos)
+    try {
+      const { result } = await montar()
+      vi.mocked(supabase.rpc).mockResolvedValue({ data: { success: false, error: 'Usuario desactivado' }, error: null } as never)
+      await act(async () => { await result.current.switchSucursal(4) })
+      expect(pedidos).toHaveBeenCalledTimes(1)
+
+      vi.mocked(supabase.rpc).mockResolvedValue({ data: { success: false, error: 'No autorizado para esta sucursal' }, error: null } as never)
+      await act(async () => { await result.current.switchSucursal(4) })
+      expect(pedidos).toHaveBeenCalledTimes(1)
+    } finally {
+      window.removeEventListener('perfil:revalidar', pedidos)
+    }
+  })
+
+  it('sin motivo en la respuesta usa el texto genérico', async () => {
+    const { result } = await montar()
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: { success: false }, error: null } as never)
+
+    await act(async () => { await result.current.switchSucursal(4) })
+
+    expect(notifyErrorMock.mock.calls[0][0]).toMatch(/No tenés acceso a esa sucursal/)
   })
 
   it('si el servidor contesta success:true, cambia la sucursal y el header', async () => {

@@ -20,7 +20,9 @@ export type CausaDeConsultaFallida = 'sin_conexion' | 'sin_permiso' | 'sesion_ve
 
 export const MENSAJES_DE_CONSULTA_FALLIDA: Record<CausaDeConsultaFallida, string> = {
   sin_conexion: 'No se pudo cargar la información. Verificá tu conexión.',
-  sin_permiso: 'No tenés permiso para ver esta información. Si creés que es un error, avisale al administrador.',
+  // Un 42501 también sale cuando el token no se pudo renovar (supabase-js manda la consulta con la
+  // anon key si el refresh falla por señal intermitente): el texto no descarta la sesión.
+  sin_permiso: 'No tenés permiso para ver esta información, o tu sesión no se pudo renovar. Probá de nuevo; si sigue, cerrá sesión y volvé a entrar.',
   sesion_vencida: 'Tu sesión venció. Cerrá sesión y volvé a entrar para seguir.',
   error_del_servidor: 'No se pudo cargar la información por un problema del servidor. Probá de nuevo en unos minutos.',
 }

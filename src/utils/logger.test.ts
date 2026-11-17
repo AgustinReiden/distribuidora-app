@@ -69,7 +69,7 @@ describe('logger.error en producción', () => {
    * 1600-b4: supabase-js devuelve el error como objeto plano (`{ message, code, details, hint }`),
    * no como `Error`. Sólo mandaba la etiqueta y se perdían el código y el texto del server.
    */
-  it("('msg', errorPlano de supabase) → captureException con el código y el texto del server", async () => {
+  it("('msg', errorPlano de supabase) → captureException con la etiqueta y el código", async () => {
     const logger = await importLoggerEnProduccion()
 
     logger.error('[SucursalContext] Error loading sucursales:', {
@@ -81,26 +81,41 @@ describe('logger.error en producción', () => {
 
     expect(captureMessage).not.toHaveBeenCalled()
     expect(captureException).toHaveBeenCalledTimes(1)
-    const [error, contexto] = captureException.mock.calls[0] as [Error, { extra: { errorPlano: Record<string, string> } }]
+    const [error, contexto] = captureException.mock.calls[0] as [Error, { extra: { codigoSupabase: string } }]
     expect(error).toBeInstanceOf(Error)
-    expect(error.message).toContain('permission denied for table usuario_sucursales')
-    expect(error.message).toContain('[42501]')
     expect(error.message).toContain('[SucursalContext]')
-    expect(contexto.extra.errorPlano.code).toBe('42501')
+    expect(error.message).toContain('[42501]')
+    expect(contexto.extra.codigoSupabase).toBe('42501')
   })
 
-  it('el error plano también pasa por la redacción: un valor en `details` no sale tal cual', async () => {
+  // Privacidad (#1266): del error plano viaja sólo el código. El `details` de un 23505/23514/23502
+  // trae los valores de la fila, y un `message` de RAISE puede nombrar un cliente o un producto.
+  it('no manda a Sentry el message, el details ni el hint de un error plano (traen valores de la fila)', async () => {
     const logger = await importLoggerEnProduccion()
 
     logger.error('Alta de cliente', {
-      message: 'duplicate key value violates unique constraint',
+      message: 'duplicate key value violates unique constraint "clientes_nombre_key"',
       code: '23505',
-      details: 'Key (cuit)=(20-12345678-9) already exists.',
+      details: 'Key (nombre_fantasia, direccion)=(Kiosco La Esquina, Calle Falsa 123) already exists.',
+      hint: 'Revisá Kiosco La Esquina',
     })
 
-    const [error, contexto] = captureException.mock.calls[0] as [Error, { extra: { errorPlano: Record<string, string> } }]
-    expect(JSON.stringify(contexto.extra.errorPlano)).not.toContain('12345678')
-    expect(error.message).not.toContain('12345678')
+    expect(captureException).toHaveBeenCalledTimes(1)
+    const serializado = JSON.stringify(captureException.mock.calls[0].map(a => (a instanceof Error ? a.message : a)))
+    expect(serializado).toContain('23505')
+    expect(serializado).not.toContain('Kiosco La Esquina')
+    expect(serializado).not.toContain('Calle Falsa')
+    expect(serializado).not.toContain('duplicate key')
+    expect(serializado).not.toContain('Revisá')
+  })
+
+  it('un error plano sin código manda la etiqueta con «sin código»', async () => {
+    const logger = await importLoggerEnProduccion()
+
+    logger.error('Carga caída', { message: 'TypeError: Failed to fetch', code: '' })
+
+    const [error] = captureException.mock.calls[0] as [Error]
+    expect(error.message).toBe('Carga caída [sin código]')
   })
 
   it('un objeto sin `message` no es un error plano: sigue siendo captureMessage', async () => {

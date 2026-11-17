@@ -75,7 +75,8 @@ export async function explicarErrorDeSesion(mensaje: string): Promise<string> {
 
   // Ya se renovó hace un rato por este mismo error y volvió: no es el token.
   if (porSucursal && renovadaPorSucursalEn !== null && Date.now() - renovadaPorSucursalEn < VENTANA_DE_RENOVACION_MS) {
-    renovadaPorSucursalEn = null;
+    // No se resetea: la ventana se deja vencer sola. Si se reseteara, el siguiente intento
+    // volvería a renovar y el cartel alternaría entre «la renovamos» y «no se resolvió».
     return MENSAJE_SUCURSAL_NO_RESUELTA;
   }
 

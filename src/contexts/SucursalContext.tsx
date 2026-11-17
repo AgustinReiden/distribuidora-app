@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { supabase, setSucursalHeader } from '../lib/supabase'
 import type { UsuarioSucursalDB, RolUsuario } from '../types'
 import { notifyError } from '../hooks/supabase/base'
+import { esMotivoDeUsuarioDesactivado, pedirRevalidacionDelPerfil } from '../utils/revalidarPerfil'
 import { logger } from '../utils/logger'
 import { esFalloDeRed } from '../utils/falloDeRed'
 import { SUCURSAL_STORAGE_KEY } from '../lib/sucursalStorageKey'
@@ -82,9 +83,20 @@ const SIN_ROLES_EXTRA: RolUsuario[] = []
 const MENSAJE_CAMBIO_SUCURSAL_FALLO = 'No se pudo cambiar de sucursal. Revisá tu conexión y probá de nuevo.'
 const MENSAJE_CAMBIO_SUCURSAL_RECHAZADO = 'No tenés acceso a esa sucursal, así que no se cambió.'
 
-/** `cambiar_sucursal` contesta `{ success: false }` (no un error) cuando rechaza el cambio. */
+/** `cambiar_sucursal` contesta `{ success: false, error }` (no un error) cuando rechaza el cambio. */
 function cambioDeSucursalRechazado(data: unknown): boolean {
   return (data as { success?: unknown } | null | undefined)?.success === false
+}
+
+/**
+ * El motivo que manda el server («No autorizado para esta sucursal», «Usuario desactivado»…),
+ * cuando viene. Sin motivo, el texto genérico: decir «no tenés acceso» a un desactivado era mentir.
+ */
+function mensajeDeCambioRechazado(data: unknown): string {
+  const motivo = (data as { error?: unknown } | null | undefined)?.error
+  return typeof motivo === 'string' && motivo.trim() !== ''
+    ? `No se cambió de sucursal: ${motivo.trim()}.`
+    : MENSAJE_CAMBIO_SUCURSAL_RECHAZADO
 }
 
 const SucursalContext = createContext<SucursalContextValue | null>(null)
@@ -241,7 +253,9 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
       // sucursal activa quedaban en una sucursal que el servidor no confirmó.
       if (cambioDeSucursalRechazado(data)) {
         logger.warn('[SucursalContext] cambiar_sucursal rechazó el cambio:', data)
-        notifyError(MENSAJE_CAMBIO_SUCURSAL_RECHAZADO)
+        notifyError(mensajeDeCambioRechazado(data))
+        // «Usuario desactivado»: que `useAuth` lo confirme con el perfil y lo saque.
+        if (esMotivoDeUsuarioDesactivado((data as { error?: unknown }).error)) pedirRevalidacionDelPerfil()
         return
       }
 

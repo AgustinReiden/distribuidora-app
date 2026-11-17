@@ -89,6 +89,15 @@ describe('explicarErrorDeSesion', () => {
       expect(refreshSession).toHaveBeenCalledTimes(1);
     });
 
+    it('el cartel de «no resuelta» no alterna con el de «renovada»: sigue igual mientras dure la ventana', async () => {
+      renueva();
+      expect(await explicarErrorDeSesion(SUCURSAL)).toBe(MENSAJE_SESION_RENOVADA);
+      expect(await explicarErrorDeSesion(SUCURSAL)).toBe(MENSAJE_SUCURSAL_NO_RESUELTA);
+      expect(await explicarErrorDeSesion(SUCURSAL)).toBe(MENSAJE_SUCURSAL_NO_RESUELTA);
+      expect(await explicarErrorDeSesion(SUCURSAL)).toBe(MENSAJE_SUCURSAL_NO_RESUELTA);
+      expect(refreshSession).toHaveBeenCalledTimes(1);
+    });
+
     it('el cartel nuevo no culpa a la sesión: manda a entrar de nuevo y nombra la sucursal y el usuario', () => {
       expect(MENSAJE_SUCURSAL_NO_RESUELTA).toMatch(/sucursal/);
       expect(MENSAJE_SUCURSAL_NO_RESUELTA).toMatch(/administrador/);
