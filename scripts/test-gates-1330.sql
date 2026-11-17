@@ -12,7 +12,7 @@
 -- con la violación armada a mano y no moverse con el caso legítimo. Un check que no
 -- sube es un check que no muerde.
 --
---   C1 · la lista: total_checks cuadra con ella y es de al menos 79 (la cuenta exacta se sacó: crece con cada tanda), sin ids repetidos, y GASTO-A sigue ahí.
+--   C1 · la lista: total_checks cuadra con ella y es de al menos 86 (los de prod hoy; la cuenta exacta se sacó: crece con cada tanda, pero no baja), sin ids repetidos, y GASTO-A sigue ahí.
 --   C2 · RUTA-A y RUTA-B: una parada 'no_entregado' de un pedido entregado es
 --        historia y no se pone en rojo; una 'pendiente' sí. Con la cuenta vieja los
 --        dos daban rojo en el primer caso.
@@ -86,11 +86,11 @@ BEGIN
 
   -- ================================================================ C1 · lista
   v_a := public.auditoria_integridad();
-  -- Desde #1603 B13b no se fija la cuenta (eran 79 en #1330, hoy son 84 y crece con cada tanda): total_checks tiene que
+  -- Desde #1603 B13b no se fija la cuenta (eran 79 en #1330, en prod hoy son 86 y crece con cada tanda): total_checks tiene que
   -- cuadrar con la lista, que tiene al menos los 79 de entonces; los 12 checks de esta tarjeta se afirman más abajo.
   v_fallas := v_fallas || pg_temp.chk((v_a->>'total_checks')::int = jsonb_array_length(v_a->'checks')
-                                      AND (v_a->>'total_checks')::int >= 79,
-                format('C1 total_checks %s, lista de %s (tiene que cuadrar y ser >= 79)', v_a->>'total_checks', jsonb_array_length(v_a->'checks')));
+                                      AND (v_a->>'total_checks')::int >= 86,
+                format('C1 total_checks %s, lista de %s (tiene que cuadrar y ser >= 86)', v_a->>'total_checks', jsonb_array_length(v_a->'checks')));
   v_fallas := v_fallas || pg_temp.chk(
     (SELECT count(*) = count(DISTINCT c->>'id') FROM jsonb_array_elements(v_a->'checks') c), 'C1 ids repetidos');
   v_fallas := v_fallas || pg_temp.chk(

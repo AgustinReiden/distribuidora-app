@@ -85,10 +85,10 @@ DECLARE
 BEGIN
   -- ------------------------------------------------- 1 · la función nueva ---
   v_aud := public.auditoria_integridad();
-  -- Desde #1603 B13b no se fija la cuenta (eran 79 en #1254, hoy son 84 y crece con cada tanda): total_checks tiene que
-  -- cuadrar con la lista y ser de al menos 79; los seis checks nuevos de esta tarjeta se afirman uno por uno abajo.
-  IF (v_aud->>'total_checks')::int <> jsonb_array_length(v_aud->'checks') OR (v_aud->>'total_checks')::int < 79 THEN
-    v_fallas := v_fallas || format('total_checks = %s, lista de %s (tienen que cuadrar y ser >= 79)',
+  -- Desde #1603 B13b no se fija la cuenta (eran 79 en #1254, en prod hoy son 86; crece con cada tanda, pero no baja): total_checks tiene que
+  -- cuadrar con la lista y ser de al menos 86 (que no se borren checks); los seis checks nuevos de esta tarjeta se afirman uno por uno abajo.
+  IF (v_aud->>'total_checks')::int <> jsonb_array_length(v_aud->'checks') OR (v_aud->>'total_checks')::int < 86 THEN
+    v_fallas := v_fallas || format('total_checks = %s, lista de %s (tienen que cuadrar y ser >= 86)',
                                    v_aud->>'total_checks', jsonb_array_length(v_aud->'checks'));
   END IF;
   SELECT count(*) - count(DISTINCT c->>'id') INTO v_n FROM jsonb_array_elements(v_aud->'checks') c;
