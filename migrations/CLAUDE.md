@@ -178,8 +178,8 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   devuelven entera para ese producto (`_compra_producto_devuelto`, #1557 D10, también en el alta):
   la nota que la deja así, o su anulación, recalcula la reposición (`_reposicion_tras_nota`). Y lo
   que la recalcula desde una compra le aplica encima el mayor de los envíos aceptados después
-  (`_reposicion_aplicar_envios`, D12), como hizo aceptarlos. El `costo_con_iva` lleva lo que el
-  motor le suma al costo real (cargos, factor del II declarado), sin el IVA del cargo (1593-b1).
+  (`_reposicion_aplicar_envios`, D12), como hizo aceptarlos; un envío sin `origen_costo_real`
+  (anterior a esa migración) no aplica nada, para no dejar la terna mezclada.
 - **Dentro de una compra los renglones que fijan costo van antes que los regalos** (#1593 CMP-A):
   el alta y la edición los recorren e insertan así, y la cadena va por id. Un regalo primero sobre
   un producto agotado no diluía nada y el pagado de después se promediaba con esas unidades al

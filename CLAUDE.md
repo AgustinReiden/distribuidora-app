@@ -357,11 +357,15 @@ suelta en `sucursales`.
 - **Una NC de compra no pasa lo que le queda a la compra** (su total menos sus notas vigentes): el ajuste
   siempre, y la devolución si la compra tiene un ajuste (#1557, #1565; decisión del dueño). La devolución
   se valúa neta de la bonificación y de los descuentos de cabecera (`_compra_factor_neto`, #1590 D16):
-  devolver todo nunca acredita más que lo pagado. Un camino nuevo de NC hace igual.
+  un descuento con reparto le baja el neto sólo a sus renglones, y el resto va parejo. Devolver todo
+  nunca acredita más que lo pagado. Un camino nuevo de NC hace igual.
 - **Una NC de compra se anula, no se borra** (`anular_nota_credito_compra`, #1590 D15): queda
   `anulada` con su motivo, y deshace el stock, los lotes que tomó (`notas_credito.lotes_tomados`), el
-  promedio y la reposición. Toda suma de las notas de una compra filtra `NOT anulada`; un camino nuevo
+  promedio y la reposición. Una devolución anterior a la 483 (10/11/2026) no se anula: no corrigió el
+  promedio ni sus lotes. Toda suma de las notas de una compra filtra `NOT anulada`; un camino nuevo
   que baje lotes por una nota los anota ahí.
+- **Un envío a un producto desactivado lo reactiva sólo con la confirmación** (#1558 D7): el renglón
+  trae `"reactivar": true`; sin la marca, `aceptar_movimiento_sucursal` rechaza.
 - **El total de una ZZ lo pone el server** (#1603): el subtotal, los otros impuestos y los cargos
   `en_factura`, en el alta y en la edición, mande lo que mande el front (un PWA de antes de la 506
   manda el subtotal). Un descuento en factura que lo deja negativo se rechaza con su motivo. Un camino

@@ -1,8 +1,9 @@
 -- =========================================================================
 -- NNN · COMPRAS, NOTAS DE CRÉDITO DE COMPRA Y ENVÍOS ENTRE SUCURSALES
 --       (plan #1603, ola 2, tarjeta B2: 1590-a, 1590-b, 1557-b4, 1557-b5,
---        1557-b7, 1557-b10, 1558-b8, 1593-b1, 1593-b3, 1593-b5, STK-12,
---        STK-14, STK-16 y SEG-1 de actualizar_compra_items)
+--        1557-b7, 1557-b10, 1558-b8, 1593-b3, 1593-b5, STK-12, STK-14,
+--        STK-16 y SEG-1 de actualizar_compra_items; corregida con la revisión
+--        adversarial: H1, H2, H3, H4, H9, H11 y los bloqueos)
 --
 -- Columnas nuevas en `notas_credito` (la anulación y los lotes que tomó la
 -- nota) y en `movimiento_sucursal_items` (el costo real del origen al
@@ -24,6 +25,10 @@
 -- comprobante del proveedor: `notas_credito_proteger_vinculo` y
 -- `nota_credito_items_inmutable` siguen igual): queda `anulada`, con quién,
 -- cuándo y por qué, y todo lo que suma las notas de una compra la deja afuera.
+-- Una devolución anterior al 10/11/2026 19:21:45 UTC (la 483) no se anula
+-- (H11): cuando se cargó no corrigió el promedio ni devolvió a su lote, y
+-- anularla desharía movimientos que no existieron. Un ajuste de cualquier fecha
+-- sí: no movió stock, lotes ni promedio, y anularlo sólo libera el tope.
 -- Una devolución anulada deshace lo que hizo la nota:
 --   · el stock vuelve (origen 'nota_credito_anulada', a la bolsa) y cada lote
 --     recibe lo que la nota le sacó (`notas_credito.lotes_tomados`, que desde
@@ -54,13 +59,16 @@
 -- la bonificación de la factura ni los descuentos en factura: devolver todo
 -- acreditaba más que lo pagado (ZZ de 10 × 100 con un descuento de −150:
 -- 1.000 sobre 850). Ahora ese costo se multiplica por
--- `_compra_factor_neto(compra)` = (neto de los renglones + descuentos) / neto,
--- con los descuentos de cabecera en negativo: en una ZZ, sus cargos en factura
--- negativos; en una FC, sus cargos gravados en factura negativos más la parte
--- de `compras.bonificaciones` que no explican sus cargos (si es negativa). Un
--- flete no suma (el factor no pasa de 1). El IVA sale del subtotal neto; el
--- impuesto interno ya era el de la cabecera, prorrateado. La ZZ de arriba
--- acredita 850. Las dos puertas (factura entera y por lote).
+-- `_compra_factor_neto(compra, producto)`. Los descuentos de cabecera son, en
+-- una ZZ, sus cargos en factura negativos; en una FC, sus cargos gravados en
+-- factura negativos más la parte de `compras.bonificaciones` que no explican
+-- sus cargos (si es negativa). Un descuento que se prorratea con reparto
+-- (`compra_cargo_repartos`) le baja el neto sólo a los renglones que alcanza,
+-- con la misma cuenta que el motor (`prorratear_cargo`, H4: −200 sobre W1 de
+-- dos renglones de 1.000 acredita 800 y 1.000, no 900 y 900); lo que no tiene
+-- reparto se reparte parejo, en proporción al neto. Un flete no suma (el factor
+-- no pasa de 1). El IVA sale del subtotal neto; el impuesto interno ya era el
+-- de la cabecera, prorrateado. Las dos puertas (factura entera y por lote).
 -- El front sigue mandando el importe sin el factor (lo valúa
 -- `notaCredito.ts`): `registrar_nota_credito` acepta lo que mande la pantalla
 -- con o sin el factor, y guarda el neto. Un front viejo y uno nuevo andan.
@@ -93,14 +101,19 @@
 -- (`_reposicion_aplicar_envios`): el costo real del origen al aceptar (columna
 -- nueva `origen_costo_real`, que guarda `aceptar_movimiento_sucursal`) y los
 -- costos con y sin IVA de la foto del envío. Un envío aceptado antes de esta
--- migración no guardó el costo real: aplica sólo los otros dos.
+-- migración no guardó el costo real: no aplica nada (H3), como hoy; aplicar
+-- sólo dos de los tres dejaba la terna mezclada.
 --
 -- =========================================================================
 -- 1558-b8 · UN ENVÍO A UN PRODUCTO DESACTIVADO LO REACTIVA (D7)
 -- =========================================================================
--- La decisión: es normal que la otra sucursal lo tenga desactivado, y se puede.
--- `aceptar_movimiento_sucursal` ya lo aceptaba; ahora lo reactiva (el front
--- pide confirmarlo, B11a) y lo devuelve en `reactivados`.
+-- La decisión: es normal que la otra sucursal lo tenga desactivado, y se puede:
+-- la lista lo muestra aparte y, si se elige, pide confirmar y lo reactiva.
+-- `aceptar_movimiento_sucursal` lo reactiva sólo si el renglón trae la marca
+-- `"reactivar": true` (la manda el modal después de confirmar) y lo devuelve en
+-- `reactivados`; sin la marca rechaza el envío con el nombre del producto (H2:
+-- reactivar en silencio despertaba un producto dado de baja a propósito). Lo
+-- puede quien puede aceptar el envío (admin o encargado), con la confirmación.
 --
 -- =========================================================================
 -- STK-16 · EL ENVÍO GUARDA SIEMPRE LA FOTO DEL PROMEDIO CON QUE SE MEZCLÓ
@@ -110,14 +123,6 @@
 -- ahora en `origen_costo_promedio` el que usó. Los anteriores quedan como
 -- están (no se sabe con qué promedio se mezclaron).
 --
--- =========================================================================
--- 1593-b1 · EL COSTO CON IVA LLEVA LOS CARGOS Y EL FACTOR DEL II DECLARADO
--- =========================================================================
--- `productos.costo_con_iva` se calculaba con el neto del renglón, sin lo que
--- el motor le suma al costo real (cargos prorrateados y el ajuste del II
--- declarado). Ahora suma esa diferencia (costo real del motor menos el costo
--- real sin cargos): FC A de 10 × 100 al 21 % con un flete de 100 da 131, no
--- 121. El IVA del cargo no entra. En el alta, la edición y la reposición.
 --
 -- =========================================================================
 -- 1593-b3 · UNA FC B O C NO TRAE IVA NI II DISCRIMINADOS
@@ -145,7 +150,9 @@
 -- STK-14 · SINCRONIZAR LOS LOTES DE UNA COMPRA TIENE LAS REGLAS DE EDITARLA
 -- =========================================================================
 -- Por llamada directa aceptaba una compra con notas de crédito, fuera de los
--- 7 días y de un encargado. Ahora: no con notas vigentes; no con más de 7 días;
+-- 7 días y de un encargado. Ahora: no con notas vigentes; no con más de 8 días
+-- (la edición que la dispara mide 7 desde el alta: el día de margen evita que
+-- una edición guardada al límite pierda sus vencimientos, H9);
 -- y el encargado sólo carga los vencimientos de una compra que todavía no
 -- tiene lotes (el alta). Cambiar los de una que ya los tiene es editarla, y
 -- eso es del admin. El rol sale de `es_encargado_o_admin()` (mira `activo`).
@@ -157,6 +164,12 @@
 -- tienen CUIT. La premisa aborta con el listado si hoy hay duplicados.
 --
 -- =========================================================================
+-- 1593-b1 · NO VA EN ESTA MIGRACIÓN (H1)
+-- =========================================================================
+-- Sumarle los cargos a `costo_con_iva` choca con la ficha del producto, que
+-- se los vuelve a sumar y al guardar lo recalcula sin ellos. Queda como hoy.
+--
+-- =========================================================================
 -- SEG-1 (#1545) · `actualizar_compra_items` lee el rol mirando `activo`
 -- =========================================================================
 -- No se reproduce: a un desactivado ya lo corta `current_sucursal_id()`. Es la
@@ -166,6 +179,12 @@
 BEGIN;
 
 SET LOCAL lock_timeout = '5s';
+
+-- Las tablas que la migración altera o lee para su premisa, antes de leerlas:
+-- si alguien las tiene tomadas, falla al instante y no deja a nadie esperando.
+LOCK TABLE public.notas_credito, public.movimiento_sucursal_items IN ACCESS EXCLUSIVE MODE NOWAIT;
+LOCK TABLE public.proveedores IN SHARE MODE NOWAIT;
+LOCK TABLE public.perfiles IN SHARE ROW EXCLUSIVE MODE NOWAIT;
 
 DO $lf$
 BEGIN
@@ -214,7 +233,7 @@ BEGIN
   FOR r IN SELECT * FROM (VALUES
     ('public.anular_nota_credito_compra(bigint,text)'),
     ('public._compra_producto_devuelto(bigint,bigint,bigint)'),
-    ('public._compra_factor_neto(bigint,bigint)'),
+    ('public._compra_factor_neto(bigint,bigint,bigint)'),
     ('public._reposicion_aplicar_envios(bigint,bigint,timestamp with time zone)'),
     ('public._reposicion_tras_nota(bigint,bigint,bigint)')
   ) AS t(f) LOOP
@@ -327,36 +346,61 @@ AS $function$
              AND nci.producto_id = p_producto) d;
 $function$;
 
-CREATE FUNCTION public._compra_factor_neto(p_compra bigint, p_sucursal bigint)
+CREATE FUNCTION public._compra_factor_neto(p_compra bigint, p_producto bigint, p_sucursal bigint)
  RETURNS numeric
  LANGUAGE sql
  STABLE
  SET search_path TO 'public'
 AS $function$
   -- mig NNN (1590-b, #1590; decisión del dueño D16): lo que vale cada peso del neto de los
-  -- renglones después de los descuentos de cabecera. Una devolución se valúa con esto: nunca
-  -- acredita más que lo pagado. Descuentos (en negativo): en una ZZ, sus cargos en factura
-  -- negativos (su total los incluye, #1593); en una FC, sus cargos gravados en factura
-  -- negativos (van a `bonificaciones`) más la parte de `bonificaciones` que no explican sus
-  -- cargos, si es negativa. Un flete no suma: el factor no pasa de 1.
-  SELECT COALESCE((
-    SELECT CASE WHEN l.neto > 0 THEN LEAST(GREATEST(l.neto + d.descuento, 0) / l.neto, 1) ELSE 1 END
-      FROM (SELECT COALESCE(SUM(ci.cantidad * ci.costo_unitario * (1 - COALESCE(ci.bonificacion, 0) / 100)), 0) AS neto
-              FROM compra_items ci
-             WHERE ci.compra_id = p_compra AND ci.sucursal_id = p_sucursal) l
-     CROSS JOIN (
-       SELECT CASE WHEN c.tipo_factura = 'ZZ'
-                   THEN COALESCE(g.neg_todos, 0)
-                   ELSE COALESCE(g.neg_gravados, 0)
-                        + LEAST(COALESCE(c.bonificaciones, 0) - COALESCE(g.gravados, 0), 0) END AS descuento
-         FROM compras c
-         LEFT JOIN LATERAL (
-           SELECT SUM(cc.monto) FILTER (WHERE cc.monto < 0)                                AS neg_todos,
-                  SUM(cc.monto) FILTER (WHERE cc.monto < 0 AND cc.condicion_iva = 'gravado') AS neg_gravados,
-                  SUM(cc.monto) FILTER (WHERE cc.condicion_iva = 'gravado')                  AS gravados
-             FROM compra_cargos cc
-            WHERE cc.compra_id = c.id AND cc.sucursal_id = c.sucursal_id AND cc.en_factura) g ON true
-        WHERE c.id = p_compra AND c.sucursal_id = p_sucursal) d), 1);
+  -- renglones de un producto después de los descuentos de cabecera. Una devolución se valúa
+  -- con esto: nunca acredita más que lo pagado. Descuentos (en negativo): en una ZZ, sus cargos
+  -- en factura negativos (su total los incluye, #1593); en una FC, sus cargos gravados en
+  -- factura negativos (van a `bonificaciones`) más la parte de `bonificaciones` que no explican
+  -- sus cargos, si es negativa. Un descuento que se prorratea con reparto le baja el neto sólo
+  -- a sus renglones, con `prorratear_cargo` (la cuenta del motor y de COMPRA-A3); el resto se
+  -- reparte parejo en proporción al neto (H4). Un flete no suma: el factor no pasa de 1.
+  WITH c AS (
+    SELECT c.id, c.sucursal_id, c.tipo_factura, COALESCE(c.bonificaciones, 0) AS bonif
+      FROM compras c
+     WHERE c.id = p_compra AND c.sucursal_id = p_sucursal
+  ), lin AS (
+    SELECT ci.id, ci.producto_id,
+           ci.cantidad * ci.costo_unitario * (1 - COALESCE(ci.bonificacion, 0) / 100) AS neto
+      FROM compra_items ci
+     WHERE ci.compra_id = p_compra AND ci.sucursal_id = p_sucursal
+  ), descuento AS (
+    SELECT cc.id, cc.monto,
+           cc.prorratea_al_costo
+             AND EXISTS (SELECT 1 FROM compra_cargo_repartos r WHERE r.cargo_id = cc.id AND r.peso > 0) AS repartido
+      FROM compra_cargos cc
+      JOIN c ON cc.compra_id = c.id AND cc.sucursal_id = c.sucursal_id
+     WHERE cc.en_factura AND cc.monto < 0
+       AND (c.tipo_factura = 'ZZ' OR cc.condicion_iva = 'gravado')
+  ), reparto AS (
+    SELECT pr.item_id, SUM(pr.monto) AS monto
+      FROM descuento d
+     CROSS JOIN LATERAL public.prorratear_cargo(d.monto,
+             (SELECT jsonb_object_agg(r.compra_item_id::text, r.peso)
+                FROM compra_cargo_repartos r WHERE r.cargo_id = d.id)) pr
+     WHERE d.repartido
+     GROUP BY pr.item_id
+  ), aj AS (
+    SELECT l.producto_id, l.neto, GREATEST(l.neto + COALESCE(rp.monto, 0), 0) AS neto_rep
+      FROM lin l LEFT JOIN reparto rp ON rp.item_id = l.id
+  ), parejo AS (
+    SELECT COALESCE((SELECT SUM(d.monto) FROM descuento d WHERE NOT d.repartido), 0)
+           + CASE WHEN c.tipo_factura = 'ZZ' THEN 0
+                  ELSE LEAST(c.bonif - COALESCE((SELECT SUM(cc.monto) FROM compra_cargos cc
+                                                  WHERE cc.compra_id = c.id AND cc.sucursal_id = c.sucursal_id
+                                                    AND cc.en_factura AND cc.condicion_iva = 'gravado'), 0), 0) END AS monto
+      FROM c
+  ), f AS (
+    SELECT CASE WHEN t.neto_rep > 0 THEN LEAST(GREATEST(t.neto_rep + pj.monto, 0) / t.neto_rep, 1) ELSE 1 END AS f
+      FROM (SELECT SUM(neto_rep) AS neto_rep FROM aj) t, parejo pj
+  )
+  SELECT COALESCE((SELECT CASE WHEN SUM(aj.neto) > 0 THEN LEAST(SUM(aj.neto_rep) * (SELECT f FROM f) / SUM(aj.neto), 1) END
+                     FROM aj WHERE aj.producto_id = p_producto), 1);
 $function$;
 
 CREATE FUNCTION public._reposicion_aplicar_envios(p_producto bigint, p_sucursal bigint, p_desde timestamptz)
@@ -370,8 +414,7 @@ BEGIN
   -- mig NNN (1557-b7, #1557; decisión del dueño D12): aceptar un envío deja en el destino el
   -- mayor de los dos costos de reposición. Lo que recalcula la reposición desde una compra
   -- (corregirla, anularla, la nota que la devuelve) le aplica encima, con la misma cuenta, los
-  -- envíos aceptados después de esa compra: si no, los pisaba. Un envío anterior a esta
-  -- migración no guardó el costo real del origen (NULL: GREATEST lo ignora).
+  -- envíos aceptados después de esa compra: si no, los pisaba.
   SELECT count(*) AS n,
          max(mi.origen_costo_real)    AS costo_real,
          max(mi.origen_costo_con_iva) AS costo_con_iva,
@@ -382,7 +425,10 @@ BEGIN
    WHERE mi.producto_destino_id = p_producto
      AND m.sucursal_destino_id = p_sucursal
      AND m.estado = 'aceptada'
-     AND m.resuelto_at > p_desde;
+     AND m.resuelto_at > p_desde
+     -- H3: un envío anterior a esta migración no guardó el costo real: no aplica nada (como
+     -- hoy); sólo dos de los tres dejaban la terna mezclada.
+     AND mi.origen_costo_real IS NOT NULL;
   IF e.n = 0 THEN
     RETURN;
   END IF;
@@ -432,23 +478,6 @@ $r$     AND public._cpp_fija_costo(ci.bonificacion, ci.costo_neto_unitario, ci.c
      AND NOT public._compra_producto_devuelto(c.id, ci.producto_id, ci.sucursal_id)
    ORDER BY c.fecha_compra DESC, c.created_at DESC, c.id DESC, ci.id DESC
 $r$, '_reposicion_desde_ultima_compra (sin las devueltas)');
-  v_def := pg_temp.parche(v_def,
-$a$         costo_con_iva      = public.costo_financiero_unitario(
-                                v_neto,
-                                COALESCE(v_ult.iva_linea, p.porcentaje_iva),
-                                COALESCE(v_ult.ii_linea, p.impuestos_internos),
-                                v_tipo),
-$a$,
-$r$         costo_con_iva      = public.costo_financiero_unitario(
-                                v_neto,
-                                COALESCE(v_ult.iva_linea, p.porcentaje_iva),
-                                COALESCE(v_ult.ii_linea, p.impuestos_internos),
-                                v_tipo)
-                              -- mig NNN (1593-b1, #1593): lo que el motor le sumó al costo
-                              -- real (cargos, factor del II declarado), como el alta.
-                              + COALESCE(v_ult.costo_real_unitario
-                                  - public.costo_real_unitario(v_neto, COALESCE(v_ult.ii_linea, p.impuestos_internos), v_tipo, 0), 0),
-$r$, '_reposicion_desde_ultima_compra (el costo con IVA)');
   v_def := pg_temp.parche(v_def,
 $a$   WHERE p.id = p_producto AND p.sucursal_id = p_sucursal;
 
@@ -526,7 +555,7 @@ END
 $parche_cpp$;
 
 -- =========================================================================
--- El alta: 1593-b3, 1557-b5 y 1593-b1
+-- El alta: 1593-b3 y 1557-b5
 -- =========================================================================
 DO $parche_alta$
 DECLARE
@@ -557,29 +586,12 @@ $r$       AND _cpp_fija_costo(ci.bonificacion, ci.costo_neto_unitario, ci.costo_
        /* mig NNN (1557-b5, #1557; D10) · una compra devuelta entera ya no es la mas nueva */
        AND NOT public._compra_producto_devuelto(c.id, ci.producto_id, ci.sucursal_id);
 $r$, 'registrar_compra_completa (1557-b5)');
-
-  v_def := pg_temp.parche(v_def,
-$a$      IF v_bonificacion >= 100 AND v_costo_real < 0 THEN
-        v_costo_real := 0;
-      END IF;
-    ELSE
-$a$,
-$r$      IF v_bonificacion >= 100 AND v_costo_real < 0 THEN
-        v_costo_real := 0;
-      END IF;
-      /* mig NNN (1593-b1, #1593) · el costo con IVA lleva lo que el motor le sumo al
-         costo real (cargos prorrateados, factor del II declarado), sin el IVA del cargo. */
-      v_costo_con_iva := v_costo_con_iva
-        + (v_costo_real - costo_real_unitario(v_costo_neto, v_impuestos_internos,
-                                              CASE WHEN v_sin_credito THEN 'ZZ' ELSE v_tipo_factura END, 0));
-    ELSE
-$r$, 'registrar_compra_completa (1593-b1)');
   EXECUTE v_def;
 END
 $parche_alta$;
 
 -- =========================================================================
--- La edición: SEG-1, 1593-b3, 1593-b1, STK-12 y 1557-b7
+-- La edición: SEG-1, 1593-b3, STK-12 y 1557-b7
 -- =========================================================================
 DO $parche_edicion$
 DECLARE
@@ -605,23 +617,6 @@ $r$  v_iva_efectivo := CASE WHEN v_sin_credito THEN 0 ELSE p_iva END;
              v_compra.letra_comprobante));
   END IF;
 $r$, 'actualizar_compra_items (1593-b3)');
-
-  v_def := pg_temp.parche(v_def,
-$a$      IF v_bonificacion >= 100 AND v_costo_real < 0 THEN
-        v_costo_real := 0;
-      END IF;
-    ELSE
-$a$,
-$r$      IF v_bonificacion >= 100 AND v_costo_real < 0 THEN
-        v_costo_real := 0;
-      END IF;
-      /* mig NNN (1593-b1, #1593) · el costo con IVA lleva lo que el motor le sumo al
-         costo real (ver el alta). */
-      v_costo_con_iva := v_costo_con_iva
-        + (v_costo_real - costo_real_unitario(v_costo_neto, v_impuestos_internos,
-                                              CASE WHEN v_sin_credito THEN 'ZZ' ELSE v_compra.tipo_factura END, 0));
-    ELSE
-$r$, 'actualizar_compra_items (1593-b1)');
 
   v_def := pg_temp.parche(v_def,
 $a$        UPDATE producto_lotes
@@ -683,7 +678,6 @@ $a$  v_resta NUMERIC;  -- #1557 (CMP-2)
 $a$,
 $r$  v_resta NUMERIC;  -- #1557 (CMP-2)
   v_compra RECORD;                   -- mig NNN (1557-b4)
-  v_factor NUMERIC;                  -- mig NNN (1590-b)
   v_sub_bruto NUMERIC; v_iva_bruto NUMERIC;  -- mig NNN (1590-b)
   v_lotes JSONB := '[]'::JSONB;      -- mig NNN (1590-a)
 $r$, 'registrar_nota_credito (declaración)');
@@ -764,24 +758,32 @@ $a$    SELECT jsonb_agg(to_jsonb(x) ORDER BY x.producto_id)
                      * COALESCE(co.base_iva / NULLIF(co.neto, 0), 0) / 100, 2) AS iva
 $a$,
 $r$    /* mig NNN (1590-b, #1590; decision del dueño D16) · NETA DE LOS DESCUENTOS DE
-       CABECERA. El costo de cada producto se multiplica por el factor de la compra
+       CABECERA. El costo de cada producto se multiplica por su factor
        (_compra_factor_neto): devolver todo nunca acredita mas que lo pagado (una ZZ
        de 10 x 100 con un descuento de -150 acreditaba 1.000 sobre 850). `subtotal` e
        `iva` son lo que se acredita; `subtotal_bruto` e `iva_bruto`, la cuenta sin el
        factor, que es la que hace un front de antes: se acepta cualquiera de las dos. */
-    v_factor := public._compra_factor_neto(p_compra_id, v_sucursal);
     SELECT jsonb_agg(to_jsonb(x) ORDER BY x.producto_id)
       INTO v_lineas
       FROM (
         SELECT pe.producto_id, pe.cantidad, pe.sub_front, pr.stock, pr.nombre,
-               co.neto / co.comprado * v_factor AS costo,
-               round(pe.cantidad * co.neto / co.comprado * v_factor, 2) AS subtotal,
-               round(round(pe.cantidad * co.neto / co.comprado * v_factor, 2)
+               co.neto / co.comprado * fx.f AS costo,
+               round(pe.cantidad * co.neto / co.comprado * fx.f, 2) AS subtotal,
+               round(round(pe.cantidad * co.neto / co.comprado * fx.f, 2)
                      * COALESCE(co.base_iva / NULLIF(co.neto, 0), 0) / 100, 2) AS iva,
                round(pe.cantidad * co.neto / co.comprado, 2) AS subtotal_bruto,
                round(round(pe.cantidad * co.neto / co.comprado, 2)
                      * COALESCE(co.base_iva / NULLIF(co.neto, 0), 0) / 100, 2) AS iva_bruto
 $r$, 'registrar_nota_credito (1590-b, el factor)');
+
+  v_def := pg_temp.parche(v_def,
+$a$          JOIN productos pr ON pr.id = pe.producto_id AND pr.sucursal_id = v_sucursal
+      ) x;
+$a$,
+$r$          JOIN productos pr ON pr.id = pe.producto_id AND pr.sucursal_id = v_sucursal
+         CROSS JOIN LATERAL (SELECT public._compra_factor_neto(p_compra_id, pe.producto_id, v_sucursal) AS f) fx  -- mig NNN (1590-b)
+      ) x;
+$r$, 'registrar_nota_credito (1590-b, el factor por producto)');
 
   v_def := pg_temp.parche(v_def,
 $a$    SELECT COALESCE(sum(l.subtotal), 0), COALESCE(sum(l.iva), 0)
@@ -910,7 +912,7 @@ $r$  IF v_comprado IS NULL THEN
   END IF;
 
   -- mig NNN (1590-b, #1590; D16): neto de los descuentos de cabecera, como la nota por factura.
-  v_costo := v_costo * public._compra_factor_neto(v_lote.compra_id, v_sucursal);
+  v_costo := v_costo * public._compra_factor_neto(v_lote.compra_id, v_lote.producto_id, v_sucursal);
 $r$, 'registrar_nota_credito_lote (1590-b)');
 
   v_def := pg_temp.parche(v_def,
@@ -986,10 +988,17 @@ $r$, 'aceptar_movimiento_sucursal (declaración)');
 $a$      IF NOT FOUND THEN RAISE EXCEPTION 'El producto destino elegido no existe en la sucursal'; END IF;
 $a$,
 $r$      IF NOT FOUND THEN RAISE EXCEPTION 'El producto destino elegido no existe en la sucursal'; END IF;
-      -- mig NNN (1558-b8, #1558; decisión del dueño D7): un destino desactivado se acepta y se
-      -- reactiva (el UPDATE de abajo): es normal que la otra sucursal lo tenga desactivado.
+      -- mig NNN (1558-b8, #1558; decisión del dueño D7): un destino desactivado se reactiva
+      -- (el UPDATE de abajo) sólo si quien acepta lo confirmó: el renglón trae
+      -- "reactivar": true. Sin la marca se rechaza: reactivar en silencio despertaba un
+      -- producto dado de baja a propósito (H2).
       IF (SELECT NOT p.activo FROM productos p WHERE p.id = v_dest_id AND p.sucursal_id = v_destino) THEN
-        v_reactivados := v_reactivados || v_dest_id;
+        IF v_res->'reactivar' = 'true'::jsonb THEN
+          v_reactivados := v_reactivados || v_dest_id;
+        ELSE
+          RAISE EXCEPTION 'El producto «%» está desactivado en esta sucursal: confirmá que querés reactivarlo o elegí otro.',
+            (SELECT p.nombre FROM productos p WHERE p.id = v_dest_id AND p.sucursal_id = v_destino);
+        END IF;
       END IF;
 $r$, 'aceptar_movimiento_sucursal (1558-b8, el desactivado)');
 
@@ -998,7 +1007,7 @@ $a$        costo_promedio = v_promedio_nuevo, costo_real = v_real_nuevo, updated
       WHERE id = v_dest_id AND sucursal_id = v_destino;
 $a$,
 $r$        costo_promedio = v_promedio_nuevo, costo_real = v_real_nuevo,
-        activo = true,  -- mig NNN (1558-b8)
+        activo = (activo OR v_dest_id = ANY(v_reactivados)),  -- mig NNN (1558-b8)
         updated_at = now()
       WHERE id = v_dest_id AND sucursal_id = v_destino;
 $r$, 'aceptar_movimiento_sucursal (1558-b8, reactivar)');
@@ -1070,12 +1079,13 @@ $r$    RAISE EXCEPTION 'La compra % esta cancelada: no se le pueden cargar venci
 
   /* mig NNN (STK-14, #1542) · LAS REGLAS DE EDITAR LA COMPRA. Por llamada directa
      se le cambiaban los vencimientos a una compra con notas de credito (que ya
-     bajaron sus lotes), fuera de los 7 dias de la edicion y de un encargado. */
+     bajaron sus lotes), fuera de la ventana de la edicion y de un encargado. */
   IF EXISTS (SELECT 1 FROM public.notas_credito nc
               WHERE nc.compra_id = p_compra_id AND nc.sucursal_id = v_sucursal AND NOT nc.anulada) THEN
     RAISE EXCEPTION 'La compra % tiene notas de crédito: sus vencimientos ya no se cambian desde la compra. Un lote se corrige desde la ficha del producto.', p_compra_id;
   END IF;
-  IF EXTRACT(EPOCH FROM (now() - v_creada)) / 86400 > 7 THEN
+  -- H9: un día más que la edición (7 desde el alta), que la llama justo después de guardar.
+  IF EXTRACT(EPOCH FROM (now() - v_creada)) / 86400 > 8 THEN
     RAISE EXCEPTION 'La compra % se cargó hace más de 7 días: sus vencimientos ya no se cambian desde la compra. Un lote se corrige desde la ficha del producto.', p_compra_id;
   END IF;
   IF NOT public.es_admin()
@@ -1154,6 +1164,15 @@ BEGIN
   SELECT * INTO v_nota FROM notas_credito WHERE id = p_nota_id AND sucursal_id = v_sucursal FOR UPDATE;
   IF v_nota.anulada THEN
     RETURN jsonb_build_object('success', false, 'error', 'La nota de crédito ya está anulada');
+  END IF;
+
+  -- H11: una devolución anterior a la 483 (aplicada el 10/11/2026 a las 19:21:45 UTC) no
+  -- corrigió el promedio ni devolvió a su lote: anularla desharía movimientos que no existieron.
+  -- Un ajuste no movió stock, lotes ni promedio: se anula de cualquier fecha.
+  IF v_nota.tipo = 'devolucion'
+     AND COALESCE(v_nota.created_at, v_nota.fecha::timestamptz) < timestamptz '2026-11-10 19:21:45+00' THEN
+    RETURN jsonb_build_object('success', false, 'error',
+      'Esta nota es anterior al 10/11/2026 y no se puede anular desde acá: cuando se cargó no corrigió el costo promedio ni devolvió las unidades a su lote, y anularla desharía movimientos que no existieron. Si la devolución no salió, corregí el stock desde la ficha del producto.');
   END IF;
 
   UPDATE notas_credito
@@ -1235,11 +1254,11 @@ $function$;
 -- Permisos: los helpers son de server; la RPC, de quien carga notas
 -- =========================================================================
 REVOKE ALL ON FUNCTION public._compra_producto_devuelto(bigint,bigint,bigint) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public._compra_factor_neto(bigint,bigint) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._compra_factor_neto(bigint,bigint,bigint) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._reposicion_aplicar_envios(bigint,bigint,timestamptz) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._reposicion_tras_nota(bigint,bigint,bigint) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._compra_producto_devuelto(bigint,bigint,bigint) TO service_role;
-GRANT EXECUTE ON FUNCTION public._compra_factor_neto(bigint,bigint) TO service_role;
+GRANT EXECUTE ON FUNCTION public._compra_factor_neto(bigint,bigint,bigint) TO service_role;
 GRANT EXECUTE ON FUNCTION public._reposicion_aplicar_envios(bigint,bigint,timestamptz) TO service_role;
 GRANT EXECUTE ON FUNCTION public._reposicion_tras_nota(bigint,bigint,bigint) TO service_role;
 
@@ -1257,35 +1276,35 @@ DECLARE
 BEGIN
   FOR r IN SELECT * FROM (VALUES
     ('public.registrar_compra_completa(bigint,character varying,character varying,date,numeric,numeric,numeric,numeric,character varying,text,uuid,jsonb,character varying,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,text)',
-     'e5e0067ec95ded33096aad70f3cb68c0', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+     '9f1c391db98056da0d89de7d16a3e171', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.actualizar_compra_items(bigint,jsonb,numeric,numeric,numeric,uuid,numeric,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,bigint[])',
-     'bbdd25695b8dfaa61a7db431011c2384', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+     '87e8096b7c375c82b6bcf29a69026015', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.registrar_nota_credito(bigint,character varying,text,numeric,numeric,numeric,uuid,jsonb,numeric)',
-     '3412d73ba51d8efb2a24cc6c636b1dc7', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+     'b589e283f8ce0d611b1c2661890c2cfe', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.registrar_nota_credito_lote(bigint,numeric,text,text)',
-     '0cfa702be5aaa43679a6795a3a5b1192', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+     '6a3b2d6a88e7cc7dc36ca1680f849888', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.aceptar_movimiento_sucursal(bigint,jsonb)',
-     'f7af3352dfebd372b53c38c0e88a6d3a', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+     '8dc1b5fdb24362cfa655db1af7ae3093', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.sincronizar_lotes_compra(bigint,jsonb)',
-     'f25fc7665fecc43f3f272b46b08eb78c', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+     '46a5c59f948074714a75876eb9c6c3f0', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public._cpp_arrastrar(bigint,bigint,bigint,timestamp with time zone,integer,numeric,numeric)',
      '3cbb27fa967fad761c660aab300b3c2d', false, '{postgres=X/postgres,service_role=X/postgres}'),
     ('public._cpp_devolucion_compra(bigint,bigint,bigint,integer,integer)',
      'bff2ccc6d4db410d49f7217488619178', false, '{postgres=X/postgres,service_role=X/postgres}'),
     ('public._reposicion_desde_ultima_compra(bigint,bigint)',
-     'c1769eccef2cac3adb701f2f104cf580', false, '{postgres=X/postgres,service_role=X/postgres}'),
+     '322d0edf2363c1ccf22785a1f8f54200', false, '{postgres=X/postgres,service_role=X/postgres}'),
     ('public._ninguna_compra_mas_nueva(bigint,bigint,bigint)',
      '36962a469c877fad8b4965885714e684', false, '{postgres=X/postgres,service_role=X/postgres}'),
     ('public._compra_producto_devuelto(bigint,bigint,bigint)',
      '293e276020f1a426a088ca1912609c93', false, '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public._compra_factor_neto(bigint,bigint)',
-     'ac1265b1a46f6f8c3a32056e2f95d48d', false, '{postgres=X/postgres,service_role=X/postgres}'),
+    ('public._compra_factor_neto(bigint,bigint,bigint)',
+     'd0ba3c950c3205b0363b93f9e1e8b317', false, '{postgres=X/postgres,service_role=X/postgres}'),
     ('public._reposicion_aplicar_envios(bigint,bigint,timestamp with time zone)',
-     'f36399f3c2a6c52e9a2a5e0732f8dcd3', false, '{postgres=X/postgres,service_role=X/postgres}'),
+     'bd6054824334c11783b97071ae27bdc7', false, '{postgres=X/postgres,service_role=X/postgres}'),
     ('public._reposicion_tras_nota(bigint,bigint,bigint)',
      '7f4108145b650be746bc12366cd230c0', false, '{postgres=X/postgres,service_role=X/postgres}'),
     ('public.anular_nota_credito_compra(bigint,text)',
-     '9adaaaff3478ea10d459d8f09397ec47', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}')
+     'd727f0b616950dc5388ff5654d04a485', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}')
   ) AS t(f, h, def, acl) LOOP
     SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS def INTO x
       FROM pg_proc WHERE oid = r.f::regprocedure;

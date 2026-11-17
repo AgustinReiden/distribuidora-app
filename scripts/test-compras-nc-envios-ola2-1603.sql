@@ -3,7 +3,8 @@
 --
 -- Un único DO con datos propios que termina SIEMPRE en una excepción: no deja rastro (salvo
 -- valores de secuencia). Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ' con la lista. Sin la
--- migración falla en todos los casos menos S1 (regresión) y SN (declarado).
+-- migración falla en todos los casos menos S1 (regresión), SN y C1 (declarados) y B7V (lo de
+-- hoy).
 --
 --   A   · 1590-a · Producto con 10 u. a 80 (bolsa) y una ZZ de 10 a 100 con su lote: promedio
 --         90. Una NC de 4 u. sale del lote (lote 6, stock 16, promedio 87,5). Anularla deja
@@ -15,16 +16,21 @@
 --         todo acredita 850, no 1.000, mande la pantalla el bruto o el neto. FC A de 10 × 100
 --         al 21 % con una bonificación de cabecera de −100 (total 1.089): acredita 1.089, no
 --         1.210. La NC por lote de una ZZ con −150 de descuento también: 850.
+--   B4W · 1590-b (H4) · ZZ con W1 y W2 de 10 × 100 y un descuento de −200 prorrateado sólo a
+--         W1 (total 1.800): devolver W1 acredita 800 y W2 1.000 (con el factor parejo, 900 y 900).
 --   B4  · 1557-b4 · El ajuste de una ZZ con IVA se rechaza; sin IVA entra.
 --   B5  · 1557-b5 · Compras de 10 a 100 (anteayer) y de 10 a 120 (ayer): reposición 120.
 --         Devolver entera la de ayer la vuelve a 100; anular esa nota, a 120.
 --   B7  · 1557-b7 · Una ZZ de 10 a 100, y un envío de un origen con costo real 150: el
 --         destino queda en 150. Corregir la compra a 110 lo deja en 150, no en 110.
---   B8  · 1558-b8 · Un envío a un producto desactivado se acepta y lo reactiva.
+--   B7V · 1557-b7 (H3) · Lo mismo con un envío anterior a la migración (sin origen_costo_real):
+--         corregir la compra deja la terna como hoy, 110 / 110 / 110, no 110 / 150 / 150.
+--   B8  · 1558-b8 (H2) · Un envío a un producto desactivado sin la marca `reactivar` se rechaza
+--         con el nombre del producto y no se reactiva; con la marca, se acepta y lo reactiva.
 --   S16 · STK-16 · Un envío creado sin promedio del origen (NULL) y aceptado cuando el origen
 --         tiene 50: el ítem guarda 50.
---   C1  · 1593-b1 · FC A de 10 × 100 al 21 % con un flete no gravado de 100 prorrateado:
---         costo real 110 y costo con IVA 131 (antes 121).
+--   C1  · 1593-b1 NO va en esta migración (H1): FC A de 10 × 100 al 21 % con un flete no
+--         gravado de 100 prorrateado deja costo real 110 y costo con IVA 121, como hoy.
 --   C3  · 1593-b3 · Una FC B con IVA 21 mandada directo se rechaza (antes entraba con
 --         COMPRA-A1 en rojo).
 --   C5  · 1593-b5 · Un número de nota de 60 caracteres se rechaza con su motivo, en las dos
@@ -32,8 +38,10 @@
 --   K12 · STK-12 · Una ZZ de 100 con lotes de 60 y 40 (bolsa 0) corregida a 1: el lote que
 --         la segunda pasada saca entero se borra (antes quedaba en 1/0); queda uno en 1/1.
 --   K14 · STK-14 · sincronizar_lotes_compra rechaza una compra con NC vigente, una de más de
---         7 días y al encargado sobre una compra que ya tiene lotes; el encargado sí carga
---         los de una compra sin lotes.
+--         8 días (H9: una de 7 días y medio, al límite de la edición, pasa) y al encargado
+--         sobre una compra que ya tiene lotes; el encargado sí carga los de una compra sin lotes.
+--   H11 · Una NC de devolución anterior al 10/11/2026 19:21:45 UTC (la 483) no se anula: no
+--         corrigió el promedio ni sus lotes. Un ajuste de esa fecha sí se anula.
 --   P10 · 1557-b10 · Dos proveedores de la misma sucursal con «20-11111111-2» y
 --         «20111111112» no entran; en otra sucursal sí.
 --   S1  · SEG-1 · Un admin desactivado no edita una compra (regresión: ya lo cortaba la
@@ -286,6 +294,30 @@ BEGIN
     END;
   END;
 
+  -- ================================================================ B4W ====
+  DECLARE
+    v_w1 bigint := pg_temp.producto(1, 'B4W uno', 0, NULL);
+    v_w2 bigint := pg_temp.producto(1, 'B4W dos', 0, NULL);
+    v_c  bigint;
+    v_d  jsonb := jsonb_build_array(jsonb_build_object('concepto', 'Descuento W1', 'monto', -200, 'condicion_iva', 'no_gravado',
+                    'en_factura', true, 'prorratea_al_costo', true, 'base_prorrateo', 'unidades',
+                    'pesos', jsonb_build_object('0', 10)));
+    v_t1 text; v_t2 text;
+  BEGIN
+    v_c := pg_temp.compra(v_adm, pg_temp.lineas(jsonb_build_array(
+             jsonb_build_object('producto_id', v_w1, 'cantidad', 10, 'costo_unitario', 100),
+             jsonb_build_object('producto_id', v_w2, 'cantidad', 10, 'costo_unitario', 100))), 'ZZ', v_hoy, 0, 1800, v_d);
+    v_j := pg_temp.nc(v_adm, v_c, jsonb_build_array(jsonb_build_object('producto_id', v_w1, 'cantidad', 10, 'subtotal', 1000)), 1000, 0);
+    v_t1 := format('%s %s', v_j->>'success', v_j->>'total');
+    v_j := pg_temp.nc(v_adm, v_c, jsonb_build_array(jsonb_build_object('producto_id', v_w2, 'cantidad', 10, 'subtotal', 1000)), 1000, 0);
+    v_t2 := format('%s %s', v_j->>'success', v_j->>'total');
+    v_t := format('W1 %s | W2 %s | suma %s de %s', v_t1, v_t2,
+                  (SELECT sum(total) FROM notas_credito WHERE compra_id = v_c), (SELECT total FROM compras WHERE id = v_c));
+    IF v_t IS DISTINCT FROM 'W1 true 800.00 | W2 true 1000.00 | suma 1800.00 de 1800.00' THEN
+      v_fallas := v_fallas || format('B4W · el descuento de −200 sólo sobre W1: esperaba W1 800, W2 1000, suma 1800 de 1800 y dio %s', v_t);
+    END IF;
+  END;
+
   -- ================================================================= B4 ====
   DECLARE
     v_p bigint := pg_temp.producto(1, 'B4', 0, NULL);
@@ -379,16 +411,54 @@ BEGIN
     SELECT id INTO v_item FROM movimiento_sucursal_items WHERE movimiento_id = v_mov;
     UPDATE productos SET costo_promedio = 50 WHERE id = v_o2;
     PERFORM pg_temp.como(v_adm, 1);
+    -- sin la marca: se rechaza y no se reactiva
     v_j := public.aceptar_movimiento_sucursal(v_mov, jsonb_build_array(jsonb_build_object(
              'item_id', v_item, 'accion', 'match_existente', 'producto_destino_id', v_d2)));
+    v_t := format('%s activo=%s', v_j->>'success', (SELECT activo FROM productos WHERE id = v_d2));
+    IF v_t IS DISTINCT FROM 'false activo=f' OR position('está desactivado en esta sucursal' in COALESCE(v_j->>'error', '')) = 0 THEN
+      v_fallas := v_fallas || format('B8 · sin la marca, un destino desactivado debía rechazarse con su motivo y dio %s (%s)', v_t, v_j);
+    END IF;
+    -- con la marca: se acepta y se reactiva
+    v_j := public.aceptar_movimiento_sucursal(v_mov, jsonb_build_array(jsonb_build_object(
+             'item_id', v_item, 'accion', 'match_existente', 'producto_destino_id', v_d2, 'reactivar', true)));
     v_t := format('%s activo=%s reactivados=%s', v_j->>'success', (SELECT activo FROM productos WHERE id = v_d2),
                   COALESCE(v_j->'reactivados' = jsonb_build_array(v_d2), false));
     IF v_t IS DISTINCT FROM 'true activo=t reactivados=t' THEN
-      v_fallas := v_fallas || format('B8 · envío a un destino desactivado: esperaba true activo=t reactivados=t y dio %s', v_t);
+      v_fallas := v_fallas || format('B8 · con la marca, el destino desactivado debía aceptarse y reactivarse y dio %s (%s)', v_t, v_j);
     END IF;
     v_r1 := (SELECT origen_costo_promedio FROM movimiento_sucursal_items WHERE id = v_item);
     IF v_r1 IS DISTINCT FROM 50 THEN
       v_fallas := v_fallas || format('S16 · el envío sin foto del promedio debía guardar el que usó (50) y guardó %s', v_r1);
+    END IF;
+  END;
+
+  -- ================================================================ B7V ====
+  DECLARE
+    v_d   bigint := pg_temp.producto(1, 'B7V destino', 0, NULL);
+    v_o   bigint := pg_temp.producto(2, 'B7V origen', 10, 150);
+    v_c bigint; v_mov bigint; v_item bigint;
+  BEGIN
+    v_c := pg_temp.compra(v_adm, pg_temp.lineas(jsonb_build_array(
+             jsonb_build_object('producto_id', v_d, 'cantidad', 10, 'costo_unitario', 100))), 'ZZ', v_hoy, 0, 1000);
+    UPDATE compras SET created_at = now() - interval '1 hour' WHERE id = v_c;
+    PERFORM pg_temp.como(v_adm, 2);
+    v_j := public.crear_movimiento_sucursal(1, 'ensayo b2 b7v', jsonb_build_array(jsonb_build_object('producto_id', v_o, 'cantidad', 5)));
+    v_mov := (v_j->>'movimiento_id')::bigint;
+    SELECT id INTO v_item FROM movimiento_sucursal_items WHERE movimiento_id = v_mov;
+    PERFORM pg_temp.como(v_adm, 1);
+    v_j := public.aceptar_movimiento_sucursal(v_mov, jsonb_build_array(jsonb_build_object(
+             'item_id', v_item, 'accion', 'match_existente', 'producto_destino_id', v_d)));
+    -- como un envío aceptado antes de la migración: sin el costo real del origen
+    BEGIN
+      EXECUTE 'UPDATE public.movimiento_sucursal_items SET origen_costo_real = NULL WHERE id = $1' USING v_item;
+    EXCEPTION WHEN undefined_column THEN NULL;
+    END;
+    v_j := pg_temp.editar(v_adm, v_c, pg_temp.lineas(jsonb_build_array(
+             jsonb_build_object('producto_id', v_d, 'cantidad', 10, 'costo_unitario', 110))), 0, 1100);
+    v_t := (SELECT format('real=%s sin=%s con=%s', round(costo_real, 2), round(costo_sin_iva, 2), round(costo_con_iva, 2))
+              FROM productos WHERE id = v_d);
+    IF v_t IS DISTINCT FROM 'real=110.00 sin=110.00 con=110.00' THEN
+      v_fallas := v_fallas || format('B7V · con un envío viejo, corregir la compra a 110: esperaba real=110.00 sin=110.00 con=110.00 (como hoy) y dio %s', v_t);
     END IF;
   END;
 
@@ -404,8 +474,8 @@ BEGIN
               jsonb_build_object('producto_id', v_p, 'cantidad', 10, 'costo_unitario', 100, 'porcentaje_iva', 21,
                                  'condicion_iva', 'gravado'))), 'FC', v_hoy, 210, 1210, v_flete, 'A');
     v_t := (SELECT format('real=%s con_iva=%s', round(costo_real, 2), round(costo_con_iva, 2)) FROM productos WHERE id = v_p);
-    IF v_t IS DISTINCT FROM 'real=110.00 con_iva=131.00' THEN
-      v_fallas := v_fallas || format('C1 · FC A con un flete de 100: esperaba real=110.00 con_iva=131.00 y dio %s', v_t);
+    IF v_t IS DISTINCT FROM 'real=110.00 con_iva=121.00' THEN
+      v_fallas := v_fallas || format('C1 · FC A con un flete de 100: esperaba real=110.00 con_iva=121.00 (como hoy, H1) y dio %s', v_t);
     END IF;
   END;
 
@@ -488,9 +558,18 @@ BEGIN
       v_r := v_r || 'nc:pasa ';
     EXCEPTION WHEN OTHERS THEN v_r := v_r || 'nc:no ';
     END;
-    -- de más de 7 días
+    -- al límite de la edición (7 días y medio): pasa (H9)
     v_c2 := pg_temp.compra(v_adm, v_lin, 'ZZ', v_hoy, 0, 50);
-    UPDATE compras SET created_at = now() - interval '8 days' WHERE id = v_c2;
+    UPDATE compras SET created_at = now() - interval '7 days 12 hours' WHERE id = v_c2;
+    BEGIN
+      v_j := pg_temp.lotes_compra(v_adm, v_c2, jsonb_build_array(jsonb_build_object(
+               'producto_id', v_p, 'fecha_vencimiento', v_hoy + 30, 'cantidad', 5)));
+      v_r := v_r || 'limite:pasa ';
+    EXCEPTION WHEN OTHERS THEN v_r := v_r || 'limite:no ';
+    END;
+    -- de más de 8 días
+    v_c2 := pg_temp.compra(v_adm, v_lin, 'ZZ', v_hoy, 0, 50);
+    UPDATE compras SET created_at = now() - interval '9 days' WHERE id = v_c2;
     BEGIN
       v_j := pg_temp.lotes_compra(v_adm, v_c2, jsonb_build_array(jsonb_build_object(
                'producto_id', v_p, 'fecha_vencimiento', v_hoy + 30, 'cantidad', 5)));
@@ -511,9 +590,37 @@ BEGIN
       v_r := v_r || 'enc2:pasa';
     EXCEPTION WHEN OTHERS THEN v_r := v_r || 'enc2:no';
     END;
-    IF v_r IS DISTINCT FROM 'nc:no vieja:no enc1:pasa enc2:no' THEN
-      v_fallas := v_fallas || format('K14 · sincronizar_lotes_compra: esperaba nc:no vieja:no enc1:pasa enc2:no y dio %s', v_r);
+    IF v_r IS DISTINCT FROM 'nc:no limite:pasa vieja:no enc1:pasa enc2:no' THEN
+      v_fallas := v_fallas || format('K14 · sincronizar_lotes_compra: esperaba nc:no limite:pasa vieja:no enc1:pasa enc2:no y dio %s', v_r);
     END IF;
+  END;
+
+  -- ================================================================ H11 ====
+  DECLARE
+    v_p bigint := pg_temp.producto(1, 'H11', 0, NULL);
+    v_c bigint; v_dev bigint; v_aj bigint; v_r text;
+  BEGIN
+    v_c := pg_temp.compra(v_adm, pg_temp.lineas(jsonb_build_array(
+             jsonb_build_object('producto_id', v_p, 'cantidad', 10, 'costo_unitario', 100))), 'ZZ', v_hoy, 0, 1000);
+    v_dev := (pg_temp.nc(v_adm, v_c, jsonb_build_array(jsonb_build_object('producto_id', v_p, 'cantidad', 2, 'subtotal', 200)), 200, 0)
+              ->>'nota_credito_id')::bigint;
+    v_aj := (pg_temp.ajuste(v_adm, v_c, 100, 0)->>'nota_credito_id')::bigint;
+    -- como las de prod: la devolución del 02/10 y el ajuste del 01/04
+    UPDATE notas_credito SET created_at = timestamptz '2026-10-02 15:00:00+00' WHERE id = v_dev;
+    UPDATE notas_credito SET created_at = timestamptz '2026-04-01 15:00:00+00' WHERE id = v_aj;
+    BEGIN
+      v_j := pg_temp.anular(v_adm, v_dev, 'prueba');
+      v_r := format('dev:%s', v_j->>'success');
+      IF COALESCE((v_j->>'success')::boolean, true) OR position('anterior al 10/11/2026' in COALESCE(v_j->>'error', '')) = 0 THEN
+        v_fallas := v_fallas || format('H11 · una devolución anterior a la 483 debía rechazarse con su motivo y dio %s', v_j);
+      END IF;
+      v_j := pg_temp.anular(v_adm, v_aj, 'prueba');
+      IF NOT COALESCE((v_j->>'success')::boolean, false) THEN
+        v_fallas := v_fallas || format('H11 · un ajuste viejo debía anularse y dio %s', v_j);
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      v_fallas := v_fallas || format('H11 · %s %s', SQLSTATE, SQLERRM);
+    END;
   END;
 
   -- ================================================================ P10 ====
@@ -566,7 +673,7 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = format(E'ENSAYO FALLÓ (%s fallas, todo revertido):\n- %s\nnotas:\n  %s',
       cardinality(v_fallas), array_to_string(v_fallas, E'\n- '), array_to_string(v_notas, E'\n  '));
   END IF;
-  RAISE EXCEPTION USING ERRCODE = 'ZZ0OK', MESSAGE = format(E'ENSAYO OK (todo revertido) · A AJ B B4 B5 B7 B8 S16 C1 C3 C5 K12 K14 P10 S1 SN\nnotas:\n  %s',
+  RAISE EXCEPTION USING ERRCODE = 'ZZ0OK', MESSAGE = format(E'ENSAYO OK (todo revertido) · A AJ B B4W B4 B5 B7 B8 S16 B7V C1 C3 C5 K12 K14 H11 P10 S1 SN\nnotas:\n  %s',
     array_to_string(v_notas, E'\n  '));
 END
 $ensayo$;
