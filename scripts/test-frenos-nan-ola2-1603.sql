@@ -12,8 +12,8 @@
 --   N7 · 1567-10: grupo_precio_escala_minimos.precio_unitario_override 'NaN' da 23514; NULL y 50 entran.
 --   N8 · H4: pedido_items.costo_unitario_al_crear en 'NaN', 'Infinity' o '-Infinity', y precio_lista_al_crear o
 --        descuento_pct en 'NaN', dan 23514; un costo −2 entra (sin piso).
---   N9 · 1596-b1: productos.precio −1, precio_sin_iva −1, stock_minimo −1, cantidad_minima_venta 0 y 100.001, y un
---        nombre vacío o de espacios dan 23514; 0, 100.000 y NULL entran. Por REST como admin, el nombre vacío también.
+--   N9 · 1596-b1: productos.precio −1, precio_sin_iva −1, stock_minimo −1, cantidad_minima_venta 0 y 100.000.000, y un
+--        nombre vacío o de espacios dan 23514; 0, 99.999.999 y NULL entran. Por REST como admin, el nombre vacío también.
 --   N10 · 1561-b13: clientes.razon_social, nombre_fantasia y direccion vacíos o de espacios dan 23514, por el camino
 --        del server y por REST como admin; un texto normal entra.
 --   N11 · El barrido: bot_costo_llm_mensual.usd, bot_pedidos_pendientes.cargo_mostrado, bot_presupuesto_llm
@@ -242,11 +242,11 @@ BEGIN
   f := pg_temp.b7_caso(f, 'productos', v, 'precio_sin_iva = -1', 'productos_precios_no_negativos');
   f := pg_temp.b7_caso(f, 'productos', v, 'stock_minimo = -1', 'productos_stock_minimo_no_negativo');
   f := pg_temp.b7_caso(f, 'productos', v, 'cantidad_minima_venta = 0', 'productos_cantidad_minima_venta_check');
-  f := pg_temp.b7_caso(f, 'productos', v, 'cantidad_minima_venta = 100001', 'productos_cantidad_minima_venta_check');
+  f := pg_temp.b7_caso(f, 'productos', v, 'cantidad_minima_venta = 100000000', 'productos_cantidad_minima_venta_check');
   f := pg_temp.b7_caso(f, 'productos', v, $$nombre = ''$$, 'productos_nombre_no_vacio');
   f := pg_temp.b7_caso(f, 'productos', v, $$nombre = '   '$$, 'productos_nombre_no_vacio');
   f := pg_temp.b7_caso(f, 'productos', v, 'precio = 0, precio_sin_iva = 0, stock_minimo = 0', NULL);
-  f := pg_temp.b7_caso(f, 'productos', v, 'cantidad_minima_venta = 100000', NULL);
+  f := pg_temp.b7_caso(f, 'productos', v, 'cantidad_minima_venta = 99999999', NULL);
   f := pg_temp.b7_caso(f, 'productos', v, 'cantidad_minima_venta = NULL, stock_minimo = NULL, precio_sin_iva = NULL', NULL);
   -- Por REST, como el admin (un producto del ensayo de la sucursal 1).
   f := pg_temp.b7_caso(f, 'productos', v, $$nombre = ' '$$, 'productos_nombre_no_vacio', 'rest', v_adm);

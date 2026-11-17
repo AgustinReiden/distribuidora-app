@@ -34,7 +34,7 @@
 -- Cómo:
 --   El freno va en la columna (regla de CLAUDE.md): cubre la RPC, el REST y los triggers. No se toca ninguna función.
 --   · Lo que viene del usuario lleva su rango: la bonificación de 0 a 100; el precio y el precio sin IVA >= 0; el
---     stock mínimo >= 0; el mínimo de venta hasta 100.000 unidades; las coordenadas de la sucursal en ±90 / ±180.
+--     stock mínimo >= 0; el mínimo de venta hasta 99.999.999 (D36 de #1596); las coordenadas de la sucursal en ±90 / ±180.
 --     Un techo deja afuera al NaN y al infinito.
 --   · Lo que tiene piso suma `<> 'NaN'` (y `<> 'Infinity'` si la columna no tiene precisión; el '-Infinity' ya lo
 --     deja afuera el piso).
@@ -63,6 +63,19 @@ $lf$;
 -- Los ALTER TABLE toman ACCESS EXCLUSIVE mientras validan (pedido_items es la tabla grande). Si hay una transacción
 -- larga adelante, mejor fallar y reintentar que dejar la cola de locks trabada detrás.
 SET LOCAL lock_timeout = '5s';
+
+-- Todos los locks juntos y al principio, sin esperar. Tomados tabla por tabla con cada ALTER, la migración retendría
+-- pedido_items mientras espera productos o clientes, y el alta de un pedido (clientes → productos → pedido_items), la
+-- compra y el bot los toman en otro orden: deadlock, y muere la transacción de la app. Con NOWAIT la migración nunca
+-- espera: o los consigue todos ya, o falla en el acto sin haber bloqueado nada y se reintenta. Después de este LOCK
+-- ningún ALTER espera. El lock_timeout queda como red.
+LOCK TABLE public.gastos, public.compra_cargos, public.compra_items, public.notas_credito_venta,
+           public.nota_credito_venta_items, public.pedido_combos, public.pedido_item_sustituciones, public.pedido_items,
+           public.grupo_precio_escala_minimos, public.productos, public.clientes, public.bot_costo_llm_mensual,
+           public.bot_pedidos_pendientes, public.bot_presupuesto_llm, public.empleado_liquidaciones,
+           public.rendicion_faltantes, public.movimiento_sucursal_items, public.movimientos_sucursal,
+           public.rendicion_pagos_confirmados, public.rendiciones_control, public.sucursales
+  IN ACCESS EXCLUSIVE MODE NOWAIT;
 
 -- ---------------------------------------------------------------------------
 -- Premisas de esquema (leídas en el volcado del 16/11, ledger en la 512)
@@ -206,7 +219,7 @@ BEGIN
       ('productos.precios', (SELECT count(*) FROM public.productos WHERE precio < 0 OR precio_sin_iva < 0)),
       ('productos.stock_minimo', (SELECT count(*) FROM public.productos WHERE stock_minimo < 0)),
       ('productos.cantidad_minima_venta', (SELECT count(*) FROM public.productos
-                                            WHERE cantidad_minima_venta <= 0 OR cantidad_minima_venta > 100000)),
+                                            WHERE cantidad_minima_venta <= 0 OR cantidad_minima_venta > 99999999)),
       ('productos.nombre', (SELECT count(*) FROM public.productos WHERE btrim(nombre) = '')),
       ('clientes.textos', (SELECT count(*) FROM public.clientes
                             WHERE btrim(razon_social) = '' OR btrim(nombre_fantasia) = '' OR btrim(direccion) = '')),
@@ -349,10 +362,10 @@ ALTER TABLE public.productos
   CHECK (precio >= 0 AND precio_sin_iva >= 0),
   ADD CONSTRAINT productos_stock_minimo_no_negativo
   CHECK (stock_minimo >= 0),
-  -- Un mínimo de venta más alto que cualquier pedido deja el producto sin vender.
+  -- Techo del mínimo de venta: 99.999.999 (D36 de #1596, decisión del dueño). NULL es «sin mínimo».
   DROP CONSTRAINT productos_cantidad_minima_venta_check,
   ADD CONSTRAINT productos_cantidad_minima_venta_check
-  CHECK (cantidad_minima_venta IS NULL OR (cantidad_minima_venta > 0 AND cantidad_minima_venta <= 100000)),
+  CHECK (cantidad_minima_venta IS NULL OR (cantidad_minima_venta > 0 AND cantidad_minima_venta <= 99999999)),
   ADD CONSTRAINT productos_nombre_no_vacio
   CHECK (btrim(nombre) <> '');
 
@@ -460,9 +473,7 @@ BEGIN
     RAISE EXCEPTION 'faltan los CHECK (o no están validados): %', v_faltan;
   END IF;
 
-  -- Barrido final: ninguna columna numeric de public queda con un piso (`>= 0`, `> 0`) sin freno de NaN en sus
-  -- CHECK. Se mira por CHECK: uno que nombre la columna con piso y sin techo ni 'NaN' en ningún CHECK de la tabla
-  -- que la nombre. Las de esta migración tienen que dar cero.
+  -- Cada columna con piso de esta migración tiene un CHECK que excluye el NaN de ESA columna (`<col> <> 'NaN'`).
   SELECT string_agg(e.t || '.' || e.c, ', ') INTO v_faltan
     FROM (VALUES ('gastos', 'iva'), ('gastos', 'percepcion_iva'), ('gastos', 'percepcion_iibb'),
                  ('gastos', 'otros_impuestos'), ('gastos', 'litros'), ('compra_cargos', 'iva_monto'),
@@ -476,14 +487,11 @@ BEGIN
    WHERE NOT EXISTS (SELECT 1 FROM pg_constraint co
                       JOIN pg_attribute a ON a.attrelid = co.conrelid AND a.attnum = ANY (co.conkey)
                      WHERE co.conrelid = ('public.' || e.t)::regclass AND co.contype = 'c' AND a.attname = e.c
-                       AND position('''NaN''::numeric' in pg_get_constraintdef(co.oid)) > 0);
+                       AND pg_get_constraintdef(co.oid) ~ ('\m' || e.c || '\M <> ''NaN''::numeric'));
   IF v_faltan IS NOT NULL THEN
     RAISE EXCEPTION 'estas columnas no quedaron con freno de NaN: %', v_faltan;
   END IF;
-
-  IF jsonb_array_length(public.auditoria_nan()->'con_nan') <> 0 THEN
-    RAISE EXCEPTION 'hay filas en NaN o infinito: %', public.auditoria_nan()->'con_nan';
-  END IF;
+  -- auditoria_nan() no va acá: recorrería todas las tablas con los locks tomados. Se corre después del COMMIT.
 END
 $post$;
 
