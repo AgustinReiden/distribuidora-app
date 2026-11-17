@@ -10,7 +10,8 @@
 --   SEG-1 · el alta no nombra a un cliente de otra sucursal
 --   L2 · Un preventista de la sucursal A carga un pedido de A con el id de un cliente de B asignado a otro
 --        preventista, y con el de un cliente reservado de B: los dos responden exactamente lo mismo que un id
---        que no existe (23503, sin el nombre).
+--        que no existe (sin el nombre; desde la ola 2 del plan #1603, «El cliente del pedido no existe en
+--        esta sucursal», antes un 23503).
 --   E2 · Con un cliente de A asignado a otro preventista de A sigue respondiendo 42501 con su nombre, y con uno
 --        reservado de A, 42501 «reservado a administración».
 --
@@ -311,7 +312,11 @@ DECLARE
 BEGIN
   INSERT INTO public.cliente_preventistas (cliente_id, preventista_id) VALUES (v_cb, v_pb);
   v_nada := pg_temp.t6_alta_prev((SELECT COALESCE(max(id), 0) + 1000000 FROM public.clientes), v_p1, v_sa, v_prod);
-  f := pg_temp.t6_si(f, v_nada LIKE '23503|%', format('el id que no existe dio %s', v_nada));
+  -- Cambió de regla en la ola 2 del plan #1603 (B4, 1559-b7): el alta contesta con un rechazo
+  -- claro que no nombra a nadie, en vez del 23503 crudo de la FK. Lo que se prueba sigue igual:
+  -- los dos de abajo responden exactamente lo mismo que un id que no existe.
+  f := pg_temp.t6_si(f, v_nada LIKE 'OK %"success": false%' AND v_nada LIKE '%no existe en esta sucursal%',
+                     format('el id que no existe dio %s', v_nada));
 
   v_r := pg_temp.t6_alta_prev(v_cb, v_p1, v_sa, v_prod);
   f := pg_temp.t6_si(f, v_r = v_nada, format('el cliente asignado de la otra sucursal dio «%s» y no lo mismo que un id que no existe', v_r));

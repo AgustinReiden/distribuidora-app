@@ -3,9 +3,7 @@
   "funciones": {
     "actualizar_alertas_combos(numeric,numeric)": "sin sucursal: 'No se pudo determinar la sucursal activa' antes de escribir la política",
     "actualizar_alertas_vencimiento(integer,integer)": "sin sucursal: 'No se pudo determinar la sucursal activa' antes de escribir la política",
-    "actualizar_monto_minimo_pedido(numeric)": "sin sucursal: 'No se pudo determinar la sucursal activa' antes de escribir la política",
     "actualizar_mostrar_sin_stock(boolean)": "sin sucursal: 'No se pudo determinar la sucursal activa' antes de escribir la política",
-    "actualizar_politica_minimo_pedido(text,numeric,numeric,numeric)": "sin sucursal: 'No se pudo determinar la sucursal activa' antes de escribir la política",
     "actualizar_preventista_pedido(bigint,uuid)": "sin sucursal: devuelve success false, 'No se pudo determinar la sucursal activa', antes de tocar el pedido",
     "actualizar_ventana_precio_anterior(integer)": "sin sucursal: 'No se pudo determinar la sucursal activa' antes de escribir la política",
     "ajustar_lote(bigint,integer)": "sin sucursal: 'No se pudo determinar la sucursal activa' antes de leer el lote",
@@ -15,7 +13,6 @@
     "bot_admin_listar_config_digest()": "cada fila pasa por bot_admin_puede_gestionar(), que exige activo: un desactivado lista cero filas",
     "cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)": "sin sucursal: devuelve success false, 'No hay sucursal activa', antes de tocar el pedido. Es de la tarjeta 12 de #1477 (#1489)",
     "cambiar_proveedor_compra(bigint,uuid,bigint,character varying,text)": "sin sucursal: devuelve success false, 'No hay sucursal activa', antes de leer la compra",
-    "cancelar_pedido_con_stock(bigint,text,uuid,text)": "sin sucursal: devuelve success false, 'No se pudo determinar la sucursal activa', antes de tocar el pedido",
     "crear_lote_manual(bigint,date,integer)": "sin sucursal: 'No se pudo determinar la sucursal activa' antes de leer el producto",
     "dar_de_baja_lote(bigint,integer,text)": "sin sucursal: 'No se pudo determinar la sucursal activa' antes de leer el lote",
     "dividir_regalo_pedido(bigint,jsonb,text,uuid)": "sin sucursal: devuelve success false, 'No hay sucursal activa', antes de leer la línea",

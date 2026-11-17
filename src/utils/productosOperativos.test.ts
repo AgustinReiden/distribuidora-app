@@ -4,6 +4,7 @@ import {
   esProductoMostrable,
   filtrarProductosOperativos,
   esErrorPorHistorial,
+  mensajeErrorAlEliminarProducto,
   itemsConProductoDesactivado,
 } from './productosOperativos'
 
@@ -65,6 +66,26 @@ describe('esErrorPorHistorial', () => {
     expect(esErrorPorHistorial({ message: 'violates foreign key', code: '23503' })).toBe(false)
     expect(esErrorPorHistorial(null)).toBe(false)
     expect(esErrorPorHistorial(undefined)).toBe(false)
+  })
+})
+
+// 1561-b2 (#1561, decisión del dueño): con stock, con lotes o como regalo de una promo
+// tampoco se borra, y el motivo que da la base es lo que ve el usuario.
+describe('mensajeErrorAlEliminarProducto', () => {
+  it('con stock, lotes o una promo muestra el motivo de la base tal cual', () => {
+    const base = 'No se puede borrar "Agua de ensayo": tiene 5 u. en stock, tiene lotes. Desactivalo en lugar de borrarlo.'
+    expect(mensajeErrorAlEliminarProducto({ message: base, code: '23503' })).toBe(base)
+  })
+  it('con historial conserva su texto', () => {
+    expect(mensajeErrorAlEliminarProducto({
+      message: 'No se puede borrar "Agua": tiene historial (pedidos). Desactivalo en lugar de borrarlo.',
+      code: '23503',
+    })).toBe('No se puede eliminar: tiene historial. Desactivalo para que deje de ofrecerse.')
+  })
+  it('otro error no muestra lo crudo', () => {
+    expect(mensajeErrorAlEliminarProducto({ message: 'violates foreign key', code: '23503' }))
+      .toBe('Error al eliminar producto')
+    expect(mensajeErrorAlEliminarProducto(null)).toBe('Error al eliminar producto')
   })
 })
 

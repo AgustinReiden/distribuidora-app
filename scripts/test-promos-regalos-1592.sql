@@ -46,7 +46,8 @@
 --       no cambia; con los dos entregados (uno viejo, sin rendiciones confirmadas en
 --       la sucursal) entra. La salvedad sobre un entregado queda para la ola 2.
 --   L2 · borrar el contenedor con un pedido en su barra se rechaza con un mensaje
---       que dice que es el contenedor.
+--       que dice que es el contenedor (desde la ola 2, B6a: lo frena antes el trigger
+--       de productos, que nombra la promo).
 --   L5 · un pedido cuyo regalo pasó a una barra con su propio bulto no traba el
 --       cambio de factor.
 --   R · PRM-3 · renormalizar_bloques_por_cambio_factor anota de qué lote salió el
@@ -672,8 +673,12 @@ BEGIN
     BEGIN
       DELETE FROM productos WHERE id = K1;
       v_f := v_f || 'L2 se borró el contenedor con un pedido abierto en su barra'::text;
-    EXCEPTION WHEN raise_exception THEN
-      IF SQLERRM NOT LIKE 'No se puede borrar el producto #%es el contenedor de la promo%' THEN
+    EXCEPTION WHEN raise_exception OR foreign_key_violation THEN
+      -- Desde la ola 2 de #1603 (B6a, 1561-b2, decisión del dueño): un producto con stock o
+      -- que es el regalo o el contenedor de una promo no se borra, y lo frena antes el
+      -- trigger de borrado de productos (23503), que nombra la promo.
+      IF SQLERRM NOT LIKE 'No se puede borrar el producto #%es el contenedor de la promo%'
+         AND SQLERRM NOT LIKE 'No se puede borrar "%está en la promoción «ZZ ensayo 1592%' THEN
         v_f := v_f || ('L2 el mensaje al borrar el contenedor: ' || SQLERRM);
       END IF;
     END;

@@ -13,7 +13,7 @@ import { formatCurrency } from '../../utils/formatters';
 import { leerPlataTipeada, numeroEditable, parsePrecio } from '../../utils/calculations';
 import { DIAS_ATRAS_FECHA_PEDIDO_MAXIMO, DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO } from '../../utils/fechaPedido';
 import { errorDeMultiploRedondeo, MULTIPLO_REDONDEO_PRECIO } from '../../utils/precios';
-import type { ModoMinimoPedido, ReglaMinimoPedido } from '../../utils/montoMinimo';
+import { MONTO_MINIMO_TECHO, type ModoMinimoPedido, type ReglaMinimoPedido } from '../../utils/montoMinimo';
 
 export interface VistaConfiguracionProps {
   montoMinimoActual: number;
@@ -31,6 +31,11 @@ export interface VistaConfiguracionProps {
   /** Lo dispara el container al tipear, para recalcular el impacto. */
   onMontoTipeado: (monto: number) => void;
   onGuardar: (regla: ReglaMinimoPedido) => void;
+  /**
+   * La compra mínima la cambia sólo el admin (1561-b9, #1561; decisión del dueño
+   * D35): el encargado la ve y no la edita. Las RPC rechazan al resto.
+   */
+  puedeEditarMinimo?: boolean;
   nombreSucursal?: string | null;
   /** % por defecto de quien tiene rol preventista (mig 207). */
   comisionPctPreventista: number;
@@ -935,6 +940,7 @@ export default function VistaConfiguracion({
   impactoCargando,
   onMontoTipeado,
   onGuardar,
+  puedeEditarMinimo = false,
   nombreSucursal,
   comisionPctPreventista,
   comisionPctOtros,
@@ -987,7 +993,8 @@ export default function VistaConfiguracion({
   const parseadoCargo = parsearMonto(cargo);
   const cobraEnvio = modo !== 'bloquear';
   const esEscalas = modo === 'escalas';
-  const valido = Number.isFinite(parseado) && parseado >= 0;
+  // El techo es el de la base (D36): contra un error de tipeo.
+  const valido = Number.isFinite(parseado) && parseado >= 0 && parseado <= MONTO_MINIMO_TECHO;
   const montosValidos = valido
     && (!cobraEnvio || (Number.isFinite(parseadoCargo) && parseadoCargo >= 0))
     && (!esEscalas || (Number.isFinite(parseadoGratis) && parseadoGratis > parseado));
@@ -1007,8 +1014,9 @@ export default function VistaConfiguracion({
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!puedeEditarMinimo) return;
     if (!valido) {
-      setError('Ingresá un monto válido (0 o mayor).');
+      setError('Ingresá un monto válido, de 0 a $ 99.999.999.');
       return;
     }
     if (cobraEnvio && !(Number.isFinite(parseadoCargo) && parseadoCargo >= 0)) {
@@ -1064,6 +1072,11 @@ export default function VistaConfiguracion({
             Qué pasa con un pedido que no llega al mínimo — en la app, sin señal y desde el bot.
             Dejá el mínimo en 0 para no exigir nada.
           </p>
+          {!puedeEditarMinimo && (
+            <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
+              Solo un admin puede cambiar la compra mínima.
+            </p>
+          )}
 
           <fieldset className="mt-3">
             <legend className="sr-only">Qué pasa con un pedido bajo el mínimo</legend>
@@ -1084,6 +1097,7 @@ export default function VistaConfiguracion({
                       value={m.value}
                       checked={modo === m.value}
                       onChange={() => { setModo(m.value); setError(null); }}
+                      disabled={!puedeEditarMinimo}
                     />
                     {m.titulo}
                   </span>
@@ -1101,8 +1115,9 @@ export default function VistaConfiguracion({
               inputMode="decimal"
               value={valor}
               onChange={(e) => handleChange(e.target.value)}
+              disabled={!puedeEditarMinimo}
               aria-invalid={!valido}
-              aria-describedby={error ? 'monto-minimo-error' : undefined}
+              aria-describedby={error || !valido ? 'monto-minimo-error' : undefined}
               className="w-48 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
@@ -1121,6 +1136,7 @@ export default function VistaConfiguracion({
                     inputMode="decimal"
                     value={cargo}
                     onChange={(e) => { setCargo(e.target.value); setError(null); }}
+                    disabled={!puedeEditarMinimo}
                     className="w-40 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
@@ -1138,6 +1154,7 @@ export default function VistaConfiguracion({
                       inputMode="decimal"
                       value={gratis}
                       onChange={(e) => { setGratis(e.target.value); setError(null); }}
+                      disabled={!puedeEditarMinimo}
                       className="w-40 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
@@ -1153,9 +1170,9 @@ export default function VistaConfiguracion({
             </p>
           )}
 
-          {error && (
+          {(error || !valido) && (
             <p id="monto-minimo-error" role="alert" className="text-rose-600 text-xs mt-2">
-              {error}
+              {error ?? 'Ingresá un monto válido, de 0 a $ 99.999.999.'}
             </p>
           )}
         </div>
@@ -1191,7 +1208,7 @@ export default function VistaConfiguracion({
             type="submit"
             variant="primary"
             size="md"
-            disabled={guardando || !cambio}
+            disabled={guardando || !cambio || !puedeEditarMinimo}
             loading={guardando}
           >
             Guardar

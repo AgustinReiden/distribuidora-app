@@ -158,7 +158,10 @@ suelta en `sucursales`.
   idempotencia). Si editás la RPC y no el `_impl`, no cambia nada y no falla nada. Son las
   cuatro de la 167 y `registrar_pagos_pedido` (405b). El replay es de la misma solicitud:
   `pago_solicitud_abrir` rechaza (22023) una clave guardada por otra operación o por otro
-  usuario (#1440), así que un wrapper nuevo le pasa su propio nombre.
+  usuario (#1440), así que un wrapper nuevo le pasa su propio nombre. Y la misma solicitud es
+  el mismo cobro (1559-b14): el wrapper le pasa en `p_contenido` el destino, los montos y las
+  formas (los ids de un lote, ordenados), y un replay con otro contenido da 22023. La fecha, las
+  notas y la referencia no entran: el reintento puede cambiarlas sin ser otro cobro.
 - **Todo cobro pasa por una RPC** (#1246, migs 404b, 405b, 406 y 424).
   `pagos` no tiene INSERT REST: el cobro de una boleta va por `registrar_pagos_pedido` y el
   pago a cuenta por el FIFO de la ficha, que es sólo de admin y encargado. Lo que valida `registrar_pagos_pedido_impl`:
@@ -229,7 +232,18 @@ suelta en `sucursales`.
   FIFO (en un cambio de cliente lo aplica `cambiar_cliente_pedido`). Antes del primer lock toman
   por id las boletas que ese crédito alcanza (`_credito_bloquea_boletas`), y después las rutas y
   los créditos (`_credito_bloquea_rutas_y_creditos`). Un camino nuevo que deje plata a favor de
-  un cliente con boletas abiertas hace lo mismo. **Cada operación aplica sólo el crédito que nace
+  un cliente con boletas abiertas hace lo mismo. Las boletas que alcanza un crédito las calcula
+  una sola función, `_credito_ventana(cliente, sucursal, plata, sin, creditos)`: `_aplicar_credito_pagos`
+  y las seis pre-tomas (`_credito_bloquea_boletas`, `_alta_bloquea_boletas_credito`,
+  `_edicion_bloquea_boletas`, `pedidos_reconciliar_pagos` y las dos de `cambiar_cliente_pedido`).
+  Sólo pesa 0 en la cola la boleta de una NC vigente cuyo crédito está en `creditos` (COB-b2): para
+  un crédito común es la fórmula de siempre. Una pre-toma le pasa al menos la plata y los créditos
+  que se aplican después, así toma al menos lo que `_aplicar_credito_pagos` toma después; un camino
+  nuevo hace lo mismo (lo prueba P1 de `test-cobros-credito-ola2-1603.sql`). La cancelación y la
+  NC miden otra vez, con la boleta tomada y sólo con su plata, antes de los productos (COB-b1). El
+  crédito no tiene tope de boletas (1595-b1).
+  `cancelar_pedido_con_stock` con `'cambio_de_cliente'` sólo la llama `cambiar_cliente_pedido`
+  (COB-b5): por llamada directa se rechaza. **Cada operación aplica sólo el crédito que nace
   en ella** (mig 489, #1538; decisión del dueño): la cancelación, los pagos que desimputa; la NC,
   el suyo; el cambio de cliente, lo que le vuelve al original y el excedente del nuevo; la baja de
   total de una boleta (`pedidos_reconciliar_pagos`), el excedente que suelta. Una boleta que sube
@@ -388,6 +402,16 @@ suelta en `sucursales`.
   (mig 405, #1245): cada línea es un costo, y sus policies de SELECT son de admin y encargado. Desde
   #1557 (CMP-6, decisión del dueño) tampoco las cabeceras: `compras`, `notas_credito`, `compra_cargos`
   y `compra_cargo_repartos`.
+- **Un producto con stock, con lotes (aun agotados) o que es el regalo de una promo no se borra: se
+  desactiva** (1561-b2, decisión del dueño). Lo frena `productos_rechazar_borrado_con_historial`,
+  junto con el historial; sin nada de eso se borra y su `stock_historico` se va con él.
+- **Un stock mínimo de 0 es «sin alerta», y vacío es 10** (CAT-13, decisión del dueño): con alerta,
+  está bajo cuando `stock <= mínimo`. Es una regla en tres lugares: `stockBajo`
+  (`src/utils/stockMinimo.ts`), su copia del bot (`supabase/functions/_shared/utils/stockMinimo.ts`)
+  y `bot_metricas_admin_dia`. Una pantalla o un reporte nuevo de stock bajo usa una de ellas.
+- **La compra mínima del pedido la cambia sólo el admin, hasta $ 99.999.999** (1561-b9 y 1596-b3,
+  decisiones del dueño), y el mínimo de venta, hasta 99.999.999 u. Los rubros son únicos sin mirar
+  mayúsculas ni espacios de los bordes (`upper(btrim(nombre))`, por sucursal y rubro padre).
 - **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** → `migrations/CLAUDE.md`.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
@@ -451,6 +475,18 @@ suelta en `sucursales`.
   cambia. Un camino nuevo que fije `pedidos.fecha_entrega` con una fecha del usuario la llama. Un
   ensayo que entrega con una fecha de 2099 para no cruzarse con prod ya no entra: usa una fecha
   dentro del rango.
+- **La entrega programada va de hoy a 60 días adelante** (1559-b6, decisión del dueño). La regla
+  es `_fecha_entrega_programada_fuera_de_rango`, con el techo espejado en
+  `src/utils/fechaEntregaProgramada.ts`; el piso es la fecha del pedido si es anterior a hoy (la
+  cola, el admin), y en la edición rige sólo si cambia (`pedidos_proteger_columnas`).
+- **El alta no acepta un regalo sin promoción ni una sucursal inactiva** (1558-b2 y 1561-b4,
+  decisiones del dueño). Un regalo sin promoción no bajaba stock y nada lo devuelve: no nace, y la
+  edición sólo conserva el que el pedido ya tenía. La sucursal inactiva se mira en el alta, no en
+  `current_sucursal_id()`. El cambio de cliente (`app.cambio_cliente_desde`) recrea y pasa.
+- **La versión de un pedido (`updated_at`) la pone el server** (1595-b6): un UPDATE de
+  `authenticated` que cambia algo la mueve a `now()` en `pedidos_proteger_columnas`, y uno que no
+  cambia nada la deja. Lo que mande el cliente en esa columna no cuenta. Una RPC que la mueve
+  devuelve `updated_at_anterior` y `updated_at` (la edición adopta con `versionTrasCambioPropio`).
 - **El límite de usos de una promo cuenta el corte, no la línea, y lo hace cumplir un trigger**
   (`trg_limite_usos_promo`, #1300) → `migrations/CLAUDE.md`. Al editar o cambiar el cliente, el
   regalo de una promo que se apagó se conserva (`promosConRegalo`): la política rige el alta.

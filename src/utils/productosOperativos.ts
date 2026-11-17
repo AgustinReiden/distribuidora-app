@@ -52,6 +52,28 @@ export function esErrorPorHistorial(error: unknown): boolean {
 }
 
 /**
+ * Lo que se le muestra al usuario cuando borrar un producto falla.
+ *
+ * El trigger de la base rechaza el borrado de un producto con historial, y desde
+ * 1561-b2 (#1561, decisión del dueño) también el de uno con stock, con lotes o que
+ * es el regalo de una promoción. Su mensaje ya está en castellano y dice el motivo
+ * y la salida ("…: tiene 5 u. en stock. Desactivalo en lugar de borrarlo."): se
+ * muestra tal cual. El historial conserva su texto de siempre; lo demás, genérico.
+ */
+export function mensajeErrorAlEliminarProducto(error: unknown): string {
+  if (esErrorPorHistorial(error)) {
+    return 'No se puede eliminar: tiene historial. Desactivalo para que deje de ofrecerse.'
+  }
+  const mensaje = error == null
+    ? undefined
+    : typeof error === 'string' ? error : (error as { message?: unknown }).message
+  if (typeof mensaje === 'string' && /Desactivalo en lugar de borrarlo/i.test(mensaje)) {
+    return mensaje
+  }
+  return 'Error al eliminar producto'
+}
+
+/**
  * Líneas de un pedido (incluidas las de regalo: un producto desactivado
  * tampoco se regala) cuyo producto está desactivado en el catálogo dado. Un
  * producto que no aparece en el catálogo no se juzga acá: no hay dato.
