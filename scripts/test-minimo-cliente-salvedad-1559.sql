@@ -592,30 +592,25 @@ DECLARE
   x record;
 BEGIN
   FOR r IN SELECT * FROM (VALUES
-    ('public.validar_minimo_venta_item()', '265f7882a641a8475e80a4eee63677aa',
+    -- Antes cada fila traía también el md5 del cuerpo («la migración no tocó estas funciones»). Se sacó (#1603 B13b): se
+    -- ponía rojo con cada migración posterior que las tocó a propósito (la del cierre de #1565, #1592, la de M4 con VTA-1…) sin
+    -- que nada se hubiera roto. Lo que queda es lo que no debe cambiar nunca: SECURITY DEFINER y quién ejecuta.
+    ('public.validar_minimo_venta_item()',
      '{postgres=X/postgres,service_role=X/postgres}'),
-    -- El cuerpo lo cambió después la migración del cierre de #1565 (LV-1); antes, 9bf3c42b9d4447172b9c96999f65ea00.
-    -- Y después la del tope del sustituto (#1592, PRM-1); antes, c15aa49005a602eb48b7d527e698b748.
-    -- Y después la de la ola 2 del plan #1603 (B4: 1558-b2, 1592-b1, 1595-b9, 1559-b3); antes,
-    -- b6e7138c67b92ea84196e0856cf37fca.
-    -- Y después la de B19 de la ola 2 (#1603: la barra mueve sólo la diferencia); antes,
-    -- 387beb9228d1751823bc2a6c710b9098.
-    ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)', 'c0f975290ab517f535d0a91ee22bc410',
+    ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)',
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
-    ('public.pedidos_cliente_asignado()', '84754c312560f862e6f0c53d213b2f21',
+    ('public.pedidos_cliente_asignado()',
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public.pedidos_cliente_reservado()', 'f3f82c5a401e4476b671287f6373bb62',
+    ('public.pedidos_cliente_reservado()',
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public.desafectar_sobrepago_pedido(bigint)', 'b038256f1acf602b0ed20475215a3080',
+    ('public.desafectar_sobrepago_pedido(bigint)',
      '{postgres=X/postgres,service_role=X/postgres}'),
-    -- El cuerpo lo cambió después la migración de M4 (#1603: VTA-1, 1592-b5, 1559-c2); antes, c521503ea76283748fc1addcbc9f8842.
-    -- Y después la de B1 de la ola 2 (#1603, H2 de su revisión: el recorte del corte); antes, 59aaf9fa97cc0c99ad852a9daeec6270.
-    ('public.anular_salvedad(bigint,text)', 'fc8d1a7ea7795e267425cbd8b07230cc',
+    ('public.anular_salvedad(bigint,text)',
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}')
-  ) AS t(fn, h, acl) LOOP
-    SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS d INTO x FROM pg_proc WHERE oid = r.fn::regprocedure;
-    f := pg_temp.t6_si(f, x.h = r.h AND x.a = r.acl AND x.d,
-                       format('%s tiene md5 %s, EXECUTE %s, definer %s', r.fn, x.h, x.a, x.d));
+  ) AS t(fn, acl) LOOP
+    SELECT proacl::text AS a, prosecdef AS d INTO x FROM pg_proc WHERE oid = r.fn::regprocedure;
+    f := pg_temp.t6_si(f, x.a = r.acl AND x.d,
+                       format('%s tiene EXECUTE %s, definer %s', r.fn, x.a, x.d));
   END LOOP;
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END

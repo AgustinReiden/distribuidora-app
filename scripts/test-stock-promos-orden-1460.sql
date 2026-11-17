@@ -240,8 +240,12 @@ BEGIN
 
   -- L1 · cada pre-bloqueo antes de la primera sentencia que toma filas. El de
   -- ajustar_stock_promocion_completo (C2) ya no se mira: la 487 la dropeó.
+  -- Desde B19 (ola 2 de #1603) la edición llega al motor por _barra_mover_neto: lo que se mira es
+  -- la primera llamada a la barra, directa o por el helper.
   v_src := (SELECT prosrc FROM pg_proc WHERE oid = 'public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)'::regprocedure);
-  IF position('#1460 (C3)' IN v_src) NOT BETWEEN position('_contenedores_de_promos(' IN v_src) AND position('aplicar_uso_promo_acumulador(' IN v_src) THEN
+  IF position('#1460 (C3)' IN v_src) NOT BETWEEN position('_contenedores_de_promos(' IN v_src)
+       AND COALESCE(NULLIF(position('aplicar_uso_promo_acumulador(' IN v_src), 0),
+                    position('_barra_mover_neto(' IN v_src)) THEN
     v_fallas := v_fallas || 'L1 actualizar_pedido_items no bloquea las promos entre los productos y el motor'::text;
   END IF;
   v_src := (SELECT prosrc FROM pg_proc WHERE oid = 'public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)'::regprocedure);

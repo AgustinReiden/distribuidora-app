@@ -1,5 +1,5 @@
--- Ensayo de la migración de la ola 2 del plan #1603, tarjeta B19 (H1 de la revisión de B3):
--- migrations/NNN_edicion_mueve_solo_la_diferencia_de_la_barra.sql.
+-- Ensayo de la migración de la ola 2 del plan #1603, tarjeta B19 (H1 de la revisión de B3, y en
+-- la v2 H1 a H5 de la revisión de B19): migrations/NNN_edicion_mueve_solo_la_diferencia_de_la_barra.sql.
 --
 -- La edición de un pedido (`actualizar_pedido_items`) deshacía la barra de regalos entera con
 -- `aplicar_uso_promo_acumulador(-c)` —que devuelve el fardo al lote que nombra el bloque— y la
@@ -48,10 +48,31 @@
 --        edición sin cambios deja stock=54 lotes=[50] bolsa=4 y el bloque en la bolsa.
 --   E11 · regresión: la edición que agrega regalo sin stock en el contenedor se rechaza con
 --        «Auto-ajuste: stock insuficiente» y el pedido y el contenedor quedan como estaban.
+-- v2 (H1 a H5 de la revisión de B19):
+--   H1 · el regalo pasa a otra barra que descuenta del MISMO contenedor; el fardo conserva su lote.
+--     E12 · otro sabor (S×2 → S2×2; la barra de S2 descuenta de C): stock=59 lotes=[49] bolsa=10 y
+--           el bloque de S2 en L1. Cancelar: [50] y 10. Antes: [50] y 9, el bloque en la bolsa.
+--     E13 · otra promo (A×10 + S×2 de P1 → B×10 + T×2 de P2, las dos descuentan de C): [49] y 10,
+--           el bloque de P2 en L1 y P1 sin bloques. Antes: [50] y 9.
+--   H2 · la sustitución de un regalo de fracción.
+--     S1 · por el mismo producto con más cantidad (S×2 → S×3, N = 2): mueve sólo la diferencia,
+--          [49] y 10, el bloque intacto y la barra en 1. Antes: [50] y 9, el bloque en la bolsa.
+--     S2 · por otro producto cuya barra descuenta de C (S×2 → S2×2): [49] y 10, el bloque nuevo
+--          en L1. Antes: [50] y 9.
+--   H5 · los casos que muestran el cambio.
+--     E14 · N = 4 y el bloque lo cierra OTRO pedido (X e Y con S×2 cada uno): la edición sin
+--           cambios de X no toca nada ([49] y 10, la pila igual). Antes: abría el bloque de Y.
+--     E15 · la barra «pasada de N» (en 3 con N = 2): con el contenedor en 0, la edición sin cambios
+--           entra y no mueve nada (antes: «Auto-ajuste: stock insuficiente»); con bolsa, tampoco
+--           (el bloque atrasado lo cierra la próxima venta, como dice la 520; antes lo cerraba).
+--     E16 · el contador de una promo que mueve stock, puesto en 0: la edición sin cambios lo deja
+--           en 0 (antes lo subía a 2).
+--     E17 · salvedad primero y edición después: salvedad de 2 de los 4 regalos (A×20 + S×4, dos
+--           fardos de L1) y la edición sin cambios deja [49] y 10 con el bloque en L1. Antes: [50] y 9.
 --   A1 · ningún check de auditoria_integridad() suma violaciones.
 --
--- Sin la migración tiene que FALLAR en E1, E2, E3, E4, E5, E6, E7 (el paso de la edición), E8 y
--- E9. E10 y E11 son regresión.
+-- Sin la migración tiene que FALLAR en E1–E9 (en E7, el paso de la edición), E12–E17, S1 y S2
+-- (E17 también derivaba: [50] y 9). E10 y E11 son regresión.
 -- Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ …' con la lista de fallas, siempre como excepción.
 --
 --   docker exec -i <contenedor> psql -U postgres -d postgres -f - < scripts/test-barra-edicion-ola2-1603.sql
@@ -66,8 +87,10 @@ DECLARE
   a2       bigint;
   b        bigint;
   s        bigint;
+  s2       bigint;
   t        bigint;
   c        bigint;
+  v_y      bigint;
   v_promo  bigint;
   v_promo2 bigint;
   v_x      bigint;
@@ -545,6 +568,220 @@ BEGIN
     v_fallas := v_fallas || format('E11 error: %s', SQLERRM);
   END;
 
+  -- La sustitución del regalo de un pedido; devuelve 'ok' o el rechazo.
+  CREATE FUNCTION pg_temp.sustituir(p_ped bigint, p_prod bigint, p_cant int, p_ajuste bigint) RETURNS text LANGUAGE plpgsql AS $f$
+  DECLARE v jsonb;
+  BEGIN
+    v := public.sustituir_regalo_pedido((SELECT id FROM pedido_items WHERE pedido_id = p_ped AND es_bonificacion),
+                                        p_prod, p_cant, 'ensayo B19', p_ajuste, NULL);
+    PERFORM pg_temp.limpiar();
+    IF COALESCE((v->>'success')::boolean, false) THEN RETURN 'ok'; END IF;
+    RETURN v::text;
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM pg_temp.limpiar();
+    RETURN SQLERRM;
+  END $f$;
+
+  -- =================================================================== E12 ===
+  BEGIN
+    a := pg_temp.prod('[]', 100);
+    s := pg_temp.prod('[]', 100);
+    s2 := pg_temp.prod('[]', 100);
+    c := pg_temp.prod('[{"dias":30,"cantidad":100,"restante":50}]', 0);
+    v_promo := pg_temp.promo_barra(a, s, c);
+    INSERT INTO promo_acumuladores (promocion_id, producto_regalo_id, ajuste_producto_id, usos_pendientes, sucursal_id)
+    VALUES (v_promo, s2, c, 0, v_suc);
+    v_x := pg_temp.alta(v_cli, v_adm, jsonb_build_array(pg_temp.it(a, 10), pg_temp.reg(s, 2, v_promo)));
+    PERFORM pg_temp.bolsa(c, 10);
+    v_res := pg_temp.editar(v_x, v_adm, jsonb_build_array(pg_temp.it(a, 10), pg_temp.reg(s2, 2, v_promo)));
+    IF v_res <> 'ok' THEN
+      v_fallas := v_fallas || format('E12 la edición se rechazó: %s', v_res);
+    END IF;
+    v_fallas := v_fallas || pg_temp.ver('E12 otro sabor, mismo contenedor', c, 'stock=59 lotes=[49] bolsa=10')
+                         || pg_temp.verv('E12 otro sabor, mismo contenedor', v_promo, 'L1:1');
+    PERFORM pg_temp.cancelar(v_x, v_adm);
+    v_fallas := v_fallas || pg_temp.ver('E12 cancelar', c, 'stock=60 lotes=[50] bolsa=10');
+  EXCEPTION WHEN OTHERS THEN
+    v_fallas := v_fallas || format('E12 error: %s', SQLERRM);
+  END;
+
+  -- =================================================================== E13 ===
+  BEGIN
+    a := pg_temp.prod('[]', 100);
+    b := pg_temp.prod('[]', 100);
+    s := pg_temp.prod('[]', 100);
+    t := pg_temp.prod('[]', 100);
+    c := pg_temp.prod('[{"dias":30,"cantidad":100,"restante":50}]', 0);
+    v_promo := pg_temp.promo_barra(a, s, c);
+    v_promo2 := pg_temp.promo_barra(b, t, c);
+    v_x := pg_temp.alta(v_cli, v_adm, jsonb_build_array(pg_temp.it(a, 10), pg_temp.reg(s, 2, v_promo)));
+    PERFORM pg_temp.bolsa(c, 10);
+    v_res := pg_temp.editar(v_x, v_adm, jsonb_build_array(pg_temp.it(b, 10), pg_temp.reg(t, 2, v_promo2)));
+    IF v_res <> 'ok' THEN
+      v_fallas := v_fallas || format('E13 la edición se rechazó: %s', v_res);
+    END IF;
+    v_fallas := v_fallas || pg_temp.ver('E13 otra promo, mismo contenedor', c, 'stock=59 lotes=[49] bolsa=10')
+                         || pg_temp.verv('E13 otra promo (P2)', v_promo2, 'L1:1')
+                         || pg_temp.verv('E13 otra promo (P1)', v_promo, '-');
+    PERFORM pg_temp.cancelar(v_x, v_adm);
+    v_fallas := v_fallas || pg_temp.ver('E13 cancelar', c, 'stock=60 lotes=[50] bolsa=10');
+  EXCEPTION WHEN OTHERS THEN
+    v_fallas := v_fallas || format('E13 error: %s', SQLERRM);
+  END;
+
+  -- ==================================================================== S1 ===
+  BEGIN
+    a := pg_temp.prod('[]', 100);
+    s := pg_temp.prod('[]', 100);
+    c := pg_temp.prod('[{"dias":30,"cantidad":100,"restante":50}]', 0);
+    v_promo := pg_temp.promo_barra(a, s, c);
+    v_x := pg_temp.alta(v_cli, v_adm, jsonb_build_array(pg_temp.it(a, 10), pg_temp.reg(s, 2, v_promo)));
+    PERFORM pg_temp.bolsa(c, 10);
+    v_res := pg_temp.sustituir(v_x, s, 3, NULL);
+    IF v_res <> 'ok' THEN
+      v_fallas := v_fallas || format('S1 la sustitución se rechazó: %s', v_res);
+    END IF;
+    v_fallas := v_fallas || pg_temp.ver('S1 sustitución por el mismo producto', c, 'stock=59 lotes=[49] bolsa=10')
+                         || pg_temp.verv('S1 sustitución por el mismo producto', v_promo, 'L1:1');
+    IF (SELECT usos_pendientes FROM promociones WHERE id = v_promo) <> 1 THEN
+      v_fallas := v_fallas || format('S1 la barra quedó en %s (esperado 1)',
+                                     (SELECT usos_pendientes FROM promociones WHERE id = v_promo));
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_fallas := v_fallas || format('S1 error: %s', SQLERRM);
+  END;
+
+  -- ==================================================================== S2 ===
+  BEGIN
+    a := pg_temp.prod('[]', 100);
+    s := pg_temp.prod('[]', 100);
+    s2 := pg_temp.prod('[]', 100);
+    c := pg_temp.prod('[{"dias":30,"cantidad":100,"restante":50}]', 0);
+    v_promo := pg_temp.promo_barra(a, s, c);
+    v_x := pg_temp.alta(v_cli, v_adm, jsonb_build_array(pg_temp.it(a, 10), pg_temp.reg(s, 2, v_promo)));
+    PERFORM pg_temp.bolsa(c, 10);
+    v_res := pg_temp.sustituir(v_x, s2, 2, c);
+    IF v_res <> 'ok' THEN
+      v_fallas := v_fallas || format('S2 la sustitución se rechazó: %s', v_res);
+    END IF;
+    v_fallas := v_fallas || pg_temp.ver('S2 sustitución con el mismo contenedor', c, 'stock=59 lotes=[49] bolsa=10')
+                         || pg_temp.verv('S2 sustitución con el mismo contenedor', v_promo, 'L1:1');
+    PERFORM pg_temp.cancelar(v_x, v_adm);
+    v_fallas := v_fallas || pg_temp.ver('S2 cancelar', c, 'stock=60 lotes=[50] bolsa=10');
+  EXCEPTION WHEN OTHERS THEN
+    v_fallas := v_fallas || format('S2 error: %s', SQLERRM);
+  END;
+
+  -- =================================================================== E14 ===
+  BEGIN
+    a := pg_temp.prod('[]', 100);
+    s := pg_temp.prod('[]', 100);
+    c := pg_temp.prod('[{"dias":30,"cantidad":100,"restante":50}]', 0);
+    v_promo := pg_temp.promo_barra(a, s, c);
+    UPDATE promociones SET unidades_por_bloque = 4 WHERE id = v_promo;
+    v_items := jsonb_build_array(pg_temp.it(a, 10), pg_temp.reg(s, 2, v_promo));
+    v_x := pg_temp.alta(v_cli, v_adm, v_items);
+    v_y := pg_temp.alta(v_cli2, v_adm, v_items);
+    PERFORM pg_temp.bolsa(c, 10);
+    v_pila := pg_temp.pila(v_promo);
+    v_res := pg_temp.editar(v_x, v_adm, v_items);
+    IF v_res <> 'ok' THEN
+      v_fallas := v_fallas || format('E14 la edición se rechazó: %s', v_res);
+    END IF;
+    v_fallas := v_fallas || pg_temp.ver('E14 el bloque es de otro pedido', c, 'stock=59 lotes=[49] bolsa=10')
+                         || pg_temp.verv('E14 el bloque es de otro pedido', v_promo, 'L1:1');
+    IF pg_temp.pila(v_promo) <> v_pila THEN
+      v_fallas := v_fallas || format('E14 la edición sin cambios tocó la pila: %s (antes %s)', pg_temp.pila(v_promo), v_pila);
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_fallas := v_fallas || format('E14 error: %s', SQLERRM);
+  END;
+
+  -- =================================================================== E15 ===
+  BEGIN
+    a := pg_temp.prod('[]', 100);
+    s := pg_temp.prod('[]', 100);
+    c := pg_temp.prod('[{"dias":30,"cantidad":100,"restante":1}]', 0);
+    v_promo := pg_temp.promo_barra(a, s, c);
+    v_items := jsonb_build_array(pg_temp.it(a, 10), pg_temp.reg(s, 2, v_promo));
+    v_x := pg_temp.alta(v_cli, v_adm, v_items);
+    -- La barra pasada de N: el estado que deja la 520 cuando el recierre de una baja no tiene stock.
+    UPDATE promociones SET usos_pendientes = 3 WHERE id = v_promo;
+    v_pila := pg_temp.pila(v_promo);
+    v_res := pg_temp.editar(v_x, v_adm, v_items);
+    IF v_res <> 'ok' THEN
+      v_fallas := v_fallas || format('E15 con el contenedor en 0 la edición sin cambios se rechazó: %s', v_res);
+    END IF;
+    v_fallas := v_fallas || pg_temp.ver('E15 pasada de N, contenedor en 0', c, 'stock=0 lotes=[0] bolsa=0');
+    IF pg_temp.pila(v_promo) <> v_pila THEN
+      v_fallas := v_fallas || format('E15 la edición sin cambios tocó la pila: %s (antes %s)', pg_temp.pila(v_promo), v_pila);
+    END IF;
+    PERFORM pg_temp.bolsa(c, 10);
+    v_res := pg_temp.editar(v_x, v_adm, v_items);
+    v_fallas := v_fallas || pg_temp.ver('E15 pasada de N, con bolsa', c, 'stock=10 lotes=[0] bolsa=10');
+    IF pg_temp.pila(v_promo) <> v_pila THEN
+      v_fallas := v_fallas || format('E15 con bolsa la edición sin cambios tocó la pila: %s (antes %s)', pg_temp.pila(v_promo), v_pila);
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_fallas := v_fallas || format('E15 error: %s', SQLERRM);
+  END;
+
+  -- =================================================================== E16 ===
+  BEGIN
+    a := pg_temp.prod('[]', 100);
+    s := pg_temp.prod('[]', 100);
+    INSERT INTO promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id)
+    VALUES ('ZZ ensayo B19 mueve stock', 'bonificacion', public._tablero_hoy() - 1, v_suc, true, s)
+    RETURNING id INTO v_promo;
+    INSERT INTO promocion_reglas (promocion_id, clave, valor, sucursal_id)
+    VALUES (v_promo, 'cantidad_compra', 10, v_suc), (v_promo, 'cantidad_bonificacion', 2, v_suc);
+    INSERT INTO promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v_promo, a, v_suc);
+    v_items := jsonb_build_array(pg_temp.it(a, 10), pg_temp.reg(s, 2, v_promo));
+    v_x := pg_temp.alta(v_cli, v_adm, v_items);
+    UPDATE promociones SET usos_pendientes = 0 WHERE id = v_promo;
+    v_res := pg_temp.editar(v_x, v_adm, v_items);
+    IF v_res <> 'ok' THEN
+      v_fallas := v_fallas || format('E16 la edición se rechazó: %s', v_res);
+    END IF;
+    IF (SELECT usos_pendientes FROM promociones WHERE id = v_promo) <> 0 THEN
+      v_fallas := v_fallas || format('E16 el contador quedó en %s (esperado 0)',
+                                     (SELECT usos_pendientes FROM promociones WHERE id = v_promo));
+    END IF;
+    v_fallas := v_fallas || pg_temp.ver('E16 el regalo que mueve stock', s, 'stock=98 lotes=[] bolsa=98');
+  EXCEPTION WHEN OTHERS THEN
+    v_fallas := v_fallas || format('E16 error: %s', SQLERRM);
+  END;
+
+  -- =================================================================== E17 ===
+  BEGIN
+    a := pg_temp.prod('[]', 100);
+    s := pg_temp.prod('[]', 100);
+    c := pg_temp.prod('[{"dias":30,"cantidad":100,"restante":50}]', 0);
+    v_promo := pg_temp.promo_barra(a, s, c);
+    v_x := pg_temp.alta(v_cli, v_adm, jsonb_build_array(pg_temp.it(a, 20), pg_temp.reg(s, 4, v_promo)));
+    PERFORM pg_temp.bolsa(c, 10);
+    UPDATE pedidos SET estado = 'asignado' WHERE id = v_x;
+    v_j := public.registrar_salvedad(v_x,
+             (SELECT id FROM pedido_items WHERE pedido_id = v_x AND es_bonificacion),
+             2, 'cliente_rechaza', 'ensayo B19', NULL, true, NULL);
+    PERFORM pg_temp.limpiar();
+    IF NOT COALESCE((v_j->>'success')::boolean, false) THEN
+      v_fallas := v_fallas || format('E17 la salvedad se rechazó: %s', v_j);
+    END IF;
+    v_fallas := v_fallas || pg_temp.ver('E17 salvedad', c, 'stock=59 lotes=[49] bolsa=10');
+    v_res := pg_temp.editar(v_x, v_adm,
+               (SELECT jsonb_agg(CASE WHEN es_bonificacion THEN pg_temp.reg(producto_id, cantidad, promocion_id)
+                                      ELSE pg_temp.it(producto_id, cantidad) END ORDER BY id)
+                  FROM pedido_items WHERE pedido_id = v_x));
+    IF v_res <> 'ok' THEN
+      v_fallas := v_fallas || format('E17 la edición se rechazó: %s', v_res);
+    END IF;
+    v_fallas := v_fallas || pg_temp.ver('E17 edición después de la salvedad', c, 'stock=59 lotes=[49] bolsa=10')
+                         || pg_temp.verv('E17 edición después de la salvedad', v_promo, 'L1:1');
+  EXCEPTION WHEN OTHERS THEN
+    v_fallas := v_fallas || format('E17 error: %s', SQLERRM);
+  END;
+
   -- ------------------------------------------------------------------- A1 ---
   SELECT jsonb_object_agg(x->>'id', (x->>'violaciones')::bigint) INTO v_checks
     FROM jsonb_array_elements(public.auditoria_integridad()->'checks') x;
@@ -555,7 +792,7 @@ BEGIN
   END LOOP;
 
   IF cardinality(v_fallas) = 0 THEN
-    RAISE EXCEPTION 'ENSAYO OK · E1–E11 y A1 (la edición mueve sólo la diferencia de la barra)';
+    RAISE EXCEPTION 'ENSAYO OK · E1–E17, S1, S2 y A1 (la edición y la sustitución mueven sólo la diferencia de la barra, y el fardo que cambia de barra en el mismo contenedor conserva su lote)';
   END IF;
   RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' || ');
 END
