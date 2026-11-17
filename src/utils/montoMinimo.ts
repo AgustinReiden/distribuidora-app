@@ -66,6 +66,13 @@ export interface ReglaMinimoPedido {
   cargoEnvio: number
 }
 
+/**
+ * Techo de la compra mínima, contra un error de tipeo (1596-b3, #1596; decisión del
+ * dueño D36). Espejo del CHECK `politicas_monto_minimo_pedido_techo` y de las RPC
+ * `actualizar_politica_minimo_pedido` y `actualizar_monto_minimo_pedido`.
+ */
+export const MONTO_MINIMO_TECHO = 99_999_999
+
 export const REGLA_MINIMO_POR_DEFECTO: ReglaMinimoPedido = {
   modo: 'bloquear',
   montoMinimo: 0,

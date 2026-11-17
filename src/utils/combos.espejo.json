@@ -236,6 +236,71 @@
         "2": 1753.63,
         "3": 1710.21
       }
+    },
+    {
+      "caso": "una referencia de un centavo en un combo muy rebajado: el caramelo no sale gratis (1592-b4)",
+      "total": 4000,
+      "lineas": [
+        { "producto_id": 1, "cantidad": 1, "ref": 10000 },
+        { "producto_id": 2, "cantidad": 1, "ref": 0.01 }
+      ],
+      "esperado": { "1": 3999.99, "2": 0.01 }
+    },
+    {
+      "caso": "3 + 2 con la línea de centavos como la que absorbe (#1259): no queda negativa (1592-b4)",
+      "total": 1500,
+      "lineas": [
+        { "producto_id": 1, "cantidad": 3, "ref": 10000 },
+        { "producto_id": 2, "cantidad": 2, "ref": 0.01 }
+      ],
+      "esperado": { "1": 499.98, "2": 0.03 }
+    },
+    {
+      "caso": "2 + 3 con referencias de 2 centavos: ninguna en $0 (1592-b4)",
+      "total": 8000,
+      "lineas": [
+        { "producto_id": 1, "cantidad": 2, "ref": 10000 },
+        { "producto_id": 2, "cantidad": 3, "ref": 0.02 }
+      ],
+      "esperado": { "1": 3999.97, "2": 0.02 }
+    },
+    {
+      "caso": "tres líneas, dos de centavos: cada una con lo suyo (1592-b4)",
+      "total": 3000,
+      "lineas": [
+        { "producto_id": 1, "cantidad": 1, "ref": 10000 },
+        { "producto_id": 2, "cantidad": 2, "ref": 0.01 },
+        { "producto_id": 3, "cantidad": 1, "ref": 0.03 }
+      ],
+      "esperado": { "1": 2999.96, "2": 0.01, "3": 0.02 }
+    },
+    {
+      "caso": "un solo componente de un centavo: el total entre las unidades (1592-b4)",
+      "total": 0.07,
+      "lineas": [
+        { "producto_id": 1, "cantidad": 7, "ref": 0.01 }
+      ],
+      "esperado": { "1": 0.01 }
+    },
+    {
+      "caso": "2 + 3 por 6 centavos: no hay reparto con un centavo en cada línea, null (1592-b4)",
+      "total": 0.06,
+      "lineas": [
+        { "producto_id": 1, "cantidad": 2, "ref": 0.01 },
+        { "producto_id": 2, "cantidad": 3, "ref": 0.01 }
+      ],
+      "esperado": null
+    },
+    {
+      "caso": "cuatro unidades por 3 centavos: no alcanza para un centavo cada una, null (1592-b4)",
+      "total": 0.03,
+      "lineas": [
+        { "producto_id": 1, "cantidad": 1, "ref": 0.01 },
+        { "producto_id": 2, "cantidad": 1, "ref": 0.01 },
+        { "producto_id": 3, "cantidad": 1, "ref": 0.01 },
+        { "producto_id": 4, "cantidad": 1, "ref": 0.01 }
+      ],
+      "esperado": null
     }
   ],
   "total": [

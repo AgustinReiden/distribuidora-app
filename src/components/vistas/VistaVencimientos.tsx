@@ -17,7 +17,9 @@
  * propio en la ficha del producto.
  *
  * La baja va por `dar_de_baja_lote`, que escribe la merma con motivo
- * 'vencimiento' y recién después toca el stock. El costo lo congela solo el
+ * 'vencimiento' y recién después toca el stock. Un lote que todavía no venció
+ * también se puede dar de baja (rotura, pérdida), pero con el motivo escrito:
+ * la merma va como 'decomiso' (una pérdida) con ese texto (#1558, 1558-b6). El costo lo congela solo el
  * trigger de la mig 119, así que la pérdida queda valorizada sin que esta
  * pantalla tenga que saber nada de costos.
  *
@@ -38,7 +40,7 @@ import { Button } from '../ui/Button'
 import Paginacion from '../layout/Paginacion'
 import QueryErrorState from '../layout/QueryErrorState'
 import type { LoteReporte } from '../../hooks/queries/useLotesQuery'
-import { estadoVencimiento, formatearFechaVencimiento } from '../../utils/vencimientos'
+import { bajaDeLotePideMotivo, estadoVencimiento, formatearFechaVencimiento } from '../../utils/vencimientos'
 import type { EstadoVencimiento } from '../../utils/vencimientos'
 import BadgeVencimiento from '../vencimientos/BadgeVencimiento'
 
@@ -92,7 +94,11 @@ export interface VistaVencimientosProps {
   darDeBajaPendiente: boolean
   devolucionPendiente: boolean
   onRefrescar: () => void
-  onDarDeBaja: (loteId: number, cantidad: number) => Promise<void>
+  /**
+   * `motivo` va sólo cuando el lote todavía no venció: la RPC lo exige para dar
+   * de baja un lote vigente (rotura, pérdida; #1558, 1558-b6).
+   */
+  onDarDeBaja: (loteId: number, cantidad: number, motivo?: string) => Promise<void>
   onDevolverAlProveedor: (
     loteId: number,
     cantidad: number,
@@ -122,6 +128,9 @@ export default function VistaVencimientos({
   /** Lote con el formulario de baja abierto. */
   const [dandoDeBaja, setDandoDeBaja] = useState<number | null>(null)
   const [cantidadBaja, setCantidadBaja] = useState('')
+  /** El motivo de la baja de un lote que todavía no venció, y su error. */
+  const [motivoBaja, setMotivoBaja] = useState('')
+  const [errorBaja, setErrorBaja] = useState('')
   /** Lote con el formulario de devolución abierto. Excluyente con el de baja. */
   const [devolviendo, setDevolviendo] = useState<number | null>(null)
   const [cantidadDevolucion, setCantidadDevolucion] = useState('')
@@ -183,14 +192,28 @@ export default function VistaVencimientos({
   async function confirmarBaja(lote: LoteReporte) {
     const cantidad = Number(cantidadBaja)
     if (!Number.isFinite(cantidad) || cantidad <= 0 || cantidad > lote.cantidad_restante) return
-    await onDarDeBaja(lote.lote_id, cantidad)
+    if (bajaDeLotePideMotivo(lote.fecha_vencimiento)) {
+      const motivo = motivoBaja.trim()
+      if (!motivo) {
+        setErrorBaja('Este lote todavía no venció: escribí el motivo de la baja (rotura, pérdida…).')
+        return
+      }
+      await onDarDeBaja(lote.lote_id, cantidad, motivo)
+    } else {
+      await onDarDeBaja(lote.lote_id, cantidad)
+    }
+    cerrarBaja()
+  }
+
+  function cerrarBaja() {
     setDandoDeBaja(null)
     setCantidadBaja('')
+    setMotivoBaja('')
+    setErrorBaja('')
   }
 
   function abrirDevolucion(lote: LoteReporte) {
-    setDandoDeBaja(null)
-    setCantidadBaja('')
+    cerrarBaja()
     setDevolviendo(lote.lote_id)
     setCantidadDevolucion(String(lote.cantidad_restante))
     setNumeroNota('')
@@ -350,35 +373,57 @@ export default function VistaVencimientos({
                   </td>
                   <td className="py-2 pl-2 text-right">
                     {dandoDeBaja === lote.lote_id ? (
-                      <span className="inline-flex items-center gap-1">
-                        <input
-                          type="number"
-                          min={1}
-                          max={lote.cantidad_restante}
-                          value={cantidadBaja}
-                          onChange={e => setCantidadBaja(e.target.value)}
-                          aria-label="Unidades a dar de baja"
-                          className="w-16 px-2 py-1 border rounded text-sm text-right dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => void confirmarBaja(lote)}
-                          disabled={darDeBajaPendiente}
-                          aria-label="Confirmar la baja"
-                          className="p-1 text-green-600 hover:text-green-700 disabled:opacity-50"
-                        >
-                          {darDeBajaPendiente
-                            ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                            : <Check className="w-4 h-4" aria-hidden="true" />}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setDandoDeBaja(null); setCantidadBaja('') }}
-                          aria-label="Cancelar la baja"
-                          className="p-1 text-stone-400 hover:text-stone-600"
-                        >
-                          <X className="w-4 h-4" aria-hidden="true" />
-                        </button>
+                      <span className="inline-flex flex-col items-end gap-1">
+                        {/* Un lote que todavía no venció se da de baja con el
+                            motivo escrito (rotura, pérdida): lo pide la RPC
+                            (#1558, 1558-b6). El vencido no lo pide. */}
+                        {bajaDeLotePideMotivo(lote.fecha_vencimiento) && (
+                          <>
+                            <input
+                              type="text"
+                              value={motivoBaja}
+                              onChange={e => { setMotivoBaja(e.target.value); setErrorBaja('') }}
+                              aria-label="Motivo de la baja"
+                              placeholder="Motivo (rotura, pérdida…)"
+                              className="w-44 px-2 py-1 border rounded text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            />
+                            {errorBaja && (
+                              <span className="text-xs text-red-600 dark:text-red-400" role="alert">
+                                {errorBaja}
+                              </span>
+                            )}
+                          </>
+                        )}
+                        <span className="inline-flex items-center gap-1">
+                          <input
+                            type="number"
+                            min={1}
+                            max={lote.cantidad_restante}
+                            value={cantidadBaja}
+                            onChange={e => setCantidadBaja(e.target.value)}
+                            aria-label="Unidades a dar de baja"
+                            className="w-16 px-2 py-1 border rounded text-sm text-right dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void confirmarBaja(lote)}
+                            disabled={darDeBajaPendiente}
+                            aria-label="Confirmar la baja"
+                            className="p-1 text-green-600 hover:text-green-700 disabled:opacity-50"
+                          >
+                            {darDeBajaPendiente
+                              ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                              : <Check className="w-4 h-4" aria-hidden="true" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={cerrarBaja}
+                            aria-label="Cancelar la baja"
+                            className="p-1 text-stone-400 hover:text-stone-600"
+                          >
+                            <X className="w-4 h-4" aria-hidden="true" />
+                          </button>
+                        </span>
                       </span>
                     ) : devolviendo === lote.lote_id ? (
                       // El mini formulario de la devolución, con las tres cosas
@@ -448,6 +493,7 @@ export default function VistaVencimientos({
                             type="button"
                             onClick={() => {
                               cerrarDevolucion()
+                              cerrarBaja()
                               setDandoDeBaja(lote.lote_id)
                               setCantidadBaja(String(lote.cantidad_restante))
                             }}

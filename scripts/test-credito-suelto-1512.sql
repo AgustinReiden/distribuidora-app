@@ -5,8 +5,9 @@
 --   K1 · Una boleta W de 100 impaga y una X de 60 cobrada entera: cancelar X le pasa los 60 a W (60/100), con la marca
 --        de_saldo_a_favor, y el cliente no queda con crédito suelto. La respuesta trae credito_aplicado 60.
 --   K2 · W de 30 y X de 50 cobrada: cancelar X salda W (30/30) con un pedazo y quedan 20 sueltos. credito_aplicado 30.
---   K3 · Igual que K1 con p_tipo = 'cambio_de_cliente': la cancelación no aplica nada (lo hace cambiar_cliente_pedido) y
---        los 60 quedan sueltos. Sin cobros, cancelar no aplica nada (credito_aplicado 0).
+--   K3 · Igual que K1 con p_tipo = 'cambio_de_cliente' por llamada directa: se rechaza (desde la ola 2 de #1603, COB-b5,
+--        ese tipo lo pone sólo cambiar_cliente_pedido, que aplica el crédito): X sigue 60/60, W 0/100 y nada suelto.
+--        Sin cobros, cancelar no aplica nada (credito_aplicado 0).
 --   N1 · Una boleta Q entregada e impaga de 100 y una NC de 30: el crédito baja Q (30/100) con la marca y el
 --        nota_credito_id, y no queda nada suelto. La respuesta trae credito_aplicado_pedido 30 y otras 0.
 --   N2 · Q de 100 cobrada 80 y otra boleta W de 50 impaga: una NC de 60 salda Q con un pedazo de 20 (raíz y padre en el
@@ -228,15 +229,18 @@ BEGIN
     v_w := pg_temp.t_alta(v_cli, v_adm, v_prod, 100, v_hoy - 2);
     v_x := pg_temp.t_alta(v_cli, v_adm, v_prod, 60, v_hoy);
     v_p := pg_temp.t_cobro(v_x, 60);
+    -- Cambió de regla (COB-b5, ola 2 de #1603): 'cambio_de_cliente' por llamada directa se
+    -- rechaza (sólo lo pone cambiar_cliente_pedido). Antes cancelaba y dejaba los 60 sueltos.
     v_j := public.cancelar_pedido_con_stock(v_x, 'ensayo 1512', v_adm, 'cambio_de_cliente');
-    IF (v_j->>'credito_aplicado')::numeric IS DISTINCT FROM 0
+    IF COALESCE((v_j->>'success')::boolean, false)
+       OR (SELECT estado FROM pedidos WHERE id = v_x) = 'cancelado'
        OR pg_temp.t_estado(v_w) <> '0.00/100.00'
-       OR pg_temp.t_suelto(v_cli) <> 60
+       OR pg_temp.t_suelto(v_cli) <> 0
        OR pg_temp.t_saldo(v_cli) <> '' THEN
       v_fallas := v_fallas || format('K3 cambio de cliente dio %s; W %s, suelto %s%s', v_j, pg_temp.t_estado(v_w),
                                      pg_temp.t_suelto(v_cli), pg_temp.t_saldo(v_cli));
     END IF;
-    -- sin cobros (el crédito de 60 sigue suelto: no lo aplica nadie)
+    -- sin cobros
     v_x := pg_temp.t_alta(v_cli, v_adm, v_prod, 10, v_hoy);
     v_j := public.cancelar_pedido_con_stock(v_x, 'ensayo 1512', v_adm, 'error_de_carga');
     IF (v_j->>'credito_aplicado')::numeric IS DISTINCT FROM 0 THEN

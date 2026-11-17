@@ -17,6 +17,7 @@ function props(over: Partial<VistaConfiguracionProps> = {}): VistaConfiguracionP
     impactoCargando: false,
     onMontoTipeado: vi.fn(),
     onGuardar: vi.fn(),
+    puedeEditarMinimo: true,
     nombreSucursal: 'Tucumán',
     comisionPctPreventista: 2,
     comisionPctOtros: 0,
@@ -139,6 +140,30 @@ describe('VistaConfiguracion — compra mínima y cargo de envío', () => {
 
   it('con la política sin cambios, Guardar queda deshabilitado', () => {
     render(<VistaConfiguracion {...props({ modoMinimoActual: 'cargo', cargoEnvioActual: 1500 })} />)
+    expect(botonGuardarMinimo()).toBeDisabled()
+  })
+
+  // 1596-b3 (#1596, decisión del dueño D36): el techo de la base, contra un error de tipeo.
+  it('un mínimo por encima de $ 99.999.999 no se guarda y dice el techo', async () => {
+    const user = userEvent.setup()
+    const onGuardar = vi.fn()
+    render(<VistaConfiguracion {...props({ onGuardar })} />)
+    fireEvent.change(screen.getByLabelText('Compra mínima por pedido'), { target: { value: '100.000.000' } })
+    expect(screen.getByRole('alert')).toHaveTextContent('de 0 a $ 99.999.999')
+    await user.click(botonGuardarMinimo())
+    expect(onGuardar).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText('Compra mínima por pedido'), { target: { value: '99.999.999' } })
+    await user.click(botonGuardarMinimo())
+    expect(onGuardar).toHaveBeenCalledWith(expect.objectContaining({ montoMinimo: 99999999 }))
+  })
+
+  // 1561-b9 (#1561, decisión del dueño D35): la compra mínima la cambia sólo el admin.
+  it('sin permiso (el encargado) la ve pero no la puede cambiar', () => {
+    render(<VistaConfiguracion {...props({ puedeEditarMinimo: false })} />)
+    expect(screen.getByText('Solo un admin puede cambiar la compra mínima.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Compra mínima por pedido')).toBeDisabled()
+    expect(screen.getByRole('radio', { name: /Bloquear/ })).toBeDisabled()
     expect(botonGuardarMinimo()).toBeDisabled()
   })
 })

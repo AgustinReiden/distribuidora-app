@@ -22,6 +22,7 @@ import { useSucursal } from '../../contexts/SucursalContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { lazyWithReload } from '../../utils/lazyWithReload'
+import { avisoAceptacion } from '../../utils/matchProducto'
 
 const VistaMovimientos = lazyWithReload(() => import('../vistas/VistaMovimientos'))
 const ModalCrearMovimiento = lazyWithReload(() => import('../modals/ModalCrearMovimiento'))
@@ -108,10 +109,10 @@ export default function MovimientosContainer(): React.ReactElement {
 
   const handleAceptar = useCallback(async (resoluciones: ResolucionItem[]) => {
     if (!aceptarMov) return
-    await aceptar.mutateAsync({ movimientoId: aceptarMov.id, resoluciones })
+    const reactivados = await aceptar.mutateAsync({ movimientoId: aceptarMov.id, resoluciones })
     setAceptarMov(null)
-    notify.success('Movimiento aceptado. Stock ingresado en esta sucursal.')
-  }, [aceptar, aceptarMov, notify])
+    notify.success(avisoAceptacion(reactivados, productos))
+  }, [aceptar, aceptarMov, notify, productos])
 
   const handleDenegar = useCallback(async (motivo: string) => {
     if (!aceptarMov) return

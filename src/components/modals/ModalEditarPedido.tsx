@@ -9,6 +9,7 @@ import { formatPrecio, parseDateSafe, fechaHaceDias, diaArgentino, fechaLocalISO
 import { fechaReferenciaPromo as fechaReferenciaPromoDe } from '../../utils/fechaReferenciaPromo';
 import { fechaPedidoFueraDeRango, mensajeFechaAnteriorAlPiso, pisoFechaPedido } from '../../utils/fechaPedido';
 import { errorDeFechaEntrega, rangoFechaEntrega } from '../../utils/fechaEntrega';
+import { techoFechaEntregaProgramada } from '../../utils/fechaEntregaProgramada';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio';
@@ -1858,6 +1859,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
               type="date"
               value={fechaEntregaProgramada}
               onChange={e => setFechaEntregaProgramada(e.target.value)}
+              // 1559-b6 (D21): hasta 60 días adelante, como el server.
+              max={techoFechaEntregaProgramada()}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             />
             {fechaEntregaProgramada !== fechaEntregaProgramadaOriginal && (

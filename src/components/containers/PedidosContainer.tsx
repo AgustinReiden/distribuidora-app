@@ -115,13 +115,14 @@ import { usePagos } from '../../hooks/supabase/usePagos'
 import { isTransientNetworkError } from '../../utils/retryWithBackoff'
 import { escrituraIdempotente } from '../../utils/escrituraIdempotente'
 import { importConRecarga, lazyWithReload } from '../../utils/lazyWithReload'
-import { versionTrasCambioPropio } from '../../utils/versionPedido'
+import { cambioDeVersionDe, versionTrasCambioPropio } from '../../utils/versionPedido'
 import type { PedidoDB, FiltrosPedidosState, PerfilDB, RegistrarSalvedadInput, RegistrarSalvedadResult, PagoDBWithUsuario, TipoComprobanteVenta } from '../../types'
 import type { PedidoEditItem } from '../modals/ModalEditarPedido'
 import type { CambiarClientePayload } from '../modals/ModalCambiarCliente'
 import type { RutaMultiResultadoUI } from '../modals/ModalGestionRutas'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
+import { mensajeCobroMasivo, avisoNoCobrados } from '../../utils/avisoCobroMasivo'
 
 // Lazy load de componentes
 const VistaPedidos = lazyWithReload(() => import('../vistas/VistaPedidos'))
@@ -1116,7 +1117,7 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(true)
     try {
       const huella = `pagos|${fechaPago}|${formaPago}|${[...pedidoIds].sort().join(',')}`
-      await pagosMasivos.mutateAsync({
+      const cobrados = await pagosMasivos.mutateAsync({
         pedidoIds, formaPago, fecha: fechaPago,
         // Mismo lote + misma forma + misma fecha = el mismo cobro. Un reintento
         // tras un error de red no vuelve a cobrarlo (mig 167).
@@ -1125,7 +1126,10 @@ export default function PedidosContainer(): React.ReactElement {
       // Salió bien: un cobro igual después es otro cobro (COB-F-5), no un replay.
       requestIdMasivo.olvidar([huella])
       setModalPagosMasivosOpen(false)
-      notify.success(`${pedidoIds.length} pedido${pedidoIds.length !== 1 ? 's' : ''} marcado${pedidoIds.length !== 1 ? 's' : ''} como pagado${pedidoIds.length !== 1 ? 's' : ''}`)
+      // 1559-b12 (#1559): lo que cobró el server, no los ids enviados.
+      notify.success(mensajeCobroMasivo(cobrados))
+      const aviso = avisoNoCobrados(pedidoIds.length, cobrados)
+      if (aviso) notify.warning(aviso)
     } catch (e) { notify.error('Error en pagos masivos: ' + (e as Error).message) }
     setGuardando(false)
   }, [pagosMasivos, notify, requestIdMasivo])
@@ -1169,6 +1173,9 @@ export default function PedidosContainer(): React.ReactElement {
         if (resultado.entregados < ids.idsEntregar.length) {
           notify.warning(avisoNoEntregados(ids.idsEntregar.length - resultado.entregados))
         }
+        // 1559-b12 (#1559): las que ya estaban cobradas se saltean.
+        const avisoCobro = avisoNoCobrados(ids.idsCobrar.length, resultado.cobrados)
+        if (avisoCobro) notify.warning(avisoCobro)
       }
     } catch (e) { notify.error('Error en entrega y pago masivos: ' + (e as Error).message) }
     setGuardando(false)
@@ -1331,19 +1338,26 @@ export default function PedidosContainer(): React.ReactElement {
           ? (data.fechaEntrega.includes('T') ? data.fechaEntrega : `${data.fechaEntrega}T12:00:00Z`)
           : null,
         p_fecha_entrega_programada: data.fechaEntregaProgramada || null,
+        // 1559-b10: la versión con la que se abrió la edición. Sin versión, no viaja y no se compara.
+        ...(versionEdicion.current ? { p_updated_at_esperado: versionEdicion.current } : {}),
       })
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el pedido se actualizó. Revisá antes de reintentar.')
-      const respuesta = resultado as { vuelto_a_pendiente?: boolean; updated_at_anterior?: string; updated_at?: string } | null
-      const revertido = respuesta?.vuelto_a_pendiente === true
-      // #1323: la vuelta a pendiente le mueve el updated_at al pedido. Se adopta
-      // el nuevo sólo si la edición estaba parada en el de antes; si la RPC falló,
-      // no se movió nada y la versión sigue sirviendo para guardar las líneas.
-      if (respuesta?.updated_at_anterior && respuesta.updated_at) {
-        versionEdicion.current = versionTrasCambioPropio(versionEdicion.current, {
-          anterior: respuesta.updated_at_anterior,
-          nueva: respuesta.updated_at,
-        })
+      const respuesta = resultado as {
+        success?: boolean; errores?: string[]; codigo?: string
+        vuelto_a_pendiente?: boolean; updated_at_anterior?: string; updated_at?: string
+      } | null
+      if (respuesta?.success === false) {
+        // La lista quedó vieja: al volver a abrir, el pedido tiene que venir fresco.
+        if (respuesta.codigo === CODIGO_PEDIDO_EDITADO_POR_OTRO) {
+          queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+        }
+        throw new Error(respuesta.errores?.join(', ') || 'No se pudo actualizar el pedido')
       }
+      const revertido = respuesta?.vuelto_a_pendiente === true
+      // #1323: guardar mueve el updated_at del pedido (la vuelta a pendiente, y desde
+      // 1595-b6 cualquier cambio). Se adopta el nuevo sólo si la edición estaba parada en
+      // el de antes; si la RPC falló, no se movió nada y la versión sigue sirviendo.
+      versionEdicion.current = versionTrasCambioPropio(versionEdicion.current, cambioDeVersionDe(respuesta))
 
       // Invalidar cache para que los cambios se reflejen en la UI. Incluye la
       // familia recorridos* para que la hoja de ruta/comanda re-descargada desde
@@ -1460,7 +1474,7 @@ export default function PedidosContainer(): React.ReactElement {
         p_nuevo_preventista_id: nuevoPreventistaId,
       })
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el preventista se cambió. Revisá antes de reintentar.')
-      const response = data as { success: boolean; error?: string }
+      const response = data as { success: boolean; error?: string; updated_at_anterior?: string; updated_at?: string }
       if (!response?.success) {
         throw new Error(response?.error || 'Error al cambiar preventista')
       }
@@ -1468,8 +1482,11 @@ export default function PedidosContainer(): React.ReactElement {
       // Actualizar localmente el pedido en edicion para reflejar el cambio
       // sin esperar al refetch.
       setPedidoEditando(prev => prev ? { ...prev, usuario_id: nuevoPreventistaId } as PedidoDB : prev)
-      // #1323: esta RPC le mueve el updated_at al pedido, y es el mismo usuario.
-      versionEdicion.current = null
+      // #1323 y 1559-b9: esta RPC le mueve el updated_at al pedido y devuelve el de antes y
+      // el nuevo. La edición sigue con el nuevo si estaba en el de antes. Un server de antes
+      // de la migración no los devuelve: ahí la edición deja de comparar, como hasta ahora.
+      const cambio = cambioDeVersionDe(response)
+      versionEdicion.current = cambio ? versionTrasCambioPropio(versionEdicion.current, cambio) : null
       notify.success('Preventista actualizado')
     } catch (e) {
       notify.error((e as Error).message || 'Error al cambiar preventista')
