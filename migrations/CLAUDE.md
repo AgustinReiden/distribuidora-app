@@ -87,7 +87,11 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
     quedaba +N en cada edición; a nivel pedido, le comía la huella a otra línea del mismo
     producto. El cambio de cliente es otro de esos caminos (#1594, STK-1): la cancelación devuelve
     a su lote, así que `cambiar_cliente_pedido` le saca a cada lote lo que le devolvió (con tope en
-    la foto) antes del alta, y al final rehace la huella sobre el pedido nuevo.
+    la foto) antes del alta, y al final rehace la huella sobre el pedido nuevo. Lo mismo con el fardo
+    del contenedor (M3-1, ola 2 de #1603): lo que la cancelación le devolvió a un lote del contenedor
+    vuelve a la bolsa, y el bloque que cierra el alta hereda esos lotes en sus `lotes_pendientes` (la
+    parte `{"lote_id": null}`); lo que no se vuelve a cerrar vuelve a su lote. La edición
+    (`actualizar_pedido_items`) todavía no lo hace.
   - El gate es el check **STK-F** de `auditoria_integridad()`: falla si una función de `public`
     sube `productos.stock` de forma incremental sin mencionar `app.stock_origen`. **No tiene
     excepciones** (#1594): `registrar_ingreso_sucursal` ya no existe y `registrar_compra_completa`
@@ -103,6 +107,10 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
     `auth.uid()` cuando corre como `authenticated` a `pg_trigger_depth() = 1`. Corolario: una
     función que mueve stock **no puede ser `SECURITY INVOKER`**: sin etiqueta se confundiría con
     la ficha y STK-D no la vería.
+    El ledger también tiene lo que el trigger de UPDATE no ve (ola 2 de #1603): el alta de un
+    producto con stock deja `0 → stock` ('alta_producto', `registrar_alta_stock`), y un camino que
+    pasa unidades entre un lote y la bolsa sin mover el stock (`ajustar_lote`) deja su fila con
+    anterior = nuevo y el lote de referencia.
   - **El orden de locks es producto antes que lote, y productos por id ascendente** (#1255): es el
     de la venta, que bloquea los productos y deja que el trigger baje después a sus lotes. Una
     función que toca un lote lee su `producto_id` sin lock, bloquea el producto `FOR UPDATE` y
@@ -256,7 +264,9 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   (`trg_promo_tipo_reinicia_barra`): el `usos_pendientes` de unidad entera es un contador. Y el
   reinicio marca las fotos de fracción que ya existen (`pedido_promo_reglas.barra_anterior`, #1556):
   un pedido de un tramo anterior entró en la barra que se tiró, así que no le resta ni le suma a la
-  nueva, aunque su foto vuelva a coincidir con la promo. La marca no se borra al editar.
+  nueva, aunque su foto vuelva a coincidir con la promo. La marca no se borra al editar, y el cambio
+  de cliente se la pasa al pedido nuevo y deshace lo que el alta le sumó a la barra viva: neto 0
+  (1556-c1, decisión del dueño: un fardo de más subvalúa el stock).
   A un regalo de fracción en la foto que no entra en la barra viva —foto marcada, o promo que pasó
   a unidad entera— no se le suma (LV-1 de #1565, mig 502; decisión del dueño): la edición, la
   sustitución y el reparto que le dejarían a un producto del regalo más unidades de las que tiene

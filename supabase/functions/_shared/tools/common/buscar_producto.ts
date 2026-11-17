@@ -8,6 +8,7 @@
 // decidir si alertar.
 
 import type { Tool } from "../base.ts";
+import { stockBajo, stockMinimoEfectivo } from "../../utils/stockMinimo.ts";
 import {
   aplicarFiltroCatalogo,
   fetchMostrarSinStock,
@@ -46,7 +47,8 @@ export const buscarProductoTool: Tool<BuscarProductoParams, BuscarProductoResult
   name: "buscar_producto",
   description:
     "Busca productos del catálogo por nombre o código. Devuelve precio, stock, " +
-    "stock mínimo y un flag bajo_stock cuando stock <= stock_minimo. " +
+    "stock mínimo y un flag bajo_stock cuando stock <= stock_minimo " +
+    "(un mínimo de 0 es sin alerta). " +
     "Filtra por sucursal del bot user cuando aplica.",
   parameters: {
     type: "object",
@@ -123,7 +125,8 @@ export const buscarProductoTool: Tool<BuscarProductoParams, BuscarProductoResult
       total: count ?? rows.length,
       productos: rows.map((p) => {
         const stock = Number(p.stock ?? 0);
-        const stockMin = Number(p.stock_minimo ?? 0);
+        // CAT-13 (#1596): vacío usa 10 y 0 es "sin alerta", como en las pantallas.
+        const stockMin = stockMinimoEfectivo(p.stock_minimo);
         return {
           id: Number(p.id),
           codigo: p.codigo ?? null,
@@ -131,7 +134,7 @@ export const buscarProductoTool: Tool<BuscarProductoParams, BuscarProductoResult
           precio: Number(p.precio ?? 0),
           stock,
           stock_minimo: stockMin,
-          bajo_stock: stock <= stockMin,
+          bajo_stock: stockBajo(stock, stockMin),
           categoria: p.categoria ?? null,
         };
       }),
