@@ -26,7 +26,8 @@ import {
   BLOQUES_GERENCIAL, hojasDeBloque, hojasTodo, nombreArchivo,
   type BloqueGerencial,
 } from '../../utils/exportGerencial'
-import { contribucionEstimada, resumenCobranza } from '../../utils/contribucionGerencial'
+import { contribucionEstimada, notasCreditoAparte, resumenCobranza } from '../../utils/contribucionGerencial'
+import { margenSobreConCosto, sinCostoFueraDelMargen } from '../../utils/margenSobreConCosto'
 import { descuentoPorMes } from '../../utils/combosReporte'
 import { detallesTop } from '../../utils/topGerencial'
 
@@ -200,6 +201,8 @@ function VerDetalle({ tab, desde, hasta, sucursalId }: {
 
 /** REP-11: lo que dicen la comisión y la contribución con "Todos". */
 const SOLO_ENTREGADAS = 'Se calculan sobre lo entregado: pasá a «Entregadas»'
+// 1562-b6: un margen sobre un denominador 0 o negativo no es un porcentaje.
+const pctMargen = (x: number | null): string => (x == null ? '—' : pct(x))
 
 const th = 'px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400'
 
@@ -510,10 +513,10 @@ export default function VistaReportesGerenciales({
                 {metasOn && metas?.venta != null && <Semaforo cur={k.venta} meta={metas.venta} factor={metaFactor} />}
               </div>} />
             <KpiCard label="Margen real" value={moneyC(k.margen_real ?? k.margen_comercial)}
-              sub={<><b>{pct((k.margen_real ?? k.margen_comercial) / (k.venta_real ?? k.venta))}</b> s/ venta real (Σ ingresos reales − costos reales)</>}
+              sub={<><b>{pctMargen(margenSobreConCosto(k.margen_real ?? k.margen_comercial, k.venta_real ?? k.venta, sinCostoFueraDelMargen(k, k.venta_real != null ? k.ingreso_real_sin_costo : k.ingreso_sin_costo)))}</b> s/ venta real (Σ ingresos reales − costos reales)</>}
               accent={ACCENTS.emerald}
               delta={cmp && kp!.margen_real != null ? <Delta cur={k.margen_real ?? 0} prev={kp!.margen_real} /> : undefined} />
-            <KpiCard label="Margen comercial" value={moneyC(k.margen_comercial)} sub={<><b>{pct(k.margen_comercial / k.venta)}</b> s/ venta final, antes de bonif.</>} accent={ACCENTS.cyan}
+            <KpiCard label="Margen comercial" value={moneyC(k.margen_comercial)} sub={<><b>{pctMargen(margenSobreConCosto(k.margen_comercial, k.venta, sinCostoFueraDelMargen(k, k.ingreso_sin_costo)))}</b> s/ venta final con costo, antes de bonif.</>} accent={ACCENTS.cyan}
               delta={cmp ? <Delta cur={k.margen_comercial} prev={kp!.margen_comercial} /> : undefined} />
             <KpiCard label="Bonificaciones" value={moneyC(k.bonif)} sub={<><b>{pct(k.bonif / k.venta)}</b> de la venta</>} accent={ACCENTS.amber}
               delta={cmp ? <Delta cur={k.bonif} prev={kp!.bonif} invert /> : undefined} />
@@ -525,7 +528,7 @@ export default function VistaReportesGerenciales({
                 accent={ACCENTS.cyan}
                 delta={cmp && reporte.combos.kpis.descuento_anterior != null ? <Delta cur={reporte.combos.kpis.descuento} prev={reporte.combos.kpis.descuento_anterior} invert /> : undefined} />
             )}
-            <KpiCard label="Margen neto" value={moneyC(k.margen_neto)} sub={<><b>{pct(k.margen_neto / k.venta)}</b> post bonif.</>} accent={ACCENTS.violet}
+            <KpiCard label="Margen neto" value={moneyC(k.margen_neto)} sub={<><b>{pctMargen(margenSobreConCosto(k.margen_neto, k.venta, sinCostoFueraDelMargen(k, k.ingreso_sin_costo)))}</b> post bonif.</>} accent={ACCENTS.violet}
               delta={<div className="space-y-1">
                 {cmp && <Delta cur={k.margen_neto} prev={kp!.margen_neto} />}
                 {metasOn && metas?.margen_neto != null && <Semaforo cur={k.margen_neto} meta={metas.margen_neto} factor={metaFactor} />}
@@ -552,9 +555,10 @@ export default function VistaReportesGerenciales({
                 delta={cmp && kp!.consumo_interno != null ? <Delta cur={k.consumo_interno.monto} prev={kp!.consumo_interno.monto} /> : undefined} />
             )}
             {/* #845: notas de crédito de venta del período (por la fecha de la nota).
-                No tocan los márgenes; la contribución las resta. */}
+                REP-D (#1545): ya están restadas de la venta y de los márgenes (llega
+                venta_bruta); con un RPC anterior las resta la contribución. */}
             <KpiCard label="Notas de crédito" value={moneyC(k.notas_credito_venta ?? 0)}
-              sub={<>{N.format(k.notas_credito_venta_n ?? 0)} de venta · <b>{pct((k.notas_credito_venta ?? 0) / k.venta)}</b> de la venta</>}
+              sub={<>{N.format(k.notas_credito_venta_n ?? 0)} de venta · <b>{pct((k.notas_credito_venta ?? 0) / (k.venta_bruta ?? k.venta))}</b> de la venta{k.venta_bruta != null ? ', ya restadas' : ''}</>}
               accent={ACCENTS.red}
               delta={cmp && kp!.notas_credito_venta != null ? <Delta cur={k.notas_credito_venta ?? 0} prev={kp!.notas_credito_venta} invert /> : undefined} />
             {todos ? (
@@ -609,8 +613,8 @@ export default function VistaReportesGerenciales({
             <div className="flex items-start gap-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-3">
               <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
               <p className="text-sm text-amber-800 dark:text-amber-200">
-                <b>Margen sobreestimado:</b> el {pct(reporte.flags.pct_sin_costo / 100)} de la venta ({money(reporte.flags.ingreso_sin_costo)}) proviene de productos sin costo cargado,
-                que se computan con costo cero. El margen real es algo menor. Conviene completar el maestro de costos.
+                <b>Ventas sin costo:</b> el {pct(reporte.flags.pct_sin_costo / 100)} de la venta ({money(reporte.flags.ingreso_sin_costo)}) proviene de productos sin costo cargado,
+                y queda fuera de los márgenes. Conviene completar el maestro de costos.
               </p>
             </div>
           )}
@@ -736,7 +740,7 @@ export default function VistaReportesGerenciales({
                   <p>Contribución: —. {SOLO_ENTREGADAS}.</p>
                 </div>
               ) : (
-                <div className="h-72"><WaterfallChart venta={k.venta} cmv={k.cmv} bonif={k.bonif} mermas={k.mermas} comision={derived.comision} descuentos={k.descuentos_proveedores ?? 0} notasCredito={k.notas_credito_venta ?? 0} /></div>
+                <div className="h-72"><WaterfallChart venta={k.venta} cmv={k.cmv} bonif={k.bonif} mermas={k.mermas} comision={derived.comision} descuentos={k.descuentos_proveedores ?? 0} notasCredito={notasCreditoAparte(k)} /></div>
               )}
             </Card>
             <Card className="p-5">
@@ -802,7 +806,8 @@ export default function VistaReportesGerenciales({
                     {[...reporte.vendedores].sort((a, b) => b.venta - a.venta).map((v, i) => {
                       const mn = v.margen_comercial - v.bonif
                       const base = comBase === 'nc' ? v.base_nc : v.venta
-                      const mnp = v.venta ? mn / v.venta : 0
+                      // 1562-b6: sobre la venta con costo, como el margen.
+                      const mnp = margenSobreConCosto(mn, v.venta, sinCostoFueraDelMargen(reporte.kpis, v.venta_sin_costo))
                       return (
                         <tr key={v.nombre + i} className="hover:bg-gray-50 dark:hover:bg-gray-700/40">
                           <td className={td}>
@@ -811,7 +816,7 @@ export default function VistaReportesGerenciales({
                           </td>
                           <td className={`${td} text-right tabular-nums`}>{moneyC(v.venta)}</td>
                           <td className={`${td} text-right tabular-nums ${mn < 0 ? 'text-red-600 dark:text-red-400' : ''}`}>{moneyC(mn)}</td>
-                          <td className={`${td} text-right tabular-nums font-medium ${mnp < 0.1 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{pct(mnp)}</td>
+                          <td className={`${td} text-right tabular-nums font-medium ${mnp == null ? 'text-gray-400' : mnp < 0.1 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{pctMargen(mnp)}</td>
                           {hayComisionReal && !todos && (
                             <td className={`${td} text-right tabular-nums font-bold text-gray-900 dark:text-white`}>
                               {money(comisionReal(v))}
@@ -855,7 +860,7 @@ export default function VistaReportesGerenciales({
 
           {/* Categorías */}
           <Card id="sec-categorias" className="p-5">
-            <SectionTitle icon={TrendingUp} title="Mezcla por categoría" hint="Venta y margen comercial. △ = margen inflado por productos sin costo." right={<div className="flex items-center gap-3">{botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'categorias')!)}<VerDetalle tab="rentabilidad" desde={periodoSel.desde} hasta={periodoSel.hasta} sucursalId={sucursalSel} /></div>} />
+            <SectionTitle icon={TrendingUp} title="Mezcla por categoría" hint="Venta y margen comercial. △ = tiene ventas sin costo, que quedan fuera del margen." right={<div className="flex items-center gap-3">{botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'categorias')!)}<VerDetalle tab="rentabilidad" desde={periodoSel.desde} hasta={periodoSel.hasta} sucursalId={sucursalSel} /></div>} />
             <div className="grid lg:grid-cols-3 gap-5">
               <div className="lg:col-span-2 h-80"><CategoriasChart data={reporte.categorias} /></div>
               <div className="overflow-x-auto">
@@ -1024,11 +1029,13 @@ export default function VistaReportesGerenciales({
               el CMV). Vivía mezclado en "Otros costos" junto a mermas y bonif.,
               donde la columna Bonif. era la misma que ya está en Evolución. */}
           <Card id="sec-compras" className="p-5">
-            <SectionTitle icon={TrendingUp} title="Compras del período" hint="Compras a proveedores más transferencias netas entre sucursales, por mes. Excluye canceladas. No es el CMV." right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'compras')!)} />
-            <Criterio className="mb-3">Suma del total de las compras por <strong>fecha de compra</strong>, excluyendo canceladas, más las <strong>transferencias netas</strong> entre sucursales (lo recibido suma, lo enviado resta, a costo con IVA del origen, por fecha de aceptación, desde el 05/10/2026). Es mercadería que entró en el período, no el costo de lo vendido: eso es el CMV. En la Red las transferencias se cancelan.</Criterio>
-            {(k.compras_transferencias ?? 0) !== 0 && (
+            <SectionTitle icon={TrendingUp} title="Compras del período" hint="Compras a proveedores, netas de sus notas de crédito, más transferencias netas entre sucursales, por mes. Excluye canceladas. No es el CMV." right={botonDe(BLOQUES_GERENCIAL.find(b => b.id === 'compras')!)} />
+            <Criterio className="mb-3">Suma del total de las compras por <strong>fecha de compra</strong>, excluyendo canceladas, menos sus <strong>notas de crédito</strong> (por la fecha de la nota), más las <strong>transferencias netas</strong> entre sucursales (lo recibido suma, lo enviado resta, a costo con IVA del origen, por fecha de aceptación, desde el 05/10/2026). Es mercadería que entró en el período, no el costo de lo vendido: eso es el CMV. En la Red las transferencias se cancelan.</Criterio>
+            {((k.compras_transferencias ?? 0) !== 0 || (k.compras_notas_credito ?? 0) !== 0) && (
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                Facturas: <b>{moneyC(k.compras_facturas ?? k.compras - (k.compras_transferencias ?? 0))}</b> · Transferencias netas: <b>{moneyC(k.compras_transferencias ?? 0)}</b>
+                Facturas: <b>{moneyC(k.compras_facturas ?? k.compras - (k.compras_transferencias ?? 0) + (k.compras_notas_credito ?? 0))}</b>
+                {(k.compras_notas_credito ?? 0) !== 0 && <> · Notas de crédito: <b>−{moneyC(k.compras_notas_credito ?? 0)}</b></>}
+                {(k.compras_transferencias ?? 0) !== 0 && <> · Transferencias netas: <b>{moneyC(k.compras_transferencias ?? 0)}</b></>}
               </p>
             )}
             <div className="overflow-x-auto">

@@ -223,9 +223,9 @@ export function ReporteRentabilidadSection({
         <div className="flex items-start gap-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-3">
           <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
           <p className="text-sm text-amber-800 dark:text-amber-200">
-            <b>Margen sobreestimado:</b> el {pctSinCosto.toFixed(1)}% de los ingresos ({formatPrecio(ingresosSinCosto)}) proviene de{' '}
-            {productosSinCosto === 1 ? 'un producto' : `${productosSinCosto} productos`} sin costo cargado, que se computan con costo cero.
-            El margen real es algo menor. Conviene completar el maestro de costos.
+            <b>Ingresos sin costo:</b> el {pctSinCosto.toFixed(1)}% de los ingresos ({formatPrecio(ingresosSinCosto)}) proviene de{' '}
+            {productosSinCosto === 1 ? 'un producto' : `${productosSinCosto} productos`} sin costo cargado, y queda fuera del margen.
+            Conviene completar el maestro de costos.
           </p>
         </div>
       )}
@@ -257,7 +257,7 @@ export function ReporteRentabilidadSection({
                 <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                   <td className="px-4 py-3">
                     <p className={`font-medium${p.id === null ? ' italic' : ''}`}>
-                      {p.sinCosto && <span className="text-amber-500" title="Margen inflado: tiene líneas sin costo cargado">△ </span>}
+                      {p.sinCosto && <span className="text-amber-500" title="Tiene líneas sin costo cargado: quedan fuera del margen">△ </span>}
                       {p.nombre}
                     </p>
                     {/* Sin id no hay ficha: la fila queda porque es venta y el total cierra con ella. */}
@@ -298,7 +298,7 @@ export function ReporteRentabilidadSection({
           </table>
           {productosEnPantalla.some((p) => p.sinCosto) && (
             <p className="px-4 py-3 text-sm text-gray-500 border-t dark:border-gray-700">
-              △ = margen inflado por productos sin costo.
+              △ = tiene ventas sin costo, que quedan fuera del margen.
             </p>
           )}
           {productos.length > PRODUCTOS_EN_PANTALLA && (
