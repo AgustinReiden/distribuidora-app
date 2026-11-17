@@ -15,6 +15,15 @@ E2E: `npm run test:e2e` (Playwright, chromium).
 `SUPABASE_SERVICE_ROLE_KEY`, que no están en `.env`. Es un gate de CI
 (`.github/workflows/integridad.yml`), no un comando de desarrollo.
 
+Los gates de SQL y los ensayos `scripts/test-*.sql` corren **en cada PR que toca `migrations/` o
+`scripts/`** (`.github/workflows/sql-local.yml`, #1601): sobre una base local de Docker armada con
+la foto del esquema de prod (`esquema-base.yml`, sin datos) más las migraciones `NNN_*.sql` del PR.
+El cron de `integridad.yml` queda para lo que sólo se ve con los datos de prod. Un gate o un
+ensayo nuevo corre ahí sin secrets; si encuentra algo que hoy está así a propósito, va a su lista
+de excepciones (`scripts/*-permitidas.json`, `ensayos-sql-excepciones.json`) con su motivo, y la
+lista **sólo se achica**. Localmente: `GATE_DB_CONTENEDOR=<contenedor> bash scripts/ci/gates-locales.sh`
+(la base se arma con `scripts/concurrencia/docker-local.mjs`).
+
 Deploy: push a `main` → webhook de Coolify. La config de nginx de producción **vive en el
 panel de Coolify**, no en el `nginx.conf` del repo — editar el repo no cambia nada.
 Verificá siempre con `curl -I`, nunca leyendo el archivo.
@@ -378,8 +387,8 @@ suelta en `sucursales`.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
   **visible para todos los preventistas** (mig 028), o sea lo contrario de reservado. Y
-  `reservado_admin` **no** es "solo lo ve admin": lo ven también encargado, transportista y
-  depósito, y el preventista que ya le vendió —esa excepción es la que evita que sus pedidos
+  `reservado_admin` **no** es "solo lo ve admin": lo ven también encargado y transportista
+  (el depósito no ve ningún cliente: `mt_clientes_select` lo excluye entero), y el preventista que ya le vendió —esa excepción es la que evita que sus pedidos
   viejos pierdan el cliente y desaparezcan por los `!inner` de `usePedidosQuery`—. Todo
   camino nuevo que ofrezca clientes *para operar* lo excluye; todo camino de *historial* lo
   sigue mostrando.

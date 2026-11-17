@@ -1,0 +1,80 @@
+name: Esquema base
+
+# Foto del ESQUEMA de prod (sin datos) para que los PRs corran los gates y los ensayos de SQL
+# sobre una base local (.github/workflows/sql-local.yml, #1601 1601-b7, #1563 1563-b9, decisión
+# D60 del dueño). Corre a las 07:30 ART, antes del cron de integridad.yml, y a demanda: la
+# PRIMERA vez hay que dispararlo a mano (Actions > Esquema base > Run workflow), porque el PR
+# que lo trae no tiene todavía ninguna foto que restaurar.
+#
+# Por qué es un workflow aparte y no un paso del PR: la conexión a prod (SUPABASE_DB_URL, el
+# secret que ya usa backup.yml) no se le da a un job que corre código del PR (ver ci.yml,
+# job `embeds`). Este corre sólo por `schedule` y `workflow_dispatch`, desde main, y deja la
+# foto en el cache de Actions; el job del PR la restaura sin ningún secret.
+#
+# Qué guarda: `pg_dump --schema-only` del schema public (tablas, funciones, policies, grants:
+# lo mismo que ya está en migrations/, que es público) y la lista del ledger de migraciones.
+# NO guarda datos. El cache lo ve cualquier run del repo, incluidos los PRs de forks.
+
+on:
+  schedule:
+    - cron: '30 10 * * *' # 07:30 ART (10:30 UTC), todos los días
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: esquema-base
+  cancel-in-progress: false
+
+jobs:
+  esquema:
+    name: pg_dump del esquema
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Verificar el secret
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "${SUPABASE_DB_URL:-}" ]; then
+            echo "::error::Falta el secret SUPABASE_DB_URL (el de backup.yml): sin la foto del esquema los PRs no pueden correr los gates de SQL."
+            exit 1
+          fi
+
+      - name: Instalar postgresql-client-17
+        run: |
+          set -euo pipefail
+          # Mismo procedimiento que backup.yml: el runner trae el cliente 16 y pg_dump se niega
+          # a volcar un servidor más nuevo.
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+
+      - name: Volcar el esquema y el ledger
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          mkdir -p esquema-base
+          pg_dump --schema-only --no-owner --schema=public --file=esquema-base/esquema.sql "$SUPABASE_DB_URL"
+          # Los números de lo aplicado: para ver, en el job del PR, contra qué ledger corre.
+          psql "$SUPABASE_DB_URL" -X -At -c "SELECT version || '|' || name FROM supabase_migrations.schema_migrations ORDER BY version" > esquema-base/ledger.txt
+          TAM=$(stat -c%s esquema-base/esquema.sql)
+          echo "esquema.sql: $TAM bytes · ledger: $(wc -l < esquema-base/ledger.txt) migraciones · última: $(tail -n1 esquema-base/ledger.txt)"
+          # Un volcado de menos de 500 KB es casi seguro una falla parcial.
+          if [ "$TAM" -lt 500000 ]; then
+            echo "::error::El esquema pesa $TAM bytes: el volcado falló o quedó parcial."
+            exit 1
+          fi
+
+      - name: Guardar la foto en el cache
+        uses: actions/cache/save@v4
+        with:
+          path: esquema-base
+          key: esquema-prod-${{ github.run_id }}

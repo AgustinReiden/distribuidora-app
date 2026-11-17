@@ -316,5 +316,7 @@ jobs:
         # su unico fix es vite@8 (breaking, se evalua por separado).
         run: npm audit --audit-level=high --omit=dev
 
+      # `--all`: en CI el índice está vacío, y sin esto el chequeo (que mira los archivos
+      # staged, pensado para el pre-commit) no revisaba nada y salía verde (#1600, 1600-b2).
       - name: Check for secrets in code
-        run: npm run check-secrets
+        run: npm run check-secrets -- --all

@@ -1,0 +1,160 @@
+name: SQL local
+
+# Los gates de SQL y los ensayos de SQL sobre una base LOCAL, en cada PR que toca SQL (#1601
+# 1601-b7, #1563 1563-b9, decisión D60 del dueño: «los ensayos de SQL se suman a CI sobre una
+# base local»). Antes los gates corrían sólo en el cron de las 08:00 contra prod
+# (integridad.yml) y los ensayos no corrían en ningún lado: un PR que abría una función se
+# mergeaba, y se enteraba al día siguiente (o nunca).
+#
+# Qué hace:
+#   1. Restaura la foto del ESQUEMA de prod que deja esquema-base.yml (sin datos).
+#   2. Levanta Postgres 17.6 en Docker (la imagen de Supabase, la misma versión de prod),
+#      le carga esa foto, la semilla (admin y sucursales 1 y 2) y las migraciones pendientes
+#      del PR (migrations/NNN_*.sql, con el NNN literal: las que todavía no tienen número).
+#   3. Corre los gates (scripts/ci/gates-locales.sh): los mismos scripts del cron, apuntados
+#      a un PostgREST de juguete, más los que leen el catálogo (Realtime, mensajes de error
+#      de los triggers, cruce por ids de otra sucursal).
+#   4. Corre los ensayos (scripts/ci/ensayos-sql.mjs: todos los scripts/test-*.sql, salvo los
+#      de scripts/ensayos-sql-excepciones.json).
+#
+# No usa ningún secret: puede correr en PRs de forks. Cuánto tarda: unos 8 a 15 minutos
+# (bajar la imagen de Postgres ~1 min, cargar el esquema ~1 min, los gates ~2 min y los
+# ensayos el resto). Corre sólo si el PR toca migrations/, scripts/ o estos workflows, y en
+# cada push a main que los toque.
+#
+# Hasta que esquema-base.yml haya corrido una vez (se dispara a mano la primera vez) no hay
+# foto que restaurar: en un PR el job avisa (::warning::) y termina sin correr nada; en
+# `push` y a demanda, falla.
+
+on:
+  pull_request:
+    paths:
+      - 'migrations/**'
+      - 'scripts/**'
+      - '.github/workflows/sql-local.yml'
+      - '.github/workflows/esquema-base.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'migrations/**'
+      - 'scripts/**'
+      - '.github/workflows/sql-local.yml'
+      - '.github/workflows/esquema-base.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sql-local-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sql-local:
+    name: Gates y ensayos de SQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CONC_NOMBRE: ci-sql
+      CONC_PUERTO: '54430'
+      GATE_DB_CONTENEDOR: ci-sql
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Restaurar la foto del esquema de prod
+        id: foto
+        uses: actions/cache/restore@v4
+        with:
+          path: esquema-base
+          key: esquema-prod-ninguna-exacta
+          restore-keys: esquema-prod-
+
+      - name: Sin foto del esquema
+        if: steps.foto.outputs.cache-matched-key == ''
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "::warning::No hay foto del esquema de prod en el cache: este PR NO corrió los gates ni los ensayos de SQL. Disparar a mano el workflow «Esquema base» (Actions > Esquema base > Run workflow) y volver a correr éste."
+            exit 0
+          fi
+          echo "::error::No hay foto del esquema de prod en el cache (workflow «Esquema base»)."
+          exit 1
+
+      - name: Qué foto se restauró
+        if: steps.foto.outputs.cache-matched-key != ''
+        run: |
+          echo "foto: ${{ steps.foto.outputs.cache-matched-key }}"
+          echo "ledger de prod: $(wc -l < esquema-base/ledger.txt) migraciones, última $(tail -n1 esquema-base/ledger.txt)"
+
+      - name: Levantar Postgres local
+        if: steps.foto.outputs.cache-matched-key != ''
+        run: node scripts/concurrencia/docker-local.mjs up
+
+      # La foto es `pg_dump -n public`: no trae las extensiones. `unaccent` vive en public
+      # en prod y varias funciones la llaman; el resto (pgcrypto, uuid-ossp, vault) las trae
+      # la imagen.
+      - name: Cargar el esquema y la semilla
+        if: steps.foto.outputs.cache-matched-key != ''
+        run: |
+          set -euo pipefail
+          node scripts/concurrencia/docker-local.mjs sql "CREATE EXTENSION IF NOT EXISTS unaccent WITH SCHEMA public"
+          node scripts/concurrencia/docker-local.mjs dump esquema-base/esquema.sql | tee /tmp/carga.log
+          # Los únicos errores tolerados: el CREATE SCHEMA public (ya existe) y los privilegios
+          # por defecto de supabase_admin (pg_dump los incluye y postgres no puede cambiarlos).
+          MALOS=$(grep -E 'ERROR|FATAL' /tmp/carga.log | grep -v -E 'schema "public" already exists|permission denied to change default privileges' || true)
+          if [ -n "$MALOS" ]; then
+            echo "::error::La carga del esquema falló:"
+            echo "$MALOS"
+            exit 1
+          fi
+          node scripts/concurrencia/docker-local.mjs semilla
+
+      # Usuarios de cada rol, clientes y productos inventados en las sucursales 1 y 2: muchos
+      # ensayos arrancan pidiendo «una sucursal con admin, preventista y transportista». Va
+      # ANTES de las migraciones del PR, como en prod: una columna NOT NULL sin default que
+      # se agrega con filas existentes tiene que fallar acá igual que allá.
+      - name: Datos mínimos para los ensayos
+        if: steps.foto.outputs.cache-matched-key != ''
+        run: docker exec -i ci-sql psql -U postgres -h localhost -d postgres -X -q -v ON_ERROR_STOP=1 < scripts/ci/semilla-ensayos.sql
+
+      # Las migraciones con NNN literal son las del PR (todavía sin número). Una que ya tenga
+      # número es de prod y ya está en la foto.
+      - name: Aplicar las migraciones pendientes del PR
+        id: migr
+        if: steps.foto.outputs.cache-matched-key != ''
+        run: |
+          set -euo pipefail
+          n=0
+          for f in $(ls migrations/NNN_*.sql 2>/dev/null | sort); do
+            echo "== aplicando $f"
+            node scripts/concurrencia/docker-local.mjs aplicar "$f"
+            n=$((n+1))
+          done
+          echo "migraciones pendientes aplicadas: $n"
+
+      - name: Gates de SQL
+        id: gates
+        if: steps.foto.outputs.cache-matched-key != ''
+        run: bash scripts/ci/gates-locales.sh
+
+      # Cada gate nuevo o endurecido se prueba contra el defecto que vigila (un gate que nunca
+      # falla no sirve): se arma, se comprueba que da rojo y se deshace. Va después de los gates
+      # y antes de los ensayos, que tienen que ver la base como estaba.
+      - name: Los gates muerden (controles negativos)
+        if: always() && steps.migr.outcome == 'success'
+        run: bash scripts/ci/gates-muerden.sh
+
+      - name: Ensayos de SQL
+        # Corre aunque los gates hayan fallado (una corrida dice todo lo que está mal), pero no
+        # si la base no se armó.
+        if: always() && steps.migr.outcome == 'success'
+        run: node scripts/ci/ensayos-sql.mjs
+
+      - name: Apagar Postgres local
+        if: always() && steps.foto.outputs.cache-matched-key != ''
+        run: node scripts/concurrencia/docker-local.mjs down

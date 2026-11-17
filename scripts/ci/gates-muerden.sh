@@ -1,0 +1,82 @@
+#!/bin/bash
+# Controles negativos de los gates de SQL: arma a propósito el defecto que cada uno vigila, en la
+# base LOCAL, y comprueba que el gate se pone ROJO (exit 1); después lo deshace. Un gate que nunca
+# falla no sirve: si alguien le saca el diente (un cambio en una regla, un filtro de más), éste
+# lo dice. Lo corre sql-local.yml después de los gates, sobre la misma base.
+#
+# Uso:  GATE_DB_CONTENEDOR=<contenedor> bash scripts/ci/gates-muerden.sh
+#
+# NUNCA contra prod: crea y borra objetos. Sólo contenedor local (GATE_DB_CONTENEDOR).
+set -u
+
+if [ -z "${GATE_DB_CONTENEDOR:-}" ]; then
+  echo "Falta GATE_DB_CONTENEDOR (sólo se corre contra el contenedor local)." >&2
+  exit 2
+fi
+unset SUPABASE_DB_URL GATE_DB_URL
+
+PUERTO="${RPC_LOCAL_PUERTO:-54498}"
+node scripts/ci/rpc-local.mjs "$PUERTO" > /tmp/rpc-local-muerden.log 2>&1 &
+SERVIDOR=$!
+trap 'kill $SERVIDOR 2>/dev/null' EXIT
+for i in $(seq 1 30); do
+  grep -q escuchando /tmp/rpc-local-muerden.log 2>/dev/null && break
+  sleep 1
+done
+grep -q escuchando /tmp/rpc-local-muerden.log 2>/dev/null || { echo "rpc-local no levantó:"; cat /tmp/rpc-local-muerden.log; exit 2; }
+export SUPABASE_URL="http://127.0.0.1:$PUERTO" SUPABASE_SERVICE_ROLE_KEY="local"
+
+SQL() { docker exec -i "$GATE_DB_CONTENEDOR" psql -U postgres -h localhost -d postgres -X -q -v ON_ERROR_STOP=1 -c "$1" > /dev/null; }
+
+MAL=()
+# muerde <nombre> <gate.mjs> <sql que arma el defecto> <sql que lo deshace>
+muerde() {
+  local nombre="$1" gate="$2" arma="$3" deshace="$4"
+  echo ""
+  echo "=== $nombre"
+  if ! SQL "$arma"; then
+    echo "   no pude armar el defecto"; MAL+=("$nombre (no armó)"); SQL "$deshace" || true; return
+  fi
+  node "scripts/$gate" > /tmp/muerde.out 2>&1
+  local c=$?
+  SQL "$deshace" || { echo "   NO pude deshacer el defecto"; MAL+=("$nombre (no deshizo)"); }
+  if [ $c -eq 1 ]; then
+    echo "   ✓ el gate se puso rojo (exit 1), como tiene que ser"
+  else
+    echo "   ✗ el gate dio exit $c con el defecto armado: ya no muerde"
+    tail -5 /tmp/muerde.out | sed 's/^/     /'
+    MAL+=("$nombre (exit $c)")
+  fi
+}
+
+muerde "Realtime: una tabla con SELECT por columna entra en la publicación" check-realtime.mjs \
+  "ALTER PUBLICATION supabase_realtime ADD TABLE public.productos" \
+  "ALTER PUBLICATION supabase_realtime DROP TABLE public.productos"
+
+muerde "Tablas anon: una tabla VACÍA legible por anon" check-tablas-anon.mjs \
+  "CREATE TABLE public.zz_gate_anon (id int); ALTER TABLE public.zz_gate_anon ENABLE ROW LEVEL SECURITY; GRANT SELECT ON public.zz_gate_anon TO anon; CREATE POLICY zz_abierta ON public.zz_gate_anon FOR SELECT TO anon USING (true)" \
+  "DROP TABLE IF EXISTS public.zz_gate_anon"
+
+muerde "Guardas: IF NOT (rol IN (…) OR col = auth.uid()) sin COALESCE" check-rpcs-definer.mjs \
+  "CREATE FUNCTION public.zz_gate_guarda(p_pedido_id bigint) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS \$f\$ DECLARE v_rol text; v_chofer uuid; BEGIN SELECT rol INTO v_rol FROM perfiles WHERE id = auth.uid(); SELECT transportista_id INTO v_chofer FROM pedidos WHERE id = p_pedido_id; IF NOT (v_rol IN ('admin','encargado') OR v_chofer = auth.uid()) THEN RAISE EXCEPTION 'sin permiso'; END IF; END \$f\$" \
+  "DROP FUNCTION IF EXISTS public.zz_gate_guarda(bigint)"
+
+muerde "Rol sin activo: una _impl sin EXECUTE que lee el rol sin activo" check-rol-sin-activo.mjs \
+  "CREATE FUNCTION public.zz_gate_impl(p_x bigint) RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS \$f\$ DECLARE v_rol text; BEGIN SELECT rol INTO v_rol FROM perfiles WHERE id = auth.uid(); RETURN v_rol; END \$f\$; REVOKE EXECUTE ON FUNCTION public.zz_gate_impl(bigint) FROM PUBLIC, anon, authenticated" \
+  "DROP FUNCTION IF EXISTS public.zz_gate_impl(bigint)"
+
+muerde "Mensajes de trigger: un RAISE con el nombre de un cliente leído con NEW.cliente_id" check-mensajes-trigger.mjs \
+  "CREATE FUNCTION public.zz_gate_trg() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS \$f\$ DECLARE v_n text; BEGIN SELECT razon_social INTO v_n FROM clientes WHERE id = NEW.cliente_id; RAISE EXCEPTION 'El cliente % ya tiene pedido', v_n; END \$f\$" \
+  "DROP FUNCTION IF EXISTS public.zz_gate_trg()"
+
+muerde "Cruce por ids: una RPC que cambia un cliente de otra sucursal" check-cruce-ids.mjs \
+  "CREATE FUNCTION public.zz_gate_cruce(p_cliente_id bigint) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS \$f\$ BEGIN UPDATE clientes SET direccion = 'tocada' WHERE id = p_cliente_id; END \$f\$; GRANT EXECUTE ON FUNCTION public.zz_gate_cruce(bigint) TO authenticated" \
+  "DROP FUNCTION IF EXISTS public.zz_gate_cruce(bigint)"
+
+echo ""
+if [ ${#MAL[@]} -gt 0 ]; then
+  echo "❌ Gates que no muerden (o no se pudieron probar):"
+  printf '   - %s\n' "${MAL[@]}"
+  exit 1
+fi
+echo "✅ Cada gate se pone rojo ante su defecto."

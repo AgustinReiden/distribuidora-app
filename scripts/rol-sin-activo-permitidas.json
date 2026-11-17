@@ -33,5 +33,16 @@
     "sustituir_regalo_pedido(bigint,bigint,numeric,text,bigint,uuid)": "sin sucursal: devuelve success false, 'No hay sucursal activa', antes de leer la línea",
     "tablero_guardar_meta_cobertura(bigint,date,numeric,integer)": "antes del rol pasa por _tablero_sucursales(), que mira activo: 'Acceso denegado: se requiere rol admin o encargado'",
     "verificar_duplicado_cliente(numeric,numeric,text,bigint)": "sin sucursal: 42501 'No se pudo verificar duplicados: sin sesión o sin sucursal activa' antes de buscar"
+  },
+  "_doc_impl": "Las funciones SIN EXECUTE para authenticated que leen perfiles.rol de quien llama sin mirar activo (1595-b4): las `_impl` de los pagos y de la nota de crédito, que llama su wrapper DEFINER. La lee scripts/check-rol-sin-activo.mjs por conexión directa al catálogo. Va por firma y sólo se achica, como 'funciones': una `_impl` nueva decide con es_admin()/es_encargado_o_admin() o mira activo. Las seis `_impl` de pagos se probaron como un admin desactivado con el token vivo por su wrapper: todas cortan con 42501 'No hay sucursal activa' (current_sucursal_id() da NULL para un desactivado) antes de leer o escribir.",
+  "impl": {
+    "crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)": "sin sucursal: 42501 'No hay sucursal activa' por crear_nota_credito_venta, antes de leer el rol",
+    "get_audit_history(text,text,integer)": "sin EXECUTE para authenticated y sin llamador en src/: sólo un servidor puede ejecutarla, y un desactivado no llega",
+    "get_suspicious_activity(integer)": "sin EXECUTE para authenticated y sin llamador en src/: sólo un servidor puede ejecutarla, y un desactivado no llega",
+    "imputar_credito_a_pedido_impl(bigint,bigint,numeric)": "sin sucursal: 42501 'No hay sucursal activa' por imputar_credito_a_pedido, antes de leer el rol",
+    "marcar_entrega_y_pago_masivo_impl(bigint[],uuid,text,date)": "sin sucursal: corta con 42501 'No hay sucursal activa' antes de leer el rol",
+    "marcar_pagos_masivo_impl(bigint[],text,date)": "sin sucursal: corta con 42501 'No hay sucursal activa' antes de leer el rol",
+    "registrar_pago_cliente_fifo_impl(bigint,numeric,text,date,text,text)": "sin sucursal: 42501 'No hay sucursal activa' por registrar_pago_cliente_fifo, antes de leer el rol",
+    "registrar_pago_combinado_cliente_fifo_impl(bigint,jsonb,date,text,text)": "sin sucursal: 42501 'No hay sucursal activa' por registrar_pago_combinado_cliente_fifo, antes de leer el rol"
   }
 }
