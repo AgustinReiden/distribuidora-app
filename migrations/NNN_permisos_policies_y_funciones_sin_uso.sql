@@ -141,7 +141,12 @@
 --     guardar_horarios_clientes_masivo, obtener_resumen_compras,
 --     obtener_sucursales_usuario, desasignar_usuario_sucursal,
 --     get_audit_history y get_suspicious_activity (SEG-4: sin EXECUTE para
---     authenticated desde #1438; borrarlas cierra también su parte de SEG-6);
+--     authenticated desde #1438; borrarlas cierra también su parte de SEG-6).
+--     desasignar_usuario_sucursal la arregló la 513 (1561-b3) y tampoco tiene
+--     llamador en el main del 17/11 ni en las ramas de la ola: se borra igual;
+--   · _tablero_cat_nombre, que desde la 514 sólo la llama
+--     tablero_productos_categoria: si después de borrar ésa nadie la nombra, se
+--     borra; si no, se deja;
 --   · con llamador sólo de server, quedan y pierden el EXECUTE de
 --     authenticated: tablero_categorias, tablero_facturacion_mensual,
 --     tablero_top_clientes_zona y tablero_cobertura (los cruces de
@@ -812,6 +817,26 @@ DROP FUNCTION IF EXISTS public.tablero_kpis(bigint, integer);
 DROP FUNCTION IF EXISTS public.tablero_productos_categoria(uuid, text, bigint, date, date, bigint);
 DROP FUNCTION IF EXISTS public.tablero_ficha_cliente(bigint);
 DROP FUNCTION IF EXISTS public.obtener_resumen_compras(date, date);
+
+-- _tablero_cat_nombre: desde la 514 (B8b) la llama sólo tablero_productos_categoria, que se
+-- acaba de borrar. Si ya nadie la nombra, queda huérfana y se borra (D48); si alguna otra
+-- función la sigue llamando, se deja y se avisa.
+DO $p9b$
+BEGIN
+  IF to_regprocedure('public._tablero_cat_nombre(text)') IS NULL THEN
+    RETURN;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_proc p
+              WHERE p.pronamespace = 'public'::regnamespace
+                AND p.proname <> '_tablero_cat_nombre'
+                AND p.prosrc ~ '\m_tablero_cat_nombre\M')
+     OR EXISTS (SELECT 1 FROM pg_views WHERE schemaname = 'public' AND definition ~ '\m_tablero_cat_nombre\M') THEN
+    RAISE NOTICE 'mig NNN · _tablero_cat_nombre sigue teniendo llamador: se deja';
+  ELSE
+    DROP FUNCTION public._tablero_cat_nombre(text);
+  END IF;
+END
+$p9b$;
 
 -- 9c · La que arregla B6b (1561-b3).
 DROP FUNCTION public.desasignar_usuario_sucursal(uuid, bigint);

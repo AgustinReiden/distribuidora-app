@@ -96,7 +96,7 @@ BEGIN
   -- --------------------------------------------------------------- fixtures -
   v_adm1 := pg_temp.u('admin', 1);
   v_admT := pg_temp.u('admin', 1);
-  INSERT INTO usuario_sucursales (usuario_id, sucursal_id, rol, es_default) VALUES (v_admT, 2, 'mismo', false);
+  INSERT INTO usuario_sucursales (usuario_id, sucursal_id, es_default) VALUES (v_admT, 2, false);
   v_enc  := pg_temp.u('encargado', 1);
   v_pre  := pg_temp.u('preventista', 1);
   v_pre2 := pg_temp.u('preventista', 1);
@@ -191,6 +191,13 @@ BEGIN
    WHERE to_regprocedure(f) IS NOT NULL;
   IF v_t IS NOT NULL THEN
     v_fallas := v_fallas || ('P3 · siguen existiendo: ' || v_t);
+  END IF;
+  -- _tablero_cat_nombre (desde la 514 la llamaba sólo tablero_productos_categoria): si nadie la
+  -- nombra, no queda huérfana.
+  IF to_regprocedure('public._tablero_cat_nombre(text)') IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+                       AND p.proname <> '_tablero_cat_nombre' AND p.prosrc ~ '\m_tablero_cat_nombre\M') THEN
+    v_fallas := v_fallas || 'P3 · _tablero_cat_nombre quedó huérfana'::text;
   END IF;
   SELECT string_agg(f, ', ') INTO v_t FROM unnest(ARRAY[
       'public.tablero_categorias(bigint,date,date,bigint)', 'public.tablero_facturacion_mensual(bigint,integer)',
