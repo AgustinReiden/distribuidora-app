@@ -191,6 +191,14 @@ BEGIN
 END
 $fn$;
 
+-- Una salvedad es de un pedido que ya salió: con la regla de B1 (D23 del dueño)
+-- registrar_salvedad rechaza uno pendiente o en preparación (pedido_sin_salir).
+-- Los casos que registran salvedades pasan el pedido a 'asignado' antes.
+CREATE OR REPLACE FUNCTION pg_temp.t_asignar(p_ped bigint)
+RETURNS void LANGUAGE sql AS $fn$
+  UPDATE public.pedidos SET estado = 'asignado' WHERE id = p_ped;
+$fn$;
+
 CREATE OR REPLACE FUNCTION pg_temp.t_salvedad(p_ped bigint, p_item bigint, p_cant int, p_motivo text)
 RETURNS bigint LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -429,6 +437,7 @@ DECLARE
 BEGIN
   b := pg_temp.t_promo_con_pedido(p_cli, p_adm, p_suc);
   PERFORM pg_temp.t_claims(p_adm, p_suc);
+  PERFORM pg_temp.t_asignar((b->>'pedido')::bigint);
   v_salv := pg_temp.t_salvedad((b->>'pedido')::bigint, (b->>'regalo')::bigint, 2, 'faltante_stock');
   f := pg_temp.t_si(f, NOT EXISTS (SELECT 1 FROM public.pedido_items WHERE promocion_id = (b->>'promo')::bigint),
                     'el regalo tendría que haberse ido de pedido_items');
@@ -739,6 +748,7 @@ BEGIN
     jsonb_build_object('producto_id', v_c, 'cantidad', 3, 'precio_unitario', 1960,
                        'combo_id', v_combo, 'precio_sin_combo_unitario', 2500)));
   PERFORM pg_temp.t_claims(p_adm, p_suc);
+  PERFORM pg_temp.t_asignar(v_ped);
   SELECT id INTO v_lf FROM public.pedido_items WHERE pedido_id = v_ped AND producto_id = v_f;
   PERFORM pg_temp.t_salvedad(v_ped, v_lf, 2, 'cliente_rechaza');
   SELECT id INTO v_lc FROM public.pedido_items WHERE pedido_id = v_ped AND producto_id = v_c AND combo_id IS NOT NULL;
