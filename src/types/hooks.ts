@@ -1100,6 +1100,17 @@ export interface NotaCreditoDB {
   impuestos_internos?: number | null;
   /** 'ajuste' = sin mercadería (mig 280). Lo deriva la base de los items. */
   tipo?: 'devolucion' | 'ajuste' | null;
+  /**
+   * mig 523: la nota se anuló (`anular_nota_credito_compra`). Queda en el
+   * historial pero no cuenta para nada (`esNotaVigente`).
+   */
+  anulada?: boolean | null;
+  anulada_at?: string | null;
+  /** id de perfiles, SIN clave foránea (mig 524): no se embebe. */
+  anulada_por?: string | null;
+  /** Nombre de quien la anuló, resuelto aparte por `fetchNotasCreditoByCompra`. */
+  anulada_por_nombre?: string | null;
+  motivo_anulacion?: string | null;
 }
 
 export interface NotaCreditoFormInput {

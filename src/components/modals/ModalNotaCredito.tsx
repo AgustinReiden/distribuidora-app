@@ -10,6 +10,7 @@ import {
   calcularIINotaCredito,
   calcularTotalesNotaCredito,
   costosAcreditablesPorProducto,
+  notasVigentes,
   restanteAcreditableCompra,
   totalesAjusteNotaCredito,
 } from '../../utils/notaCredito'
@@ -96,7 +97,7 @@ export default function ModalNotaCredito({
   // `nota_credito_items` no guarda de qué línea salió cada unidad.
   const yaAcreditado = useMemo(() => {
     const acreditado: Record<string, number> = {}
-    for (const nota of notasExistentes) {
+    for (const nota of notasVigentes(notasExistentes)) {  // una anulada ya devolvió lo suyo (mig 523)
       for (const ncItem of nota.items || []) {
         acreditado[ncItem.producto_id] = (acreditado[ncItem.producto_id] || 0) + ncItem.cantidad
       }

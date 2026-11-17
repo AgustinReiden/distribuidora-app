@@ -21,6 +21,7 @@ import {
   useNotasCreditoByCompraQuery,
   useNotasCreditoResumenQuery,
   useRegistrarNotaCreditoMutation,
+  useAnularNotaCreditoCompraMutation,
   useCategoriasQuery,
   useMarcasQuery,
   useAsegurarCatalogo,
@@ -155,6 +156,7 @@ export default function ComprasContainer(): React.ReactElement {
   const crearProducto = useCrearProductoMutation()
   const crearProveedor = useCrearProveedorMutation()
   const registrarNC = useRegistrarNotaCreditoMutation()
+  const anularNC = useAnularNotaCreditoCompraMutation()
   const cambiarProveedorMut = useCambiarProveedorCompraMutation()
 
   // Estado de modales
@@ -433,6 +435,13 @@ export default function ComprasContainer(): React.ReactElement {
     }
   }, [registrarNC, notify, user])
 
+  // B18 (#1603): el error lo muestra el detalle de la compra, adentro, con el motivo del server.
+  const handleAnularNC = useCallback(async (notaId: string, motivo: string) => {
+    const avisos = await anularNC.mutateAsync({ notaId, motivo })
+    notify.success('Nota de crédito anulada')
+    for (const aviso of avisos) notify.warning(aviso, { persist: true })
+  }, [anularNC, notify])
+
   const handleCrearProveedorDesdeCompra = useCallback(async (data: ProveedorFormInputExtended) => {
     const proveedor = await crearProveedor.mutateAsync(data)
     notify.success(`Proveedor "${data.nombre}" creado`)
@@ -497,6 +506,8 @@ export default function ComprasContainer(): React.ReactElement {
               handleNotaCredito(c)
             }}
             notasCredito={notasCreditoQuery.data as Parameters<typeof ModalCompra>[0]['notasCredito']}
+            // Los mismos que la registran (la RPC lo vuelve a validar).
+            onAnularNotaCredito={isAdmin || isEncargado ? handleAnularNC : undefined}
             lotes={lotesDetalle}
           />
         </Suspense>
