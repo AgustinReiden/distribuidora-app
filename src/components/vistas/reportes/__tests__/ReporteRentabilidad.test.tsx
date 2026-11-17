@@ -239,28 +239,28 @@ describe('ReporteRentabilidad › productos sin costo (#1289)', () => {
 
   it('sin líneas sin costo no marca ni avisa nada', () => {
     renderReporte();
-    expect(screen.queryByText(/Margen sobreestimado/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Ingresos sin costo:/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/△/)).not.toBeInTheDocument();
   });
 
   it('marca el producto con △ y avisa el monto y el porcentaje junto a los totales', () => {
     renderReporte({ reporte: conSinCosto(3, 1) });
 
-    expect(screen.getByText(/Margen sobreestimado/i).closest('p')).toHaveTextContent(
+    expect(screen.getByText(/Ingresos sin costo:/i).closest('p')).toHaveTextContent(
       'el 20.0% de los ingresos ($600) proviene de un producto sin costo cargado'
     );
     const fila = screen.getByText('Producto 1').closest('tr');
     expect(fila).toHaveTextContent('△ Producto 1');
     expect(screen.getByText('Producto 0').closest('tr')).not.toHaveTextContent('△');
-    expect(screen.getByText(/△ = margen inflado/)).toBeInTheDocument();
+    expect(screen.getByText(/△ = tiene ventas sin costo/)).toBeInTheDocument();
   });
 
   // La tabla muestra 20: un producto sin costo con poco margen puede quedar
   // afuera, y el aviso no puede depender de que esté en pantalla.
   it('avisa aunque el producto sin costo esté fuera de los 20 de la tabla', () => {
     renderReporte({ reporte: conSinCosto(25, 22) });
-    expect(screen.getByText(/Margen sobreestimado/i)).toBeInTheDocument();
-    expect(screen.queryByText(/△ = margen inflado/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Ingresos sin costo:/i)).toBeInTheDocument();
+    expect(screen.queryByText(/△ = tiene ventas sin costo/)).not.toBeInTheDocument();
   });
 
   it('el Excel lleva la marca y el monto', async () => {

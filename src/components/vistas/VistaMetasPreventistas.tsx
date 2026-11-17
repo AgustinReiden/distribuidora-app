@@ -164,7 +164,7 @@ const FilaPreventista = memo(function FilaPreventista({
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                   Margen comercial del período: {formatPrecio(p.margen_comercial)}
                 </p>
-                {/* #1289: acá el margen deja afuera esa venta; no la cuenta a costo 0 como el gerencial. */}
+                {/* #1289 y 1562-b6: el margen deja afuera esa venta, igual que el gerencial y Rentabilidad. */}
                 {ventaSinCosto > 0 && (
                   <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
                     <span className="text-amber-500">△ </span>
