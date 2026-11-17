@@ -15,6 +15,8 @@ import { chequearCoordenadaEnZona } from '../../utils/zonaCentroide';
 import { formatDistancia } from '../../utils/geo';
 import { mensajeDuplicado, type MensajeDuplicado, type VeredictoDuplicadoRPC } from '../../utils/duplicadoCliente';
 import { lazyWithReload } from '../../utils/lazyWithReload';
+import { errorDeDocumento } from './utils';
+import { rubrosParaDescuento } from '../../utils/rubrosParaDescuento';
 
 // La confirmación del aviso de duplicado se renderiza ADENTRO de este modal:
 // como hermano en el container quedaría detrás del overlay de Radix y fallaría
@@ -231,6 +233,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
   // `confirmacion` es el aviso que el usuario puede levantar.
   const [verificandoDuplicado, setVerificandoDuplicado] = useState(false);
   const [bloqueoDuplicado, setBloqueoDuplicado] = useState<MensajeDuplicado | null>(null);
+  // Error del documento que el schema no ve (dígito verificador del CUIT, largo del DNI).
+  const [errorDocumento, setErrorDocumento] = useState<string | null>(null);
   const [confirmacionDuplicado, setConfirmacionDuplicado] = useState<
     { texto: MensajeDuplicado; datos: ClienteSaveData } | null
   >(null);
@@ -254,12 +258,16 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
   // Opciones de categoría = unión de la tabla `categorias` (gestionada) y las
   // categorías reales usadas por productos. Así el valor elegido siempre matchea
   // algún producto al calcular el descuento (productos.categoria es texto libre).
-  const categoriasDisponibles = useMemo(() => {
-    const set = new Set<string>();
-    categoriasTabla.forEach(c => { const n = (c.nombre || '').trim(); if (n) set.add(n); });
-    productosParaCategorias.forEach(p => { const n = (p.categoria || '').trim(); if (n) set.add(n); });
-    return [...set].sort((a, b) => a.localeCompare(b));
-  }, [categoriasTabla, productosParaCategorias]);
+  // Un rubro desactivado no se ofrece para descuentos nuevos, pero el que el cliente ya
+  // tiene se sigue viendo (CAT-11, #1596).
+  const categoriasDisponibles = useMemo(
+    () => rubrosParaDescuento(
+      categoriasTabla,
+      productosParaCategorias.map(p => p.categoria),
+      (cliente?.descuentos_categoria || []).map(d => d.categoria),
+    ),
+    [categoriasTabla, productosParaCategorias, cliente?.descuentos_categoria],
+  );
 
   // Zod validation hook with accessibility helpers
   const { errors: errores, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar, getAriaProps, getErrorMessageProps } = useZodValidation(modalClienteSchema);
@@ -579,32 +587,28 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
     preventistas.find(p => p.id === id)?.nombre ?? 'otro preventista';
 
   const handleSubmit = async (): Promise<void> => {
+    setErrorDocumento(null);
     // Un intento nuevo empieza sin el bloqueo del anterior: el usuario acaba de
     // cambiar la dirección o el nombre justamente para destrabarlo.
     setBloqueoDuplicado(null);
     // Validar con Zod
     const result = validate(form);
 
-    // Validación adicional específica de documento según tipo
-    // Solo validar longitud si el documento no está vacío (vacío es permitido por el schema)
+    // Validación adicional específica de documento según tipo: el schema no
+    // conoce el tipo. CUIT con dígito verificador (D37, #1561). Vacío se permite.
     if (result.success) {
-      const docLimpio = form.numero_documento.replace(/\D/g, '');
-      if (docLimpio.length > 0) {
-        if (form.tipo_documento === 'CUIT' && docLimpio.length !== 11) {
-          // Error específico de CUIT
-          setTimeout(() => {
-            const primerError = formRef.current?.querySelector('.border-red-500');
-            if (primerError) primerError.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }, 100);
-          return;
-        }
-        if (form.tipo_documento === 'DNI' && (docLimpio.length < 7 || docLimpio.length > 8)) {
-          setTimeout(() => {
-            const primerError = formRef.current?.querySelector('.border-red-500');
-            if (primerError) primerError.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }, 100);
-          return;
-        }
+      const msjDocumento = errorDeDocumento(
+        form.tipo_documento,
+        form.numero_documento,
+        form.tipo_documento === tipoDocInicial ? numeroDocInicial : null
+      );
+      if (msjDocumento) {
+        setErrorDocumento(msjDocumento);
+        setTimeout(() => {
+          const primerError = formRef.current?.querySelector('.border-red-500');
+          if (primerError) primerError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 100);
+        return;
       }
     }
 
@@ -719,6 +723,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
   const handleTipoDocumentoChange = (nuevoTipo: string): void => {
     // Limpiar el numero al cambiar de tipo
     setForm({ ...form, tipo_documento: nuevoTipo as TipoDocumento, numero_documento: '' });
+    setErrorDocumento(null);
     if (intentoGuardar && errores.numero_documento) {
       clearFieldError('numero_documento');
     }
@@ -735,6 +740,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
       }
     }
     setForm({ ...form, [field]: processedValue });
+    if (field === 'numero_documento') setErrorDocumento(null);
     if (intentoGuardar && errores[field]) {
       clearFieldError(field);
     }
@@ -795,12 +801,13 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
               value={form.numero_documento}
               onChange={e => handleFieldChange('numero_documento', e.target.value)}
               disabled={edicionRestringida}
-              className={`${inputClass('numero_documento')} disabled:opacity-60 disabled:cursor-not-allowed`}
+              className={`${inputClass('numero_documento')} ${errorDocumento ? 'border-red-500 bg-red-50 dark:bg-red-900/20' : ''} disabled:opacity-60 disabled:cursor-not-allowed`}
               placeholder={form.tipo_documento === 'CUIT' ? 'XX-XXXXXXXX-X' : '12345678'}
               maxLength={form.tipo_documento === 'CUIT' ? 13 : 8}
               {...getAriaProps('numero_documento', true)}
             />
             {errores.numero_documento && <p {...getErrorMessageProps('numero_documento')} className="text-red-500 text-xs mt-1">{errores.numero_documento}</p>}
+            {!errores.numero_documento && errorDocumento && <p role="alert" className="text-red-500 text-xs mt-1">{errorDocumento}</p>}
           </div>
           <div>
             <label htmlFor="razonSocial" className="block text-sm font-medium mb-1 dark:text-gray-200">Razón social/Nombre Cliente *</label>

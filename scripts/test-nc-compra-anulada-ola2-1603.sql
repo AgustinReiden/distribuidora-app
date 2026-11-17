@@ -1,10 +1,10 @@
 -- Ensayo de la tarjeta B18 de la ola 2 del plan #1603: una nota de crédito de COMPRA anulada
 -- (`anular_nota_credito_compra`, mig 523) deja de contar en todo lo que suma notas, y deja de
--- bloquear la compra. Migración: NNN_nc_compra_anulada_lectores.
+-- bloquear la compra. Migración: 526_nc_compra_anulada_lectores (en producción desde el 17/11).
 --
 -- Un único DO con datos propios que termina SIEMPRE en una excepción: no deja rastro (salvo
 -- valores de secuencia). Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ' con la lista. Sin la
--- migración fallan PF, RG, RGA, BOT, ED, AN, CP y TR; REG (regresión) pasa igual.
+-- migración fallan PF, RG, RGA, BOT, ED, AN, CP, TR, LV, CPD y MES; REG (regresión) pasa igual.
 --
 --   PF  · posicion_fiscal: una FC A de 10 × 100 al 21 % y una devolución de 4 (IVA 84) más un
 --         ajuste con IVA 10,50 e II 5. Anuladas las dos, el IVA y el II de las notas de compra
@@ -24,6 +24,18 @@
 --         compra cuya única nota está anulada.
 --   REG · Regresión: con una nota VIGENTE las cuatro siguen rechazando, y la nota vigente sigue
 --         restando en posicion_fiscal, reporte_gerencial y el bot.
+--   LV  · H13 con lotes y una venta en el medio (H8 de la revisión de B18): 10 u. a 80 en la
+--         bolsa, ZZ de 20 × 100 con lotes de 8 y 12, devolución de 10 (sale de los lotes), venta
+--         de 3, anulación. Editar la compra a 15 deja lo mismo que la compra de referencia sin
+--         nota (stock, lotes y promedio).
+--   CPD · H13 con una DEVOLUCIÓN que tomó lotes: FC A de 20 × 100 con lotes de 8 y 12, devolución
+--         de 10 anulada, cambio de proveedor: los lotes pasan al clon enteros (8/8, 12/12), la
+--         nota anulada queda en la original (cancelada) y una devolución nueva de 20 sobre el
+--         clon entra.
+--   MES · Decisión del dueño: una nota anulada sale de TODOS los períodos, también del de su
+--         fecha. FC A del mes anterior con una devolución de 4 fechada en ese mes: anulada hoy,
+--         posicion_fiscal, reporte_gerencial y el bot de ese mes vuelven a lo de antes de la
+--         nota, y el mes de hoy no cambia.
 --
 --   docker exec -i <contenedor> psql -U postgres -h localhost -d postgres -f - < scripts/test-nc-compra-anulada-ola2-1603.sql
 
@@ -127,29 +139,43 @@ BEGIN
     END IF;
   END $f$;
   -- Lo que dicen los tres lectores de la sucursal 1 para hoy, como el servidor (sin sesión).
-  CREATE FUNCTION pg_temp.pf() RETURNS jsonb LANGUAGE plpgsql AS $f$
+  -- Por defecto, el día de hoy; con un rango, ese período.
+  CREATE FUNCTION pg_temp.pf(p_d date DEFAULT NULL, p_h date DEFAULT NULL) RETURNS jsonb LANGUAGE plpgsql AS $f$
   DECLARE v jsonb;
   BEGIN
     PERFORM pg_temp.como(NULL, NULL);
-    v := public.posicion_fiscal(1, public._tablero_hoy(), public._tablero_hoy())->'compras';
+    v := public.posicion_fiscal(1, COALESCE(p_d, public._tablero_hoy()), COALESCE(p_h, public._tablero_hoy()))->'compras';
     RETURN jsonb_build_object('iva_nc', v->'iva_notas_credito', 'ii_nc', v->'ii_notas_credito',
                               'iva_credito', v->'iva_credito', 'ii_compras', v->'ii_compras');
   END $f$;
-  CREATE FUNCTION pg_temp.rg() RETURNS jsonb LANGUAGE plpgsql AS $f$
+  CREATE FUNCTION pg_temp.rg(p_d date DEFAULT NULL, p_h date DEFAULT NULL) RETURNS jsonb LANGUAGE plpgsql AS $f$
   DECLARE v jsonb; m jsonb;
   BEGIN
     PERFORM pg_temp.como(NULL, NULL);
-    v := public.reporte_gerencial(1, public._tablero_hoy(), public._tablero_hoy());
-    SELECT e INTO m FROM jsonb_array_elements(v->'mensual') e WHERE e->>'mes' = to_char(public._tablero_hoy(), 'YYYY-MM');
+    v := public.reporte_gerencial(1, COALESCE(p_d, public._tablero_hoy()), COALESCE(p_h, public._tablero_hoy()));
+    SELECT e INTO m FROM jsonb_array_elements(v->'mensual') e
+     WHERE e->>'mes' = to_char(COALESCE(p_d, public._tablero_hoy()), 'YYYY-MM');
     RETURN jsonb_build_object('nc', v->'kpis'->'compras_notas_credito', 'compras', v->'kpis'->'compras',
                               'desc', v->'kpis'->'descuentos_proveedores',
                               'm_nc', m->'compras_notas_credito', 'm_compras', m->'compras',
                               'm_desc', m->'descuentos_proveedores');
   END $f$;
-  CREATE FUNCTION pg_temp.bot() RETURNS numeric LANGUAGE plpgsql AS $f$
+  CREATE FUNCTION pg_temp.bot(p_d date DEFAULT NULL, p_h date DEFAULT NULL) RETURNS numeric LANGUAGE plpgsql AS $f$
   BEGIN
     PERFORM pg_temp.como(NULL, NULL);
-    RETURN (public.bot_compras_periodo(public._tablero_hoy(), public._tablero_hoy(), 1)->>'compras_notas_credito')::numeric;
+    RETURN (public.bot_compras_periodo(COALESCE(p_d, public._tablero_hoy()), COALESCE(p_h, public._tablero_hoy()), 1)
+              ->>'compras_notas_credito')::numeric;
+  END $f$;
+  -- Una venta que baja stock como un pedido (el trigger de lotes come la bolsa primero).
+  CREATE FUNCTION pg_temp.vender(p bigint, n int) RETURNS void LANGUAGE plpgsql AS $f$
+  BEGIN
+    PERFORM set_config('app.stock_origen',   'pedido',  true);
+    PERFORM set_config('app.stock_ref_tipo', 'pedidos', true);
+    PERFORM set_config('app.stock_ref_id',   '0',       true);
+    UPDATE public.productos SET stock = stock - n WHERE id = p;
+    PERFORM set_config('app.stock_origen', '', true);
+    PERFORM set_config('app.stock_ref_tipo', '', true);
+    PERFORM set_config('app.stock_ref_id', '', true);
   END $f$;
   CREATE FUNCTION pg_temp.estado(p bigint) RETURNS text LANGUAGE sql AS $f$
     SELECT format('stock=%s lotes=%s cpp=%s',
@@ -344,6 +370,114 @@ BEGIN
     END;
   END;
 
+  -- ================================================================== LV ====
+  DECLARE
+    v_p bigint := pg_temp.producto(1, 'LV', 10, 80);
+    v_r bigint := pg_temp.producto(1, 'LVref', 10, 80);
+    v_c bigint; v_cr bigint; v_n bigint; v_e text; v_er text; v_jr jsonb;
+  BEGIN
+    v_c := pg_temp.compra(v_adm, pg_temp.lineas(jsonb_build_array(
+             jsonb_build_object('producto_id', v_p, 'cantidad', 20, 'costo_unitario', 100))), 'ZZ', v_hoy, 0, 2000);
+    v_cr := pg_temp.compra(v_adm, pg_temp.lineas(jsonb_build_array(
+             jsonb_build_object('producto_id', v_r, 'cantidad', 20, 'costo_unitario', 100))), 'ZZ', v_hoy, 0, 2000);
+    PERFORM pg_temp.como(v_adm, 1);
+    v_j := public.sincronizar_lotes_compra(v_c, jsonb_build_array(
+             jsonb_build_object('producto_id', v_p, 'fecha_vencimiento', v_hoy + 60, 'cantidad', 8),
+             jsonb_build_object('producto_id', v_p, 'fecha_vencimiento', v_hoy + 90, 'cantidad', 12)));
+    v_j := public.sincronizar_lotes_compra(v_cr, jsonb_build_array(
+             jsonb_build_object('producto_id', v_r, 'fecha_vencimiento', v_hoy + 60, 'cantidad', 8),
+             jsonb_build_object('producto_id', v_r, 'fecha_vencimiento', v_hoy + 90, 'cantidad', 12)));
+    v_n := pg_temp.nc(v_adm, v_c, jsonb_build_array(jsonb_build_object('producto_id', v_p, 'cantidad', 10, 'subtotal', 1000)), 1000, 0);
+    PERFORM pg_temp.vender(v_p, 3);
+    PERFORM pg_temp.vender(v_r, 3);
+    PERFORM pg_temp.anular(v_adm, v_n);
+    v_j := pg_temp.editar(v_adm, v_c, pg_temp.lineas(jsonb_build_array(
+             jsonb_build_object('producto_id', v_p, 'cantidad', 15, 'costo_unitario', 100))), 0, 1500);
+    v_jr := pg_temp.editar(v_adm, v_cr, pg_temp.lineas(jsonb_build_array(
+             jsonb_build_object('producto_id', v_r, 'cantidad', 15, 'costo_unitario', 100))), 0, 1500);
+    v_e := pg_temp.estado(v_p);
+    v_er := pg_temp.estado(v_r);
+    IF NOT COALESCE((v_j->>'success')::boolean, false) THEN
+      v_fallas := v_fallas || format('LV · editar la compra con lotes, una venta y la nota anulada debía entrar y dio %s', v_j);
+    ELSIF v_e IS DISTINCT FROM v_er OR NOT COALESCE((v_jr->>'success')::boolean, false) THEN
+      v_fallas := v_fallas || format('LV · la compra editada tenía que quedar como la de referencia sin nota (%s) y quedó %s', v_er, v_e);
+    END IF;
+    v_notas := v_notas || format('LV · %s (referencia %s)', v_e, v_er);
+  END;
+
+  -- ================================================================= CPD ====
+  DECLARE
+    v_p bigint := pg_temp.producto(1, 'CPD', 0, NULL);
+    v_c bigint; v_n bigint; v_clon bigint; v_t2 text;
+  BEGIN
+    v_c := pg_temp.compra(v_adm, pg_temp.lineas(jsonb_build_array(
+             jsonb_build_object('producto_id', v_p, 'cantidad', 20, 'costo_unitario', 100, 'porcentaje_iva', 21,
+                                'condicion_iva', 'gravado'))), 'FC', v_hoy, 420, 2420, 'A');
+    PERFORM pg_temp.como(v_adm, 1);
+    v_j := public.sincronizar_lotes_compra(v_c, jsonb_build_array(
+             jsonb_build_object('producto_id', v_p, 'fecha_vencimiento', v_hoy + 60, 'cantidad', 8),
+             jsonb_build_object('producto_id', v_p, 'fecha_vencimiento', v_hoy + 90, 'cantidad', 12)));
+    v_n := pg_temp.nc(v_adm, v_c, jsonb_build_array(jsonb_build_object('producto_id', v_p, 'cantidad', 10, 'subtotal', 1000)), 1000, 210);
+    PERFORM pg_temp.anular(v_adm, v_n);
+    PERFORM pg_temp.como(v_adm, 1);
+    BEGIN
+      v_j := public.cambiar_proveedor_compra(v_c, v_adm, NULL, 'Otro B18 CPD');
+    EXCEPTION WHEN OTHERS THEN
+      v_j := jsonb_build_object('success', false, 'error', SQLERRM);
+    END;
+    IF NOT COALESCE((v_j->>'success')::boolean, false) THEN
+      v_fallas := v_fallas || format('CPD · cambiar el proveedor de una compra con una devolución anulada que tomó lotes debía entrar y dio %s', v_j);
+    ELSE
+      SELECT max(l.compra_id) INTO v_clon FROM producto_lotes l WHERE l.producto_id = v_p;
+      v_t2 := format('clon=%s lotes=%s nota=%s/%s original=%s', v_clon IS DISTINCT FROM v_c,
+                     (SELECT string_agg(l.cantidad_restante || '/' || l.cantidad, ',' ORDER BY l.fecha_vencimiento, l.id)
+                        FROM producto_lotes l WHERE l.producto_id = v_p),
+                     (SELECT compra_id = v_c FROM notas_credito WHERE id = v_n), (SELECT anulada FROM notas_credito WHERE id = v_n),
+                     (SELECT estado FROM compras WHERE id = v_c));
+      IF v_t2 IS DISTINCT FROM 'clon=t lotes=8/8,12/12 nota=t/t original=cancelada' THEN
+        v_fallas := v_fallas || format('CPD · esperaba clon=t lotes=8/8,12/12 nota=t/t original=cancelada y dio %s', v_t2);
+      END IF;
+      BEGIN
+        PERFORM pg_temp.nc(v_adm, v_clon, jsonb_build_array(jsonb_build_object('producto_id', v_p, 'cantidad', 20, 'subtotal', 2000)), 2000, 420);
+      EXCEPTION WHEN OTHERS THEN
+        v_fallas := v_fallas || format('CPD · una devolución de las 20 u. sobre el clon debía entrar (no se le descuenta la anulada) y dio: %s', SQLERRM);
+      END;
+    END IF;
+  END;
+
+  -- ================================================================= MES ====
+  DECLARE
+    v_d0 date := (date_trunc('month', public._tablero_hoy()) - interval '1 month')::date;
+    v_d1 date := (date_trunc('month', public._tablero_hoy()) - interval '1 day')::date;
+    v_m0 date := date_trunc('month', public._tablero_hoy())::date;
+    v_p bigint := pg_temp.producto(1, 'MES', 0, NULL);
+    v_c bigint; v_n bigint;
+    v_a0 jsonb; v_a1 jsonb; v_a2 jsonb; v_h0 jsonb; v_h2 jsonb;
+  BEGIN
+    v_c := pg_temp.compra(v_adm, pg_temp.lineas(jsonb_build_array(
+             jsonb_build_object('producto_id', v_p, 'cantidad', 10, 'costo_unitario', 100, 'porcentaje_iva', 21,
+                                'condicion_iva', 'gravado'))), 'FC', v_d0 + 14, 210, 1210, 'A');
+    v_a0 := jsonb_build_object('pf', pg_temp.pf(v_d0, v_d1), 'rg', pg_temp.rg(v_d0, v_d1), 'bot', pg_temp.bot(v_d0, v_d1));
+    v_h0 := jsonb_build_object('pf', pg_temp.pf(v_m0, v_hoy), 'rg', pg_temp.rg(v_m0, v_hoy), 'bot', pg_temp.bot(v_m0, v_hoy));
+    v_n := pg_temp.nc(v_adm, v_c, jsonb_build_array(jsonb_build_object('producto_id', v_p, 'cantidad', 4, 'subtotal', 400)), 400, 84);
+    UPDATE notas_credito SET fecha = v_d0 + 19 WHERE id = v_n;  -- la nota es de ese mes
+    v_a1 := jsonb_build_object('pf', pg_temp.pf(v_d0, v_d1), 'rg', pg_temp.rg(v_d0, v_d1), 'bot', pg_temp.bot(v_d0, v_d1));
+    IF (v_a1->'pf'->>'iva_nc')::numeric - (v_a0->'pf'->>'iva_nc')::numeric <> 84
+       OR (v_a1->'rg'->>'nc')::numeric - (v_a0->'rg'->>'nc')::numeric <> 484
+       OR (v_a1->>'bot')::numeric - (v_a0->>'bot')::numeric <> 484 THEN
+      v_fallas := v_fallas || format('REG · la nota vigente del mes anterior tenía que restar 84 de IVA y 484: antes %s, después %s', v_a0, v_a1);
+    END IF;
+    PERFORM pg_temp.anular(v_adm, v_n);
+    v_a2 := jsonb_build_object('pf', pg_temp.pf(v_d0, v_d1), 'rg', pg_temp.rg(v_d0, v_d1), 'bot', pg_temp.bot(v_d0, v_d1));
+    v_h2 := jsonb_build_object('pf', pg_temp.pf(v_m0, v_hoy), 'rg', pg_temp.rg(v_m0, v_hoy), 'bot', pg_temp.bot(v_m0, v_hoy));
+    IF v_a2 IS DISTINCT FROM v_a0 THEN
+      v_fallas := v_fallas || format('MES · anulada hoy, la nota tenía que salir de su mes (%s → %s) y dio %s', v_d0, v_d1, v_a2);
+    END IF;
+    IF v_h2 IS DISTINCT FROM v_h0 THEN
+      v_fallas := v_fallas || format('MES · el mes de la anulación no tenía que cambiar: %s y dio %s', v_h0, v_h2);
+    END IF;
+  END;
+
   RAISE EXCEPTION USING ERRCODE = 'ZZ001';
  EXCEPTION WHEN SQLSTATE 'ZZ001' THEN NULL;
  END;
@@ -352,7 +486,7 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = format(E'ENSAYO FALLÓ (%s fallas, todo revertido):\n- %s\nnotas:\n  %s',
       cardinality(v_fallas), array_to_string(v_fallas, E'\n- '), array_to_string(v_notas, E'\n  '));
   END IF;
-  RAISE EXCEPTION USING ERRCODE = 'ZZ0OK', MESSAGE = format(E'ENSAYO OK (todo revertido) · PF RG RGA BOT ED AN CP TR REG\nnotas:\n  %s',
+  RAISE EXCEPTION USING ERRCODE = 'ZZ0OK', MESSAGE = format(E'ENSAYO OK (todo revertido) · PF RG RGA BOT ED AN CP TR LV CPD MES REG\nnotas:\n  %s',
     array_to_string(v_notas, E'\n  '));
 END
 $ensayo$;

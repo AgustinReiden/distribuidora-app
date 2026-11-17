@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcularNuevosPrecios, errorDeMultiploRedondeo, mensajeErrorPreciosMasivo, mensajeEscalasSinCambiar, mensajeExitoPreciosMasivo, redondearPrecio } from './precios'
+import { calcularNuevosPrecios, errorDeMultiploRedondeo, mensajeErrorPreciosMasivo, mensajeEscalasSinCambiar, mensajeExitoPreciosMasivo, redondearPrecio, separarSinPrecio } from './precios'
 
 describe('redondearPrecio', () => {
   it('redondea al múltiplo de 10 más cercano cuando el múltiplo representa bien el cambio', () => {
@@ -209,5 +209,21 @@ describe('las escalas que no se cambiaron', () => {
     expect(mensajeEscalasSinCambiar(['a', 'b', 'c', 'd'])).toBe('4 escala(s) mayorista(s) no se cambiaron: a; b; c y 1 más.')
     expect(mensajeEscalasSinCambiar([])).toBe('')
     expect(mensajeEscalasSinCambiar(null)).toBe('')
+  })
+})
+
+describe('separarSinPrecio (1599-b7)', () => {
+  it('aparta los productos sin precio final ni neto', () => {
+    const a = { precio: 100, precio_sin_iva: 82.64 }
+    const b = { precio: 0, precio_sin_iva: null }
+    const c = { precio: null, precio_sin_iva: 50 }
+    const d = {}
+    const { conPrecio, sinPrecio } = separarSinPrecio([a, b, c, d])
+    expect(conPrecio).toEqual([a, c])
+    expect(sinPrecio).toEqual([b, d])
+  })
+
+  it('lista vacía, listas vacías', () => {
+    expect(separarSinPrecio([])).toEqual({ conPrecio: [], sinPrecio: [] })
   })
 })

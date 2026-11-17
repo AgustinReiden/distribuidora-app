@@ -284,6 +284,20 @@ describe("ModalCompra modo 'ver': anular una nota de crédito (B18 de #1603, mig
     expect(screen.getByRole('group', { name: 'Anular nota de crédito' })).toBeInTheDocument()
   })
 
+  it('una devolución anterior al 10/11/2026 muestra "Anular" deshabilitado, con el motivo a la vista (H3, decisión del dueño)', () => {
+    const vieja = {
+      id: '7', numero_nota: 'NC-0003', fecha: '2026-10-02', created_at: '2026-10-02T14:00:00Z', total: 3000,
+      motivo: 'Faltante', tipo: 'devolucion' as const, items: [],
+    }
+    const onAnularNotaCredito = vi.fn()
+    renderVer({}, { notasCredito: [vieja], onAnularNotaCredito })
+    const boton = screen.getByRole('button', { name: 'Anular la nota NC-0003' })
+    expect(boton).toBeDisabled()
+    expect(boton).toHaveAccessibleDescription(/anterior al 10\/11\/2026.*no se puede anular desde el sistema/)
+    expect(screen.getByText(/no se puede anular desde el sistema/)).toBeVisible()
+    expect(onAnularNotaCredito).not.toHaveBeenCalled()
+  })
+
   it('sin permiso (el container no pasa la acción) no ofrece anular la nota', () => {
     renderVer()
     expect(screen.queryByRole('button', { name: /Anular la nota/ })).toBeNull()

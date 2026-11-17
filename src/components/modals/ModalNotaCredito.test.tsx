@@ -191,3 +191,78 @@ describe('ModalNotaCredito — una nota anulada no cuenta (B18 de #1603, mig 523
     expect(screen.getByTestId('nc-ajuste-restante')).toHaveTextContent('1.210')
   })
 })
+
+describe('ModalNotaCredito — aviso de la devolución cuando hay un ajuste (#1590-c)', () => {
+  // 10 u. x 100 sin IVA = 1.000. Con un ajuste de 800 le quedan 200: la devolución no puede pasarlos.
+  const compra: ModalNotaCreditoProps['compra'] = {
+    id: '400', numero_factura: 'A-0001-00000400', tipo_factura: 'FC', impuestos_internos: 0, total: 1000,
+    items: [
+      { id: '1', producto_id: '10', producto: { id: '10', nombre: 'Agua' }, cantidad: 10, costo_unitario: 100, subtotal: 1000, impuestos_internos: 0, porcentaje_iva: 0, condicion_iva: 'exento' },
+    ],
+  }
+  const nota = (tipo: 'ajuste' | 'devolucion', total: number) =>
+    ({ id: '9', compra_id: '400', fecha: '2026-11-12', subtotal: total, iva: 0, total, tipo })
+
+  function renderDevolucion(notas: ReturnType<typeof nota>[]) {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    render(<ModalNotaCredito compra={compra} notasExistentes={notas} onSave={onSave} onClose={() => {}} />)
+    return onSave
+  }
+  const cantidad = (n: string) =>
+    fireEvent.change(screen.getByLabelText('Cantidad a acreditar de Agua'), { target: { value: n } })
+
+  it('muestra lo que le queda a la compra y avisa si el total parece pasarlo, sin bloquear', async () => {
+    const onSave = renderDevolucion([nota('ajuste', 800)])
+    expect(screen.getByTestId('nc-devolucion-restante')).toHaveTextContent('Le quedan')
+    expect(screen.getByTestId('nc-devolucion-restante')).toHaveTextContent('200')
+
+    cantidad('3')
+    expect(screen.getByTestId('nc-devolucion-restante')).toHaveTextContent('Puede superar lo que le queda a la compra')
+    // Decide el server (neto de descuentos): el modal no bloquea.
+    expect(guardar()).toBeEnabled()
+    fireEvent.click(guardar())
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+  })
+
+  it('con un descuento de cabecera el total bruto parece pasar, pero el server mide el neto y acepta: se puede guardar', async () => {
+    // ZZ de 10 x 100 con un descuento de -150 en factura (total 850) y un ajuste de 100: le quedan 750.
+    // Devolver 8 u. son 800 brutos (> 750), 680 netos (el server multiplica por 0,85): entra.
+    const conDescuento: ModalNotaCreditoProps['compra'] = {
+      ...compra, id: '401', tipo_factura: 'ZZ', total: 850,
+    }
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    render(<ModalNotaCredito compra={conDescuento} notasExistentes={[nota('ajuste', 100)]} onSave={onSave} onClose={() => {}} />)
+    cantidad('8')
+    expect(screen.getByTestId('nc-devolucion-restante')).toHaveTextContent('Puede superar')
+    expect(guardar()).toBeEnabled()
+    fireEvent.click(guardar())
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ compraId: '401', total: 800 })
+  })
+
+  it('hasta lo que le queda, se guarda', async () => {
+    const onSave = renderDevolucion([nota('ajuste', 800)])
+    cantidad('2')
+    expect(screen.getByTestId('nc-devolucion-restante')).toHaveTextContent('Le quedan')
+    fireEvent.click(guardar())
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ total: 200 })
+  })
+
+  it('un ajuste ANULADO no pone tope: la devolución no muestra el aviso (B18, mig 526)', () => {
+    renderDevolucion([{ ...nota('ajuste', 800), anulada: true } as ReturnType<typeof nota>])
+    expect(screen.queryByTestId('nc-devolucion-restante')).toBeNull()
+    cantidad('9')
+    expect(screen.queryByTestId('nc-devolucion-restante')).toBeNull()
+    expect(guardar()).toBeEnabled()
+  })
+
+  it('sin un ajuste en la compra el tope no rige: devolver toda la mercadería entra siempre', async () => {
+    const onSave = renderDevolucion([nota('devolucion', 100)])
+    expect(screen.queryByTestId('nc-devolucion-restante')).toBeNull()
+    cantidad('9')
+    expect(guardar()).toBeEnabled()
+    fireEvent.click(guardar())
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+  })
+})

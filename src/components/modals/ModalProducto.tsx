@@ -7,7 +7,8 @@ import NumberInput from '../ui/NumberInput';
 import SelectorConAlta from '../productos/SelectorConAlta';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { useMarcasQuery, useCatalogoIIQuery } from '../../hooks/queries';
-import { tasaEfectivaEncuadre, alicuotaVigente, formatearNominal } from '../../utils/impuestosInternos';
+import { tasaEfectivaEncuadre, alicuotaVigente, formatearNominal, II_EFECTIVO_MAXIMO } from '../../utils/impuestosInternos';
+import { CANTIDAD_MINIMA_VENTA_MAXIMA, MENSAJE_MINIMO_VENTA_MAXIMO } from '../../utils/minimoVenta';
 import { fechaLocalISO, formatPrecio } from '../../utils/formatters';
 import {
   calcularCostoFinanciero,
@@ -81,6 +82,8 @@ export const modalProductoSchema = z.object({
     .number({ error: 'El mínimo de venta debe ser un número' })
     .int({ message: 'El mínimo de venta debe ser un número entero' })
     .nonnegative({ message: 'El mínimo de venta no puede ser negativo' })
+    // La base lo frena con un CHECK (> 0 y hasta 99.999.999): se valida acá antes.
+    .max(CANTIDAD_MINIMA_VENTA_MAXIMA, { message: MENSAJE_MINIMO_VENTA_MAXIMO })
     .optional()
     .nullable(),
 
@@ -88,7 +91,9 @@ export const modalProductoSchema = z.object({
   condicion_iva: condicionIvaSchema,
   costo_sin_iva: z.coerce.number().nonnegative().optional(),
   costo_con_iva: z.coerce.number().nonnegative().optional(),
-  impuestos_internos: z.coerce.number().nonnegative().optional(),
+  // Tasa efectiva sobre el neto, de 0 a 9900 (99 % nominal): el CHECK de la base (mig 511).
+  // La ficha la deriva del encuadre, pero así un valor fuera de rango no llega al 23514.
+  impuestos_internos: z.coerce.number().nonnegative().max(II_EFECTIVO_MAXIMO, { message: 'El impuesto interno no puede superar el 9900 %' }).optional(),
   // Encuadre de impuestos internos (mig 277). '' / null = sin definir.
   ii_encuadre_id: z.string().optional().nullable(),
   precio_sin_iva: z.coerce.number().nonnegative().optional(),
@@ -492,10 +497,17 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
 
   // Qué se puede hacer en el campo Subrubro: ver utils/subrubroFicha. Crear
   // categorías es sólo de admin (RLS mt_categorias_insert).
+  // Un rubro desactivado SÍ es una fila de `categorias` (sólo se oculta, CAT-11 de
+  // #1596): contarlo, o el campo quedaba deshabilitado con «este rubro todavía no
+  // está cargado», que no es verdad.
+  const rubrosConFilaFicha = useMemo(
+    () => (rubrosConFila && rubrosDesactivados ? [...rubrosConFila, ...rubrosDesactivados] : rubrosConFila),
+    [rubrosConFila, rubrosDesactivados],
+  );
   const estadoSub = estadoSubrubro({
     rubro: form.categoria || '',
     rubroNuevo: categoriaNueva,
-    rubrosConFila,
+    rubrosConFila: rubrosConFilaFicha,
     cantidadSubrubros: subrubrosDelRubro.length,
     puedeCrear: esAdmin,
   });

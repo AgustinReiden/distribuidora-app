@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { respuestaDeErrorLegible } from '../utils/errorDeSupabase'
+import { esMotivoDeUsuarioDesactivado, pedirRevalidacionDelPerfil } from '../utils/revalidarPerfil'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -36,7 +37,13 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     storageKey: 'distribuidora_v2',
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
+    // Apagado (1600-b1). Con `true`, un link con `#access_token=...` abría esa sesión sin
+    // preguntar: el visitante de un link ajeno quedaba logueado en la cuenta de otro. La app
+    // sólo entra por `signInWithPassword` (LoginScreen) y no tiene pantalla de «recuperar
+    // contraseña», de invitación ni de magic link —tampoco el `updateUser` que pondría la
+    // contraseña—, así que ningún flujo necesita leer un token de la URL. Si algún día se
+    // suma uno, que lo pida a propósito (`exchangeCodeForSession` / `setSession`).
+    detectSessionInUrl: false,
   },
   global: {
     // Sin plazo a propósito: por acá pasan las subidas a Storage y las descargas
@@ -50,6 +57,12 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
         headers.set('X-Sucursal-ID', String(currentSucursalId))
       }
       const respuesta = await fetch(input, { ...init, headers })
+      if (!respuesta.ok && String(input).includes('/rest/v1/rpc/')) {
+        // Una RPC que rechaza con «Usuario desactivado»: `useAuth` confirma con el perfil (1600-b15).
+        void respuesta.clone().text().then(cuerpo => {
+          if (esMotivoDeUsuarioDesactivado(cuerpo)) pedirRevalidacionDelPerfil()
+        }).catch(() => {})
+      }
       return String(input).includes('/rest/v1/') ? respuestaDeErrorLegible(respuesta) : respuesta
     },
   },

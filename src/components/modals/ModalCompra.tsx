@@ -14,6 +14,7 @@ import { OPCIONES_CONDICION_IVA, OPCIONES_CONDICION_SIN_ALICUOTA, alicuotaIvaCom
 import { prorratearCargo, calcularCostosCompra, calcularTotalesCompra, pesosEntrePagados } from '../../utils/prorrateoCompra'
 import type { CostosCompra, TotalesCompra, ResultadoBasesII } from '../../utils/prorrateoCompra'
 import NumberInput from '../ui/NumberInput'
+import MontoLeido from '../ui/MontoLeido'
 import { Button } from '../ui/Button'
 import { supabase, getSucursalHeader } from '../../lib/supabase'
 import AuthDataContext from '../../contexts/AuthDataContext'
@@ -58,7 +59,7 @@ import { Badge } from '../ui/Badge'
 import { toneDeEstadoCompra, ETIQUETA_ESTADO_COMPRA } from '../../lib/estadoTones'
 import { formatearFechaVencimiento } from '../../utils/vencimientos'
 import { hidratarCompraGuardada } from '../../utils/hidratarCompra'
-import { costoEfectivoCompra, esNotaVigente, notasVigentes } from '../../utils/notaCredito'
+import { costoEfectivoCompra, esNotaVigente, motivoNotaNoAnulable, notasVigentes } from '../../utils/notaCredito'
 import { getErrorMessage } from '../../utils/errorHandling'
 import { pesosDesactualizados } from '../../utils/pesosDesactualizados'
 import {
@@ -209,6 +210,8 @@ interface NotaCreditoDeLaCompra {
   anulada_at?: string | null;
   anulada_por_nombre?: string | null;
   motivo_anulacion?: string | null;
+  /** Cuándo se cargó: una devolución anterior a la 483 no se anula (`motivoNotaNoAnulable`). */
+  created_at?: string | null;
   items?: Array<{
     producto_id: string;
     cantidad: number;
@@ -1410,7 +1413,7 @@ function ModalCompraVer({ compra, proveedores, onClose, lotes = [], notasCredito
   const hidratada = useMemo(() => hidratarCompraGuardada(compra), [compra])
   const { estado: state } = hidratada
   const [confirmarAnular, setConfirmarAnular] = useState(false)
-  // Una nota anulada no bloquea anular la compra (mig NNN, H13): sólo las vigentes.
+  // Una nota anulada no bloquea anular la compra (mig 526, H13): sólo las vigentes.
   const hayNotasVigentes = notasVigentes(notasCredito).length > 0
 
   const vencimientosPorProducto = useMemo(() => {
@@ -1967,6 +1970,9 @@ function NotasCreditoDeLaCompra({ notas, totalCompra, onAnular }: {
       <div className="space-y-3">
         {notas.map(nc => {
           const anulada = !esNotaVigente(nc)
+          // Una devolución que el server siempre rechaza (anterior a la 483) se ofrece
+          // deshabilitada, con su motivo a la vista (decisión del dueño del 17/11).
+          const noAnulable = motivoNotaNoAnulable(nc)
           return (
           <div key={nc.id} className={`bg-white dark:bg-gray-800 rounded-lg p-3 border border-blue-200 dark:border-blue-800 ${anulada ? 'opacity-70' : ''}`}>
             <div className="flex justify-between items-start mb-2">
@@ -2007,15 +2013,20 @@ function NotasCreditoDeLaCompra({ notas, totalCompra, onAnular }: {
               </div>
             )}
             {!anulada && onAnular && anulandoId !== nc.id && (
-              <div className="mt-2 flex justify-end">
+              <div className="mt-2 flex flex-col items-end gap-1">
                 <button
                   type="button"
                   onClick={() => { setAnulandoId(nc.id); setMotivoAnulacion(''); setErrorAnulacion('') }}
+                  disabled={noAnulable !== null}
                   aria-label={`Anular la nota ${nc.numero_nota || `NC #${nc.id}`}`}
-                  className="text-xs text-rose-700 dark:text-rose-300 font-medium hover:underline"
+                  aria-describedby={noAnulable ? `no-anulable-${nc.id}` : undefined}
+                  className="text-xs text-rose-700 dark:text-rose-300 font-medium hover:underline disabled:text-gray-400 disabled:no-underline disabled:cursor-not-allowed"
                 >
                   Anular
                 </button>
+                {noAnulable && (
+                  <p id={`no-anulable-${nc.id}`} className="text-xs text-gray-500 dark:text-gray-400 text-right">{noAnulable}</p>
+                )}
               </div>
             )}
             {!anulada && onAnular && anulandoId === nc.id && (
@@ -2996,6 +3007,8 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
               commitOnChange
               className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
             />
+            {/* 1557-c5: cómo leyó la app lo tipeado, a la vista en el mismo campo y no recién en el subtotal. */}
+            {!ver && <MontoLeido monto={item.costoUnitario} />}
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">IVA</label>
@@ -3056,6 +3069,7 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
             commitOnChange
             className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
           />
+          {!ver && <MontoLeido monto={item.costoUnitario} />}
         </div>
         <div className="col-span-2">
           {selectCondicion()}

@@ -65,18 +65,63 @@ export const validarEmail = (email: string): boolean => {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 };
 
+/** Pesos del dígito verificador del CUIT/CUIL (módulo 11). */
+const PESOS_CUIT = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+
 /**
- * Valida un CUIT argentino (formato XX-XXXXXXXX-X)
+ * Valida un CUIT argentino: 11 dígitos (con o sin guiones) y dígito
+ * verificador correcto (módulo 11). Vacío se permite (es opcional).
+ * Decisión del dueño en #1561 (D37, 1561-b11): uno inválido se rechaza.
  * @param cuit - CUIT a validar
- * @returns true si el formato es valido o esta vacio
+ * @returns true si es válido o está vacío
  * @example
- * validarCuit("20-12345678-9") // true
- * validarCuit("20123456789") // true (sin guiones)
+ * validarCuit("20-12345678-6") // true
+ * validarCuit("20-12345678-9") // false (dígito verificador)
+ * validarCuit("20123456786") // true (sin guiones)
  */
 export const validarCuit = (cuit: string): boolean => {
   if (!cuit) return true; // Opcional
-  const cuitLimpio = cuit.replace(/-/g, '');
-  return /^[0-9]{11}$/.test(cuitLimpio);
+  const cuitLimpio = cuit.replace(/[-\s]/g, '');
+  if (!/^[0-9]{11}$/.test(cuitLimpio)) return false;
+  const suma = PESOS_CUIT.reduce((acc, peso, i) => acc + peso * Number(cuitLimpio[i]), 0);
+  const resto = suma % 11;
+  // Resto 1 daría un dígito de 10: no existe CUIT con esa combinación.
+  if (resto === 1) return false;
+  const esperado = resto === 0 ? 0 : 11 - resto;
+  return esperado === Number(cuitLimpio[10]);
+};
+
+/**
+ * Mensaje de error de un CUIT tipeado, o null si se puede guardar.
+ * @param cuit - Lo que hay en el campo
+ * @param original - El CUIT con el que se abrió la ficha: uno viejo que no se
+ *   tocó no bloquea guardar otros cambios (el rechazo es para lo que se escribe).
+ */
+export const errorDeCuit = (cuit: string, original?: string | null): string | null => {
+  const digitos = (cuit || '').replace(/\D/g, '');
+  if (digitos.length === 0) return null;
+  if (original && digitos === original.replace(/\D/g, '')) return null;
+  if (digitos.length !== 11) return 'El CUIT debe tener 11 dígitos';
+  if (!validarCuit(digitos)) {
+    return 'El CUIT no es válido: el dígito verificador no coincide. Revisá los números.';
+  }
+  return null;
+};
+
+/**
+ * Error del documento de un cliente según su tipo, o null si se puede guardar.
+ * CUIT: 11 dígitos y dígito verificador (D37 de #1561); DNI: 7 u 8 dígitos.
+ * Vacío se permite. `original` es el documento con el que se abrió la ficha.
+ */
+export const errorDeDocumento = (
+  tipo: 'CUIT' | 'DNI',
+  numero: string,
+  original?: string | null
+): string | null => {
+  const digitos = (numero || '').replace(/\D/g, '');
+  if (digitos.length === 0) return null;
+  if (tipo === 'CUIT') return errorDeCuit(numero, original);
+  return digitos.length >= 7 && digitos.length <= 8 ? null : 'El DNI debe tener 7 u 8 dígitos';
 };
 
 /**

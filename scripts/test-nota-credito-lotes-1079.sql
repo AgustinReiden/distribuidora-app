@@ -24,10 +24,9 @@
 --   D · a los lotes de la compra no les alcanza. C con 5 vivas, D (otra compra,
 --       vence antes) con 30, bolsa 20 (stock 55). Nota por 10: C 0, y las 5 que
 --       faltan salen de la bolsa: bolsa 15, D 30.
---   E · stock menor que lo devuelto (la bajada se clampea a 0). C con 5 vivas,
---       bolsa 3 (stock 8). Nota por 10: stock 0, C 0, bolsa 0, sin error.
---       (Da igual con o sin el arreglo: el trigger recorta a 0. Es un "no
---       revienta", no una prueba del cambio.)
+--   E · stock menor que lo devuelto. C con 5 vivas, bolsa 3 (stock 8). Nota por
+--       10: desde la 466 se rechaza ("No alcanza el stock para devolver") y no
+--       mueve nada (stock 8, C 5, bolsa 3). Antes la bajada se recortaba a 0.
 --   F · editar la compra después no devuelve lo que salió. Tras el caso A,
 --       sincronizar_lotes_compra con el mismo vencimiento y la misma cantidad
 --       (lo que la app manda en cada edición) deja el lote en 40.
@@ -114,7 +113,10 @@ BEGIN
   -- la nota de crédito con ítems: [[cantidad], ...] del producto
   CREATE FUNCTION pg_temp.nota(p_compra bigint, p_prod bigint, p_cants int[]) RETURNS jsonb LANGUAGE sql AS $f$
     SELECT public.registrar_nota_credito(
-      p_compra, 'ENSAYO-1079', 'ensayo 1079', 0, 0, 0, NULL,
+      p_compra, 'ENSAYO-1079', 'ensayo 1079',
+      -- Desde la 466 (#1471) la devolución trae el importe de las líneas (subtotal e IVA al 21 %): con 0 se rechaza.
+      (SELECT sum(c) * 10 FROM unnest(p_cants) c), (SELECT round(sum(c) * 10 * 0.21, 2) FROM unnest(p_cants) c),
+      (SELECT round(sum(c) * 10 * 1.21, 2) FROM unnest(p_cants) c), NULL,
       (SELECT jsonb_agg(jsonb_build_object('producto_id', p_prod, 'cantidad', c,
                                            'costo_unitario', 10, 'subtotal', c * 10))
          FROM unnest(p_cants) c),
@@ -228,14 +230,17 @@ BEGIN
   v_compra := pg_temp.compra(v_prod, v_suc);
   v_lote_c := pg_temp.nuevo_lote(v_prod, v_suc, v_compra, v_hoy + 60, 100, 5);
 
+  -- Desde la 466 (#1471) la nota NO se registra si el stock no alcanza para devolver (antes la bajada se recortaba a 0 y
+  -- la nota entraba): se rechaza con su motivo y no mueve nada. Es la regla vigente de este caso.
   v_res := pg_temp.nota(v_compra, v_prod, ARRAY[10]);
-  IF NOT COALESCE((v_res->>'success')::boolean, false) THEN
-    v_fallas := v_fallas || format('E · la nota no se registró: %s', v_res);
-  ELSE
-    v_foto := pg_temp.foto(v_prod);
-    IF v_foto <> '{"stock":0,"lotes":0,"bolsa":0}'::jsonb THEN
-      v_fallas := v_fallas || format('E · esperaba stock 0, lote 0, bolsa 0; quedó %s', v_foto);
-    END IF;
+  IF COALESCE((v_res->>'success')::boolean, false)
+     OR COALESCE(v_res->>'error', '') NOT ILIKE 'No alcanza el stock para devolver%' THEN
+    v_fallas := v_fallas || format('E · la nota con stock de menos tenía que rechazarse (466): %s', v_res);
+  END IF;
+  v_foto := pg_temp.foto(v_prod);
+  IF v_foto <> '{"stock":8,"lotes":5,"bolsa":3}'::jsonb
+     OR EXISTS (SELECT 1 FROM notas_credito WHERE compra_id = v_compra) THEN
+    v_fallas := v_fallas || format('E · la nota rechazada no tenía que mover nada: esperaba stock 8, lote 5, bolsa 3; quedó %s', v_foto);
   END IF;
 
   -- -------------------------------------------------------------------------

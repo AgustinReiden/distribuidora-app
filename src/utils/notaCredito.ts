@@ -228,6 +228,35 @@ export function esNotaVigente(nota: { anulada?: boolean | null }): boolean {
   return nota.anulada !== true;
 }
 
+/**
+ * Desde cuándo una DEVOLUCIÓN se puede anular: la aplicación de la migración 483
+ * (10/11/2026 19:21:45 UTC), que empezó a devolver a su lote y a corregir el promedio.
+ * Espejo de la constante de `anular_nota_credito_compra` (migs 523 y 526), que rechaza
+ * una devolución anterior: deshacerla desharía movimientos que no existieron. Un
+ * ajuste se anula de cualquier fecha.
+ */
+export const DESDE_DEVOLUCION_ANULABLE = '2026-11-10T19:21:45Z';
+
+/**
+ * Por qué una nota no se puede anular desde el sistema, o `null` si se puede ofrecer.
+ * Es la misma regla de fecha que `anular_nota_credito_compra` (sin `created_at`, la
+ * base usa la fecha de la nota a medianoche UTC). Si el server rechaza por otro
+ * motivo, la pantalla muestra su mensaje igual.
+ */
+export function motivoNotaNoAnulable(nota: {
+  tipo?: 'devolucion' | 'ajuste' | null;
+  created_at?: string | null;
+  fecha?: string | null;
+  anulada?: boolean | null;
+}): string | null {
+  if (!esNotaVigente(nota) || nota.tipo !== 'devolucion') return null;
+  const alta = nota.created_at ?? (nota.fecha ? `${nota.fecha}T00:00:00Z` : null);
+  if (!alta) return null;
+  const t = new Date(alta).getTime();
+  if (!Number.isFinite(t) || t >= new Date(DESDE_DEVOLUCION_ANULABLE).getTime()) return null;
+  return 'Esta devolución es anterior al 10/11/2026, cuando el sistema todavía no guardaba los lotes que tomó: no se puede anular desde el sistema.';
+}
+
 /** Las notas vigentes de una lista, en el mismo orden. */
 export function notasVigentes<T extends { anulada?: boolean | null }>(notas: ReadonlyArray<T>): T[] {
   return notas.filter(esNotaVigente);

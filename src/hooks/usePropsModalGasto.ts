@@ -11,6 +11,7 @@ import {
 } from './queries'
 import { useAuthData } from '../contexts/AuthDataContext'
 import { useSucursal } from '../contexts/SucursalContext'
+import { puedeCrearRubroGasto } from '../lib/permisos'
 import type { ModalGastoProps } from '../components/modals/ModalGasto'
 import type { GrupoGasto, RubroGasto } from '../types/gastos'
 
@@ -54,6 +55,7 @@ export function usePropsModalGasto(): PropsComunesModalGasto {
     esAdmin: isAdmin,
     usuarioId: user?.id,
     tieneTodasLasSucursales,
-    onCrearRubro: isAdmin ? crearRubro : undefined,
+    // 1597-b5 (#1597): los rubros son de toda la empresa; los crea sólo un admin de todas las sucursales.
+    onCrearRubro: puedeCrearRubroGasto(isAdmin ? 'admin' : null, tieneTodasLasSucursales) ? crearRubro : undefined,
   }
 }

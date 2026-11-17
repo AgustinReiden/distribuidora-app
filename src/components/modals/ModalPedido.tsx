@@ -585,7 +585,7 @@ const ModalPedido = memo(function ModalPedido({
     // Bonificaciones NO descuentan stock — solo items comprados
     const stockDisponible = producto.stock - cantidadEnPedido;
     if (stockDisponible < 0) return { tipo: 'error', mensaje: `Sin stock! Disponible: ${producto.stock}` };
-    if (stockBajo(stockDisponible, producto.stock_minimo)) return { tipo: 'warning', mensaje: `Stock bajo: quedaran ${stockDisponible}` };
+    if (stockBajo(stockDisponible, producto.stock_minimo)) return { tipo: 'warning', mensaje: `Stock bajo: quedarán ${stockDisponible}` };
     return null;
   };
 
@@ -1800,7 +1800,7 @@ const ModalPedido = memo(function ModalPedido({
                       </select>
                       {isOffline && (
                         <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                          Sin conexión el cobro se registra después, desde la ficha del pedido.
+                          Sin conexión el cobro no se guarda con el pedido: cargalo a mano desde la ficha cuando vuelva la señal.
                         </p>
                       )}
                     </div>

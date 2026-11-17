@@ -592,7 +592,7 @@ BEGIN
   -- Un cliente que el preventista puede operar y SIN descuentos.
   SELECT id INTO v_cliente FROM clientes cl
    WHERE sucursal_id = v_suc AND activo AND tipo_factura_default IS DISTINCT FROM 'VB'
-     AND preventista_id IS NULL AND NOT COALESCE(reservado_admin, false)
+     AND NOT EXISTS (SELECT 1 FROM cliente_preventistas cp WHERE cp.cliente_id = cl.id) AND NOT COALESCE(reservado_admin, false)
      AND COALESCE(descuento_porcentaje, 0) = 0
      AND NOT EXISTS (SELECT 1 FROM cliente_descuentos_categoria d WHERE d.cliente_id = cl.id)
    ORDER BY id LIMIT 1;

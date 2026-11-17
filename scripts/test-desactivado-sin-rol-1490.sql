@@ -39,6 +39,11 @@
 --   \i scripts/test-desactivado-sin-rol-1490.sql      -- compara las huellas; da 'ENSAYO OK'
 --   ROLLBACK;
 -- Después de aplicar, una corrida sola: psql "$DATABASE_URL" -f scripts/test-desactivado-sin-rol-1490.sql
+--
+-- El archivo abre su propia transacción (#1603 B13b): las dos tablas temporales son ON COMMIT DROP, y con el autocommit de
+-- `psql -f` se borraban al terminar su propio CREATE ("relation ensayo_1490_huellas does not exist"). Dentro del BEGIN
+-- de arriba (la corrida antes/después) el segundo BEGIN sólo avisa que ya hay una transacción abierta.
+BEGIN;
 
 CREATE TEMP TABLE IF NOT EXISTS ensayo_1490_huellas (
   caso text PRIMARY KEY,

@@ -109,6 +109,20 @@ async function deleteMarca(id: string): Promise<void> {
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la marca se haya eliminado. Revisá antes de reintentar.')
 }
 
+/**
+ * Cuántas metas de preventistas (de cualquier período) apuntan a la marca. La FK
+ * `metas_preventista.marca_id` es ON DELETE CASCADE: borrar la marca borra esas metas
+ * sin que nada lo avise (#1596, 1596-b11). Sólo admin y encargado leen metas ajenas.
+ */
+export async function contarMetasDeMarca(marcaId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('metas_preventista')
+    .select('id', { count: 'exact', head: true })
+    .eq('marca_id', marcaId)
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo ver si la marca tiene metas. Revisá la señal e intentá de nuevo.')
+  return count ?? 0
+}
+
 async function toggleMarcaActiva({ id, activa }: { id: string; activa: boolean }): Promise<void> {
   const { error } = await supabase.from('marcas').update({ activa }).eq('id', id)
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la marca se haya actualizado. Revisá antes de reintentar.')
@@ -162,6 +176,19 @@ export function useRenombrarMarcaMutation() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: marcasKeys.lists(currentSucursalId) })
     },
+  })
+}
+
+/** Las metas que se borrarían junto con la marca; `null` mientras no hay marca por borrar. */
+export function useMetasDeMarcaQuery(marcaId: string | null) {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: [...marcasKeys.all(currentSucursalId), 'metas', marcaId] as const,
+    queryFn: () => contarMetasDeMarca(marcaId as string),
+    enabled: marcaId != null,
+    // Siempre fresco: el aviso es sobre lo que se va a borrar ahora.
+    staleTime: 0,
+    gcTime: 0,
   })
 }
 

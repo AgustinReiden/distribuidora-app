@@ -8,6 +8,7 @@ import {
   avisosAnulacionNotaCredito,
   costoEfectivoCompra,
   esNotaVigente,
+  motivoNotaNoAnulable,
   notasVigentes,
   restanteAcreditableCompra,
   resumirNotasCreditoPorCompra,
@@ -49,6 +50,30 @@ describe('resumirNotasCreditoPorCompra (el badge de la lista)', () => {
       { compra_id: 8, total: 300, anulada: true },
     ])
     expect(r).toEqual([{ compra_id: '7', cantidad: 2, total: 110 }])
+  })
+})
+
+describe('motivoNotaNoAnulable (espejo de la fecha de corte de anular_nota_credito_compra)', () => {
+  it('una devolución cargada antes del 10/11/2026 19:21:45 UTC no se puede anular, y dice por qué', () => {
+    const m = motivoNotaNoAnulable({ tipo: 'devolucion', created_at: '2026-10-02T14:00:00Z', fecha: '2026-10-02' })
+    expect(m).toMatch(/anterior al 10\/11\/2026/)
+    expect(m).toMatch(/no se puede anular desde el sistema/)
+    expect(motivoNotaNoAnulable({ tipo: 'devolucion', created_at: '2026-11-10T19:21:44Z' })).not.toBeNull()
+  })
+
+  it('desde el corte sí, y un ajuste de cualquier fecha también', () => {
+    expect(motivoNotaNoAnulable({ tipo: 'devolucion', created_at: '2026-11-10T19:21:45Z' })).toBeNull()
+    expect(motivoNotaNoAnulable({ tipo: 'devolucion', created_at: '2026-11-15T10:00:00-03:00' })).toBeNull()
+    expect(motivoNotaNoAnulable({ tipo: 'ajuste', created_at: '2026-10-02T14:00:00Z' })).toBeNull()
+  })
+
+  it('sin created_at usa la fecha de la nota a medianoche UTC, como la base', () => {
+    expect(motivoNotaNoAnulable({ tipo: 'devolucion', fecha: '2026-11-10' })).not.toBeNull()
+    expect(motivoNotaNoAnulable({ tipo: 'devolucion', fecha: '2026-11-11' })).toBeNull()
+  })
+
+  it('una nota ya anulada no lleva motivo (no se ofrece anular)', () => {
+    expect(motivoNotaNoAnulable({ tipo: 'devolucion', created_at: '2026-10-02T14:00:00Z', anulada: true })).toBeNull()
   })
 })
 

@@ -17,6 +17,7 @@ import type {
   SustituirRegaloResult,
 } from '../../types'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { nuevoRequestId } from '../../utils/idempotencia'
 import type { CambioDeVersion } from '../../utils/versionPedido'
 
 /** #1376: las dos RPCs mueven `pedidos.updated_at` y devuelven el de antes y el nuevo. */
@@ -27,7 +28,7 @@ function versionDe(raw: { updated_at_anterior?: string; updated_at?: string }): 
 }
 
 async function sustituirRegalo(input: SustituirRegaloInput): Promise<SustituirRegaloResult> {
-  const clientRequestId = input.clientRequestId ?? crypto.randomUUID()
+  const clientRequestId = input.clientRequestId ?? nuevoRequestId()
 
   const { data, error } = await supabase.rpc('sustituir_regalo_pedido', {
     p_pedido_item_id: input.pedidoItemId,
@@ -103,7 +104,7 @@ export function useSustituirRegaloMutation() {
  * cantidad de la linea. Idempotente via `client_request_id`.
  */
 async function dividirRegalo(input: DividirRegaloInput): Promise<DividirRegaloResult> {
-  const clientRequestId = input.clientRequestId ?? crypto.randomUUID()
+  const clientRequestId = input.clientRequestId ?? nuevoRequestId()
 
   const { data, error } = await supabase.rpc('dividir_regalo_pedido', {
     p_pedido_item_id: input.pedidoItemId,

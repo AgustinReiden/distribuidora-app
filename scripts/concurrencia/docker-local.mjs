@@ -9,7 +9,8 @@
 //   node scripts/concurrencia/docker-local.mjs up                 # imagen + contenedor `conc-pg` (puerto 54330), borra el anterior
 //   node scripts/concurrencia/docker-local.mjs dump <schema.sql>  # carga el dump de prod (fuera del repo) y deja el `auth` como Supabase
 //   node scripts/concurrencia/docker-local.mjs aplicar <archivo.sql> [--tal-cual]   # aplica una migración posterior al dump (LF salvo --tal-cual)
-//   node scripts/concurrencia/docker-local.mjs semilla | sin-semilla   # admin de las sucursales 1 y 2 que pide el ensayo de la 437, y su baja
+//   node scripts/concurrencia/docker-local.mjs semilla | sin-semilla   # admin de las sucursales 1 y 2 que pide el ensayo de la 437 (y la 440, 442, 463_permisos, 463d y 468), y su baja
+//   node scripts/concurrencia/docker-local.mjs semilla-ensayos    # personas, clientes, productos y boletas para correr los scripts/test-*.sql (después de `semilla`; no se deshace)
 //   node scripts/concurrencia/docker-local.mjs auth               # sólo el ajuste de `auth` (trigger de alta, auth.uid/role/email)
 //   node scripts/concurrencia/docker-local.mjs huella             # etapa 1 de la huella (para comparar con prod)
 //   node scripts/concurrencia/docker-local.mjs sql "<consulta>"   # una consulta, como postgres
@@ -195,6 +196,25 @@ function sinSemilla() {
            AND (xpath('/row/n/text()', query_to_xml(format('select count(*) as n from public.%I', c.relname), false, true, '')))[1]::text <> '0'`).replace(/^DO\s*/, "").trim() || "(sin tablas con filas)");
 }
 
+// Datos para correr los ensayos de scripts/test-*.sql, que eligen sus personas y sus datos de lo que hay (en prod los
+// hay). Ver el encabezado de semilla-ensayos.sql. Va DESPUÉS de `semilla` y no se deshace.
+function semillaEnsayos() {
+  // La imagen trae el `auth` de un GoTrue viejo: sin `users.banned_until`, `sessions` ni `one_time_tokens` (que el trigger que
+  // desactiva a un usuario, perfiles_sync_acceso_auth #1245, escribe y borra), y no tiene el ledger `supabase_migrations` (lo lee
+  // `migraciones_aplicadas()`). Son del dueño de esos schemas: se agregan como supabase_admin, mínimos y vacíos. Sólo en esta base.
+  docker("exec", NOMBRE, "psql", "-U", "supabase_admin", "-h", "localhost", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c",
+    `ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS banned_until timestamptz;
+     CREATE TABLE IF NOT EXISTS auth.sessions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL);
+     CREATE TABLE IF NOT EXISTS auth.one_time_tokens (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL);
+     GRANT ALL ON auth.sessions, auth.one_time_tokens TO postgres;
+     CREATE SCHEMA IF NOT EXISTS supabase_migrations;
+     CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (version text PRIMARY KEY, statements text[], name text);
+     GRANT USAGE ON SCHEMA supabase_migrations TO postgres;
+     GRANT ALL ON supabase_migrations.schema_migrations TO postgres`);
+  const sql = readFileSync(join(aqui, "semilla-ensayos.sql"), "utf8");
+  console.log(psql(sql).replace(/^DO\s*/, "").trim() || "semilla-ensayos: puesta");
+}
+
 function huella() {
   const sql = readFileSync(join(aqui, "huella-esquema.sql"), "utf8");
   console.log(psql(sql.replace(/^--.*$/gm, "")));
@@ -208,7 +228,8 @@ else if (cmd === "auth") ajustarAuth();
 else if (cmd === "aplicar") aplicar();
 else if (cmd === "semilla") semilla();
 else if (cmd === "sin-semilla") sinSemilla();
+else if (cmd === "semilla-ensayos") semillaEnsayos();
 else if (cmd === "huella") huella();
 else if (cmd === "sql") console.log(psql(process.argv[3]));
 else if (cmd === "down") { docker("rm", "-f", NOMBRE); console.log("contenedor borrado"); }
-else { console.error("Uso: docker-local.mjs <up|dump|aplicar|semilla|sin-semilla|auth|huella|sql|down|migrar>"); process.exit(2); }
+else { console.error("Uso: docker-local.mjs <up|dump|aplicar|semilla|sin-semilla|semilla-ensayos|auth|huella|sql|down|migrar>"); process.exit(2); }
