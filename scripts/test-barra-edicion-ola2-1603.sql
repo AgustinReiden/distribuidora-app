@@ -69,10 +69,21 @@
 --           en 0 (antes lo subía a 2).
 --     E17 · salvedad primero y edición después: salvedad de 2 de los 4 regalos (A×20 + S×4, dos
 --           fardos de L1) y la edición sin cambios deja [49] y 10 con el bloque en L1. Antes: [50] y 9.
+-- v3 · el reparto de un regalo entre sabores (`dividir_regalo_pedido`). A×20 + S×4: dos fardos de
+--   L1 ([48] y bolsa 0, después la bolsa sube 10). La barra de S2 descuenta de C salvo en R2.
+--     R1 · S×4 repartido en S×2 + S2×2: stock=58 lotes=[48] bolsa=10, los dos bloques vivos en L1.
+--          Antes: [49] y 9, el bloque de S2 en la bolsa.
+--     R2 · regresión: la barra de S2 descuenta de otro contenedor C2 (lote 100/50 y bolsa 10): el
+--          fardo de S vuelve a su lote de C ([49] y 10) y el de S2 sale de la bolsa de C2 ([50] y 9),
+--          como hoy.
+--     R3 · reparto y después edición sin cambios: [48] y 10, la pila igual. Antes: [49] y 9.
+--     R4 · reparto y después cancelar: todo vuelve a su lote, [50] y 10 (antes también, porque
+--          la cancelación corregía la deriva; el paso del reparto sí fallaba).
 --   A1 · ningún check de auditoria_integridad() suma violaciones.
 --
--- Sin la migración tiene que FALLAR en E1–E9 (en E7, el paso de la edición), E12–E17, S1 y S2
--- (E17 también derivaba: [50] y 9). E10 y E11 son regresión.
+-- Sin la migración tiene que FALLAR en E1–E9 (en E7, el paso de la edición), E12–E17, S1, S2,
+-- R1, R3 y R4 (el paso del reparto) (E17 también derivaba: [50] y 9). E10, E11 y R2 son
+-- regresión.
 -- Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ …' con la lista de fallas, siempre como excepción.
 --
 --   docker exec -i <contenedor> psql -U postgres -d postgres -f - < scripts/test-barra-edicion-ola2-1603.sql
@@ -782,6 +793,84 @@ BEGIN
     v_fallas := v_fallas || format('E17 error: %s', SQLERRM);
   END;
 
+  -- El reparto del regalo de un pedido en dos sabores; devuelve 'ok' o el rechazo.
+  CREATE FUNCTION pg_temp.repartir(p_ped bigint, p_s bigint, p_s2 bigint) RETURNS text LANGUAGE plpgsql AS $f$
+  DECLARE v jsonb;
+  BEGIN
+    v := public.dividir_regalo_pedido((SELECT id FROM pedido_items WHERE pedido_id = p_ped AND es_bonificacion),
+           jsonb_build_array(jsonb_build_object('producto_id', p_s, 'cantidad', 2),
+                             jsonb_build_object('producto_id', p_s2, 'cantidad', 2)),
+           'ensayo B19', NULL);
+    PERFORM pg_temp.limpiar();
+    IF COALESCE((v->>'success')::boolean, false) THEN RETURN 'ok'; END IF;
+    RETURN v::text;
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM pg_temp.limpiar();
+    RETURN SQLERRM;
+  END $f$;
+
+  -- ============================================================ R1 · R3 · R4 ===
+  FOR k IN SELECT unnest(ARRAY['R1', 'R3', 'R4']) LOOP
+    BEGIN
+      a := pg_temp.prod('[]', 100);
+      s := pg_temp.prod('[]', 100);
+      s2 := pg_temp.prod('[]', 100);
+      c := pg_temp.prod('[{"dias":30,"cantidad":100,"restante":50}]', 0);
+      v_promo := pg_temp.promo_barra(a, s, c);
+      INSERT INTO promo_acumuladores (promocion_id, producto_regalo_id, ajuste_producto_id, usos_pendientes, sucursal_id)
+      VALUES (v_promo, s2, c, 0, v_suc);
+      v_items := jsonb_build_array(pg_temp.it(a, 20), pg_temp.reg(s, 4, v_promo));
+      v_x := pg_temp.alta(v_cli, v_adm, v_items);
+      PERFORM pg_temp.bolsa(c, 10);
+      v_res := pg_temp.repartir(v_x, s, s2);
+      IF v_res <> 'ok' THEN
+        v_fallas := v_fallas || format('%s el reparto se rechazó: %s', k, v_res);
+      END IF;
+      v_fallas := v_fallas || pg_temp.ver(k || ' reparto, mismo contenedor', c, 'stock=58 lotes=[48] bolsa=10')
+                           || pg_temp.verv(k || ' reparto, mismo contenedor', v_promo, 'L1:1 | L1:1');
+      IF k = 'R3' THEN
+        v_pila := pg_temp.pila(v_promo);
+        v_res := pg_temp.editar(v_x, v_adm, v_items);
+        IF v_res <> 'ok' THEN
+          v_fallas := v_fallas || format('R3 la edición se rechazó: %s', v_res);
+        END IF;
+        v_fallas := v_fallas || pg_temp.ver('R3 edición después del reparto', c, 'stock=58 lotes=[48] bolsa=10');
+        IF pg_temp.pila(v_promo) <> v_pila THEN
+          v_fallas := v_fallas || format('R3 la edición sin cambios tocó la pila: %s (antes %s)', pg_temp.pila(v_promo), v_pila);
+        END IF;
+      ELSIF k = 'R4' THEN
+        PERFORM pg_temp.cancelar(v_x, v_adm);
+        v_fallas := v_fallas || pg_temp.ver('R4 cancelar después del reparto', c, 'stock=60 lotes=[50] bolsa=10')
+                             || pg_temp.verv('R4 cancelar después del reparto', v_promo, '-');
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      v_fallas := v_fallas || format('%s error: %s', k, SQLERRM);
+    END;
+  END LOOP;
+
+  -- ==================================================================== R2 ===
+  BEGIN
+    a := pg_temp.prod('[]', 100);
+    s := pg_temp.prod('[]', 100);
+    s2 := pg_temp.prod('[]', 100);
+    c := pg_temp.prod('[{"dias":30,"cantidad":100,"restante":50}]', 0);
+    t := pg_temp.prod('[{"dias":30,"cantidad":100,"restante":50}]', 10);
+    v_promo := pg_temp.promo_barra(a, s, c);
+    INSERT INTO promo_acumuladores (promocion_id, producto_regalo_id, ajuste_producto_id, usos_pendientes, sucursal_id)
+    VALUES (v_promo, s2, t, 0, v_suc);
+    v_x := pg_temp.alta(v_cli, v_adm, jsonb_build_array(pg_temp.it(a, 20), pg_temp.reg(s, 4, v_promo)));
+    PERFORM pg_temp.bolsa(c, 10);
+    v_res := pg_temp.repartir(v_x, s, s2);
+    IF v_res <> 'ok' THEN
+      v_fallas := v_fallas || format('R2 el reparto se rechazó: %s', v_res);
+    END IF;
+    v_fallas := v_fallas || pg_temp.ver('R2 reparto, contenedores distintos (C)', c, 'stock=59 lotes=[49] bolsa=10')
+                         || pg_temp.ver('R2 reparto, contenedores distintos (C2)', t, 'stock=59 lotes=[50] bolsa=9')
+                         || pg_temp.verv('R2 reparto, contenedores distintos', v_promo, 'L1:1 | bolsa:1');
+  EXCEPTION WHEN OTHERS THEN
+    v_fallas := v_fallas || format('R2 error: %s', SQLERRM);
+  END;
+
   -- ------------------------------------------------------------------- A1 ---
   SELECT jsonb_object_agg(x->>'id', (x->>'violaciones')::bigint) INTO v_checks
     FROM jsonb_array_elements(public.auditoria_integridad()->'checks') x;
@@ -792,7 +881,7 @@ BEGIN
   END LOOP;
 
   IF cardinality(v_fallas) = 0 THEN
-    RAISE EXCEPTION 'ENSAYO OK · E1–E17, S1, S2 y A1 (la edición y la sustitución mueven sólo la diferencia de la barra, y el fardo que cambia de barra en el mismo contenedor conserva su lote)';
+    RAISE EXCEPTION 'ENSAYO OK · E1–E17, S1, S2, R1–R4 y A1 (la edición, la sustitución y el reparto mueven sólo la diferencia de la barra, y el fardo que cambia de barra en el mismo contenedor conserva su lote)';
   END IF;
   RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' || ');
 END

@@ -692,8 +692,12 @@ BEGIN
                                  'public.sustituir_regalo_pedido(bigint,bigint,numeric,text,bigint,uuid)',
                                  'public.dividir_regalo_pedido(bigint,jsonb,text,uuid)'] LOOP
     v_def := pg_get_functiondef(v_firma::regprocedure);
+    -- Desde B19 (ola 2 de #1603) la edición, la sustitución y el reparto llegan al motor por
+    -- _barra_mover_neto: se mira la primera llamada a la barra, directa o por el helper.
     f := pg_temp.er_si(f, position('public._contenedores_de_promos(' IN v_def) > 0
-                          AND position('public._contenedores_de_promos(' IN v_def) < position('aplicar_uso_promo_acumulador' IN v_def),
+                          AND position('public._contenedores_de_promos(' IN v_def)
+                              < LEAST(NULLIF(position('aplicar_uso_promo_acumulador' IN v_def), 0),
+                                      NULLIF(position('_barra_mover_neto(' IN v_def), 0)),
                        format('%s no bloquea los contenedores antes del motor de promos', v_firma));
   END LOOP;
   FOREACH v_firma IN ARRAY ARRAY['public.sustituir_regalo_pedido(bigint,bigint,numeric,text,bigint,uuid)',

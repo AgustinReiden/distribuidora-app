@@ -1,14 +1,15 @@
 -- =========================================================================
--- NNN · LA EDICIÓN DE UN PEDIDO Y LA SUSTITUCIÓN DE UN REGALO MUEVEN SÓLO LA
---       DIFERENCIA DE LA BARRA DE REGALOS: NO PASAN EL FARDO DEL CONTENEDOR
---       DE LA BOLSA AL LOTE
+-- NNN · LA EDICIÓN DE UN PEDIDO, LA SUSTITUCIÓN Y EL REPARTO DE UN REGALO
+--       MUEVEN SÓLO LA DIFERENCIA DE LA BARRA DE REGALOS: NO PASAN EL FARDO
+--       DEL CONTENEDOR DE LA BOLSA AL LOTE
 --       (ola 2 del plan #1603, tarjeta B19: H1 de la revisión de la tarjeta B3;
---        v2: H1 a H6 de la revisión de la tarjeta B19)
+--        v2: H1 a H6 de la revisión de la tarjeta B19; v3: el reparto)
 --
 -- Crea un helper de server (`_barra_mover_neto`) y parcha por ancla, con
 -- premisa de md5 sobre los cuerpos vivos (ledger en la 525),
--- `actualizar_pedido_items` (el de la 519) y `sustituir_regalo_pedido`. En
--- las dos toca sólo el tramo de la barra: el resto del cuerpo (precios, piso y
+-- `actualizar_pedido_items` (el de la 519), `sustituir_regalo_pedido` y
+-- `dividir_regalo_pedido`. En las tres toca sólo el tramo de la barra: el
+-- resto del cuerpo (precios, piso y
 -- techo, versión del pedido, mínimos, promos, stock de las líneas, huella)
 -- queda igual, y la poscondición lo comprueba. No cambia firmas ni permisos,
 -- no toca tablas y no toca el motor de la barra (`aplicar_uso_promo_acumulador`).
@@ -33,8 +34,14 @@
 -- Lo mismo pasaba cuando el regalo cambia de barra y las dos barras descuentan
 -- del mismo contenedor (otro sabor, o el regalo que pasa de una promo a otra
 -- con el mismo fardo: en producción hay dos contenedores de los que descuentan
--- dos barras cada uno), y en la sustitución de un regalo (`-cantidad` en la
--- barra del original y `+cantidad` en la del sustituto).
+-- dos barras cada uno), en la sustitución de un regalo (`-cantidad` en la
+-- barra del original y `+cantidad` en la del sustituto) y en el reparto de un
+-- regalo entre sabores (`dividir_regalo_pedido`: ya movía el neto por sabor,
+-- pero un sabor baja y otro sube, y si sus barras comparten contenedor el
+-- fardo iba del lote a la bolsa). Los demás llamadores del motor no bajan una
+-- barra y suben otra en la misma operación (el alta y el bot sólo suben; la
+-- cancelación, la eliminación y la salvedad sólo bajan) o ya lo resuelven (el
+-- cambio de cliente, M3-1 de la 517).
 --
 -- -------------------------------------------------------------------------
 -- El arreglo
@@ -61,10 +68,11 @@
 -- producto y la cantidad que quedaron en la fila y `_regalo_barra_vale`
 -- después de insertarlo), y con las líneas ya insertadas llama al helper.
 -- `sustituir_regalo_pedido` (modo de fracción) le pasa la salida del original y
--- la entrada del sustituto en una sola llamada. Así:
+-- la entrada del sustituto en una sola llamada, y `dividir_regalo_pedido` el
+-- neto de cada sabor del reparto. Así:
 --   · una edición que no cambia el regalo de una promo no toca su barra, sus
 --     bloques, el contenedor, sus lotes ni la bolsa, y no deja asientos;
---   · una que lo cambia, o una sustitución, mueve sólo la diferencia, y un
+--   · una que lo cambia, una sustitución o un reparto mueven sólo la diferencia, y un
 --     regalo que pasa a otra barra del mismo contenedor conserva el lote de su
 --     fardo;
 --   · los textos de los asientos son los de antes ('Edicion pedido #N' en la
@@ -97,8 +105,9 @@
 --     mismo contenedor y la bolsa justa cambia cuál bloque queda anotado en la
 --     bolsa y cuál en un lote (los totales son los mismos).
 --
--- Revertir: volver `actualizar_pedido_items` y `sustituir_regalo_pedido` a los
--- cuerpos de la premisa y `DROP FUNCTION public._barra_mover_neto(jsonb,bigint,uuid);`.
+-- Revertir: volver `actualizar_pedido_items`, `sustituir_regalo_pedido` y
+-- `dividir_regalo_pedido` a los cuerpos de la premisa y
+-- `DROP FUNCTION public._barra_mover_neto(jsonb,bigint,uuid);`.
 -- =========================================================================
 
 BEGIN;
@@ -127,6 +136,7 @@ BEGIN
   FOR r IN SELECT * FROM (VALUES
     ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)', '387beb9228d1751823bc2a6c710b9098'),
     ('public.sustituir_regalo_pedido(bigint,bigint,numeric,text,bigint,uuid)', '243714f196f2dae7ae9cb8bdf43b54a1'),
+    ('public.dividir_regalo_pedido(bigint,jsonb,text,uuid)', 'd120bac125a5656fb39d3bf72469c0e0'),
     ('public.aplicar_uso_promo_acumulador(bigint,bigint,numeric,bigint,bigint,uuid,text)', 'b55ff7a09db621f71f6e29d55bfea808'),
     ('public._mov_lotes_devolver(bigint,jsonb)', '83ef22b3b0143bf318ead07069ac916e'),
     ('public._contenedores_de_promos(bigint[],bigint)', 'a9febeec0cb96eef6751cb16cc9da6bf')
@@ -351,7 +361,7 @@ REVOKE ALL ON FUNCTION public._barra_mover_neto(jsonb, bigint, uuid) FROM PUBLIC
 GRANT EXECUTE ON FUNCTION public._barra_mover_neto(jsonb, bigint, uuid) TO service_role;
 
 COMMENT ON FUNCTION public._barra_mover_neto(jsonb, bigint, uuid) IS
-  'mig NNN (B19, ola 2 de #1603): la diferencia de cada barra de regalos, en una llamada al motor por barra (primero las que bajan); el fardo que se abre en una barra y se cierra en otra del mismo contenedor conserva su lote (molde M3-1 de la 517). De server: la llaman actualizar_pedido_items y sustituir_regalo_pedido con los productos y las promos tomados.';
+  'mig NNN (B19, ola 2 de #1603): la diferencia de cada barra de regalos, en una llamada al motor por barra (primero las que bajan); el fardo que se abre en una barra y se cierra en otra del mismo contenedor conserva su lote (molde M3-1 de la 517). De server: la llaman actualizar_pedido_items, sustituir_regalo_pedido y dividir_regalo_pedido con los productos y las promos tomados.';
 
 -- Los tramos que se cambian: la función, el ancla y su reemplazo. La
 -- poscondición los vuelve a poner al revés y compara con el md5 de la premisa.
@@ -462,10 +472,47 @@ $r$    -- B19 (ola 2 de #1603): la salida del original y la entrada del sustitut
                          'delta', p_cantidad_nueva, 'ajuste_def', v_ajuste_sustituto_efectivo,
                          'motivo', 'sustitucion: entrada del producto regalo sustituto')),
       v_sucursal, v_user_id);
+$r$),
+(6, 'public.dividir_regalo_pedido(bigint,jsonb,text,uuid)', 'el neto de cada sabor',
+$a$    FOR v_neto IN SELECT producto_id, consumo
+                   FROM (SELECT t.producto_id, sum(t.c) AS consumo
+                           FROM (SELECT u.producto_id, u.cantidad AS c
+                                   FROM unnest(v_prod, v_cant) AS u(producto_id, cantidad)
+                                 UNION ALL
+                                 SELECT v_item.producto_id, -v_item.cantidad) t
+                          GROUP BY t.producto_id) n
+                  WHERE consumo <> 0
+                  ORDER BY consumo, producto_id LOOP
+      PERFORM public.aplicar_uso_promo_acumulador(
+        v_promo.id, v_neto.producto_id, v_neto.consumo,
+        v_neto.producto_id,
+        v_sucursal, v_user_id,
+        CASE WHEN v_neto.consumo < 0
+             THEN 'reparto: salida del producto regalo original'
+             ELSE 'reparto: entrada de un sabor del regalo' END
+      );
+    END LOOP;
+$a$,
+$r$    -- B19 (ola 2 de #1603): el neto de cada sabor en una llamada. Si un sabor baja
+    -- y otro sube y sus barras descuentan del mismo contenedor, el fardo conserva
+    -- su lote: antes la bajada lo devolvia al lote y la subida lo volvia a sacar
+    -- de la bolsa.
+    PERFORM public._barra_mover_neto(
+      (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                'promocion_id', v_promo.id, 'producto_id', t.producto_id, 'delta', t.c,
+                'motivo', CASE WHEN t.c < 0
+                               THEN 'reparto: salida del producto regalo original'
+                               ELSE 'reparto: entrada de un sabor del regalo' END)), '[]'::jsonb)
+         FROM (SELECT u.producto_id, u.cantidad AS c
+                 FROM unnest(v_prod, v_cant) AS u(producto_id, cantidad)
+               UNION ALL
+               SELECT v_item.producto_id, -v_item.cantidad) t),
+      v_sucursal, v_user_id);
 $r$);
 
 -- =========================================================================
--- actualizar_pedido_items y sustituir_regalo_pedido: el tramo de la barra
+-- actualizar_pedido_items, sustituir_regalo_pedido y dividir_regalo_pedido: el
+-- tramo de la barra
 -- =========================================================================
 DO $parche$
 DECLARE
@@ -491,8 +538,8 @@ $parche$;
 -- ---------------------------------------------------------------------------
 -- Poscondición: los cuerpos nuevos son los del repo, el resto de cada cuerpo
 -- no cambió (deshaciendo sus tramos vuelve el md5 de la premisa), el definer,
--- el search_path y los EXECUTE son los de antes, y ninguna de las dos llama
--- al motor por su cuenta.
+-- el search_path y los EXECUTE son los de antes, y cada una llama al helper una
+-- vez y al motor sólo donde tiene que (la sustitución, el contador de 1592-b3).
 -- ---------------------------------------------------------------------------
 DO $post$
 DECLARE
@@ -509,6 +556,9 @@ BEGIN
     ('public.sustituir_regalo_pedido(bigint,bigint,numeric,text,bigint,uuid)',
      '9fcf5264eb15043ce24b91b4c69e5ae7', '243714f196f2dae7ae9cb8bdf43b54a1', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', 1, 1),
+    ('public.dividir_regalo_pedido(bigint,jsonb,text,uuid)',
+     '8b084f84c9847ffb8960585b30407ed5', 'd120bac125a5656fb39d3bf72469c0e0', true,
+     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', 1, 0),
     ('public._barra_mover_neto(jsonb,bigint,uuid)',
      'e9aad859c3fdc71eefb4b4f632f8bc1b', NULL, false,
      '{postgres=X/postgres,service_role=X/postgres}', 0, 2)
