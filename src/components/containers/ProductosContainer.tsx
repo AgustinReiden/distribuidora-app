@@ -40,7 +40,7 @@ import {
   puedeGenerarListaPrecios,
 } from '../../lib/permisos'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
-import { filtrarProductosOperativos, esProductoOperativo, esErrorPorHistorial } from '../../utils/productosOperativos'
+import { filtrarProductosOperativos, esProductoOperativo, mensajeErrorAlEliminarProducto } from '../../utils/productosOperativos'
 import { formatPrecio, fechaLocalISO } from '../../utils/formatters'
 import { getErrorMessage } from '../../utils/errorHandling'
 import type { ProductoDB, ProductoFormInput, MermaFormInputExtended, GrupoPrecioFormInput } from '../../types'
@@ -255,13 +255,10 @@ export default function ProductosContainer(): React.ReactElement {
           await eliminarProducto.mutateAsync(productoId)
           notify.success('Producto eliminado')
         } catch (err) {
-          // Un producto con historial no se puede borrar (lo rechaza un trigger):
-          // la salida es desactivarlo, y el mensaje tiene que decirlo.
-          notify.error(
-            esErrorPorHistorial(err)
-              ? 'No se puede eliminar: tiene historial. Desactivalo para que deje de ofrecerse.'
-              : 'Error al eliminar producto',
-          )
+          // Un producto con historial, stock, lotes o que es regalo de una promo no se
+          // puede borrar (lo rechaza un trigger): la salida es desactivarlo, y el
+          // mensaje tiene que decirlo.
+          notify.error(mensajeErrorAlEliminarProducto(err))
         }
       },
     })

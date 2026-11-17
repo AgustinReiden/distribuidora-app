@@ -197,6 +197,24 @@ describe('usePoliticasComercialesQuery — días hacia atrás de la fecha del pe
     expect(result.current.politicas.diasAtrasFechaPedido).toBe(0)
   })
 
+  it('M10-2: manda lo que dice dias_atras_fecha_pedido(), aunque la RLS oculte la fila', async () => {
+    m.fila = null
+    m.rpc.mockImplementation((fn: string) => Promise.resolve(
+      fn === 'dias_atras_fecha_pedido' ? { data: 2, error: null } : { data: null, error: null }))
+    const { result } = renderHook(() => usePoliticasComercialesQuery(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(m.rpc).toHaveBeenCalledWith('dias_atras_fecha_pedido')
+    expect(result.current.politicas.diasAtrasFechaPedido).toBe(2)
+  })
+
+  it('M10-2: si la RPC falla (un server de antes), queda lo de la tabla', async () => {
+    m.fila = { dias_atras_fecha_pedido: 4 }
+    m.rpc.mockResolvedValue({ data: null, error: { message: 'Could not find the function', code: 'PGRST202' } })
+    const { result } = renderHook(() => usePoliticasComercialesQuery(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.politicas.diasAtrasFechaPedido).toBe(4)
+  })
+
   it('la mutación llama la RPC con p_dias y guarda el caché con el campo, sin perder los demás', async () => {
     m.rpc.mockResolvedValue({ data: 3, error: null })
     m.cache = { ...POLITICAS_POR_DEFECTO, montoMinimoPedido: 5000 }

@@ -85,7 +85,9 @@ describe('ModalRegistrarPago — con una boleta elegida se mide contra lo que fa
   it('sin boleta (pago a cuenta general) todo sigue contra el saldo del cliente y el sobrante queda a favor', async () => {
     const user = userEvent.setup()
     montar({ saldoPendiente: 1000, onConfirmarFIFO: vi.fn() })
-    await user.type(campoMonto(), '3000')
+    // Hasta el doble del saldo: más que eso pide confirmar el monto (1559-b15, decisión D22;
+    // lo prueba ModalRegistrarPago.montoGrande.test.tsx). Antes este caso tipeaba 3000.
+    await user.type(campoMonto(), '1500')
 
     expect(screen.getByText(/La diferencia quedará como saldo a favor/)).toBeInTheDocument()
     expect(screen.queryByRole('alert')).toBeNull()
