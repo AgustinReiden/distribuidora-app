@@ -391,10 +391,13 @@ export function parseDecimal(input: string | number | null | undefined): number 
 
 /**
  * Redondea medio hacia afuera, como `round(numeric, n)` de Postgres (#1560-b1): el server
- * compara al centavo (el piso de precio, el cobro), así que el front tiene que dar el mismo
- * número. Con `Math.round(v * 100) / 100`, 1,005 daba 1 y 0,145 daba 0,14 (el server, 1,01 y
- * 0,15), y un 10 % sobre $1,15 daba $1,03 contra $1,04. Es `redondearSQL`; lo que no es finito
- * vuelve tal cual, como antes.
+ * compara al centavo (el piso de precio, el cobro). Con `Math.round(v * 100) / 100`, 1,005 daba
+ * 1 y 0,145 daba 0,14 (el server, 1,01 y 0,15), y un 10 % sobre $1,15 daba $1,03 contra $1,04.
+ * Es `redondearSQL`; lo que no es finito vuelve tal cual, como antes.
+ *
+ * Alcance: para un número leído de un texto (lo tipeado) da lo mismo que el server. No es espejo
+ * de una cuenta con división ni de un costo a 4 decimales: ahí el double ya puede haber perdido el
+ * medio, y a veces difiere en el último dígito (lo midió la lente de #1644).
  *
  * @param valor - Número a redondear
  * @param decimales - Cantidad de decimales (default: 2)

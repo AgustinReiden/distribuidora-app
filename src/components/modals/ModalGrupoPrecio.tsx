@@ -577,7 +577,7 @@ export default function ModalGrupoPrecio({
                         value={escala.cantidadMinima}
                         aria-invalid={cantidadIlegible(escala.cantidadMinima)}
                         onChange={e => actualizarEscala(index, { cantidadMinima: tecleo(escala.cantidadMinima, e) })}
-                        className="flex-1 px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                        className="flex-1 px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white aria-[invalid=true]:!border-red-500 dark:aria-[invalid=true]:!border-red-500 aria-[invalid=true]:!ring-1 aria-[invalid=true]:!ring-red-500"
                         placeholder="Cant. minima total"
                       />
                       <div className="flex-1 relative">
@@ -589,7 +589,7 @@ export default function ModalGrupoPrecio({
                           value={escala.precioUnitario}
                           aria-invalid={esTextoIlegible(escala.precioUnitario)}
                           onChange={e => actualizarEscala(index, { precioUnitario: tecleo(escala.precioUnitario, e) })}
-                          className="w-full pl-7 pr-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                          className="w-full pl-7 pr-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white aria-[invalid=true]:!border-red-500 dark:aria-[invalid=true]:!border-red-500 aria-[invalid=true]:!ring-1 aria-[invalid=true]:!ring-red-500"
                           placeholder={escala.combinada ? 'Precio base (opcional)' : 'Precio c/u'}
                           title={escala.combinada
                             ? 'Opcional si todos los productos tienen precio propio. Sirve de fallback.'
@@ -665,7 +665,7 @@ export default function ModalGrupoPrecio({
                             value={escala.minProductosDistintos}
                             aria-invalid={cantidadIlegible(escala.minProductosDistintos)}
                             onChange={e => actualizarEscala(index, { minProductosDistintos: tecleo(escala.minProductosDistintos, e) })}
-                            className="w-16 px-2 py-1 border rounded text-xs text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            className="w-16 px-2 py-1 border rounded text-xs text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white aria-[invalid=true]:!border-red-500 dark:aria-[invalid=true]:!border-red-500 aria-[invalid=true]:!ring-1 aria-[invalid=true]:!ring-red-500"
                           />
                         </div>
 
@@ -698,7 +698,7 @@ export default function ModalGrupoPrecio({
                                       value={cantidadValue}
                                       aria-invalid={cantidadIlegible(cantidadValue)}
                                       onChange={e => actualizarMinimoProducto(index, String(p.id), tecleo(cantidadValue, e))}
-                                      className="w-16 px-2 py-1 border rounded text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                      className="w-16 px-2 py-1 border rounded text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white aria-[invalid=true]:!border-red-500 dark:aria-[invalid=true]:!border-red-500 aria-[invalid=true]:!ring-1 aria-[invalid=true]:!ring-red-500"
                                       placeholder="Min"
                                     />
                                     <div className="relative w-24">
@@ -710,7 +710,7 @@ export default function ModalGrupoPrecio({
                                         aria-invalid={esTextoIlegible(precioValue)}
                                         onChange={e => actualizarPrecioProducto(index, String(p.id), tecleo(precioValue, e))}
                                         disabled={!tieneCantidad}
-                                        className="w-full pl-5 pr-2 py-1 border rounded text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:cursor-not-allowed"
+                                        className="w-full pl-5 pr-2 py-1 border rounded text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white aria-[invalid=true]:!border-red-500 dark:aria-[invalid=true]:!border-red-500 aria-[invalid=true]:!ring-1 aria-[invalid=true]:!ring-red-500 disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:cursor-not-allowed"
                                         placeholder={tieneCantidad ? 'Base' : ''}
                                         title={tieneCantidad ? 'Dejar vacío para usar el precio base de la escala' : 'Primero ingresá la cantidad mínima'}
                                       />

@@ -4,7 +4,7 @@ import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters
 import { fechaPedidoFueraDeRango, mensajeFechaAnteriorAlPiso, pisoFechaPedido } from '../../utils/fechaPedido';
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo';
 import { parsePrecio } from '../../utils/calculations';
-import { NUMERO_ILEGIBLE, esTextoIlegible, numeroConMiles } from '../../utils/normalizarNumero';
+import { motivoPrecioTipeado, numeroConMiles } from '../../utils/normalizarNumero';
 import { useTecleoNumero } from '../../hooks/useTecleoNumero';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
@@ -1405,6 +1405,7 @@ const ModalPedido = memo(function ModalPedido({
                                 {esVB ? (
                                   <p className="text-xs text-violet-700 dark:text-violet-300">A costo (se calcula al guardar)</p>
                                 ) : isEditingPrice && isAdmin && onActualizarPrecio ? (
+                                  <>
                                   <div className="flex items-center gap-1 mt-0.5">
                                     <span className="text-xs text-orange-600">$</span>
                                     <input
@@ -1416,13 +1417,13 @@ const ModalPedido = memo(function ModalPedido({
                                       inputMode="decimal"
                                       aria-label="Editar precio unitario"
                                       value={editingPriceValue}
-                                      aria-invalid={esTextoIlegible(editingPriceValue)}
-                                      title={esTextoIlegible(editingPriceValue) ? NUMERO_ILEGIBLE : undefined}
+                                      aria-invalid={motivoPrecioTipeado(editingPriceValue) !== null}
+                                      aria-describedby={motivoPrecioTipeado(editingPriceValue) ? 'precio-unitario-motivo' : undefined}
                                       onChange={e => setEditingPriceValue(tecleoPrecio(editingPriceValue, e))}
                                       onKeyDown={e => {
                                         if (e.key === 'Enter') {
                                           // Lo que no se entiende queda a la vista para corregirlo.
-                                          if (esTextoIlegible(editingPriceValue)) return;
+                                          if (motivoPrecioTipeado(editingPriceValue)) return;
                                           precioResueltoRef.current = true;
                                           const newPrice = parsePrecio(editingPriceValue);
                                           if (newPrice > 0) onActualizarPrecio(item.productoId, newPrice);
@@ -1434,15 +1435,24 @@ const ModalPedido = memo(function ModalPedido({
                                       }}
                                       onBlur={() => {
                                         if (precioResueltoRef.current) return;
+                                        // Igual que con Enter (H6): tocar afuera no descarta en silencio
+                                        // lo que no se entiende; queda abierto, en rojo y con el motivo.
+                                        if (motivoPrecioTipeado(editingPriceValue)) return;
                                         const newPrice = parsePrecio(editingPriceValue);
                                         if (newPrice > 0) onActualizarPrecio(item.productoId, newPrice);
                                         setEditingPriceId(null);
                                       }}
-                                      className="w-24 px-2 py-0.5 text-xs border border-orange-300 rounded bg-orange-50 dark:bg-orange-900/20 dark:border-orange-600 dark:text-white focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                                      className={`w-24 px-2 py-0.5 text-xs border border-orange-300 rounded bg-orange-50 dark:bg-orange-900/20 dark:border-orange-600 dark:text-white focus:ring-1 focus:ring-orange-500 focus:outline-none ${motivoPrecioTipeado(editingPriceValue) ? '!border-red-500 dark:!border-red-500 !ring-1 !ring-red-500' : ''}`}
                                       autoFocus
                                     />
                                     <span className="text-xs text-orange-600">c/u</span>
                                   </div>
+                                  {motivoPrecioTipeado(editingPriceValue) && (
+                                    <p id="precio-unitario-motivo" role="alert" className="mt-0.5 text-xs font-medium text-red-600 dark:text-red-400">
+                                      {motivoPrecioTipeado(editingPriceValue)}
+                                    </p>
+                                  )}
+                                  </>
                                 ) : esOverride ? (
                                   <p
                                     className={`text-xs text-orange-600 font-medium ${isAdmin && onActualizarPrecio ? 'cursor-pointer hover:underline' : ''}`}

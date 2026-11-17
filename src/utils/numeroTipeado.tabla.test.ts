@@ -110,6 +110,80 @@ describe('tecla por tecla: los miles los pone el campo', () => {
   })
 })
 
+/**
+ * Una tecla como la manda el navegador: inserta (o borra) en el cursor y deja el cursor ahí.
+ * Devuelve lo que el campo muestra y dónde queda el cursor.
+ */
+function tecla(campo: { texto: string; cursor: number }, t: string): { texto: string; cursor: number } {
+  const { texto, cursor } = campo
+  if (t === 'Backspace') {
+    if (cursor === 0) return campo
+    return formatearTecleo(texto, texto.slice(0, cursor - 1) + texto.slice(cursor), cursor - 1, { direccion: 'atras' })
+  }
+  if (t === 'Delete') {
+    if (cursor >= texto.length) return campo
+    return formatearTecleo(texto, texto.slice(0, cursor) + texto.slice(cursor + 1), cursor, { direccion: 'adelante' })
+  }
+  return formatearTecleo(texto, texto.slice(0, cursor) + t + texto.slice(cursor), cursor + t.length)
+}
+
+/** «1.0|00» → { texto: '1.000', cursor: 3 }. */
+const conCursor = (marcado: string) => ({ texto: marcado.replace('|', ''), cursor: marcado.indexOf('|') })
+const marcar = ({ texto, cursor }: { texto: string; cursor: number }) => `${texto.slice(0, cursor)}|${texto.slice(cursor)}`
+
+// H2 de la lente de #1644: con dígitos repetidos, el cambio se atribuía al final de la tira de
+// dígitos iguales y el cursor quedaba corrido. 1.000 → 1.500 terminaba en 1.005.
+describe('dígitos repetidos: cada tecla cae donde está el cursor', () => {
+  it.each([
+    ['1.0|00', ['Backspace', '5'], ['1|00', '1.5|00'], 1500],
+    ['10.0|00', ['Backspace', '5'], ['1.0|00', '10.5|00'], 10500],
+    ['1.0|00', ['0', '5'], ['10.0|00', '100.5|00'], 100500],
+    ['2|2.222', ['2', '3'], ['22|2.222', '2.23|2.222'], 2232222],
+    ['1.00|0', ['Backspace', 'Backspace', '9'], ['10|0', '1|0', '19|0'], 190],
+    ['|1.000', ['Delete', '2'], ['|0', '2|0'], 20],
+    ['111.1|11', ['Backspace', '9'], ['11.1|11', '111.9|11'], 111911],
+    ['111.111|', ['Backspace', 'Backspace', '0'], ['11.111|', '1.111|', '11.110|'], 11110],
+    ['2.2|22', ['Backspace'], ['2|22'], 222],
+    ['2.2|22', ['Delete'], ['22|2'], 222],
+    ['2|.222', ['Delete'], ['2|22'], 222],
+    ['2.|222', ['Backspace'], ['|222'], 222],
+    ['1.000.0|00', ['Backspace', '7'], ['100.0|00', '1.000.7|00'], 1000700],
+    ['5|5,55', ['5'], ['55|5,55'], 555.55],
+    ['5,5|5', ['5'], ['5,55|5'], 5.555],
+  ])('«%s» + %j: se ve %j, y vale %d', (inicio, teclas, vistos, valor) => {
+    let campo = conCursor(inicio)
+    const paso: string[] = []
+    for (const t of teclas) {
+      campo = tecla(campo, t)
+      paso.push(marcar(campo))
+    }
+    expect(paso).toEqual(vistos)
+    expect(leerNumero(campo.texto)).toBe(valor)
+  })
+})
+
+// H5: un pegado ilegible que se vuelve legible al editarlo se reescribe como lo escribe el campo.
+describe('editar un pegado que no se entendía', () => {
+  it('«12.345.67» y borrar el segundo punto: «12,34567», no «12.34567» sin rojo', () => {
+    const pegado = formatearTecleo('', '12.345.67', 9)
+    expect(pegado.texto).toBe('12.345.67')
+    expect(leerNumero(pegado.texto)).toBeNull()
+    const borrado = tecla({ texto: '12.345.67', cursor: 7 }, 'Backspace')
+    expect(borrado.texto).toBe('12,34567')
+    expect(leerNumero(borrado.texto)).toBe(12.34567)
+  })
+
+  it('si sigue sin entenderse, queda tal cual', () => {
+    expect(tecla({ texto: '1,234,567', cursor: 9 }, '8').texto).toBe('1,234,5678')
+  })
+})
+
+// Regla del dueño: la coma es decimal. «15,000» pegado (un SMS en inglés) es quince, no quince mil.
+it('«15,000» pegado (formato inglés) se lee 15: la coma es decimal', () => {
+  expect(formatearTecleo('', '15,000', 6).texto).toBe('15,000')
+  expect(leerNumero('15,000')).toBe(15)
+})
+
 describe('formatearTecleo: borrar, el cursor, seleccionar y pegar', () => {
   it('borrar un cero de «1.500» da «150»', () => {
     expect(formatearTecleo('1.500', '1.50', 4)).toEqual({ texto: '150', cursor: 3 })

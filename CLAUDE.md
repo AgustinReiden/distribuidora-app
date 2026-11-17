@@ -143,8 +143,11 @@ suelta en `sucursales`.
   y la precarga con `numeroConMiles`; lo pegado se lee como se muestra («1.250,50» es 1250,5).
   Los `sinMiles` (porcentajes, litros) no llevan miles. Lo que no se entiende da `null` y el campo
   lo marca: nunca se guarda como otro número. Nada de `type="number"`, `parseFloat` ni `Number()`
-  sobre lo tipeado. La tabla de casos es `numeroTipeado.tabla.test.ts`. Y `redondear` es
-  `round(numeric, n)` de Postgres (medio hacia afuera).
+  sobre lo tipeado. La tabla de casos es `numeroTipeado.tabla.test.ts`. Un campo que no entiende
+  lo escrito no le manda nada al padre y, al salir, vuelve a su valor con un aviso: lo que se ve
+  es lo que se guarda. Y `redondear` redondea medio hacia afuera, como `round(numeric, n)`: da lo
+  mismo que el server para un número leído de un texto, pero no es espejo de una cuenta con
+  división o de un costo a 4 decimales, donde el double ya puede haber perdido el medio.
 - **Un NaN pasa toda guarda de piso** (#1468, #1520). `'NaN'::numeric` es mayor que todo número:
   pasa `x < 0`, `x <= 0` y todo CHECK `x >= 0` o `x > 0`, y `LEAST('NaN', x)` da `x`. Llega
   cuando un cliente manda el string `'NaN'`. Toda columna numeric con un CHECK de piso suma

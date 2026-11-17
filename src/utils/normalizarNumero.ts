@@ -85,6 +85,17 @@ export function esTextoIlegible(texto: string): boolean {
 }
 
 /**
+ * Por qué un precio tipeado no sirve, o null si sirve (o está vacío): no se entiende, o no llega a
+ * un centavo (cero o negativo). El texto va a la vista bajo el campo.
+ */
+export function motivoPrecioTipeado(texto: string): string | null {
+  if (texto.trim() === '') return null
+  const n = leerNumero(texto)
+  if (n === null) return NUMERO_ILEGIBLE
+  return n < 0.005 ? 'El precio tiene que ser mayor que 0' : null
+}
+
+/**
  * Una cantidad de unidades: un entero, con o sin puntos de miles («1.250»). Una coma —la tecla del
  * punto— no se redondea ni se borra: «1,5» o «1,250» no es una cantidad y da `null`.
  */
@@ -117,22 +128,48 @@ export function leerDecimalSinMiles(valor: string | number | null | undefined): 
  * seleccionado), ese punto pasa a ser una coma. Lo pegado (más de un carácter) entra tal cual, y
  * borrar no toca nada: los puntos que ya estaban son de miles.
  */
-export function teclearNumero(anterior: string, nuevo: string): string {
-  const { inicio, insertado } = diferencia(anterior, nuevo)
+export function teclearNumero(anterior: string, nuevo: string, cursor?: number): string {
+  const { inicio, insertado } = diferencia(anterior, nuevo, cursor)
   if (insertado !== '.') return nuevo
   return `${nuevo.slice(0, inicio)},${nuevo.slice(inicio + 1)}`
 }
 
-/** Qué cambió entre dos textos: dónde empieza, qué se quitó y qué entró. */
-function diferencia(anterior: string, nuevo: string): { inicio: number; fin: number; quitado: string; insertado: string } {
+/**
+ * Qué cambió entre dos textos: dónde empieza, qué se quitó y qué entró.
+ *
+ * Con `cursor` (dónde lo dejó el navegador), el cambio termina ahí: lo que está después del cursor
+ * no se tocó. Sin eso, en una tira de dígitos iguales («1.0|00» y Backspace) no hay forma de saber
+ * cuál se borró, y atribuirlo al último corría el cursor: la tecla siguiente caía en otro lugar y
+ * 1.000 → 1.500 terminaba en 1.005 (H2 de la lente de #1644).
+ */
+function diferencia(
+  anterior: string,
+  nuevo: string,
+  cursor?: number,
+): { inicio: number; fin: number; quitado: string; insertado: string } {
   let inicio = 0
-  while (inicio < anterior.length && inicio < nuevo.length && anterior[inicio] === nuevo[inicio]) inicio++
   let fin = 0
-  while (
-    fin < anterior.length - inicio &&
-    fin < nuevo.length - inicio &&
-    anterior[anterior.length - 1 - fin] === nuevo[nuevo.length - 1 - fin]
-  ) fin++
+  if (cursor === undefined || cursor < 0 || cursor > nuevo.length) {
+    while (inicio < anterior.length && inicio < nuevo.length && anterior[inicio] === nuevo[inicio]) inicio++
+    while (
+      fin < anterior.length - inicio &&
+      fin < nuevo.length - inicio &&
+      anterior[anterior.length - 1 - fin] === nuevo[nuevo.length - 1 - fin]
+    ) fin++
+  } else {
+    // Primero lo que está después del cursor (que no cambió), después lo que está antes.
+    const finMaximo = nuevo.length - cursor
+    while (
+      fin < finMaximo &&
+      fin < anterior.length &&
+      anterior[anterior.length - 1 - fin] === nuevo[nuevo.length - 1 - fin]
+    ) fin++
+    while (
+      inicio < anterior.length - fin &&
+      inicio < nuevo.length - fin &&
+      anterior[inicio] === nuevo[inicio]
+    ) inicio++
+  }
   return {
     inicio,
     fin,
@@ -212,8 +249,12 @@ export interface OpcionesTecleo {
  *   el punto volvería y el campo quedaría trabado. Borrar un cero de «1.500» da «150».
  * - Lo pegado (más de una tecla) se lee como se muestra la plata: «1.250,50» es 1250,5 y se ve
  *   igual. Lo que no se entiende entra tal cual, a la vista, para que el campo lo marque.
- * - Si el campo tiene algo que no está formateado (un pegado que no se entiende), no se reagrupa:
- *   sólo la tecla del punto se escribe como coma.
+ * - Si el campo tiene algo que no está formateado (un pegado que no se entiende), no se reagrupa
+ *   hasta que se vuelva legible: ahí se reescribe como lo escribe el campo.
+ * - El cambio se ubica con el cursor: en una tira de dígitos iguales («1.0|00») borrar o tipear
+ *   cae donde está el cursor, no al final de la tira.
+ * - Un menos pegado entra a la vista aunque el campo no lo acepte: lo rechaza el campo, que no lo
+ *   manda al padre (`NumberInput`).
  */
 export function formatearTecleo(
   anterior: string,
@@ -221,8 +262,8 @@ export function formatearTecleo(
   cursor: number = nuevo.length,
   { direccion = 'atras', negativo = false }: OpcionesTecleo = {},
 ): { texto: string; cursor: number } {
-  if (!estaFormateado(anterior)) return { texto: teclearNumero(anterior, nuevo), cursor }
-  const { inicio, fin, quitado, insertado } = diferencia(anterior, nuevo)
+  if (!estaFormateado(anterior)) return editarSinFormato(anterior, nuevo, cursor)
+  const { inicio, fin, quitado, insertado } = diferencia(anterior, nuevo, cursor)
   const limite = finDeEntero(anterior)
   let prefijo = sinPuntosDeMiles(anterior.slice(0, inicio), 0, limite)
   let sufijo = sinPuntosDeMiles(anterior.slice(anterior.length - fin), anterior.length - fin, limite)
@@ -255,6 +296,27 @@ export function formatearTecleo(
   let posicion = 0
   while (posicion < texto.length && vistos < objetivo) {
     if (!(texto[posicion] === '.' && posicion < limiteNuevo)) vistos++
+    posicion++
+  }
+  return { texto, cursor: posicion }
+}
+
+/**
+ * Editar un texto que no está formateado (un pegado que no se entendió, «12.345.67»): la tecla del
+ * punto sigue siendo coma, y apenas el texto se vuelve legible se reescribe como lo escribe el
+ * campo. Sin eso, borrar el segundo punto dejaba «12.34567» sin rojo y leído 12,35, con un punto
+ * que a la vista es de miles (H5 de la lente de #1644). El cursor queda después del mismo dígito.
+ */
+function editarSinFormato(anterior: string, nuevo: string, cursor: number): { texto: string; cursor: number } {
+  const tecleado = teclearNumero(anterior, nuevo, cursor)
+  const comoCampo = pegadoComoCampo(tecleado)
+  if (comoCampo === null) return { texto: tecleado, cursor }
+  const { texto } = agruparMiles(comoCampo)
+  const digitosAntes = tecleado.slice(0, cursor).replace(/\D/g, '').length
+  let vistos = 0
+  let posicion = 0
+  while (posicion < texto.length && vistos < digitosAntes) {
+    if (/\d/.test(texto[posicion])) vistos++
     posicion++
   }
   return { texto, cursor: posicion }

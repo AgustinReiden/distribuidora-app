@@ -1268,6 +1268,25 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
 
     expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
     expect(screen.getByRole('textbox', { name: 'Editar precio unitario' })).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('alert')).toHaveTextContent('No se entiende el número')
+  })
+
+  // H6 de la lente de #1644: tocar afuera (lo normal en el celular) hace lo mismo que Enter: no
+  // descarta en silencio lo que no se entiende.
+  it('salir del precio con algo que no se entiende lo deja abierto, en rojo y con el motivo', async () => {
+    const { user, onActualizarPrecioSpy } = montar({ isAdmin: true })
+
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
+    await user.clear(input)
+    await user.type(input, '1..5')
+    await user.tab()
+
+    expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
+    expect(screen.getByRole('textbox', { name: 'Editar precio unitario' })).toHaveValue('1,,5')
+    expect(screen.getByRole('alert')).toHaveTextContent('No se entiende el número')
   })
 
   it('sin ser admin el precio no es editable', async () => {

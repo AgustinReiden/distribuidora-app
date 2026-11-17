@@ -21,15 +21,20 @@
  * coma) y el punto de miles lo pone el campo (D17, #1560): «150000» se ve
  * «150.000», y «1.250» tipeado se ve «1,250» y es uno coma veinticinco. Lo
  * pegado se lee como se muestra la plata («1.250,50» es mil doscientos
- * cincuenta y cincuenta). Lo que no se entiende («1,000,50») queda a la vista
- * en rojo y no se confirma: el campo no lo guarda como otro número. Con
- * `sinMiles` (porcentajes, litros) no hay miles: la tecla del punto es coma y
- * nada más.
+ * cincuenta y cincuenta). Con `sinMiles` (porcentajes, litros) no hay miles:
+ * la tecla del punto es coma y nada más.
+ *
+ * Lo que no se entiende («1,000,50», un negativo) queda en rojo con el motivo
+ * escrito debajo y no se le manda al padre. Al salir del campo vuelve al valor
+ * del padre, con un aviso a la vista: lo que se ve es siempre lo que se guarda
+ * (H1 de la lente de #1644). `onValidez` le avisa al padre mientras tanto.
  */
 import {
   useState,
   useRef,
   useLayoutEffect,
+  useEffect,
+  useId,
   InputHTMLAttributes,
   ChangeEvent,
   FocusEvent,
@@ -80,7 +85,15 @@ export interface NumberInputProps extends InheritedInputProps {
   commitOnChange?: boolean;
   /** Selecciona el contenido al enfocar (tipear reemplaza). Default true. */
   selectOnFocus?: boolean;
+  /**
+   * Se llama con `false` cuando lo escrito no se entiende (el campo está en rojo y el padre tiene
+   * el valor de antes) y con `true` cuando vuelve a entenderse. Para deshabilitar Guardar.
+   */
+  onValidez?: (valido: boolean) => void;
 }
+
+/** El rojo le gana a las clases del campo: el borde oscuro, el anillo del foco y los de color. */
+const CLASES_ILEGIBLE = '!border-red-500 dark:!border-red-500 !ring-1 !ring-red-500 focus:!ring-2 focus:!ring-red-500'
 
 export function NumberInput({
   value,
@@ -93,6 +106,7 @@ export function NumberInput({
   onVaciar,
   commitOnChange = false,
   selectOnFocus = true,
+  onValidez,
   onFocus,
   onBlur,
   onKeyDown,
@@ -101,7 +115,10 @@ export function NumberInput({
   // draft === null  -> mostrar el valor canónico del padre.
   // draft === '...' -> el usuario está editando (puede ser '' o parcial).
   const [draft, setDraft] = useState<string | null>(null)
+  // Lo que se avisa después de volver al valor del padre por algo que no se entendía.
+  const [aviso, setAviso] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const idMensaje = useId()
   // Al poner o quitar un punto de miles, React deja el cursor al final: se repone.
   const cursor = useRef<number | null>(null)
   useLayoutEffect(() => {
@@ -125,13 +142,20 @@ export function NumberInput({
     const t = raw.trim()
     if (t === '') return null
     // Un entero con los puntos de miles del campo («1.500»); con coma no es una cantidad.
-    if (integer) return leerEntero(t)
-    const n = sinMiles ? leerDecimalSinMiles(t) : leerNumero(t)
-    return n === null ? null : redondear(n, 2)
+    const n = integer ? leerEntero(t) : sinMiles ? leerDecimalSinMiles(t) : leerNumero(t)
+    // Este campo no lleva negativos: un «-50» pegado no le llega al padre (H4).
+    if (n === null || n < 0) return null
+    return integer ? n : redondear(n, 2)
   }
 
-  /** Escrito y no se entiende: se muestra en rojo y no se confirma. */
-  const ilegible = (raw: string | null): boolean => raw !== null && raw.trim() !== '' && toNumber(raw) === null
+  /** Por qué lo escrito no se entiende, o null si se entiende (o está vacío). */
+  const motivo = (raw: string | null): string | null => {
+    if (raw === null || raw.trim() === '' || toNumber(raw) !== null) return null
+    const leido = integer ? leerNumero(raw) : sinMiles ? leerDecimalSinMiles(raw) : leerNumero(raw)
+    if (leido !== null && leido < 0) return 'Este campo no lleva números negativos'
+    if (integer && leido !== null) return 'Las cantidades van sin coma'
+    return NUMERO_ILEGIBLE
+  }
 
   const clamp = (n: number): number => {
     let v = n
@@ -140,11 +164,21 @@ export function NumberInput({
     return integer ? Math.round(v) : v
   }
 
+  // El último número que este campo le mandó al padre: si el `value` cambia a otra cosa, lo cambió
+  // el padre (un botón «Total», «50%»), y el borrador deja de taparlo.
+  const enviado = useRef<number | null>(value)
+  const enviar = (n: number): void => {
+    enviado.current = n
+    onChange(n)
+  }
+
+  const valorDelPadre = sinMiles ? numeroEditable(value) : numeroConMiles(value)
+
   const handleChange = (e: ChangeEvent<HTMLInputElement>): void => {
     const crudo = e.target.value
     let next: string
     if (sinMiles) {
-      const tecleado = teclearNumero(display, crudo)
+      const tecleado = teclearNumero(display, crudo, e.target.selectionStart ?? undefined)
       if (tecleado !== crudo) cursor.current = e.target.selectionStart
       next = sanitizeSinMiles(tecleado)
     } else {
@@ -154,27 +188,43 @@ export function NumberInput({
       next = r.texto
     }
     setDraft(next)
+    setAviso(null)
     if (commitOnChange) {
       // En vivo mandamos el número crudo (como hacía el parseInt anterior);
       // el clamp/normalización quedan para el blur. El vacío NO empuja 0:
       // se mantiene el último valor y el campo se ve vacío.
       const n = toNumber(next)
-      if (n !== null) onChange(n)
+      if (n !== null) enviar(n)
     }
   }
 
   const commit = (): void => {
     if (draft === null) return
-    // Lo que no se entiende no se confirma (ni como vacío): queda a la vista para corregirlo.
-    if (ilegible(draft)) return
+    // Lo que no se entiende no se confirma: el campo vuelve al valor del padre (que es lo que se va
+    // a guardar) y lo dice a la vista.
+    if (motivo(draft) !== null) {
+      setDraft(null)
+      setAviso(`No se entendió «${draft}»: el campo volvió a ${valorDelPadre === '' ? 'quedar vacío' : `«${valorDelPadre}»`}`)
+      return
+    }
     const parsed = toNumber(draft)
     setDraft(null)
     if (parsed === null && onVaciar) {
       onVaciar()
       return
     }
-    onChange(clamp(parsed ?? emptyValue ?? min ?? 0))
+    enviar(clamp(parsed ?? emptyValue ?? min ?? 0))
   }
+
+  // Un cambio del padre desde afuera limpia el borrador (y el aviso): si no, el campo seguiría
+  // mostrando lo tipeado en vez del valor nuevo.
+  useEffect(() => {
+    if (value === enviado.current) return
+    enviado.current = value
+    setDraft(d => (d !== null && toNumber(d) === value ? d : null))
+    setAviso(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sólo cuando cambia el valor del padre
+  }, [value])
 
   const handleBlur = (e: FocusEvent<HTMLInputElement>): void => {
     commit()
@@ -196,24 +246,46 @@ export function NumberInput({
 
   // El valor del padre se muestra con coma decimal y, salvo `sinMiles`, con los miles («1.500,5»).
   // Con coma, «1,5» con dos ceros más sigue siendo uno y medio (#1560).
-  const display = draft !== null ? draft : sinMiles ? numeroEditable(value) : numeroConMiles(value)
-  const invalido = ilegible(draft)
+  const display = draft !== null ? draft : valorDelPadre
+  const error = motivo(draft)
+  const invalido = error !== null
+  const mensaje = error ?? aviso
+
+  const avisado = useRef(true)
+  useEffect(() => {
+    if (avisado.current === !invalido) return
+    avisado.current = !invalido
+    onValidez?.(!invalido)
+  }, [invalido, onValidez])
+
+  const describedBy = [rest['aria-describedby'], mensaje ? idMensaje : null].filter(Boolean).join(' ') || undefined
 
   return (
-    <input
-      {...rest}
-      ref={inputRef}
-      type="text"
-      inputMode={integer ? 'numeric' : 'decimal'}
-      aria-invalid={invalido ? true : rest['aria-invalid']}
-      title={invalido ? NUMERO_ILEGIBLE : rest.title}
-      className={invalido ? `${rest.className ?? ''} border-red-500 ring-1 ring-red-500` : rest.className}
-      value={display}
-      onChange={handleChange}
-      onFocus={handleFocus}
-      onBlur={handleBlur}
-      onKeyDown={handleKeyDown}
-    />
+    <>
+      <input
+        {...rest}
+        ref={inputRef}
+        type="text"
+        inputMode={integer ? 'numeric' : 'decimal'}
+        aria-invalid={invalido ? true : rest['aria-invalid']}
+        aria-describedby={describedBy}
+        className={invalido ? `${rest.className ?? ''} ${CLASES_ILEGIBLE}` : rest.className}
+        value={display}
+        onChange={handleChange}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+      />
+      {mensaje && (
+        <span
+          id={idMensaje}
+          role="alert"
+          className="block w-full basis-full mt-1 text-xs font-medium text-red-600 dark:text-red-400"
+        >
+          {mensaje}
+        </span>
+      )}
+    </>
   )
 }
 

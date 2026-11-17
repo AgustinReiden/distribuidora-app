@@ -95,8 +95,9 @@ export default function FormEscalaMayorista({
             autoFocus
             value={cantidad}
             onChange={e => setCantidad(tecleo(cantidad, e))}
+            aria-invalid={cantidad.trim() !== '' && leerEntero(cantidad) === null}
             onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancelar() }}
-            className="mt-0.5 block w-20 px-2 py-1 border rounded text-sm text-center dark:bg-gray-800 dark:border-gray-600 dark:text-white"
+            className="mt-0.5 block w-20 px-2 py-1 border rounded text-sm text-center dark:bg-gray-800 dark:border-gray-600 dark:text-white aria-[invalid=true]:!border-red-500 dark:aria-[invalid=true]:!border-red-500 aria-[invalid=true]:!ring-1 aria-[invalid=true]:!ring-red-500"
             aria-label="Cantidad mínima"
           />
         </label>
@@ -110,7 +111,7 @@ export default function FormEscalaMayorista({
             onChange={e => setPrecio(tecleo(precio, e))}
             aria-invalid={esTextoIlegible(precio)}
             onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancelar() }}
-            className="mt-0.5 block w-28 px-2 py-1 border rounded text-sm text-right dark:bg-gray-800 dark:border-gray-600 dark:text-white"
+            className="mt-0.5 block w-28 px-2 py-1 border rounded text-sm text-right dark:bg-gray-800 dark:border-gray-600 dark:text-white aria-[invalid=true]:!border-red-500 dark:aria-[invalid=true]:!border-red-500 aria-[invalid=true]:!ring-1 aria-[invalid=true]:!ring-red-500"
             aria-label="Precio mayorista"
           />
         </label>
