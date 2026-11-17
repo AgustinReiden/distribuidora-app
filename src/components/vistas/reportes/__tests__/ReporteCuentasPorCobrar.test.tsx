@@ -180,6 +180,24 @@ describe('ReporteCuentasPorCobrar › export', () => {
     expect(nombreArchivo).toMatch(/^cuentas-por-cobrar-\d{4}-\d{2}-\d{2}$/);
   });
 
+  it('el archivo lleva el día argentino aunque el reloj del dispositivo ya esté en el día siguiente (1544-b9)', async () => {
+    // 02:30 UTC del 16 = 23:30 del 15 en Argentina. Un dispositivo en UTC diría 16.
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-16T02:30:00Z') });
+    const delDispositivo = vi.spyOn(Date.prototype, 'toLocaleDateString').mockReturnValue('2026-11-16');
+    try {
+      const user = userEvent.setup({ advanceTimers: () => {} });
+      renderReporte();
+
+      await user.click(screen.getByRole('button', { name: /Exportar a Excel/i }));
+
+      await waitFor(() => expect(mockCrearExcel).toHaveBeenCalledTimes(1));
+      expect(mockCrearExcel.mock.calls[0][1]).toBe('cuentas-por-cobrar-2026-11-15');
+    } finally {
+      delDispositivo.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('sin deuda el botón está deshabilitado', () => {
     renderReporte([]);
     expect(screen.getByRole('button', { name: /Exportar a Excel/i })).toBeDisabled();

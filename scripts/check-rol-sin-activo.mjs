@@ -24,6 +24,13 @@
  * rechazan a un desactivado por otro lado (current_sucursal_id() NULL antes de
  * leer o escribir, bot_admin_puede_gestionar()…), con cómo; sólo se achica.
  *
+ * Las funciones SIN EXECUTE para authenticated (las `_impl` de los pagos y de la nota de
+ * crédito, que llama su wrapper DEFINER) no entran en el RPC: leían el rol sin activo y
+ * ningún gate las miraba (#1595, 1595-b4). El complemento corre la misma consulta sobre
+ * ellas leyendo el catálogo directo (GATE_DB_CONTENEDOR, GATE_DB_URL o SUPABASE_DB_URL; sin
+ * conexión se avisa y queda sólo la parte del RPC), con su propia lista de permitidas
+ * ("impl" en scripts/rol-sin-activo-permitidas.json), que también sólo se achica.
+ *
  * Lo que NO ve (es texto, no ejecución):
  *   · Un alias de dos saltos, o el usuario que llega como parámetro.
  *   · SQL dinámico (EXECUTE), ni un `;` dentro de un literal $…$.
@@ -37,6 +44,8 @@
  */
 import { readFileSync } from 'node:fs';
 import { hallazgosRolSinActivo, policiesRolSinActivo } from './lib/acceso.mjs';
+import { SQL_ROL_SIN_ACTIVO_SIN_API } from './lib/catalogo.mjs';
+import { consultaJson, destino } from './lib/pg.mjs';
 
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -46,7 +55,7 @@ if (!url || !key) {
   process.exit(2);
 }
 
-const { funciones: permitidas } = JSON.parse(
+const { funciones: permitidas, impl: permitidasImpl = {} } = JSON.parse(
   readFileSync(new URL('./rol-sin-activo-permitidas.json', import.meta.url), 'utf8'),
 );
 
@@ -82,9 +91,30 @@ console.log(
     `(permitidas: ${marcadas - sinActivo.length})`,
 );
 
+// Complemento: las que no tienen EXECUTE para authenticated (se llaman desde un wrapper).
+let implSinActivo = [];
+let implSobrantes = [];
+if (destino()) {
+  const impl = consultaJson(SQL_ROL_SIN_ACTIVO_SIN_API);
+  ({ sinActivo: implSinActivo, sobrantes: implSobrantes } = hallazgosRolSinActivo(impl, permitidasImpl));
+  const marcadasImpl = new Set(impl.lecturas.map((l) => l.firma)).size;
+  console.log(
+    `Funciones sin API que leen perfiles: ${impl.funciones} | leen el rol sin activo: ${marcadasImpl} ` +
+      `(permitidas: ${marcadasImpl - implSinActivo.length})`,
+  );
+} else {
+  console.log(
+    '\nℹ️  Sin GATE_DB_CONTENEDOR / GATE_DB_URL / SUPABASE_DB_URL: se omite el complemento de las funciones sin API (_impl).',
+  );
+}
+
 if (sobrantes.length) {
   console.log('\nℹ️  Permitidas que ya no hacen falta (miran activo, o la función no existe más): sacalas del JSON.');
   for (const f of sobrantes) console.log(`  ${f}  (${permitidas[f]})`);
+}
+if (implSobrantes.length) {
+  console.log('\nℹ️  Permitidas de "impl" que ya no hacen falta (miran activo, o la función no existe más): sacalas del JSON.');
+  for (const f of implSobrantes) console.log(`  ${f}  (${permitidasImpl[f]})`);
 }
 
 if (policies === null) {
@@ -105,9 +135,9 @@ if (policies?.length) {
   );
 }
 
-if (sinActivo.length) {
+if (sinActivo.length || implSinActivo.length) {
   console.error('\n❌ Funciones que deciden por el rol de quien llama sin mirar si está activo:');
-  for (const h of sinActivo) {
+  for (const h of [...sinActivo, ...implSinActivo]) {
     console.error(`  ${h.firma}`);
     for (const l of h.lecturas) console.error(`      ${l}`);
   }
@@ -118,8 +148,8 @@ if (sinActivo.length) {
   );
 }
 
-if (sinActivo.length || policies?.length) process.exit(1);
+if (sinActivo.length || implSinActivo.length || policies?.length) process.exit(1);
 
 console.log(
-  '\n✅ Ninguna función de la API (salvo las permitidas) ni ninguna policy decide por el rol de quien llama sin mirar activo.',
+  '\n✅ Ninguna función de la API ni sin API (salvo las permitidas) ni ninguna policy decide por el rol de quien llama sin mirar activo.',
 );

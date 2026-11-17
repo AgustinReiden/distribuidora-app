@@ -27,6 +27,7 @@ import { lazyWithReload } from '../../utils/lazyWithReload'
 import { getErrorMessage } from '../../utils/errorHandling'
 import { exportarGastosDelMes } from '../../utils/exportGastos'
 import { mesDe } from '../../utils/gastos'
+import { puedeCrearRubroGasto } from '../../lib/permisos'
 import type { Gasto, GuardarGastoPayload } from '../../types/gastos'
 
 const VistaGastos = lazyWithReload(() => import('../vistas/VistaGastos'))
@@ -56,7 +57,7 @@ export default function GastosContainer(): React.ReactElement {
   const [gastoAnulando, setGastoAnulando] = useState<Gasto | null>(null)
   const [rubrosAbierto, setRubrosAbierto] = useState(false)
 
-  const { data: gastos = [], isLoading } = useGastosDelMesQuery(mes)
+  const { data: gastos = [], isLoading, isError, refetch } = useGastosDelMesQuery(mes)
   const { data: rubros = [] } = useRubrosGastoQuery()
   const { data: vehiculos = [] } = useVehiculosQuery()
   const { data: sucursalesActivas = [] } = useSucursalesActivasQuery()
@@ -67,6 +68,8 @@ export default function GastosContainer(): React.ReactElement {
   const guardarRubro = useGuardarRubroGastoMutation()
   const propsModalGasto = usePropsModalGasto()
   const { sucursalActual, tieneTodasLasSucursales } = propsModalGasto
+  // 1597-b5 (#1597): los rubros son de toda la empresa; los toca sólo un admin de todas las sucursales.
+  const puedeRubros = puedeCrearRubroGasto(isAdmin ? 'admin' : null, tieneTodasLasSucursales)
 
   const transportistas = useMemo(
     () => perfilesTransportistas.map(t => ({ id: t.id, nombre: t.nombre })),
@@ -148,6 +151,8 @@ export default function GastosContainer(): React.ReactElement {
           empleados={empleados}
           rendicionesCerradas={cerradas}
           loading={isLoading}
+          error={isError}
+          onRetry={refetch}
           usuarioId={user?.id ?? ''}
           esAdmin={isAdmin}
           tieneTodasLasSucursales={tieneTodasLasSucursales}
@@ -155,7 +160,7 @@ export default function GastosContainer(): React.ReactElement {
           onNuevoGasto={handleNuevo}
           onEditarGasto={handleEditar}
           onAnularGasto={setGastoAnulando}
-          onAbrirRubros={isAdmin ? () => setRubrosAbierto(true) : undefined}
+          onAbrirRubros={puedeRubros ? () => setRubrosAbierto(true) : undefined}
           onExportar={handleExportar}
         />
       </Suspense>
@@ -183,7 +188,7 @@ export default function GastosContainer(): React.ReactElement {
         </Suspense>
       )}
 
-      {rubrosAbierto && isAdmin && (
+      {rubrosAbierto && puedeRubros && (
         <Suspense fallback={null}>
           <ModalRubrosGasto
             rubros={rubros}

@@ -90,7 +90,8 @@ function cspConnectSrcPlugin() {
 // nginx.conf (y el panel de Coolify en prod) son los que mandan estos headers
 // de verdad; acá sólo se replican para que e2e/security.spec.js pueda
 // verificarlos contra `vite dev` / `vite preview`, que playwright.config.ts
-// usa como servidor de los tests (nunca contra nginx).
+// usa como servidor de los tests (nunca contra nginx). La CSP de acá es la
+// cuarta copia: `src/test/csp.contract.test.ts` la compara con las otras tres.
 function securityHeadersDevPlugin() {
   const setHeaders = (res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff')
@@ -99,7 +100,7 @@ function securityHeadersDevPlugin() {
     res.setHeader('Permissions-Policy', 'geolocation=(self), camera=(), microphone=(), payment=()')
     res.setHeader(
       'Content-Security-Policy',
-      "default-src 'self'; script-src 'self' https://maps.googleapis.com blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co https://*.googleapis.com https://*.gstatic.com https://*.sentry.io; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
+      "default-src 'self'; script-src 'self' https://maps.googleapis.com blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co https://*.googleapis.com https://*.gstatic.com https://*.sentry.io; frame-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
     )
   }
 

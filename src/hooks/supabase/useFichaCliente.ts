@@ -1,5 +1,5 @@
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase, notifyError } from './base'
 import type {
   PedidoClienteWithItems,
@@ -33,21 +33,32 @@ interface ProductosFrecuenciaMap {
   [key: string]: ProductoFavorito;
 }
 
+const SIN_PEDIDOS: PedidoClienteWithItems[] = []
+
 export function useFichaCliente(clienteId: string | null | undefined): UseFichaClienteReturn {
   const [pedidosCliente, setPedidosCliente] = useState<PedidoClienteWithItems[]>([])
   const [estadisticas, setEstadisticas] = useState<EstadisticasCliente | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
-  // El último fetch falló (FRT-3): sin esto la ficha quedaba con `estadisticas = null` y
-  // `pedidosCliente = []`, y el modal lo pintaba como "0 pedidos · $0 comprado".
-  const [error, setError] = useState<boolean>(false)
   // Cantidad real de pedidos del cliente (FRT-7). `pedidosCliente` trae sólo los últimos 50:
   // la ficha usa este total para avisar que la lista está cortada.
   const [pedidosTotales, setPedidosTotales] = useState<number>(0)
+  // De qué cliente es lo que hay en el estado (1563-b5). Al pasar de A a B, lo de A no
+  // se muestra mientras B carga, y una respuesta de A que llega tarde no pisa a B.
+  const [datosDe, setDatosDe] = useState<string | null>(null)
+  // De qué cliente es el último fetch que falló (FRT-3): sin esto la ficha quedaba con
+  // `estadisticas = null` y `pedidosCliente = []`, y el modal lo pintaba como "0 pedidos · $0
+  // comprado".
+  const [errorDe, setErrorDe] = useState<string | null>(null)
+  // Número de la última petición: sólo la vigente puede escribir el estado.
+  const peticionRef = useRef(0)
 
   const fetchDatosCliente = async (): Promise<void> => {
     if (!clienteId) return
+    const mia = ++peticionRef.current
+    const vigente = (): boolean => mia === peticionRef.current
+    const delCliente = String(clienteId)
     setLoading(true)
-    setError(false)
+    setErrorDe(null)
     try {
       // Query ligera: todos los pedidos del cliente (sólo columnas necesarias para stats)
       // Paginado aunque hoy el cliente más activo tenga ~117 pedidos: a su ritmo
@@ -64,6 +75,7 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
           .order('id'),
         { etiqueta: 'pedidos del cliente' },
       )
+      if (!vigente()) return
 
       // Query pesada: últimos 50 pedidos con items (para UI + productos favoritos)
       const { data: pedidos, error: errorPedidos } = await supabase
@@ -74,6 +86,7 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
         .limit(50)
       if (errorPedidos) throw errorDeSupabase(errorPedidos, 'Sin conexión: no se pudo cargar los pedidos del cliente. Revisá la señal e intentá de nuevo.')
 
+      if (!vigente()) return
       const pedidosTyped = (pedidos || []) as PedidoWithItems[]
       setPedidosCliente(pedidosTyped as unknown as PedidoClienteWithItems[])
 
@@ -97,6 +110,7 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
           .order('id'),
         { etiqueta: 'pagos del cliente' },
       )
+      if (!vigente()) return
       const totalPagosRegistrados = pagosCliente.reduce((s: number, p: { monto: number }) => s + (p.monto || 0), 0)
 
       // Productos favoritos se calculan sobre los últimos 50 pedidos (limitación aceptada)
@@ -131,22 +145,39 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
         productosFavoritos,
         consumoInterno: venta.consumoInterno
       })
+      setDatosDe(delCliente)
     } catch (e) {
-      setError(true)
+      if (!vigente()) return
+      setErrorDe(delCliente)
       notifyError('Error al cargar datos del cliente: ' + (e as Error).message)
     } finally {
-      setLoading(false)
+      if (vigente()) setLoading(false)
     }
   }
 
   useEffect(() => {
     if (clienteId) fetchDatosCliente()
+    // Al cambiar de cliente o desmontar, lo que está en vuelo queda viejo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- es un contador, no un nodo del DOM
+    return () => { peticionRef.current++ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clienteId])
 
+  // Sólo se devuelve lo que es del cliente de ahora.
+  const esDelCliente = Boolean(clienteId) && datosDe === String(clienteId)
+  const error = Boolean(clienteId) && errorDe === String(clienteId)
+
   // Con cliente y sin nada resuelto todavía (ni datos ni error) ya está cargando: en el
   // primer render, antes de que el efecto prenda `loading`, la ficha se veía con ceros.
-  const cargando = loading || (Boolean(clienteId) && estadisticas === null && !error)
+  const estadisticasVigentes = esDelCliente ? estadisticas : null
+  const cargando = Boolean(clienteId) && (loading || (estadisticasVigentes === null && !error))
 
-  return { pedidosCliente, estadisticas, loading: cargando, error, pedidosTotales, refetch: fetchDatosCliente }
+  return {
+    pedidosCliente: esDelCliente ? pedidosCliente : SIN_PEDIDOS,
+    estadisticas: estadisticasVigentes,
+    loading: cargando,
+    error,
+    pedidosTotales: esDelCliente ? pedidosTotales : 0,
+    refetch: fetchDatosCliente,
+  }
 }

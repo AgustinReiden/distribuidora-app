@@ -7,6 +7,7 @@ import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type { ProveedorDBExtended, ProveedorFormInputExtended } from '../../types'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { errorCuitDuplicado, esCuitDuplicadoDeBase, mismoCuit, patronCuit } from '../../utils/cuitProveedor'
 
 // Query keys
 export const proveedoresKeys = {
@@ -65,28 +66,20 @@ async function createProveedor(proveedor: ProveedorFormInputExtended, sucursalId
     throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
   }
 
-  // Validar CUIT duplicado
-  if (proveedor.cuit) {
-    const cuitLimpio = proveedor.cuit.replace(/[-\s]/g, '')
-    const { data: existente } = await supabase
+  // Validar CUIT duplicado: único por sucursal y comparado sin guiones (1557-b10,
+  // decisión del dueño). La base achica con un patrón que acierta cualquier
+  // separador entre los dígitos; el que decide es `mismoCuit`.
+  const patron = patronCuit(proveedor.cuit)
+  if (patron) {
+    const { data: candidatos, error: errorBusqueda } = await supabase
       .from('proveedores')
-      .select('id, nombre')
-      .eq('cuit', proveedor.cuit)
-      .limit(1)
-      .maybeSingle()
-    if (!existente && cuitLimpio !== proveedor.cuit) {
-      // Buscar también sin guiones
-      const { data: existente2 } = await supabase
-        .from('proveedores')
-        .select('id, nombre, cuit')
-        .not('cuit', 'is', null)
-        .limit(100)
-      const match = existente2?.find(p => p.cuit?.replace(/[-\s]/g, '') === cuitLimpio)
-      if (match) {
-        throw new Error(`Ya existe un proveedor con CUIT "${proveedor.cuit}": ${match.nombre}`)
-      }
-    } else if (existente) {
-      throw new Error(`Ya existe un proveedor con CUIT "${proveedor.cuit}": ${existente.nombre}`)
+      .select('id, nombre, cuit')
+      .eq('sucursal_id', sucursalId)
+      .ilike('cuit', patron)
+    if (errorBusqueda) throw errorDeSupabase(errorBusqueda, 'Sin conexión: no se pudo verificar si el CUIT ya está cargado. Revisá la señal e intentá de nuevo.')
+    const existente = (candidatos ?? []).find(p => mismoCuit(p.cuit, proveedor.cuit))
+    if (existente) {
+      throw errorCuitDuplicado(proveedor.cuit, existente.nombre)
     }
   }
 
@@ -108,6 +101,8 @@ async function createProveedor(proveedor: ProveedorFormInputExtended, sucursalId
     .select()
     .single()
 
+  // El índice único del server cubre la carrera que la verificación de arriba no ve.
+  if (error && esCuitDuplicadoDeBase(error)) throw errorCuitDuplicado(proveedor.cuit)
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el alta del proveedor. Revisá la lista antes de reintentar.')
   return data as ProveedorDBExtended
 }
@@ -131,6 +126,8 @@ async function updateProveedor({ id, data: proveedor }: { id: string; data: Prov
     .select()
     .single()
 
+  // Ponerle a un proveedor el CUIT de otro: lo frena el índice único del server.
+  if (error && esCuitDuplicadoDeBase(error)) throw errorCuitDuplicado(proveedor.cuit)
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la edición del proveedor. Revisá sus datos antes de reintentar.')
   return data as ProveedorDBExtended
 }

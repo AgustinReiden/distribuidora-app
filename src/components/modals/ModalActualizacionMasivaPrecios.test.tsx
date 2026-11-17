@@ -34,8 +34,10 @@ vi.mock('../../hooks/queries/preciosVigentes', () => ({
 // Las condiciones mayoristas (#1561, CAT-7): por defecto, ninguna.
 let grupos: unknown[] = []
 let gruposEstado: { isSuccess: boolean; isError: boolean } = { isSuccess: true, isError: false }
+// Lo que hay hoy en la base: por defecto, lo mismo que el caché.
+const gruposRefetch = vi.fn(async () => ({ data: grupos }))
 vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
-  useGruposPrecioQuery: () => ({ data: grupos, ...gruposEstado, refetch: vi.fn() }),
+  useGruposPrecioQuery: () => ({ data: grupos, ...gruposEstado, refetch: gruposRefetch }),
 }))
 
 // La política comercial (#1561, CAT-8): el múltiplo del redondeo.
@@ -319,6 +321,19 @@ describe('ModalActualizacionMasivaPrecios — precios que cambiaron desde que se
     expect(notifyWarning).toHaveBeenCalled()
   })
 
+  it('el aviso de la pantalla dice «No se aplicó nada» una sola vez: el toast no lo repite', async () => {
+    grupos = []
+    mutateAsync.mockClear(); notifyWarning.mockClear()
+    preciosEnBase.clear()
+    preciosEnBase.set('p1', { precio: 1200, precio_sin_iva: 1000 })
+    await aplicarDiez()
+
+    await screen.findByRole('alert')
+    const toast = String(notifyWarning.mock.calls[0][0])
+    expect(toast).not.toMatch(/No se aplicó nada/)
+    expect(toast).toMatch(/revisá el aviso/)
+  })
+
   it('al volver a confirmar, aplica sobre los precios nuevos de la base', async () => {
     grupos = []
     mutateAsync.mockClear()
@@ -379,6 +394,92 @@ describe('ModalActualizacionMasivaPrecios — precios que cambiaron desde que se
     leerPreciosVigentes.mockRejectedValueOnce(new Error('Sin conexión: no se pudieron verificar los precios actuales.'))
     await aplicarDiez()
     await waitFor(() => expect(notifyError).toHaveBeenCalledWith(expect.stringMatching(/no se pudieron verificar/i)))
+    expect(mutateAsync).not.toHaveBeenCalled()
+  })
+})
+
+// #1599 (1599-b7): un producto sin precio no cambia con un porcentaje (el RPC conserva el
+// valor previo) pero se contaba como «actualizado»: ni se manda ni se cuenta.
+describe('ModalActualizacionMasivaPrecios — productos sin precio', () => {
+  const sinPrecio = {
+    ...producto, id: 'p3', nombre: 'Sal fina 1kg', codigo: 'SAL1', precio: 0, precio_sin_iva: null,
+  } as unknown as ProductoDB
+
+  it('no manda el producto sin precio, lo avisa y cuenta sólo los que cambian', async () => {
+    grupos = []
+    mutateAsync.mockClear()
+    render(<ModalActualizacionMasivaPrecios productos={[producto, sinPrecio]} proveedores={[]} categorias={['aceites']} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: /seleccionar aceite 900ml/i }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /seleccionar sal fina 1kg/i }))
+    fireEvent.change(screen.getByLabelText(/porcentaje de aumento o rebaja/i), { target: { value: '10' } })
+
+    expect(screen.getByText(/1 sin precio: no se tocan/)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: /^aplicar$/i }))
+    expect(await screen.findByText(/Vas a actualizar 1 producto\(s\).*1 seleccionado\(s\) sin precio quedan afuera/)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: /^confirmar$/i }))
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    expect(mutateAsync.mock.calls[0][0].items.map((i: { producto_id: string }) => i.producto_id)).toEqual(['p1'])
+  })
+
+  it('si todo lo seleccionado está sin precio, no deja aplicar', () => {
+    grupos = []
+    render(<ModalActualizacionMasivaPrecios productos={[sinPrecio]} proveedores={[]} categorias={['aceites']} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: /seleccionar sal fina 1kg/i }))
+    fireEvent.change(screen.getByLabelText(/porcentaje de aumento o rebaja/i), { target: { value: '10' } })
+
+    expect(screen.getByRole('button', { name: /^aplicar$/i })).toBeDisabled()
+  })
+})
+
+// FRG2-3 (resto, #1599): las escalas mayoristas se leen de la base al confirmar, no del caché.
+describe('ModalActualizacionMasivaPrecios — escalas que cambiaron desde que se abrió', () => {
+  const condicion = (precioEscala: number) => ({
+    id: 'g1', nombre: 'Almacén', productos: [{ producto_id: 'p1' }],
+    escalas: [{ id: 'e1', grupo_precio_id: 'g1', cantidad_minima: 10, precio_unitario: precioEscala }],
+    escalaMinimos: {},
+  })
+
+  async function confirmar() {
+    render(<ModalActualizacionMasivaPrecios productos={[producto]} proveedores={[]} categorias={['aceites']} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: /seleccionar aceite 900ml/i }))
+    fireEvent.change(screen.getByLabelText(/porcentaje de aumento o rebaja/i), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: /^aplicar$/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /^confirmar$/i }))
+  }
+
+  it('si la escala cambió en la base, avisa y no aplica nada', async () => {
+    grupos = [condicion(900)]
+    preciosEnBase.clear()
+    mutateAsync.mockClear(); notifyWarning.mockClear()
+    gruposRefetch.mockResolvedValueOnce({ data: [condicion(950)] })
+    await confirmar()
+
+    const aviso = await screen.findByRole('alert')
+    expect(aviso.textContent).toMatch(/Cambiaron las escalas mayoristas/)
+    expect(aviso.textContent).toMatch(/No se aplicó nada/)
+    expect(mutateAsync).not.toHaveBeenCalled()
+    expect(notifyWarning).toHaveBeenCalledWith(expect.stringMatching(/condiciones mayoristas/))
+  })
+
+  it('si no cambió, aplica con las escalas', async () => {
+    grupos = [condicion(900)]
+    preciosEnBase.clear()
+    mutateAsync.mockClear()
+    await confirmar()
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    expect(mutateAsync.mock.calls[0][0].escalas).toHaveLength(1)
+  })
+
+  it('si no se puede releer la condición, no aplica y lo dice', async () => {
+    grupos = [condicion(900)]
+    preciosEnBase.clear()
+    mutateAsync.mockClear(); notifyError.mockClear()
+    gruposRefetch.mockRejectedValueOnce(new Error('red'))
+    await confirmar()
+
+    await waitFor(() => expect(notifyError).toHaveBeenCalledWith(expect.stringMatching(/condiciones mayoristas actuales/)))
     expect(mutateAsync).not.toHaveBeenCalled()
   })
 })

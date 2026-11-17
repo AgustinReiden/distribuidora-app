@@ -8,8 +8,11 @@ vi.mock('../lib/supabase', () => ({
 const {
   pareceSesionVencida,
   explicarErrorDeSesion,
+  olvidarRenovacionDeSesion,
   MENSAJE_SESION_RENOVADA,
   MENSAJE_SESION_CAIDA,
+  MENSAJE_SESION_SIN_CONEXION,
+  MENSAJE_SUCURSAL_NO_RESUELTA,
 } = await import('./sesionVencida');
 
 describe('pareceSesionVencida', () => {
@@ -35,7 +38,11 @@ describe('pareceSesionVencida', () => {
 });
 
 describe('explicarErrorDeSesion', () => {
-  beforeEach(() => refreshSession.mockReset());
+  beforeEach(() => {
+    refreshSession.mockReset();
+    olvidarRenovacionDeSesion();
+    vi.useRealTimers();
+  });
 
   it('deja pasar sin tocar los errores que no son de sesión', async () => {
     const msg = 'Stock insuficiente en MANAOS COLA 3LT';
@@ -55,12 +62,63 @@ describe('explicarErrorDeSesion', () => {
       .toBe(MENSAJE_SESION_CAIDA);
   });
 
-  it('sin red, manda a iniciar sesión de nuevo', async () => {
+  // 1600-b16: cambió de regla. Sin red el refresh falla igual, pero eso no dice que la
+  // sesión haya vencido: mandar a cerrar sesión (sin señal para volver a entrar) era peor.
+  it('sin red, dice que falta la conexión y no que la sesión venció', async () => {
     // supabase-js devuelve el error, no lo tira: así se ve un refresh sin red.
-    refreshSession.mockResolvedValue({
-      data: { session: null },
-      error: { message: 'Failed to fetch' },
+    const sinRed = Object.assign(new Error('Failed to fetch'), { name: 'AuthRetryableFetchError' });
+    refreshSession.mockResolvedValue({ data: { session: null }, error: sinRed });
+    expect(await explicarErrorDeSesion('JWT expired')).toBe(MENSAJE_SESION_SIN_CONEXION);
+  });
+
+  it('si el refresh lanza por la red, tampoco dice que venció', async () => {
+    refreshSession.mockRejectedValue(new TypeError('Failed to fetch'));
+    expect(await explicarErrorDeSesion('No se pudo determinar la sucursal activa'))
+      .toBe(MENSAJE_SESION_SIN_CONEXION);
+  });
+
+  describe('«No se pudo determinar la sucursal activa» que vuelve tras renovar (1600-b16)', () => {
+    const SUCURSAL = 'No se pudo determinar la sucursal activa';
+    const renueva = () => refreshSession.mockResolvedValue({ data: { session: { access_token: 'x' } }, error: null });
+
+    it('la primera vez renueva y pide reintentar; si vuelve, ya no repite el mismo cartel', async () => {
+      renueva();
+      expect(await explicarErrorDeSesion(SUCURSAL)).toBe(MENSAJE_SESION_RENOVADA);
+      expect(await explicarErrorDeSesion(SUCURSAL)).toBe(MENSAJE_SUCURSAL_NO_RESUELTA);
+      // La segunda ya no gasta otra renovación.
+      expect(refreshSession).toHaveBeenCalledTimes(1);
     });
-    expect(await explicarErrorDeSesion('JWT expired')).toBe(MENSAJE_SESION_CAIDA);
+
+    it('el cartel de «no resuelta» no alterna con el de «renovada»: sigue igual mientras dure la ventana', async () => {
+      renueva();
+      expect(await explicarErrorDeSesion(SUCURSAL)).toBe(MENSAJE_SESION_RENOVADA);
+      expect(await explicarErrorDeSesion(SUCURSAL)).toBe(MENSAJE_SUCURSAL_NO_RESUELTA);
+      expect(await explicarErrorDeSesion(SUCURSAL)).toBe(MENSAJE_SUCURSAL_NO_RESUELTA);
+      expect(await explicarErrorDeSesion(SUCURSAL)).toBe(MENSAJE_SUCURSAL_NO_RESUELTA);
+      expect(refreshSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('el cartel nuevo no culpa a la sesión: manda a entrar de nuevo y nombra la sucursal y el usuario', () => {
+      expect(MENSAJE_SUCURSAL_NO_RESUELTA).toMatch(/sucursal/);
+      expect(MENSAJE_SUCURSAL_NO_RESUELTA).toMatch(/administrador/);
+      expect(MENSAJE_SUCURSAL_NO_RESUELTA).not.toBe(MENSAJE_SESION_RENOVADA);
+    });
+
+    it('pasada la ventana, un error nuevo vuelve a ser un token vencido más', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      renueva();
+      expect(await explicarErrorDeSesion(SUCURSAL)).toBe(MENSAJE_SESION_RENOVADA);
+      vi.advanceTimersByTime(11 * 60 * 1000);
+
+      expect(await explicarErrorDeSesion(SUCURSAL)).toBe(MENSAJE_SESION_RENOVADA);
+      expect(refreshSession).toHaveBeenCalledTimes(2);
+    });
+
+    it('un JWT vencido sí se renueva cada vez: es el token, no la sucursal', async () => {
+      renueva();
+      expect(await explicarErrorDeSesion('JWT expired')).toBe(MENSAJE_SESION_RENOVADA);
+      expect(await explicarErrorDeSesion('JWT expired')).toBe(MENSAJE_SESION_RENOVADA);
+      expect(refreshSession).toHaveBeenCalledTimes(2);
+    });
   });
 });

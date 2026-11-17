@@ -1,0 +1,7 @@
+{
+  "_doc": "Funciones de trigger cuyo RAISE interpola un dato personal o sensible, y por qué. La lee scripts/check-mensajes-trigger.mjs (#1564, 1564-g3). Va por firma y SÓLO SE ACHICA (lo fija src/test/catalogo.test.ts): un trigger nuevo no muestra en el mensaje el nombre, el saldo ni la fila de lo que encontró con el id que mandó quien llama. Las que están son hallazgos del gate al nacer (16/11/2026), no decisiones: al arreglar una (que el mensaje diga sólo el id), sacala en el mismo PR; el gate avisa cuál sobra.",
+  "funciones": {
+    "pedidos_cliente_asignado()": "hallazgo al nacer el gate: el mensaje trae el nombre del cliente de NEW.cliente_id y quién lo atiende, leídos como DEFINER antes de que la FK compuesta cierre la sucursal. Es el sondeo de clientes de otra sucursal por un mensaje de error que describe #1559; se saca al arreglarlo ahí",
+    "pedidos_entrega_con_chofer()": "hallazgo al nacer el gate: el mensaje trae el nombre del perfil de NEW.transportista_id (cualquier uuid que mande quien marca la entrega), leído como DEFINER sin acotar la sucursal. Pendiente: que el mensaje diga sólo el pedido"
+  }
+}

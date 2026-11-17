@@ -36,6 +36,7 @@ DECLARE
   d8       date := public._tablero_hoy() - 4;
   d9       date := public._tablero_hoy() - 5;
   v_a1     uuid;
+  v_todas  uuid;
   v_tra    uuid;
   v_trb    uuid;
   v_trc    uuid;
@@ -74,10 +75,15 @@ BEGIN
   SELECT pf.id INTO v_a1 FROM perfiles pf WHERE pf.rol = 'admin' AND pf.activo
      AND (SELECT array_agg(us.sucursal_id ORDER BY us.sucursal_id) FROM usuario_sucursales us WHERE us.usuario_id = pf.id) = ARRAY[v_t]
    ORDER BY pf.id LIMIT 1;
+  -- 1597-b5 (ola 2 de #1603): los rubros los toca sólo un admin de todas las sucursales.
+  SELECT pf.id INTO v_todas FROM perfiles pf WHERE pf.rol = 'admin' AND pf.activo
+     AND NOT EXISTS (SELECT 1 FROM sucursales s WHERE s.activa
+                      AND NOT EXISTS (SELECT 1 FROM usuario_sucursales us WHERE us.usuario_id = pf.id AND us.sucursal_id = s.id))
+   ORDER BY pf.id LIMIT 1;
   SELECT id INTO v_varios FROM gasto_rubros WHERE lower(btrim(nombre)) = 'varios' AND activo;
   SELECT id INTO v_falt FROM gasto_rubros WHERE lower(btrim(nombre)) = 'faltantes de caja';
-  IF v_a1 IS NULL OR v_varios IS NULL OR v_falt IS NULL THEN
-    RAISE EXCEPTION 'ENSAYO FALLÓ · sin contexto: a1 %, rubro varios %, rubro faltantes %', v_a1, v_varios, v_falt;
+  IF v_a1 IS NULL OR v_todas IS NULL OR v_varios IS NULL OR v_falt IS NULL THEN
+    RAISE EXCEPTION 'ENSAYO FALLÓ · sin contexto: a1 %, todas %, rubro varios %, rubro faltantes %', v_a1, v_todas, v_varios, v_falt;
   END IF;
   PERFORM set_config('g1521.a1', v_a1::text, true);
 
@@ -466,16 +472,23 @@ BEGIN
 
   -- ===================================== 8 · GTO-9 los nombres de sueldo ===
   BEGIN
-    FOREACH v_txt IN ARRAY ARRAY['Haberes', 'Aguinaldo diciembre', 'Pago de SAC', 'Horas extra', 'Indemnización',
-                                 'VACACIONES', 'Salario', 'Sueldos de octubre', 'Jornales', 'Presentismo']
+    -- GTO-B (#1545, ola 2 de #1603, decisiones del dueño del 15/11 y del 17/11): se suman
+    -- «remuneraciones» y «comisiones» (no la de un medio de cobro), y «S.A.C.» con puntos. Los
+    -- rubros los toca el admin de todas.
+    FOREACH v_txt IN ARRAY ARRAY['ZZ Haberes 1521', 'ZZ Aguinaldo diciembre 1521', 'ZZ Pago de SAC 1521',
+                                 'ZZ S.A.C. 1521', 'ZZ Horas extra 1521', 'ZZ Indemnización 1521',
+                                 'ZZ VACACIONES 1521', 'ZZ Salario 1521', 'ZZ Sueldos de octubre 1521',
+                                 'ZZ Jornales 1521', 'ZZ Presentismo 1521', 'ZZ Remuneraciones 1521',
+                                 'ZZ Comisiones de vendedores 1521']
     LOOP
-      v_fallas := v_fallas || pg_temp.falla(format('8 %s', v_txt), v_a1, v_t,
-                    pg_temp.rub(jsonb_build_object('nombre', 'ZZ ' || v_txt || ' 1521', 'grupo', 'otros')),
+      v_fallas := v_fallas || pg_temp.falla(format('8 %s', v_txt), v_todas, v_t,
+                    pg_temp.rub(jsonb_build_object('nombre', v_txt, 'grupo', 'otros')),
                     'Los sueldos no son un gasto: salen de las liquidaciones del personal');
     END LOOP;
-    FOREACH v_txt IN ARRAY ARRAY['Cargas sociales', 'Comisiones bancarias', 'Sacos de arpillera', 'Sindicato', 'ART']
+    FOREACH v_txt IN ARRAY ARRAY['Cargas sociales', 'Comisiones bancarias', 'Sacos de arpillera', 'Sindicato', 'ART',
+                                 'Comisión Posnet']
     LOOP
-      v_n := pg_temp.como(v_a1, v_t, pg_temp.rub(jsonb_build_object('nombre', 'ZZ ' || v_txt || ' 1521', 'grupo', 'otros')))::bigint;
+      v_n := pg_temp.como(v_todas, v_t, pg_temp.rub(jsonb_build_object('nombre', 'ZZ ' || v_txt || ' 1521', 'grupo', 'otros')))::bigint;
       v_fallas := v_fallas || pg_temp.chk(v_n IS NOT NULL, format('8 %s entra', v_txt));
     END LOOP;
     -- El CHECK es la misma regla.
@@ -485,7 +498,7 @@ BEGIN
     EXCEPTION WHEN check_violation THEN NULL;
     END;
     -- Renombrar a un nombre de sueldo tampoco.
-    v_fallas := v_fallas || pg_temp.falla('8 renombrar a haberes', v_a1, v_t,
+    v_fallas := v_fallas || pg_temp.falla('8 renombrar a haberes', v_todas, v_t,
                   pg_temp.rub(jsonb_build_object('id', v_varios, 'nombre', 'Varios y haberes')),
                   'Los sueldos no son un gasto');
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('8 · error: %s', SQLERRM);
@@ -495,8 +508,8 @@ BEGIN
   BEGIN
     v_fallas := v_fallas || pg_temp.chk((SELECT clave FROM gasto_rubros WHERE id = v_falt) = 'faltantes_caja'
                   AND (SELECT count(*) FROM gasto_rubros WHERE clave IS NOT NULL) = 1, '9 la clave');
-    PERFORM pg_temp.como(v_a1, v_t, pg_temp.rub(jsonb_build_object('id', v_falt, 'nombre', 'ZZ Robos y pérdidas 1521')));
-    v_fallas := v_fallas || pg_temp.falla('9 darlo de baja', v_a1, v_t, pg_temp.rub(jsonb_build_object('id', v_falt, 'activo', false)),
+    PERFORM pg_temp.como(v_todas, v_t, pg_temp.rub(jsonb_build_object('id', v_falt, 'nombre', 'ZZ Robos y pérdidas 1521')));
+    v_fallas := v_fallas || pg_temp.falla('9 darlo de baja', v_todas, v_t, pg_temp.rub(jsonb_build_object('id', v_falt, 'activo', false)),
                   'es el de los faltantes de caja de las rendiciones: se le puede cambiar el nombre, pero no darlo de baja');
     v_fallas := v_fallas || pg_temp.chk((SELECT activo AND nombre = 'ZZ Robos y pérdidas 1521' FROM gasto_rubros WHERE id = v_falt),
                   '9 renombrado y activo');

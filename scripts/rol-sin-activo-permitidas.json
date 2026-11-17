@@ -27,5 +27,11 @@
     "reporte_vencimientos(integer)": "sin sucursal: 'No se pudo determinar la sucursal activa' antes de leer los lotes",
     "sustituir_regalo_pedido(bigint,bigint,numeric,text,bigint,uuid)": "sin sucursal: devuelve success false, 'No hay sucursal activa', antes de leer la línea",
     "verificar_duplicado_cliente(numeric,numeric,text,bigint)": "sin sucursal: 42501 'No se pudo verificar duplicados: sin sesión o sin sucursal activa' antes de buscar"
+  },
+  "_doc_impl": "Las funciones SIN EXECUTE para authenticated que leen perfiles.rol de quien llama sin mirar activo (1595-b4): las `_impl` de los pagos y de la nota de crédito, que llama su wrapper DEFINER. La lee scripts/check-rol-sin-activo.mjs por conexión directa al catálogo. Va por firma y sólo se achica, como 'funciones': una `_impl` nueva decide con es_admin()/es_encargado_o_admin() o mira activo. Quedan las tres que todavía leen el rol a pelo: se probaron como un admin desactivado con el token vivo por su wrapper y cortan con 42501 'No hay sucursal activa' (current_sucursal_id() da NULL para un desactivado) antes de leer o escribir. Las otras cinco salieron al integrar #1645 con la 518 (les suma AND COALESCE(activo, true)) y la 522 (borra get_audit_history y get_suspicious_activity), medido contra producción del 17/11.",
+  "impl": {
+    "imputar_credito_a_pedido_impl(bigint,bigint,numeric)": "sin sucursal: 42501 'No hay sucursal activa' por imputar_credito_a_pedido, antes de leer el rol",
+    "registrar_pago_cliente_fifo_impl(bigint,numeric,text,date,text,text)": "sin sucursal: 42501 'No hay sucursal activa' por registrar_pago_cliente_fifo, antes de leer el rol",
+    "registrar_pago_combinado_cliente_fifo_impl(bigint,jsonb,date,text,text)": "sin sucursal: 42501 'No hay sucursal activa' por registrar_pago_combinado_cliente_fifo, antes de leer el rol"
   }
 }

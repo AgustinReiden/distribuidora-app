@@ -9,8 +9,8 @@ import { leerPreciosVigentes } from '../../hooks/queries/preciosVigentes'
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery'
 import type { ErrorPreciosMasivo } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
-import { calcularNuevosPrecios, mensajeExitoPreciosMasivo } from '../../utils/precios'
-import { escalasDeSeleccion, seleccionTrasErrorMasivo } from '../../utils/preciosMasivoLotes'
+import { calcularNuevosPrecios, mensajeExitoPreciosMasivo, separarSinPrecio } from '../../utils/precios'
+import { escalasCambiaron, escalasDeSeleccion, seleccionTrasErrorMasivo } from '../../utils/preciosMasivoLotes'
 import { compararPrecios, mensajeCambiosDePrecio } from '../../utils/preciosVigentes'
 import type { PrecioVigente } from '../../utils/preciosVigentes'
 import { formatPrecio } from '../../utils/formatters'
@@ -107,6 +107,12 @@ export default function ModalActualizacionMasivaPrecios({
     [productos, seleccionados]
   )
 
+  // Un producto sin precio no cambia con un porcentaje: no se manda ni se cuenta (#1599, b7).
+  const { conPrecio: productosAActualizar, sinPrecio: productosSinPrecio } = useMemo(
+    () => separarSinPrecio(productosSeleccionados),
+    [productosSeleccionados]
+  )
+
   const seleccionadosFueraDelFiltro = useMemo(() => {
     const idsFiltrados = new Set(productosFiltrados.map(p => p.id))
     return productosSeleccionados.filter(p => !idsFiltrados.has(p.id)).length
@@ -163,7 +169,7 @@ export default function ModalActualizacionMasivaPrecios({
   }, [])
 
   const puedeAplicar =
-    porcentajeValido && productosSeleccionados.length > 0 && !mutation.isPending && !verificando && grupos.isSuccess && politica.isSuccess
+    porcentajeValido && productosAActualizar.length > 0 && !mutation.isPending && !verificando && grupos.isSuccess && politica.isSuccess
 
   const handleAplicar = useCallback(() => {
     if (!puedeAplicar) return
@@ -178,7 +184,7 @@ export default function ModalActualizacionMasivaPrecios({
     setVerificando(true)
     let vigentes: PrecioVigente[]
     try {
-      vigentes = await leerPreciosVigentes(productosSeleccionados.map(p => p.id))
+      vigentes = await leerPreciosVigentes(productosAActualizar.map(p => p.id))
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'No se pudieron verificar los precios actuales. No se aplicó nada.')
       return
@@ -186,7 +192,7 @@ export default function ModalActualizacionMasivaPrecios({
       setVerificando(false)
     }
     const comparacion = compararPrecios(
-      productosSeleccionados.map(p => {
+      productosAActualizar.map(p => {
         // Lo último que el usuario vio de cada producto: lo de al abrir, o lo que el
         // aviso anterior le mostró. Uno que no estaba al abrir se mide contra su caché.
         const visto = referencia.get(p.id) ?? { precio: p.precio, precio_sin_iva: p.precio_sin_iva }
@@ -202,11 +208,31 @@ export default function ModalActualizacionMasivaPrecios({
         setSeleccionados(prev => new Set([...prev].filter(id => !fuera.has(id))))
       }
       setAvisoPrecios(mensajeCambiosDePrecio(comparacion))
-      notify.warning('Cambiaron precios mientras tenías abierta esta pantalla. No se aplicó nada: revisalos y volvé a confirmar.')
+      // El aviso de la pantalla ya dice cuáles cambiaron y que no se aplicó nada (`mensajeCambiosDePrecio`):
+      // el toast no repite esa frase.
+      notify.warning('Cambiaron precios mientras tenías abierta esta pantalla: revisá el aviso.')
       return
     }
 
-    const items = productosSeleccionados.map(p => {
+    // Las escalas mayoristas también salen de la base y no de la lista en caché (FRG2-3, #1599):
+    // si otro admin tocó una condición mientras esta pantalla estaba abierta, se avisa y no se aplica.
+    if (aplicarEscalas) {
+      let condicionesFrescas: typeof grupos.data
+      try {
+        condicionesFrescas = (await grupos.refetch({ throwOnError: true })).data
+      } catch {
+        notify.error('No se pudieron verificar las condiciones mayoristas actuales. No se aplicó nada.')
+        return
+      }
+      const frescas = escalasDeSeleccion(condicionesFrescas ?? [], seleccionados, porcentaje, multiplo)
+      if (escalasCambiaron(escalas.aplicables, frescas.aplicables)) {
+        setAvisoPrecios('Cambiaron las escalas mayoristas de estos productos desde que abriste esta pantalla. No se aplicó nada: revisalas en la vista previa y volvé a apretar Aplicar para confirmar.')
+        notify.warning('Cambiaron las condiciones mayoristas mientras tenías abierta esta pantalla: revisá el aviso.')
+        return
+      }
+    }
+
+    const items = productosAActualizar.map(p => {
       const nuevos = calcularNuevosPrecios(p, porcentaje, multiplo)
       return {
         producto_id: p.id,
@@ -239,7 +265,7 @@ export default function ModalActualizacionMasivaPrecios({
       }
       notify.error(mensaje)
     }
-  }, [productosSeleccionados, porcentaje, mutation, notify, onClose, aplicarEscalas, escalas.aplicables, multiplo, referencia])
+  }, [productosAActualizar, porcentaje, mutation, notify, onClose, aplicarEscalas, escalas.aplicables, multiplo, referencia, grupos, seleccionados])
 
   const handlePorcentajeChange = (e: ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value
@@ -259,8 +285,10 @@ export default function ModalActualizacionMasivaPrecios({
     )
 
   const conEscalas = aplicarEscalas && escalas.aplicables.length > 0
-  const mensajeConfirmacion = `Vas a actualizar ${productosSeleccionados.length} producto(s)${
+  const mensajeConfirmacion = `Vas a actualizar ${productosAActualizar.length} producto(s)${
     conEscalas ? ` y ${escalas.aplicables.length} escala(s) mayorista(s)` : ''
+  }${
+    productosSinPrecio.length > 0 ? ` (${productosSinPrecio.length} seleccionado(s) sin precio quedan afuera)` : ''
   } con un ${
     porcentaje > 0 ? '+' : ''
   }${porcentaje}%. Esta acción modifica precio neto y precio final (los impuestos internos no se tocan)${
@@ -367,6 +395,11 @@ export default function ModalActualizacionMasivaPrecios({
                 {seleccionadosFueraDelFiltro > 0 && (
                   <span className="text-gray-500 dark:text-gray-500">
                     {' '}({seleccionadosFueraDelFiltro} fuera del filtro actual)
+                  </span>
+                )}
+                {productosSinPrecio.length > 0 && (
+                  <span className="text-amber-700 dark:text-amber-400">
+                    {' '}({productosSinPrecio.length} sin precio: no se tocan)
                   </span>
                 )}
               </span>

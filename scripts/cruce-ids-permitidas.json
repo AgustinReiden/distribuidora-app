@@ -1,0 +1,4 @@
+{
+  "_doc": "RPCs que aceptan el id de una entidad (pedido, cliente, pago, compra) de otra sucursal, y por qué. La lee scripts/check-cruce-ids.mjs (#1564, 1564-g2). Va por firma y SÓLO SE ACHICA (lo fija src/test/catalogo.test.ts): una RPC nueva rechaza con 42501 el id que no es de la sucursal activa. Al arreglar una, sacala en el mismo PR; el gate avisa cuál sobra.",
+  "funciones": {}
+}

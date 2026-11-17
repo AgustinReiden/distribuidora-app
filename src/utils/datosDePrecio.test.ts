@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
+  entradaDeConsulta,
   motivoDatosDePrecio,
   resumirDatosDePrecio,
   sePuedeReintentarDatos,
@@ -58,5 +59,47 @@ describe('datosDePrecio (FRV-1, #1559)', () => {
   it('una consulta con dato viejo y sin error no figura en ninguna lista', () => {
     const r = resumirDatosDePrecio([{ nombre: 'los combos', hayDato: true, cargando: false, fallo: false, sinSenal: true }])
     expect(r).toEqual({ cargando: [], fallaron: [], sinSenal: [] })
+  })
+})
+
+describe('entradaDeConsulta y navigator.onLine (1559-c4)', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+  const sinConexion = () => vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false)
+
+  it('sin conexión desde el arranque y sin dato es «sin señal», aunque react-query no la haya pausado', () => {
+    sinConexion()
+    // El onlineManager de react-query arranca en "online" y no se entera de que ya estaba offline:
+    // la consulta ni queda pausada ni espera, falla.
+    const e = entradaDeConsulta('las escalas mayoristas', { isError: true, isPaused: false })
+    expect(e.sinSenal).toBe(true)
+    expect(e.fallo).toBe(false)
+    const r = resumirDatosDePrecio([e])
+    expect(r.sinSenal).toEqual(['las escalas mayoristas'])
+    expect(r.fallaron).toEqual([])
+  })
+
+  it('sin conexión y todavía cargando tampoco es «cargando»: el alta se puede encolar', () => {
+    sinConexion()
+    const r = resumirDatosDePrecio([entradaDeConsulta('los clientes', { isLoading: true })])
+    expect(r.cargando).toEqual([])
+    expect(r.sinSenal).toEqual(['los clientes'])
+  })
+
+  it('con dato guardado y sin conexión no es «sin señal»', () => {
+    sinConexion()
+    const e = entradaDeConsulta('las promociones', { data: new Map(), isPaused: false })
+    expect(e.sinSenal).toBe(false)
+  })
+
+  it('con conexión una falla sigue siendo falla', () => {
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true)
+    const e = entradaDeConsulta('las promociones', { isError: true })
+    expect(e.fallo).toBe(true)
+    expect(e.sinSenal).toBe(false)
+  })
+
+  it('una consulta pausada sigue siendo «sin señal»', () => {
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true)
+    expect(entradaDeConsulta('los clientes', { isPaused: true }).sinSenal).toBe(true)
   })
 })

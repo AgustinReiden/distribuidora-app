@@ -470,6 +470,22 @@ export function validarMOQPedido(
 }
 
 /**
+ * Cantidad de venta por producto (suma de todas sus líneas, la de un combo incluida). Es el mapa
+ * `cantidadesOriginales` de `moqQueBloqueaLaEdicion`: armarlo con `new Map(lineas.map(...))` se
+ * queda con la ÚLTIMA línea de cada producto y no con su suma (1559-c1).
+ */
+export function cantidadesPorProducto(
+  lineas: ReadonlyArray<{ productoId: string | number; cantidad: number | string }>,
+): Map<string, number> {
+  const porProducto = new Map<string, number>()
+  for (const l of lineas) {
+    const pid = String(l.productoId)
+    porProducto.set(pid, (porProducto.get(pid) ?? 0) + (Number(l.cantidad) || 0))
+  }
+  return porProducto
+}
+
+/**
  * De las violaciones del mínimo de venta de un pedido que se edita, las que
  * bloquean el guardado (#1559, CAT-3).
  *

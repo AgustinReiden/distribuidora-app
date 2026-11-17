@@ -4,6 +4,16 @@ name: Integridad de datos
 # Corre auditoria_integridad() contra prod y falla si hay checks critical/high
 # en rojo. Diario + a demanda. Requiere los secrets SUPABASE_URL y
 # SUPABASE_SERVICE_ROLE_KEY (service_role, NO la anon key).
+#
+# Este workflow NO corre en los PRs (usa la service_role y la conexión a prod, que no se le
+# dan a un job que corre código del PR). Los mismos gates de SQL, y los ensayos, corren sobre
+# una base local en cada PR que toca SQL: .github/workflows/sql-local.yml (#1601 1601-b7,
+# #1563 1563-b9). Lo de acá es lo que sólo se puede mirar con los datos y la configuración
+# de prod: reportes que cierran, signup cerrado, storage, ledger, embeds con un token real.
+#
+# Los gates que leen el catálogo directo (check-realtime, check-mensajes-trigger y el
+# complemento de check-rol-sin-activo, check-rpcs-definer y check-tablas-anon) se conectan
+# con SUPABASE_DB_URL, el secret que ya usa backup.yml; son de sólo lectura.
 
 on:
   schedule:
@@ -48,11 +58,15 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
           faltan=""
           [ -z "$SUPABASE_URL" ] && faltan="$faltan SUPABASE_URL"
           [ -z "$SUPABASE_SERVICE_ROLE_KEY" ] && faltan="$faltan SUPABASE_SERVICE_ROLE_KEY"
           [ -z "$SUPABASE_JWT_SECRET" ] && faltan="$faltan SUPABASE_JWT_SECRET"
+          [ -z "$SUPABASE_DB_URL" ] && faltan="$faltan SUPABASE_DB_URL"
+          # Los gates del catálogo corren psql: que esté, o fallan todos con un mensaje oscuro.
+          command -v psql >/dev/null || faltan="$faltan psql(en-el-runner)"
           if [ -n "$faltan" ]; then
             echo "::error::Faltan los secrets:$faltan — el gate NO puede correr y por eso falla."
             echo "Cargalos en Settings > Secrets and variables > Actions."
@@ -142,6 +156,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: node scripts/check-rpcs-definer.mjs
 
       # Un desactivado conserva su token hasta que vence (el ban de Auth no lo
@@ -154,6 +169,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: node scripts/check-rol-sin-activo.mjs
 
       # Un cliente dado de baja no recibe pedidos (gate 3 de #1520, mig 480).
@@ -197,6 +213,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: node scripts/check-tablas-anon.mjs
 
       # El de arriba mira si anon LEE; éste mira qué GRANTS de tabla quedan. anon
@@ -210,6 +227,25 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/check-grants-tablas.mjs
+
+      # La publicación de Realtime (#1564, 1564-g1): una tabla con SELECT por columna
+      # (productos, pedido_items) que entrara en supabase_realtime mandaría sus columnas de
+      # costo por el canal. En prod hoy tiene sólo `pedidos`. Lee el catálogo con
+      # SUPABASE_DB_URL (de sólo lectura).
+      - name: Realtime (nada con SELECT por columna en la publicación)
+        if: always()
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: node scripts/check-realtime.mjs
+
+      # El contenido de los mensajes de error de los triggers (#1564, 1564-g3): un RAISE que
+      # interpola el nombre, el saldo o la fila de lo que encontró con un id ajeno filtra
+      # datos (#1559). Falla ante uno que no esté en scripts/mensajes-trigger-permitidas.json.
+      - name: Mensajes de error de los triggers (no filtran datos)
+        if: always()
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: node scripts/check-mensajes-trigger.mjs
 
       # Cada select de la app con un embed, probado contra PostgREST con limit=0,
       # con sus filtros y órdenes sobre embeds en el mismo request. Las FKs de

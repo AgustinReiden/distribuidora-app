@@ -88,17 +88,20 @@ export interface ControlStockDetalle {
 
 const controlStockKeys = {
   all: (sucursalId: number | null) => ['control_stock', sucursalId] as const,
-  sesiones: (sucursalId: number | null) => [...controlStockKeys.all(sucursalId), 'sesiones'] as const,
+  sesiones: (sucursalId: number | null, limite: number) => [...controlStockKeys.all(sucursalId), 'sesiones', limite] as const,
   detalle: (sucursalId: number | null, sesionId: number) => [...controlStockKeys.all(sucursalId), 'detalle', sesionId] as const,
   planilla: (sucursalId: number | null, planillaId: string) => [...controlStockKeys.all(sucursalId), 'planilla', planillaId] as const,
 }
 
-async function fetchSesiones(): Promise<ControlStockSesion[]> {
+/** Cuántas sesiones trae el historial de una vez; «Ver más antiguas» suma otro tanto. */
+export const SESIONES_POR_PAGINA = 100
+
+async function fetchSesiones(limite: number): Promise<ControlStockSesion[]> {
   const { data, error } = await supabase
     .from('control_stock_sesiones')
     .select('id, fecha, usuario_id, total_items, total_altas, total_bajas, observaciones, usuario:perfiles(nombre)')
     .order('fecha', { ascending: false })
-    .limit(100)
+    .limit(limite)
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las sesiones de control de stock. Revisá la señal e intentá de nuevo.')
   return (data as unknown as ControlStockSesion[]) || []
 }
@@ -124,13 +127,22 @@ async function fetchCargaPrevia(planillaId: string): Promise<CargaPreviaPlanilla
   return (data as CargaPreviaPlanilla | null) ?? null
 }
 
-export function useControlStockSesionesQuery(enabled = true) {
+/**
+ * Las sesiones más nuevas primero, hasta `limite`. El historial tenía un tope fijo
+ * de 100 y las anteriores no se podían ver (#1599, 1599-b3): quien lo muestra pide
+ * más subiendo `limite`, y sabe que hay más si recibe tantas como pidió.
+ */
+export function useControlStockSesionesQuery(enabled = true, limite = SESIONES_POR_PAGINA) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: controlStockKeys.sesiones(currentSucursalId),
-    queryFn: fetchSesiones,
+    queryKey: controlStockKeys.sesiones(currentSucursalId, limite),
+    queryFn: () => fetchSesiones(limite),
     enabled: enabled && !!currentSucursalId,
     staleTime: 60 * 1000,
+    // Al pedir más, la lista de antes se queda en pantalla mientras llega; la de
+    // otra sucursal, nunca.
+    placeholderData: (anterior, consultaAnterior) =>
+      consultaAnterior?.queryKey[1] === currentSucursalId ? anterior : undefined,
   })
 }
 

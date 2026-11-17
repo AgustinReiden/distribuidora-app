@@ -127,6 +127,32 @@ describe('ModalPagoPedido — la clave del cobro sobrevive al modal (#1410)', ()
     })
   })
 
+  // H2 (lente B10): quien no es admin cobra con hoy y el campo está deshabilitado. Un cobro sin
+  // confirmar de otro día lo dejaba trabado («el cobro va con la fecha de hoy», sin forma de corregirlo).
+  it('quien no es admin con un cobro sin confirmar de otro día lo cobra con la fecha de hoy y otra clave', async () => {
+    const clave = '11111111-1111-4111-8111-111111111111'
+    const ayer = (() => {
+      const [y, m, d] = fechaLocalISO().split('-').map(Number)
+      return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10)
+    })()
+    guardarCobroSinConfirmar({
+      pedidoId: '4625',
+      fechaPago: ayer,
+      pagos: [{ formaPago: 'efectivo', monto: 7000 }],
+      clientRequestId: clave,
+      pagadoAntes: 0,
+    })
+    const onConfirmar = vi.fn<Confirmar>().mockResolvedValue(undefined)
+    abrir(onConfirmar, [], { isAdmin: false })
+
+    fireEvent.click(screen.getByRole('button', { name: /^registrar pago$/i }))
+
+    await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
+    expect(onConfirmar.mock.calls[0][0].fechaPago).toBe(fechaLocalISO())
+    expect(onConfirmar.mock.calls[0][0].clientRequestIds?.[0]).not.toBe(clave)
+    expect(screen.queryByText(/el cobro va con la fecha de hoy/i)).toBeNull()
+  })
+
   it('si se cambia el cobro propuesto, ya no es el mismo: otra clave', async () => {
     const clave = '11111111-1111-4111-8111-111111111111'
     guardarCobroSinConfirmar({

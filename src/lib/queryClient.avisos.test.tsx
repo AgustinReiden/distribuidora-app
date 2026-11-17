@@ -18,7 +18,8 @@ const AVISO = 'No se pudo cargar la información. Verificá tu conexión.'
 let hook: ReturnType<typeof renderHook<ReturnType<typeof useNotification>, unknown>>
 const notify = () => hook.result.current
 
-const fallar = () => Promise.reject(new Error('sin señal'))
+// Un fallo de red de verdad (no hubo servidor): es el que dice "Verificá tu conexión".
+const fallar = () => Promise.reject(new TypeError('Failed to fetch'))
 const avisos = () => screen.queryAllByRole('alert')
 
 async function fallanVarias(n: number, prefijo: string, extra: Record<string, unknown> = {}) {
@@ -71,6 +72,39 @@ describe('INF-2: consultas que fallan', () => {
 
     expect(screen.getByText('El cobro de $1.000 no se registró')).toBeInTheDocument()
     expect(avisos()).toHaveLength(2)
+  })
+
+  // 1563-b6: el texto depende de la causa, no es siempre "Verificá tu conexión".
+  it('un permiso denegado no manda a revisar la conexión', async () => {
+    await act(async () => {
+      await Promise.allSettled([
+        queryClient.fetchQuery({
+          queryKey: ['b6-permiso'],
+          queryFn: () => Promise.reject({ message: 'permission denied for table pagos', code: '42501' }),
+          retry: false,
+        }),
+      ])
+    })
+
+    expect(avisos()).toHaveLength(1)
+    expect(avisos()[0].textContent).toMatch(/permiso/)
+    expect(avisos()[0].textContent).not.toMatch(/conexión|42501|pagos/)
+  })
+
+  it('un embed roto (PGRST201) dice que es del servidor, no de la conexión', async () => {
+    await act(async () => {
+      await Promise.allSettled([
+        queryClient.fetchQuery({
+          queryKey: ['b6-embed'],
+          queryFn: () => Promise.reject({ message: 'Could not embed because more than one relationship', code: 'PGRST201' }),
+          retry: false,
+        }),
+      ])
+    })
+
+    expect(avisos()).toHaveLength(1)
+    expect(avisos()[0].textContent).toMatch(/servidor/)
+    expect(avisos()[0].textContent).not.toMatch(/conexión|PGRST201/)
   })
 
   it('una consulta con meta.silentError no avisa', async () => {

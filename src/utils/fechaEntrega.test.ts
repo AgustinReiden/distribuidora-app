@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { errorDeFechaEntrega, rangoFechaEntrega } from './fechaEntrega'
+import { campoFechaDeEntrega, errorDeFechaEntrega, rangoFechaEntrega } from './fechaEntrega'
 
 // Espejo de _fecha_entrega_fuera_de_rango (GTO-15, #1597): mismos bordes y mismos textos.
 const hoy = '2026-11-15'
@@ -15,6 +15,21 @@ describe('rangoFechaEntrega', () => {
 
   it('el admin: hasta 60 días atrás, nunca después de hoy', () => {
     expect(rangoFechaEntrega({ esAdmin: true, diasAtras: 5, hoy })).toEqual({ min: '2026-09-16', max: hoy })
+  })
+})
+
+describe('campoFechaDeEntrega (el campo de fecha de «Confirmar entrega»)', () => {
+  it('arranca en hoy y lleva el piso y el techo de su rol', () => {
+    const c = campoFechaDeEntrega({ esAdmin: false, diasAtras: 5, hoy })
+    expect(c).toMatchObject({ label: 'Fecha de entrega', valorInicial: hoy, min: '2026-11-10', max: hoy })
+    expect(campoFechaDeEntrega({ esAdmin: true, diasAtras: 5, hoy }).min).toBe('2026-09-16')
+  })
+
+  it('valida con el texto del server: lo de afuera del rango trae su motivo, lo de adentro no', () => {
+    const c = campoFechaDeEntrega({ esAdmin: false, diasAtras: 5, hoy })
+    expect(c.validar('2026-11-10')).toBeNull()
+    expect(c.validar('2026-11-09')).toMatch(/no puede ser anterior al 10\/11\/2026/)
+    expect(c.validar('2026-11-16')).toMatch(/no puede ser posterior a hoy/)
   })
 })
 

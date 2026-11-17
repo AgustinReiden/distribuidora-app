@@ -142,6 +142,26 @@ describe('useGuardarGastoMutation', () => {
     // El gasto de un empleado le suma a su cuenta: la lista y la cuenta de Personal cambian.
     expect(keys).toContainEqual(['personal', 1])
   })
+
+  // 1599-b9 (#1599): la versión viaja en el JSON, y un rechazo vuelve a leer la lista para que
+  // al reabrir el gasto se vea cómo lo dejó el otro.
+  it('manda updated_at_esperado y, si el server rechaza, vuelve a leer los gastos', async () => {
+    rpcResult = {
+      data: null,
+      error: { message: 'Este gasto cambió desde que lo abriste (se guardó o se anuló en el medio): cerralo y volvé a abrirlo para ver cómo quedó', code: 'P0001' },
+    }
+    const qc = nuevoCliente()
+    const invalidar = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(() => useGuardarGastoMutation(), { wrapper: makeWrapper(qc) })
+    const conVersion = { ...PAYLOAD, id: 41, updated_at_esperado: '2026-10-15T10:00:00.123456+00:00' }
+
+    const error = await result.current.mutateAsync(conVersion).catch((e: unknown) => e)
+
+    expect((error as Error).message).toMatch(/^Este gasto cambió desde que lo abriste/)
+    expect(rpcCalls).toEqual([{ fn: 'guardar_gasto', args: { p_gasto: conVersion } }])
+    await waitFor(() => expect(invalidar).toHaveBeenCalledTimes(1))
+    expect((invalidar.mock.calls[0][0] as { queryKey: unknown[] }).queryKey).toEqual(['gastos', 1])
+  })
 })
 
 describe('useAnularGastoMutation', () => {
@@ -218,6 +238,8 @@ describe('useGastosDelMesQuery', () => {
     expect(select).toContain('empleado_id')
     expect(select).toContain('vehiculo:vehiculos(id,patente,descripcion)')
     expect(select).toContain('mes_fin')
+    // 1599-b9: la versión del gasto, para la edición.
+    expect(select).toContain('updated_at')
   })
 })
 

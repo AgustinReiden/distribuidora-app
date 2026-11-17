@@ -428,7 +428,7 @@ describe('usePagos', () => {
       })
 
       // Now delete one
-      mockEq.mockReturnValueOnce(conAbortSignal({ error: null }))
+      mockEq.mockReturnValueOnce({ select: () => conAbortSignal({ data: [{ id: '1' }], error: null }) })
 
       await act(async () => {
         await result.current.eliminarPago('1')
@@ -439,7 +439,7 @@ describe('usePagos', () => {
     })
 
     it('debe lanzar error si falla la eliminación', async () => {
-      mockEq.mockReturnValueOnce(conAbortSignal({ error: new Error('Delete failed') }))
+      mockEq.mockReturnValueOnce({ select: () => conAbortSignal({ data: null, error: new Error('Delete failed') }) })
 
       const { result } = renderHook(() => usePagos())
 
@@ -447,7 +447,22 @@ describe('usePagos', () => {
         await result.current.eliminarPago('1')
       })).rejects.toThrow()
 
-      expect(notifyError).toHaveBeenCalledWith(expect.stringContaining('Error al eliminar pago'))
+      // 1544-b5: el hook relanza y el llamador avisa; si avisara también acá saldrían dos toasts.
+      expect(notifyError).not.toHaveBeenCalled()
+    })
+
+    it('1559-b13: un DELETE que no borra ninguna fila NO es un pago anulado', async () => {
+      mockRange.mockResolvedValueOnce({ data: [{ id: '1', monto: 1000 }], error: null })
+      const { result } = renderHook(() => usePagos())
+      await act(async () => { await result.current.fetchPagosCliente('c1') })
+
+      mockEq.mockReturnValueOnce({ select: () => conAbortSignal({ data: [], error: null }) })
+
+      await expect(act(async () => {
+        await result.current.eliminarPago('1')
+      })).rejects.toThrow(/no se anuló ningún pago/i)
+      // Y no lo saca de la lista local: el pago sigue ahí.
+      expect(result.current.pagos).toHaveLength(1)
     })
   })
 
@@ -483,7 +498,7 @@ describe('usePagos', () => {
       expect(r?.yaEstabaSuelto).toBe(true)
     })
 
-    it('propaga el error del server y lo notifica', async () => {
+    it('propaga el error del server sin notificarlo (lo avisa quien llama)', async () => {
       ;(supabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         data: null,
         error: { message: 'solo admin', code: '42501' },
@@ -494,7 +509,7 @@ describe('usePagos', () => {
         await result.current.desimputarPago('10', '5501')
       })).rejects.toThrow()
 
-      expect(notifyError).toHaveBeenCalledWith(expect.stringContaining('Error al quitar el pago de la boleta'))
+      expect(notifyError).not.toHaveBeenCalled()
     })
   })
 

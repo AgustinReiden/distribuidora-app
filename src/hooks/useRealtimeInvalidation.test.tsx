@@ -112,7 +112,7 @@ describe('useRealtimeInvalidation', () => {
 
   // PLT-N9 (#1305): clientes (el saldo) y pagos no tienen canal; sin esto
   // quedaban con el staleTime de 5 minutos tras un corte.
-  it('al reconectar invalida también clientes y pagos, una sola vez aunque vuelvan los tres canales', async () => {
+  it('al reconectar invalida también clientes y deudores, una sola vez aunque vuelvan los tres canales', async () => {
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries')
     renderHook(() => useRealtimeInvalidation({ debounceMs: 0 }), {
@@ -128,10 +128,10 @@ describe('useRealtimeInvalidation', () => {
 
     const claves = spy.mock.calls.map(c => JSON.stringify((c[0] as { queryKey: unknown }).queryKey))
     expect(claves.filter(k => k === JSON.stringify(clientesKeys.all(1)))).toHaveLength(1)
-    expect(claves.filter(k => k === JSON.stringify(['pagos']))).toHaveLength(1)
+    expect(claves.filter(k => k === JSON.stringify(['deudores-mora']))).toHaveLength(1)
   })
 
-  it('con sólo el canal de productos de vuelta también invalida clientes y pagos', async () => {
+  it('con sólo el canal de productos de vuelta también invalida clientes y deudores', async () => {
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries')
     renderHook(() => useRealtimeInvalidation({ debounceMs: 0 }), {
@@ -144,7 +144,7 @@ describe('useRealtimeInvalidation', () => {
     })
 
     expect(spy).toHaveBeenCalledWith({ queryKey: clientesKeys.all(1) })
-    expect(spy).toHaveBeenCalledWith({ queryKey: ['pagos'] })
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['deudores-mora'] })
     // y no arrastra los pedidos: ese canal no se cayó
     expect(spy).not.toHaveBeenCalledWith({ queryKey: pedidosKeys.all(1) })
   })
@@ -165,7 +165,7 @@ describe('useRealtimeInvalidation', () => {
     })
 
     expect(spy).not.toHaveBeenCalledWith({ queryKey: clientesKeys.all(1) })
-    expect(spy).not.toHaveBeenCalledWith({ queryKey: ['pagos'] })
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: ['deudores-mora'] })
   })
 
   it('invalida pedidosKeys.all() cuando se llama invalidatePedido(id)', async () => {

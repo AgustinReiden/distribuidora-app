@@ -12,6 +12,6 @@ export const GASTO_COLUMNAS =
   'comprobante_numero,alicuota_iva,iva,percepcion_iva,percepcion_iibb,' +
   'otros_impuestos,neto,costo,vehiculo_id,litros,mes_imputado,' +
   'repartir_meses,mes_fin,origen_pago,observacion,creado_por,anulado_at,' +
-  'created_at,rendicion_transportista_id,rendicion_fecha,empleado_id,' +
+  'created_at,updated_at,rendicion_transportista_id,rendicion_fecha,empleado_id,' +
   'rubro:gasto_rubros(id,nombre,grupo,pide_litros_km),' +
   'vehiculo:vehiculos(id,patente,descripcion)'

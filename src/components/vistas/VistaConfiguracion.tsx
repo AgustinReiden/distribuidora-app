@@ -493,11 +493,16 @@ function FormDiasAtrasFechaPedido({
             onChange={(e) => setValor(e.target.value)}
             disabled={!puedeEditar}
             aria-invalid={invalido}
-            aria-describedby={invalido ? 'dias-atras-fecha-pedido-error' : undefined}
+            aria-describedby={invalido ? 'dias-atras-fecha-pedido-error dias-atras-fecha-pedido-ayuda' : 'dias-atras-fecha-pedido-ayuda'}
             className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
           <span className="text-stone-500 dark:text-stone-400">días</span>
         </div>
+        {/* 1543-b5: con 0 la medianoche corta un pedido tomado sin señal. Es el diseño. */}
+        <p id="dias-atras-fecha-pedido-ayuda" className="text-xs text-stone-500 dark:text-stone-400 mt-2">
+          Con 0, un pedido tomado sin señal a las 23:50 y sincronizado a las 00:10 se rechaza: su
+          fecha ya no es la de hoy. Es así a propósito. Con 1 o más días ese pedido entra.
+        </p>
         {invalido && (
           <p id="dias-atras-fecha-pedido-error" role="alert" className="text-xs text-red-600 mt-2">
             Ingresá una cantidad entera de días entre 0 y {DIAS_ATRAS_FECHA_PEDIDO_MAXIMO}.
