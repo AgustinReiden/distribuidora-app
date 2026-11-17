@@ -1077,8 +1077,12 @@ describe('ModalPedido — deuda previa del cliente', () => {
   })
 
   // #1560: el monto del pago parcial es plata: «1.000,50» no puede quedar en 0 (el
-  // `type="number"` lo dejaba vacío) y «1.000» es mil.
-  it('el pago parcial se lee con el punto de miles', async () => {
+  // `type="number"` lo dejaba vacío). D17 (cambió de regla): tipeado, el punto es la coma
+  // decimal; pegado, «1.000,50» es mil y cincuenta centavos.
+  it.each([
+    ['1000,50', 'tipea'],
+    ['1.000,50', 'pega'],
+  ])('el pago parcial lee %j cuando se %s', async (texto, como) => {
     const { user } = montar({ puedeVerDeuda: true })
 
     await elegirCliente(user, 'Despensa Saldo Favor')
@@ -1087,8 +1091,23 @@ describe('ModalPedido — deuda previa del cliente', () => {
     await user.selectOptions(screen.getByDisplayValue('Pendiente'), 'parcial')
     const monto = screen.getByPlaceholderText('Ingrese el monto pagado')
     await user.clear(monto)
-    await user.type(monto, '1.000,50')
+    if (como === 'tipea') await user.type(monto, texto)
+    else await user.paste(texto)
     expect(screen.getByText('Se registran sólo $ 850,00: el resto ya lo cubre el saldo a favor.')).toBeInTheDocument()
+  })
+
+  it('el pago parcial tipeado «1.000» se ve «1,000» y es un peso', async () => {
+    const { user } = montar({ puedeVerDeuda: true })
+
+    await elegirCliente(user, 'Despensa Saldo Favor')
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.selectOptions(screen.getByDisplayValue('Pendiente'), 'parcial')
+    const monto = screen.getByPlaceholderText('Ingrese el monto pagado')
+    await user.clear(monto)
+    await user.type(monto, '1.000')
+    expect(monto).toHaveValue('1,000')
+    expect(screen.getByText(/Resta por pagar: \$\s849,00/)).toBeInTheDocument()
   })
 
   it('sin permiso para ver el saldo, ni el aviso ni el descuento del cobro', async () => {
@@ -1206,12 +1225,16 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
   })
 
   // #1560: el campo era `type="number"`, que deja vacío «1.500,50»: el precio no cambiaba y
-  // nadie avisaba. Ahora es texto y lo lee `parsePrecio`, con el punto de miles.
+  // nadie avisaba. Ahora es texto y lo lee `parsePrecio`. D17: la tecla del punto es la coma
+  // decimal (cambió de regla: «1.500» tipeado era mil quinientos y ahora es uno y medio, y se ve
+  // «1,500»); pegado, «1.500,50» sigue siendo mil quinientos y cincuenta.
   it.each([
-    ['1.500,50', 1500.5],
-    ['1.500', 1500],
-    ['1250,5', 1250.5],
-  ])('el admin tipea %j y el precio queda en %d', async (tipeado, esperado) => {
+    ['1500,50', 'tipea', 1500.5],
+    ['1.500', 'tipea', 1.5],
+    ['1250,5', 'tipea', 1250.5],
+    ['1.500,50', 'pega', 1500.5],
+    ['1.500', 'pega', 1500],
+  ])('el admin %2$s %1$j y el precio queda en %3$d', async (texto, como, esperado) => {
     const { user, onActualizarPrecioSpy } = montar({ isAdmin: true })
 
     await agregarProducto(user, 'Gaseosa')
@@ -1221,10 +1244,29 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     // El precio vigente se precarga con coma decimal (`numeroEditable`), no con punto.
     expect(input).toHaveValue('1250')
     await user.clear(input)
-    await user.type(input, tipeado)
+    if (como === 'tipea') await user.type(input, texto)
+    else await user.paste(texto)
     await user.keyboard('{Enter}')
 
     expect(onActualizarPrecioSpy).toHaveBeenCalledWith('1', esperado)
+  })
+
+  // #1560-b2: «1.500,50» tipeado queda «1,500,50», que no se entiende: el precio no cambia y el
+  // campo sigue abierto, marcado, en vez de cerrarse como si nada.
+  it('un precio que no se entiende queda a la vista y no se guarda', async () => {
+    const { user, onActualizarPrecioSpy } = montar({ isAdmin: true })
+
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
+    await user.clear(input)
+    await user.type(input, '1.500,50')
+    expect(input).toHaveValue('1,500,50')
+    await user.keyboard('{Enter}')
+
+    expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
+    expect(screen.getByRole('textbox', { name: 'Editar precio unitario' })).toHaveAttribute('aria-invalid', 'true')
   })
 
   it('sin ser admin el precio no es editable', async () => {

@@ -23,6 +23,7 @@ import {
   useGuardarProductoMedidasMutation,
 } from '../../hooks/queries'
 import { useAuth } from '../../hooks/supabase/useAuth'
+import { leerNumero, teclearNumero } from '../../utils/normalizarNumero'
 
 export interface ProductoMedidasProps {
   /** Producto en edición. Sin id (alta nueva) la sección no se muestra. */
@@ -33,15 +34,15 @@ export interface ProductoMedidasProps {
 const mostrar = (n: number | undefined): string =>
   n === undefined ? '' : String(Math.round(n * 10000) / 10000).replace('.', ',')
 
-/** Lo tipeado → número válido (> 0), null (vacío = borrar) o undefined (basura). */
-function leer(texto: string): number | null | undefined {
-  // Con coma, la coma es el decimal y los puntos son miles ("1.200,5"); sin
-  // coma, el punto es el decimal ("333.33").
-  const crudo = texto.trim()
-  const t = crudo.includes(',') ? crudo.replace(/\./g, '').replace(',', '.') : crudo
-  if (t === '') return null
-  const n = Number(t)
-  return Number.isFinite(n) && n > 0 ? n : undefined
+/**
+ * Lo tipeado → número válido (> 0), null (vacío = borrar) o undefined (basura). Lo lee el lector
+ * de toda la app (#1560-b5): tenía uno propio, en el que «1.200» pegado era 1,2. La tecla del
+ * punto se escribe como coma al tipear (D17), así que «1.200» tipeado se ve «1,200».
+ */
+function leerMedida(texto: string): number | null | undefined {
+  if (texto.trim() === '') return null
+  const n = leerNumero(texto)
+  return n !== null && n > 0 ? n : undefined
 }
 
 export default function ProductoMedidas({ productoId }: ProductoMedidasProps) {
@@ -63,7 +64,7 @@ export default function ProductoMedidas({ productoId }: ProductoMedidasProps) {
   async function confirmar(medidaId: string) {
     const texto = borrador[medidaId]
     if (texto === undefined) return
-    const nuevo = leer(texto)
+    const nuevo = leerMedida(texto)
     if (nuevo === undefined) {
       setEstado(e => ({ ...e, [medidaId]: 'invalido' }))
       return
@@ -108,7 +109,7 @@ export default function ProductoMedidas({ productoId }: ProductoMedidasProps) {
                 value={borrador[m.id] ?? mostrar(propio)}
                 placeholder={heredado !== undefined ? `${mostrar(heredado)} (de ${base?.nombre})` : 'sin cargar'}
                 onChange={e => {
-                  const v = e.target.value
+                  const v = teclearNumero(borrador[m.id] ?? mostrar(propio), e.target.value)
                   setBorrador(b => ({ ...b, [m.id]: v }))
                   setEstado(s => {
                     const { [m.id]: _, ...resto } = s

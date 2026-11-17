@@ -17,9 +17,22 @@ import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { formatPrecio } from '../../utils/formatters'
 import { numeroEditable, parsePrecio } from '../../utils/calculations'
+import { esTextoIlegible, leerEntero, teclearNumero } from '../../utils/normalizarNumero'
 import { describirReglaEscala } from '../../utils/describirReglaEscala'
 import type { EscalaPrecio } from '../../utils/precioMayorista'
 import type { GrupoPrecioConDetalles, GrupoPrecioFormInput, ProductoDB } from '../../types'
+
+/**
+ * Una cantidad tipeada, o NaN si no es un entero (#1560-b3). Era `parseInt` sobre un
+ * `type="number"`: «1.250» era 1,25 para el navegador y quedaba en 1; «1,5» quedaba en 1.
+ */
+const entero = (texto: string): number => leerEntero(texto) ?? NaN
+
+/** Hay algo escrito en la cantidad y no es un entero. */
+const cantidadIlegible = (texto: string): boolean => texto.trim() !== '' && Number.isNaN(entero(texto))
+
+const MENSAJE_CANTIDAD_ILEGIBLE = 'Las cantidades van en unidades enteras, sin coma'
+const MENSAJE_PRECIO_ILEGIBLE = 'No se entiende un precio: los decimales van con coma, por ejemplo 1500,50'
 
 export interface ModalGrupoPrecioProps {
   grupo: GrupoPrecioConDetalles | null
@@ -208,7 +221,7 @@ export default function ModalGrupoPrecio({
     setEscalas(prev => prev.map((e, i) => {
       if (i !== escalaIdx) return e
       const next = { ...e.minimosPorProducto }
-      if (!value || value === '0' || parseInt(value) <= 0) {
+      if (!value || value === '0' || entero(value) <= 0) {
         delete next[productoId]
       } else {
         next[productoId] = { cantidad: value, precio: next[productoId]?.precio || '' }
@@ -261,7 +274,17 @@ export default function ModalGrupoPrecio({
         cantidadRefs.current[index]?.focus()
         return
       }
-      const qty = parseInt(e.cantidadMinima)
+      if (cantidadIlegible(e.cantidadMinima)) {
+        setError(MENSAJE_CANTIDAD_ILEGIBLE)
+        cantidadRefs.current[index]?.focus()
+        return
+      }
+      if (esTextoIlegible(e.precioUnitario)) {
+        setError(MENSAJE_PRECIO_ILEGIBLE)
+        precioRefs.current[index]?.focus()
+        return
+      }
+      const qty = entero(e.cantidadMinima)
       if (isNaN(qty) || qty <= 0) {
         setError('Las cantidades minimas deben ser mayores a 0')
         cantidadRefs.current[index]?.focus()
@@ -283,12 +306,21 @@ export default function ModalGrupoPrecio({
       }
 
       if (e.combinada) {
-        const k = parseInt(e.minProductosDistintos)
+        const reglas = Object.values(e.minimosPorProducto)
+        if (cantidadIlegible(e.minProductosDistintos) || reglas.some(v => cantidadIlegible(v.cantidad))) {
+          setError(MENSAJE_CANTIDAD_ILEGIBLE)
+          return
+        }
+        if (reglas.some(v => esTextoIlegible(v.precio))) {
+          setError(MENSAJE_PRECIO_ILEGIBLE)
+          return
+        }
+        const k = entero(e.minProductosDistintos)
         if (isNaN(k) || k < 2) {
           setError(`Con "Requiere combinacion" activo, el minimo de productos distintos debe ser >= 2 (escala ${qty}u)`)
           return
         }
-        const minimosActivos = Object.entries(e.minimosPorProducto).filter(([, v]) => parseInt(v.cantidad) > 0)
+        const minimosActivos = Object.entries(e.minimosPorProducto).filter(([, v]) => entero(v.cantidad) > 0)
         if (minimosActivos.length < k) {
           setError(`La escala ${qty}u requiere ${k} productos distintos pero solo ${minimosActivos.length} tienen minimo configurado.`)
           return
@@ -308,7 +340,7 @@ export default function ModalGrupoPrecio({
         }
         // Coherencia: suma de los K minimos mas bajos debe ser <= cantidad_minima total
         const minimosOrdenados = minimosActivos
-          .map(([, v]) => parseInt(v.cantidad))
+          .map(([, v]) => entero(v.cantidad))
           .sort((a, b) => a - b)
         const sumaMinima = minimosOrdenados.slice(0, k).reduce((s, n) => s + n, 0)
         if (sumaMinima > qty) {
@@ -337,7 +369,7 @@ export default function ModalGrupoPrecio({
     }
 
     // Check duplicates in cantidad_minima
-    const cantidades = escalasNoVacias.map(e => parseInt(e.cantidadMinima))
+    const cantidades = escalasNoVacias.map(e => entero(e.cantidadMinima))
     if (new Set(cantidades).size !== cantidades.length) {
       setError('No puede haber dos escalas con la misma cantidad minima')
       return
@@ -358,22 +390,22 @@ export default function ModalGrupoPrecio({
           // porque todos los productos con minimo tienen override configurado).
           if (sinPrecioBase && e.combinada) {
             const overrides = Object.values(e.minimosPorProducto)
-              .filter(v => parseInt(v.cantidad) > 0 && v.precio)
+              .filter(v => entero(v.cantidad) > 0 && v.precio)
               .map(v => parsePrecio(v.precio))
               .filter(n => !isNaN(n) && n > 0)
             if (overrides.length > 0) precioBase = Math.max(...overrides)
           }
 
           const base = {
-            cantidadMinima: parseInt(e.cantidadMinima),
+            cantidadMinima: entero(e.cantidadMinima),
             precioUnitario: precioBase,
             etiqueta: e.etiqueta.trim() || null,
-            minProductosDistintos: e.combinada ? parseInt(e.minProductosDistintos) : 1,
+            minProductosDistintos: e.combinada ? entero(e.minProductosDistintos) : 1,
           }
           if (!e.combinada) return base
           const minimos: Record<string, { cantidad: number; precioOverride?: number | null }> = {}
           for (const [pid, v] of Object.entries(e.minimosPorProducto)) {
-            const cant = parseInt(v.cantidad)
+            const cant = entero(v.cantidad)
             if (isNaN(cant) || cant <= 0 || !productoIds.has(pid)) continue
             const precioRaw = v.precio && v.precio.trim() !== '' ? parsePrecio(v.precio) : null
             const precioOverride = precioRaw != null && !isNaN(precioRaw) && precioRaw > 0 ? precioRaw : null
@@ -510,14 +542,14 @@ export default function ModalGrupoPrecio({
             <div className="space-y-2">
               {escalas.map((escala, index) => {
                 const previewEscala: EscalaPrecio = {
-                  cantidadMinima: parseInt(escala.cantidadMinima) || 0,
+                  cantidadMinima: entero(escala.cantidadMinima) || 0,
                   precioUnitario: parsePrecio(escala.precioUnitario) || 0,
                   etiqueta: escala.etiqueta || null,
-                  minProductosDistintos: escala.combinada ? parseInt(escala.minProductosDistintos) || 1 : 1,
+                  minProductosDistintos: escala.combinada ? entero(escala.minProductosDistintos) || 1 : 1,
                   minimosPorProducto: new Map(
                     Object.entries(escala.minimosPorProducto)
                       .map(([pid, v]) => {
-                        const cant = parseInt(v.cantidad) || 0
+                        const cant = entero(v.cantidad) || 0
                         const precioOv = v.precio && v.precio.trim() !== '' ? parsePrecio(v.precio) : null
                         return [
                           pid,
@@ -536,12 +568,12 @@ export default function ModalGrupoPrecio({
                     <div className="flex items-center gap-2">
                       <input
                         ref={el => { cantidadRefs.current[index] = el }}
-                        type="number"
+                        // Texto y no `number` (#1560-b3): igual abre el teclado numérico.
+                        type="text"
                         inputMode="numeric"
-                        step="1"
-                        min="1"
                         value={escala.cantidadMinima}
-                        onChange={e => actualizarEscala(index, { cantidadMinima: e.target.value })}
+                        aria-invalid={cantidadIlegible(escala.cantidadMinima)}
+                        onChange={e => actualizarEscala(index, { cantidadMinima: teclearNumero(escala.cantidadMinima, e.target.value) })}
                         className="flex-1 px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                         placeholder="Cant. minima total"
                       />
@@ -552,7 +584,8 @@ export default function ModalGrupoPrecio({
                           type="text"
                           inputMode="decimal"
                           value={escala.precioUnitario}
-                          onChange={e => actualizarEscala(index, { precioUnitario: e.target.value })}
+                          aria-invalid={esTextoIlegible(escala.precioUnitario)}
+                          onChange={e => actualizarEscala(index, { precioUnitario: teclearNumero(escala.precioUnitario, e.target.value) })}
                           className="w-full pl-7 pr-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                           placeholder={escala.combinada ? 'Precio base (opcional)' : 'Precio c/u'}
                           title={escala.combinada
@@ -624,12 +657,11 @@ export default function ModalGrupoPrecio({
                             Mínimo de productos distintos:
                           </label>
                           <input
-                            type="number"
+                            type="text"
                             inputMode="numeric"
-                            min="2"
-                            step="1"
                             value={escala.minProductosDistintos}
-                            onChange={e => actualizarEscala(index, { minProductosDistintos: e.target.value })}
+                            aria-invalid={cantidadIlegible(escala.minProductosDistintos)}
+                            onChange={e => actualizarEscala(index, { minProductosDistintos: teclearNumero(escala.minProductosDistintos, e.target.value) })}
                             className="w-16 px-2 py-1 border rounded text-xs text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                           />
                         </div>
@@ -651,19 +683,18 @@ export default function ModalGrupoPrecio({
                                 const regla = escala.minimosPorProducto[String(p.id)]
                                 const cantidadValue = regla?.cantidad || ''
                                 const precioValue = regla?.precio || ''
-                                const tieneCantidad = !!cantidadValue && parseInt(cantidadValue) > 0
+                                const tieneCantidad = !!cantidadValue && entero(cantidadValue) > 0
                                 return (
                                   <div key={p.id} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center text-xs">
                                     <span className="truncate dark:text-gray-200" title={p.nombre}>
                                       {p.nombre}
                                     </span>
                                     <input
-                                      type="number"
+                                      type="text"
                                       inputMode="numeric"
-                                      min="1"
-                                      step="1"
                                       value={cantidadValue}
-                                      onChange={e => actualizarMinimoProducto(index, String(p.id), e.target.value)}
+                                      aria-invalid={cantidadIlegible(cantidadValue)}
+                                      onChange={e => actualizarMinimoProducto(index, String(p.id), teclearNumero(cantidadValue, e.target.value))}
                                       className="w-16 px-2 py-1 border rounded text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                                       placeholder="Min"
                                     />
@@ -673,7 +704,8 @@ export default function ModalGrupoPrecio({
                                         type="text"
                                         inputMode="decimal"
                                         value={precioValue}
-                                        onChange={e => actualizarPrecioProducto(index, String(p.id), e.target.value)}
+                                        aria-invalid={esTextoIlegible(precioValue)}
+                                        onChange={e => actualizarPrecioProducto(index, String(p.id), teclearNumero(precioValue, e.target.value))}
                                         disabled={!tieneCantidad}
                                         className="w-full pl-5 pr-2 py-1 border rounded text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:cursor-not-allowed"
                                         placeholder={tieneCantidad ? 'Base' : ''}

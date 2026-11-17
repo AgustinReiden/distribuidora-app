@@ -31,16 +31,23 @@ function montar() {
 const campoMonto = (): HTMLInputElement => screen.getAllByPlaceholderText('0.00')[0] as HTMLInputElement
 
 describe('ModalRegistrarPago · el monto leído', () => {
+  // D17 (#1560, #1542; cambió de regla): la tecla del punto es la coma decimal y se ve como coma,
+  // así que «150.000» tipeado queda «150,000» y es $150, y el cobrador lo ve en «Se registra». Lo
+  // pegado se lee como la app muestra la plata.
   it.each([
-    ['150.000', /150\.000,00/, 150000],
-    ['1.500,50', /1\.500,50/, 1500.5],
-    ['12.50', /12,50/, 12.5],
-  ])('«%s» se muestra leído y se registra así', async (tipeado, leido, monto) => {
+    ['150000', 'tipea', /150\.000,00/, 150000],
+    ['1500,50', 'tipea', /1\.500,50/, 1500.5],
+    ['12.50', 'tipea', /12,50/, 12.5],
+    ['150.000', 'tipea', /\$\s?150,00/, 150],
+    ['150.000', 'pega', /150\.000,00/, 150000],
+    ['1.500,50', 'pega', /1\.500,50/, 1500.5],
+  ])('«%s» que se %s se muestra leído y se registra así', async (texto, como, leido, monto) => {
     const user = userEvent.setup()
     const { onConfirmar } = montar()
 
     await user.clear(campoMonto())
-    await user.type(campoMonto(), tipeado)
+    if (como === 'tipea') await user.type(campoMonto(), texto)
+    else await user.paste(texto)
 
     expect(screen.getByText(/Se registra:/)).toHaveTextContent(leido)
 

@@ -162,21 +162,61 @@ describe('ModalGrupoPrecio', () => {
 
   // #1560: el precio de la escala es plata. Con `type="number"`, «1.500,50» quedaba vacío
   // (y la condición, sin precio); ahora es texto y lo lee `parsePrecio`.
+  // D17 (cambió de regla): la tecla del punto es la coma decimal, así que «1.500» tipeado es uno y
+  // medio (y se ve «1,500»); pegado, se lee como se muestra la plata.
   it.each([
-    ['1.500,50', 1500.5],
-    ['1.500', 1500],
-    ['850,5', 850.5],
-  ])('el precio %j se guarda %d', async (tipeado, esperado) => {
+    ['1500,50', 'tipea', 1500.5],
+    ['1.500', 'tipea', 1.5],
+    ['850,5', 'tipea', 850.5],
+    ['1.500,50', 'pega', 1500.5],
+    ['1.500', 'pega', 1500],
+  ])('el precio %j que se %s se guarda %d', async (texto, como, esperado) => {
     const { onSave } = renderModal()
     await userEvent.type(screen.getByPlaceholderText('Ej: Papas Fritas'), 'Fideos Cotella')
     await userEvent.click(screen.getByText('CODITO COTELLA 500GRS'))
     await userEvent.type(screen.getByPlaceholderText('Cant. minima total'), '12')
-    await userEvent.type(screen.getByPlaceholderText('Precio c/u'), tipeado)
+    if (como === 'tipea') await userEvent.type(screen.getByPlaceholderText('Precio c/u'), texto)
+    else { await userEvent.click(screen.getByPlaceholderText('Precio c/u')); await userEvent.paste(texto) }
     await userEvent.click(guardar())
 
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({ escalas: [expect.objectContaining({ cantidadMinima: 12, precioUnitario: esperado })] }),
     )
+  })
+
+  // #1560-b3: la cantidad era `type="number"` y la leía `parseInt`: «1.250» quedaba en 1.
+  it('la cantidad mínima pegada «1.250» son 1250 unidades', async () => {
+    const { onSave } = renderModal()
+    await userEvent.type(screen.getByPlaceholderText('Ej: Papas Fritas'), 'Fideos Cotella')
+    await userEvent.click(screen.getByText('CODITO COTELLA 500GRS'))
+    const cantidad = screen.getByPlaceholderText('Cant. minima total')
+    expect(cantidad).toHaveAttribute('type', 'text')
+    expect(cantidad).toHaveAttribute('inputmode', 'numeric')
+    await userEvent.click(cantidad)
+    await userEvent.paste('1.250')
+    await userEvent.type(screen.getByPlaceholderText('Precio c/u'), '850')
+    await userEvent.click(guardar())
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ escalas: [expect.objectContaining({ cantidadMinima: 1250, precioUnitario: 850 })] }),
+    )
+  })
+
+  it.each([
+    ['la cantidad', 'Cant. minima total', '1.5', '850', 'Las cantidades van en unidades enteras, sin coma'],
+    ['el precio', 'Precio c/u', '1.000,50', '12', 'No se entiende un precio'],
+  ])('%s que no se entiende no se guarda como otro número', async (_que, campo, texto, otro, mensaje) => {
+    const { onSave } = renderModal()
+    await userEvent.type(screen.getByPlaceholderText('Ej: Papas Fritas'), 'Fideos Cotella')
+    await userEvent.click(screen.getByText('CODITO COTELLA 500GRS'))
+    const otroCampo = campo === 'Precio c/u' ? 'Cant. minima total' : 'Precio c/u'
+    await userEvent.type(screen.getByPlaceholderText(otroCampo), otro)
+    await userEvent.type(screen.getByPlaceholderText(campo), texto)
+    expect(screen.getByPlaceholderText(campo)).toHaveAttribute('aria-invalid', 'true')
+    await userEvent.click(guardar())
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText(new RegExp(mensaje))).toBeInTheDocument()
   })
 
   it('el precio guardado con centavos se precarga con coma', () => {

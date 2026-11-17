@@ -16,17 +16,25 @@
  * Usa `type="text"` + `inputMode` a propósito: el `type="number"` es lo que
  * impide controlar el string vacío y los ceros a la izquierda. Con `text`
  * controlamos el valor y igual sale el teclado numérico en mobile.
+ *
+ * La tecla del punto es la coma decimal y se ve como coma (D17, #1560): «1.250»
+ * tipeado queda «1,250» y es uno coma veinticinco. Lo pegado entra tal cual
+ * («1.250,50» es mil doscientos cincuenta y cincuenta). Lo que no se entiende
+ * («1,000,50») queda a la vista en rojo y no se confirma: el campo no lo
+ * guarda como otro número.
  */
 import {
   useState,
   useRef,
+  useLayoutEffect,
   InputHTMLAttributes,
   ChangeEvent,
   FocusEvent,
   KeyboardEvent,
   ReactElement,
 } from 'react'
-import { numeroEditable, parseDecimal, parsePrecio } from '../../utils/calculations'
+import { numeroEditable, redondear } from '../../utils/calculations'
+import { NUMERO_ILEGIBLE, leerDecimalSinMiles, leerNumero, teclearNumero } from '../../utils/normalizarNumero'
 
 type InheritedInputProps = Omit<
   InputHTMLAttributes<HTMLInputElement>,
@@ -83,6 +91,15 @@ export function NumberInput({
   // draft === '...' -> el usuario está editando (puede ser '' o parcial).
   const [draft, setDraft] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  // Al escribir la tecla del punto como coma, React deja el cursor al final: se repone.
+  const cursor = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    const input = inputRef.current
+    if (cursor.current !== null && input && document.activeElement === input) {
+      input.setSelectionRange(cursor.current, cursor.current)
+    }
+    cursor.current = null
+  })
 
   /** Limpia el string a un numérico tipeable (sin forzar a número todavía). */
   const sanitize = (raw: string): string => {
@@ -106,9 +123,16 @@ export function NumberInput({
   const toNumber = (raw: string): number | null => {
     const t = raw.trim()
     if (t === '') return null
-    const n = integer ? parseInt(t, 10) : sinMiles ? parseDecimal(t) : parsePrecio(t)
-    return Number.isFinite(n) ? n : null
+    if (integer) {
+      const n = parseInt(t, 10)
+      return Number.isFinite(n) ? n : null
+    }
+    const n = sinMiles ? leerDecimalSinMiles(t) : leerNumero(t)
+    return n === null ? null : redondear(n, 2)
   }
+
+  /** Escrito y no se entiende: se muestra en rojo y no se confirma. */
+  const ilegible = (raw: string | null): boolean => raw !== null && raw.trim() !== '' && toNumber(raw) === null
 
   const clamp = (n: number): number => {
     let v = n
@@ -118,7 +142,10 @@ export function NumberInput({
   }
 
   const handleChange = (e: ChangeEvent<HTMLInputElement>): void => {
-    const next = sanitize(e.target.value)
+    const crudo = e.target.value
+    const tecleado = integer ? crudo : teclearNumero(display, crudo)
+    if (tecleado !== crudo) cursor.current = e.target.selectionStart
+    const next = sanitize(tecleado)
     setDraft(next)
     if (commitOnChange) {
       // En vivo mandamos el número crudo (como hacía el parseInt anterior);
@@ -131,6 +158,8 @@ export function NumberInput({
 
   const commit = (): void => {
     if (draft === null) return
+    // Lo que no se entiende no se confirma (ni como vacío): queda a la vista para corregirlo.
+    if (ilegible(draft)) return
     const parsed = toNumber(draft)
     setDraft(null)
     if (parsed === null && onVaciar) {
@@ -161,6 +190,7 @@ export function NumberInput({
   // El valor del padre se muestra con coma decimal: «1.5» con dos ceros más sería «1.500»,
   // que se lee como mil quinientos; «1,500» sigue siendo uno y medio (#1560).
   const display = draft !== null ? draft : numeroEditable(value)
+  const invalido = ilegible(draft)
 
   return (
     <input
@@ -168,6 +198,9 @@ export function NumberInput({
       ref={inputRef}
       type="text"
       inputMode={integer ? 'numeric' : 'decimal'}
+      aria-invalid={invalido ? true : rest['aria-invalid']}
+      title={invalido ? NUMERO_ILEGIBLE : rest.title}
+      className={invalido ? `${rest.className ?? ''} border-red-500 ring-1 ring-red-500` : rest.className}
       value={display}
       onChange={handleChange}
       onFocus={handleFocus}

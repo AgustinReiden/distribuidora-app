@@ -4,6 +4,7 @@ import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters
 import { fechaPedidoFueraDeRango, mensajeFechaAnteriorAlPiso, pisoFechaPedido } from '../../utils/fechaPedido';
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo';
 import { numeroEditable, parsePrecio } from '../../utils/calculations';
+import { NUMERO_ILEGIBLE, esTextoIlegible, teclearNumero } from '../../utils/normalizarNumero';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { resolverDescuentoPctCliente } from '../../utils/descuentoCliente';
@@ -1406,14 +1407,19 @@ const ModalPedido = memo(function ModalPedido({
                                     <input
                                       ref={precioInputRef}
                                       // Texto y no `number` (#1560): el `number` deja vacío «1.500,50» y
-                                      // el precio no cambiaba sin aviso. Lo lee `parsePrecio`.
+                                      // el precio no cambiaba sin aviso. Lo lee `parsePrecio`, y la
+                                      // tecla del punto se escribe como coma (D17).
                                       type="text"
                                       inputMode="decimal"
                                       aria-label="Editar precio unitario"
                                       value={editingPriceValue}
-                                      onChange={e => setEditingPriceValue(e.target.value)}
+                                      aria-invalid={esTextoIlegible(editingPriceValue)}
+                                      title={esTextoIlegible(editingPriceValue) ? NUMERO_ILEGIBLE : undefined}
+                                      onChange={e => setEditingPriceValue(teclearNumero(editingPriceValue, e.target.value))}
                                       onKeyDown={e => {
                                         if (e.key === 'Enter') {
+                                          // Lo que no se entiende queda a la vista para corregirlo.
+                                          if (esTextoIlegible(editingPriceValue)) return;
                                           precioResueltoRef.current = true;
                                           const newPrice = parsePrecio(editingPriceValue);
                                           if (newPrice > 0) onActualizarPrecio(item.productoId, newPrice);

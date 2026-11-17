@@ -6,6 +6,7 @@
  */
 import { useState } from 'react'
 import { numeroEditable, parsePrecio } from '../../utils/calculations'
+import { esTextoIlegible, leerEntero, teclearNumero } from '../../utils/normalizarNumero'
 import { formatPrecio } from '../../utils/formatters'
 import { margenesEscala, descuentoSobreLista } from './margenEscala'
 import { Button } from '../ui/Button'
@@ -51,9 +52,19 @@ export default function FormEscalaMayorista({
   const descuento = descuentoSobreLista(precioNum, precioLista)
 
   const submit = (): void => {
-    const cantidadNum = parseInt(cantidad, 10)
-    if (!(cantidadNum > 0)) {
+    // Una cantidad es entera: «1,5» (o «1.250» tipeado, que se escribe «1,250») no se redondea ni
+    // se recorta a 1, como hacía el `parseInt` del `type="number"` (#1560-b3).
+    const cantidadNum = leerEntero(cantidad)
+    if (cantidad.trim() !== '' && cantidadNum === null) {
+      setError('La cantidad va en unidades enteras, sin coma')
+      return
+    }
+    if (!(cantidadNum !== null && cantidadNum > 0)) {
       setError('Poné a partir de cuántas unidades aplica')
+      return
+    }
+    if (esTextoIlegible(precio)) {
+      setError('No se entiende el precio: los decimales van con coma, por ejemplo 1500,50')
       return
     }
     if (!(precioNum > 0)) {
@@ -74,13 +85,13 @@ export default function FormEscalaMayorista({
         <label className="text-xs text-stone-600 dark:text-gray-400">
           Desde
           <input
-            type="number"
+            // Texto y no `number` (#1560-b3): para el navegador «1.250» es 1,25 y el `parseInt`
+            // lo dejaba en 1. Igual abre el teclado numérico.
+            type="text"
             inputMode="numeric"
-            min="1"
-            step="1"
             autoFocus
             value={cantidad}
-            onChange={e => setCantidad(e.target.value)}
+            onChange={e => setCantidad(teclearNumero(cantidad, e.target.value))}
             onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancelar() }}
             className="mt-0.5 block w-20 px-2 py-1 border rounded text-sm text-center dark:bg-gray-800 dark:border-gray-600 dark:text-white"
             aria-label="Cantidad mínima"
@@ -93,7 +104,8 @@ export default function FormEscalaMayorista({
             type="text"
             inputMode="decimal"
             value={precio}
-            onChange={e => setPrecio(e.target.value)}
+            onChange={e => setPrecio(teclearNumero(precio, e.target.value))}
+            aria-invalid={esTextoIlegible(precio)}
             onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancelar() }}
             className="mt-0.5 block w-28 px-2 py-1 border rounded text-sm text-right dark:bg-gray-800 dark:border-gray-600 dark:text-white"
             aria-label="Precio mayorista"

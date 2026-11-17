@@ -7,7 +7,7 @@
  * - Márgenes de ganancia
  */
 
-import { normalizarNumero } from './normalizarNumero'
+import { leerDecimalSinMiles, leerNumero } from './normalizarNumero'
 
 // ============================================
 // CÁLCULOS CON IVA E IMPUESTOS
@@ -340,69 +340,69 @@ export function calcularPrecioDesdeMargen(
  * Parsea un string (con coma o punto decimal) y devuelve un número redondeado a 2 decimales.
  * Devuelve 0 si el input no es parseable. Usa esta función en TODOS los inputs monetarios.
  *
- * El string lo lee `normalizarNumero`, el mismo lector del import de compras (#1560): la app
- * muestra «$ 150.000,00», así que el que tipea escribe así.
- * - La coma es decimal aunque antes haya puntos: "1.500,50" → 1500.5, "1,5" → 1.5.
- * - Sin coma, el punto seguido de grupos de exactamente tres dígitos es de miles:
- *   "1.500" → 1500, "150.000" → 150000, "1.234.567" → 1234567.
- * - Cualquier otro punto es decimal: "12.50" → 12.5, "0.500" → 0.5, "1234.567" → 1234.57.
- * - "280 000" → 280000, como `parseMonto`.
+ * El string lo lee `leerNumero` (`normalizarNumero.ts`), el lector único de los números escritos
+ * a mano (#1560, D17): la coma es decimal y el punto, de miles. Ver la tabla en
+ * `numeroTipeado.tabla.test.ts`:
+ * - "1.500,50" → 1500.5, "1,5" → 1.5, "1.500" → 1500, "1.234.567" → 1234567, "280 000" → 280000.
+ * - Un punto que no es de miles sólo puede ser decimal: "12.50" → 12.5, "0.500" → 0.5.
+ * - Lo que no se entiende ("1,234,567", "1..5", "10-", "1e5", "Infinity") da 0: este lector no
+ *   tiene cómo decir «no se entiende». El campo que tiene que decirlo usa `leerPlataTipeada`.
+ * La tecla del punto se escribe como coma en el campo (`teclearNumero`) antes de llegar acá.
  * Un `number` no pasa por el string: `String(1.125)` sería "1.125", que se lee como 1125.
  * Por lo mismo, un número guardado como string para volver a leerlo va con `toFixed(2)`.
  */
 export function parsePrecio(input: string | number | null | undefined): number {
-  if (input === null || input === undefined) return 0
-  const parsed = typeof input === 'number' ? input : normalizarNumero(input)
-  if (!Number.isFinite(parsed)) return 0
-  return redondear(parsed, 2)
+  const leido = leerNumero(input)
+  return leido === null ? 0 : redondear(leido, 2)
 }
 
 /**
  * La plata tipeada, leída como `parsePrecio` («1.500» = 1500, «1.500,50» = 1500,5) pero sin
- * redondear y con NaN para lo que no es un número: vacío, letras, o sin ningún dígito. Es para el
- * formulario que tiene que decir «no es un monto» o «hasta dos decimales» en vez de corregirlo en
- * silencio, como hace `parsePrecio` (que da 0 y redondea). Acepta el «$» adelante y los miles con
- * espacio, como `normalizarNumero`.
+ * redondear y con NaN para lo que no se entiende: vacío, letras, «1,234,567», «1.50.0», «1e5»
+ * (#1600-b11). Es para el formulario que tiene que decir «no es un monto» o «hasta dos decimales»
+ * en vez de corregirlo en silencio, como hace `parsePrecio` (que da 0 y redondea).
  */
 export function leerPlataTipeada(input: string): number {
-  const t = input.trim()
-  if (!/^\$?\s*-?[\d.,\s]*\d[\d.,\s]*$/.test(t)) return NaN
-  return normalizarNumero(t)
+  return leerNumero(input) ?? NaN
 }
 
 /**
- * Un número como texto para editar, con coma decimal: 125.125 → «125,125», 1500 → «1500».
- * Es lo que se precarga en un campo que después se lee con `parsePrecio`: con punto, «125.125»
- * se leería ciento veinticinco mil (#1560). `null` da el campo vacío.
+ * Un número como texto para editar, con coma decimal y sin miles: 125.125 → «125,125», 1500 →
+ * «1500». Es lo que se precarga en un campo que después se lee con `parsePrecio`: con punto,
+ * «125.125» se leería ciento veinticinco mil (#1560). Sin miles a propósito: borrar un cero de
+ * «1.500» dejaría «1.50», que es uno y medio. Al millonésimo, para no mostrar la cola del double
+ * de un valor calculado («0,30000000000000004», #1560-b4). `null` da el campo vacío.
  */
 export function numeroEditable(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return ''
-  return String(n).replace('.', ',')
+  return String(redondearSQL(n, 6)).replace('.', ',')
 }
 
 /**
  * Como `parsePrecio`, pero sin miles: el punto y la coma son decimales («38.512» → 38.51,
  * «12,5» → 12.5). Para lo que no es plata y no llega a mil: litros, porcentajes, pesos (#1560).
- * Con más de un separador («1.234,5») no se sabe qué es: da 0, como lo ilegible.
+ * Con más de un separador («1.234,5») no se sabe qué es: da 0, como lo ilegible. Lo lee
+ * `leerDecimalSinMiles`.
  */
 export function parseDecimal(input: string | number | null | undefined): number {
-  if (input === null || input === undefined) return 0
-  if (typeof input === 'number') return Number.isFinite(input) ? redondear(input, 2) : 0
-  const t = input.trim().replace(',', '.')
-  if (!/^-?(\d+\.?\d*|\.\d+)$/.test(t)) return 0
-  return redondear(Number(t), 2)
+  const leido = leerDecimalSinMiles(input)
+  return leido === null ? 0 : redondear(leido, 2)
 }
 
 /**
- * Redondea un número a la cantidad de decimales especificada
+ * Redondea medio hacia afuera, como `round(numeric, n)` de Postgres (#1560-b1): el server
+ * compara al centavo (el piso de precio, el cobro), así que el front tiene que dar el mismo
+ * número. Con `Math.round(v * 100) / 100`, 1,005 daba 1 y 0,145 daba 0,14 (el server, 1,01 y
+ * 0,15), y un 10 % sobre $1,15 daba $1,03 contra $1,04. Es `redondearSQL`; lo que no es finito
+ * vuelve tal cual, como antes.
  *
  * @param valor - Número a redondear
  * @param decimales - Cantidad de decimales (default: 2)
  * @returns Número redondeado
  */
 export function redondear(valor: number, decimales: number = 2): number {
-  const factor = Math.pow(10, decimales);
-  return Math.round(valor * factor) / factor;
+  if (!Number.isFinite(valor)) return valor;
+  return redondearSQL(valor, decimales);
 }
 
 /**
