@@ -19,7 +19,7 @@
  * La baja va por `dar_de_baja_lote`, que escribe la merma con motivo
  * 'vencimiento' y recién después toca el stock. Un lote que todavía no venció
  * también se puede dar de baja (rotura, pérdida), pero con el motivo escrito:
- * la merma va como 'otro' con ese texto (#1558, 1558-b6). El costo lo congela solo el
+ * la merma va como 'decomiso' (una pérdida) con ese texto (#1558, 1558-b6). El costo lo congela solo el
  * trigger de la mig 119, así que la pérdida queda valorizada sin que esta
  * pantalla tenga que saber nada de costos.
  *

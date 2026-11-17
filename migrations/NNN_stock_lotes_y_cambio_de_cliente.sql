@@ -78,9 +78,14 @@
 -- `fecha_vencimiento < _tablero_hoy()`, la regla de `registrar_merma_manual`
 -- y del canje (508). El lote vencido sigue igual (motivo opcional, merma
 -- 'vencimiento', ledger 'lote_vencido'). El que no venció sin motivo se
--- rechaza con un mensaje; con motivo, la merma va con motivo 'otro' y el texto
--- del usuario, y el ledger con 'lote_baja'. La firma no cambia (el front la
--- llama con `p_observaciones`).
+-- rechaza con un mensaje; con motivo, la merma va con motivo 'decomiso' y el
+-- texto del usuario, y el ledger con 'lote_baja'. Decisión del dueño (17/11,
+-- H3 de la revisión de la tarjeta): esa baja es una pérdida, no un ajuste.
+-- 'decomiso' es el motivo de la lista que `merma_clasificacion` cuenta como
+-- 'perdida' sin afirmar una causa (rotura o robo lo harían): es el mismo que el
+-- canje usa para un devuelto que no es por vencimiento ni rotura (508). La
+-- causa real es el texto del usuario. La firma no cambia (el front la llama
+-- con `p_observaciones`).
 --
 -- =========================================================================
 -- 5 · 1558-b7 · `aplicar_control_stock` ACEPTABA UN STOCK DE PLANILLA
@@ -380,6 +385,26 @@ $r$  -- M3-1 (#1603): el bloque que cerro el alta dice de que lote salio su fard
           v_nuevos := v_nuevos || jsonb_build_array(jsonb_build_object('lote_id', NULL, 'cantidad', v_pend));
         END IF;
       END LOOP;
+      -- En el orden en que lo anota el motor: primero la bolsa (lo que la
+      -- bajada comio primero) y despues los lotes por vencimiento. El motor
+      -- deshace del final al principio: asi deshacer un solo fardo (una
+      -- salvedad sobre parte del regalo) da lo mismo con o sin cambio de
+      -- cliente, el lote antes que la bolsa (H2 de la revision de B3).
+      SELECT CASE WHEN COALESCE(sum((e->>'cantidad')::int) FILTER (WHERE e->>'lote_id' IS NULL), 0) > 0
+                  THEN jsonb_build_array(jsonb_build_object(
+                         'lote_id', NULL,
+                         'cantidad', sum((e->>'cantidad')::int) FILTER (WHERE e->>'lote_id' IS NULL)))
+                  ELSE '[]'::jsonb END
+             || COALESCE((SELECT jsonb_agg(jsonb_build_object('lote_id', x.lote_id, 'cantidad', x.cantidad)
+                                           ORDER BY l.fecha_vencimiento, l.id)
+                            FROM (SELECT (y->>'lote_id')::bigint AS lote_id, sum((y->>'cantidad')::int) AS cantidad
+                                    FROM jsonb_array_elements(v_nuevos) y
+                                   WHERE y->>'lote_id' IS NOT NULL
+                                   GROUP BY 1) x
+                            JOIN producto_lotes l ON l.id = x.lote_id AND l.sucursal_id = v_sucursal),
+                         '[]'::jsonb)
+        INTO v_nuevos
+        FROM jsonb_array_elements(v_nuevos) e;
       IF v_nuevos IS DISTINCT FROM v_bloque.lotes_pendientes THEN
         UPDATE promo_ajustes SET lotes_pendientes = v_nuevos WHERE id = v_bloque.id;
       END IF;
@@ -474,8 +499,10 @@ $a$    v_lote.producto_id, p_cantidad, 'vencimiento',
              'Lote vencido el ' || to_char(v_lote.fecha_vencimiento, 'DD/MM/YYYY')),
 $a$,
 $r$    v_lote.producto_id, p_cantidad,
-    -- 1558-b6: el que no vencio no es una merma por vencimiento.
-    CASE WHEN v_vencido THEN 'vencimiento' ELSE 'otro' END,
+    -- 1558-b6: el que no vencio no es una merma por vencimiento. Es una perdida
+    -- (decision del dueño del 17/11): 'decomiso' es la de la lista que no afirma
+    -- una causa, como en el canje; la causa es el texto del usuario.
+    CASE WHEN v_vencido THEN 'vencimiento' ELSE 'decomiso' END,
     CASE WHEN v_vencido
          THEN COALESCE(v_motivo, 'Lote vencido el ' || to_char(v_lote.fecha_vencimiento, 'DD/MM/YYYY'))
          ELSE 'Baja del lote que vence el ' || to_char(v_lote.fecha_vencimiento, 'DD/MM/YYYY')
@@ -563,11 +590,11 @@ DECLARE
   x record;
 BEGIN
   FOR r IN SELECT * FROM (VALUES
-    ('public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)', '0237d4b566ba9a30d34c3276eb4dc480', true,
+    ('public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)', '8e4537a9b515fd4eccd8f701dba07044', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.ajustar_lote(bigint,integer)', '4da033d4eeaec65dfe45f774ccc9d9b8', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
-    ('public.dar_de_baja_lote(bigint,integer,text)', 'b5f89e656f5341166e034b218819a500', true,
+    ('public.dar_de_baja_lote(bigint,integer,text)', 'cfe566a46d50835836abbb21838f1fd9', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.aplicar_control_stock(jsonb,text,uuid)', '1de7b4e2272118f1abcf2c6e5f629c5e', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),

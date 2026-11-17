@@ -18,6 +18,10 @@
 --        pedido nuevo. Antes: [45] y 9.
 --   M3 · regresión: el fardo de X salió de la bolsa (C con lote 100/50 y bolsa 5): el cambio deja
 --        lotes=[50] bolsa=4 y el bloque nuevo con {"lote_id": null}.
+--   M4 · el orden de la anotación (H2 de la revisión de B3): un bloque de 2 fardos [bolsa:1 L1:1]
+--        (X = A×20 + S×4, C con lote 100/50 y bolsa 1). La bolsa sube 10 y se cambia el cliente: el
+--        bloque nuevo queda [bolsa:1 L1:1], como lo anota el motor, y deshacer UN fardo con el motor
+--        lo devuelve al lote (lotes=[50] bolsa=10), como sin el cambio. Con [L1:1 bolsa:1], a la bolsa.
 -- 1556-c1 · el cambio de cliente de un pedido de un tramo anterior de la barra es neto 0.
 --   Promo de fracción "10 V dan 4 R", contenedor Cont (lote 100/60 y bolsa 40; 6 R = 1 Cont).
 --   X = V×10 + R×4; la promo pasa a mover stock y vuelve a fracción (la barra se reinicia y la foto
@@ -30,8 +34,9 @@
 -- 1558-b5 · B5 · ajustar_lote deja una fila en el ledger: anterior = nuevo = stock, origen
 --        'ajuste_lote', el lote y el admin. Un ajuste que no cambia nada no deja fila. Antes: nada.
 -- 1558-b6 · B6 · dar_de_baja_lote: a · un lote que no venció, sin motivo, se rechaza y no cambia
---        nada (antes: se daba de baja como vencido); b · con motivo, anda: merma 'otro' con el
---        texto, ledger 'lote_baja'; c · uno que vence hoy también pide motivo; d · regresión: un lote
+--        nada (antes: se daba de baja como vencido); b · con motivo, anda: merma 'decomiso' con
+--        el texto, que merma_clasificacion cuenta como 'perdida' (decisión del dueño del 17/11),
+--        ledger 'lote_baja'; c · uno que vence hoy también pide motivo; d · regresión: un lote
 --        vencido sin motivo anda como siempre ('vencimiento', 'lote_vencido').
 -- 1558-b7 · B7 · aplicar_control_stock con un stock de planilla negativo se rechaza y no cambia el
 --        stock. Antes: aplicaba la diferencia (contado − planilla) de más.
@@ -39,7 +44,7 @@
 --        origen 'alta_producto'. Con stock 0, ninguna fila. Antes: ninguna fila.
 -- A1 · ningún check de auditoria_integridad() suma violaciones.
 --
--- Sin la migración tiene que FALLAR en M1, M2, C1, C2, B5, B6a, B6b (la merma salía como
+-- Sin la migración tiene que FALLAR en M1, M2, M4, C1, C2, B5, B6a, B6b (la merma salía como
 -- 'vencimiento'), B6c, B7 y P1. M3, C3 y B6d son regresión.
 -- Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ …' con la lista de fallas, siempre como excepción.
 --
@@ -315,6 +320,26 @@ BEGIN
   v_fallas := v_fallas || pg_temp.ver('M3 cambio de cliente', c, 'stock=54 lotes=[50] bolsa=4')
                        || pg_temp.verb('M3 cambio de cliente', v_promo, 'bolsa:1');
 
+  -- ============================================================= M3-1 · M4 ===
+  -- El orden de la anotación heredada (H2 de la revisión): un bloque de 2 fardos [bolsa:1 L1:1].
+  a := pg_temp.prod('[]', 100);
+  s := pg_temp.prod('[]', 100);
+  c := pg_temp.prod('[{"dias":30,"cantidad":100,"restante":50}]', 1);
+  v_promo := pg_temp.promo_barra(a, s, c);
+  v_items := jsonb_build_array(pg_temp.it(a, 20), pg_temp.reg(s, 4, v_promo));
+  v_x := pg_temp.alta(v_cli, v_adm, v_items);
+  v_fallas := v_fallas || pg_temp.ver('M4 la venta', c, 'stock=49 lotes=[49] bolsa=0')
+                       || pg_temp.verb('M4 la venta', v_promo, 'bolsa:1 L1:1');
+  PERFORM pg_temp.bolsa(c, 10);
+  v_nuevo := pg_temp.cambio(v_x, v_cli2, v_adm, v_items);
+  v_fallas := v_fallas || pg_temp.ver('M4 cambio de cliente', c, 'stock=59 lotes=[49] bolsa=10')
+                       || pg_temp.verb('M4 cambio de cliente', v_promo, 'bolsa:1 L1:1');
+  -- deshacer UN fardo con el motor (lo que hace una salvedad sobre la mitad del regalo): vuelve al
+  -- lote, como sin el cambio de cliente.
+  v_j := public.aplicar_uso_promo_acumulador(v_promo, s, -2, s, v_suc, v_adm, 'ensayo B3: deshacer un fardo');
+  PERFORM pg_temp.limpiar();
+  v_fallas := v_fallas || pg_temp.ver('M4 deshacer un fardo', c, 'stock=60 lotes=[50] bolsa=10');
+
   -- ========================================================== 1556-c1 · C1 ===
   a := pg_temp.prod('[]', 100);                                         -- V
   s := pg_temp.prod('[]', 100);                                         -- R
@@ -416,7 +441,8 @@ BEGIN
     v_fallas := v_fallas || pg_temp.ver('B6b con motivo', p, 'stock=55 lotes=[45] bolsa=10');
     IF NOT EXISTS (SELECT 1 FROM mermas_stock
                     WHERE id = (v_j->>'merma_id')::bigint AND cantidad = 5
-                      AND motivo = 'otro'
+                      AND motivo = 'decomiso'
+                      AND public.merma_clasificacion(motivo) = 'perdida'
                       AND observaciones LIKE '%Rotura en el depósito')
        OR NOT EXISTS (SELECT 1 FROM stock_historico
                        WHERE producto_id = p AND stock_anterior = 60 AND stock_nuevo = 55
@@ -510,7 +536,7 @@ BEGIN
   END LOOP;
 
   IF cardinality(v_fallas) = 0 THEN
-    RAISE EXCEPTION 'ENSAYO OK · M1–M3, C1–C3, B5, B6a–B6d, B7, P1 y A1';
+    RAISE EXCEPTION 'ENSAYO OK · M1–M4, C1–C3, B5, B6a–B6d, B7, P1 y A1';
   END IF;
   RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' || ');
 END
