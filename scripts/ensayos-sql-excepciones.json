@@ -1,5 +1,5 @@
 {
-  "_doc": "Ensayos de SQL (scripts/test-*.sql) que no dan ENSAYO OK sobre la base local de CI (la foto del esquema de prod + las migraciones que le faltan + scripts/ci/semilla-ensayos.sql + secuencias altas), y la FIRMA de su falla. Los lee scripts/ci/ensayos-sql.mjs (#1601 1601-b7, decisión D60 del dueño). 'ensayos' SÓLO SE ACHICA (lo fija src/test/catalogo.test.ts): un ensayo nuevo arma sus propios datos y corre sobre la base con la semilla, no se suma acá. La firma es la línea del veredicto y las dos siguientes, sin uuids ni números (scripts/lib/ensayos.mjs): si un exceptuado empieza a fallar por OTRA cosa, el CI se pone rojo, porque puede ser una regla rota nueva escondida detrás de la excepción. Al arreglar un ensayo, sacalo en el mismo PR: el gate avisa cuál sobra. Se armó el 17/11/2026 contra el esquema de producción de ese día (ya con las migraciones 515 a 524, cuyos ensayos todavía no estaban en main): varios fallan por eso y salen solos al integrar esas tarjetas. 'omitir' son los que no se corren nunca en CI.",
+  "_doc": "Ensayos de SQL (scripts/test-*.sql) que no dan ENSAYO OK sobre la base local de CI (la foto del esquema de prod + las migraciones que le faltan + scripts/ci/semilla-ensayos.sql + secuencias altas), y la FIRMA de su falla. Los lee scripts/ci/ensayos-sql.mjs (#1601 1601-b7, decisión D60 del dueño). 'ensayos' SÓLO SE ACHICA (lo fija src/test/catalogo.test.ts): un ensayo nuevo arma sus propios datos y corre sobre la base con la semilla, no se suma acá. La firma es la línea del veredicto y las dos siguientes, sin uuids ni números (scripts/lib/ensayos.mjs): si un exceptuado empieza a fallar por OTRA cosa, el CI se pone rojo, porque puede ser una regla rota nueva escondida detrás de la excepción. Al arreglar un ensayo, sacalo en el mismo PR: el gate avisa cuál sobra. Se armó el 17/11/2026 contra el esquema de producción de ese día (conc-base:525) y se podó al integrar #1647: los que dan OK salieron, y los que fallan por «sucursales_pkey» (un ensayo anterior deja una sucursal en la base de CI) o por una migración que todavía no está en main salen solos cuando se arreglen. 'omitir' son los que no se corren nunca en CI.",
   "omitir": {
     "test-concurrencia-monto-pagado-1247.sql": "pide DOS sesiones psql a la vez y confirma datos (deja una función y filas en la base): lo cubre el arnés de scripts/concurrencia/ (C1), que corre a mano contra Docker",
     "test-concurrencia-pago-fifo.sql": "pide DOS sesiones psql a la vez y confirma datos: lo cubre el arnés de scripts/concurrencia/, que corre a mano contra Docker"
@@ -101,10 +101,6 @@
       "firma": "ENSAYO FALLÓ · sin contexto: admin <uuid>, usuario <uuid>, ajena N, rubro <NULL>",
       "motivo": "falla al nacer el gate, sobre la base de CI"
     },
-    "test-credito-suelto-1512.sql": {
-      "firma": "ENSAYO FALLÓ · KN cambio de cliente dio {\"error\": \"El motivo «cambio de cliente» lo pone el cambio de cliente del pedido. Para cancelarlo, elegí otro motivo.\", \"success\": false}; W N.N/N.N, suelto N",
-      "motivo": "falla al nacer el gate, sobre la base de CI"
-    },
     "test-cupo-promo-y-combo-1300-1301-1283.sql": {
       "firma": "ENSAYO FALLO (N fallas) | - CN · error: no se pudo registrar la salvedad: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | - CN · error:",
       "motivo": "falla al nacer el gate, sobre la base de CI"
@@ -133,8 +129,8 @@
       "firma": "ENSAYO FALLO (N fallas): | - MN · salvedad: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | - MN · la salvedad que tira el regalo movio",
       "motivo": "falla al nacer el gate, sobre la base de CI"
     },
-    "test-fecha-pedido-piso-1514.sql": {
-      "firma": "ENSAYO FALLÓ · LN SEG-A ve una función del alta o la RPC nueva, o crear_pedido_idempotente cambió",
+    "test-frenos-nan-ola2-1603.sql": {
+      "firma": "duplicate key value violates unique constraint \"sucursales_pkey\" | DETAIL: Key (id)=(N) already exists.",
       "motivo": "falla al nacer el gate, sobre la base de CI"
     },
     "test-gastos-1.sql": {
@@ -189,10 +185,6 @@
       "firma": "column \"preventista_id\" does not exist | ^",
       "motivo": "falla al nacer el gate, sobre la base de CI"
     },
-    "test-limpieza-1336-1368-1383.sql": {
-      "firma": "ENSAYO FALLÓ (después de B) · RN dio {\"msg\": \"La fecha de entrega programada (N/N/N) no puede ser posterior al N/N/N: va hasta N días adelante.\", \"error\": \"N\"} y dejó pendiente|chofer=f|prog=N-N-N|notas=ensayo tN|parada=f || RN (en ventana) dio {\"msg\": \"La fecha de entrega programada (N/N/N) no pued",
-      "motivo": "falla al nacer el gate, sobre la base de CI"
-    },
     "test-limpieza-antes-del-fork-1475.sql": {
       "firma": "BN · se borró el producto <NULL> con historial",
       "motivo": "falla al nacer el gate, sobre la base de CI"
@@ -206,7 +198,7 @@
       "motivo": "falla al nacer el gate, sobre la base de CI"
     },
     "test-minimo-cliente-salvedad-1559.sql": {
-      "firma": "ENSAYO FALLÓ (N fallas): | - LN · el id que no existe dio OK {\"errores\": [\"El cliente del pedido no existe en esta sucursal. El pedido no se creó.\"], \"success\": false} | - LN · error: duplicate key value violates unique constraint \"sucursales_pkey\"",
+      "firma": "ENSAYO FALLÓ (N fallas): | - LN · error: duplicate key value violates unique constraint \"sucursales_pkey\" | - LN · public.anular_salvedad(bigint,text) tiene mdN fcNdNaNeaNeNcbdNbNcc, EXECUTE {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}, definer t",
       "motivo": "falla al nacer el gate, sobre la base de CI"
     },
     "test-movimientos-sin-sucursal-1488.sql": {
@@ -285,10 +277,6 @@
       "firma": "column \"preventista_id\" does not exist | ^",
       "motivo": "falla al nacer el gate, sobre la base de CI"
     },
-    "test-promos-regalos-1592.sql": {
-      "firma": "ENSAYO FALLÓ (N): | LN/LN · error: No se puede borrar \"ZZ ensayo N KN\": tiene N u. en stock, está en la promoción «ZZ ensayo N promo». Desactivalo en lugar de borrarlo.",
-      "motivo": "falla al nacer el gate, sobre la base de CI"
-    },
     "test-promos-y-combos-1556.sql": {
       "firma": "ENSAYO FALLÓ (N): | CN [otro pedido tomó el lugar] la salvedad no rompió el combo: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | CN e",
       "motivo": "falla al nacer el gate, sobre la base de CI"
@@ -319,10 +307,6 @@
     },
     "test-reportes-cierran-1297.sql": {
       "firma": "ENSAYO FALLÓ (N fallas, todo revertido): | - no hay regalos fraccionados en el rango: REP-NN no se prueba | - no hay pedidos sin vendedor en el rango: REP-NN no se prueba",
-      "motivo": "falla al nacer el gate, sobre la base de CI"
-    },
-    "test-reportes-ola2-1603.sql": {
-      "firma": "duplicate key value violates unique constraint \"sucursales_pkey\" | DETAIL: Key (id)=(N) already exists.",
       "motivo": "falla al nacer el gate, sobre la base de CI"
     },
     "test-restos-nucleo-1520.sql": {
@@ -373,10 +357,6 @@
       "firma": "ENSAYO FALLÓ (N fallas): | - EN · error: la salvedad no entró: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"success\": false} | - EN · el reintento con ",
       "motivo": "falla al nacer el gate, sobre la base de CI"
     },
-    "test-stock-cambio-cliente-y-canje-1594.sql": {
-      "firma": "ENSAYO FALLÓ · KN: ledger del devuelto N->N alta_producto productos | N->N cambio_producto_merma cambios_productos | N->N merma mermas_stock",
-      "motivo": "falla al nacer el gate, sobre la base de CI"
-    },
     "test-stock-integridad-1254-1255-1256.sql": {
       "firma": "ENSAYO FALLÓ · total_checks = N (tienen que ser N) | CC-B = N después del caso nuevo (tenía que dar N) | CC-C = N después del caso nuevo (tenía que dar N) | FISCAL-A = N después del caso nuevo (tenía que dar N) | VENTA-N = N después del caso nuevo (tenía que dar N) | saltados: sincronizar_lotes_comp",
       "motivo": "falla al nacer el gate, sobre la base de CI"
@@ -395,10 +375,6 @@
     },
     "test-usuarios-retencion-ola2-1603.sql": {
       "firma": "ENSAYO FALLÓ BNb (N fallas, todo revertido): | - G · el admin sólo de la N desasignó a un usuario de las dos: N function public.desasignar_usuario_sucursal(unknown, integer) does not exist → N,N* | - BN.N · desasignar la default: N function public.desasignar_usuario_sucursal(unknown, integer) does n",
-      "motivo": "falla al nacer el gate, sobre la base de CI"
-    },
-    "test-venta-edicion-1398.sql": {
-      "firma": "ENSAYO FALLÓ · EN dio {\"success\": true, \"pedido_id\": N, \"updated_at\": \"N-N-NTN:N:N.N+N:N\", \"paradas_eliminadas\": N, \"vuelto_a_pendiente\": false, \"updated_at_anterior\": \"N-N-NTN:N:N.N+N:N\"} y dejó pendiente|chofer=f|fecha=N-N-N|prog=N-N-N|notas=ensayo EN|parada=f || EN dio {\"msg\": \"La fecha de entreg",
       "motivo": "falla al nacer el gate, sobre la base de CI"
     },
     "test-venta-j-1098.sql": {
