@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { margenNetoMesPct, etiquetaDiaSerie, serieCruzaAnios } from './formato'
+import { margenNetoMesPct, etiquetaDiaSerie, serieCruzaAnios, pct, pctSobre } from './formato'
 
 describe('margenNetoMesPct', () => {
   it('venta − CMV − bonif. sobre la venta', () => {
@@ -34,5 +34,46 @@ describe('etiquetaDiaSerie (REP-10)', () => {
     expect(serieCruzaAnios(['2026-12-30', '2027-01-02'])).toBe(true)
     expect(serieCruzaAnios(['2026-01-30', '2026-12-02'])).toBe(false)
     expect(serieCruzaAnios(['30/12', '02/01'])).toBe(false)
+  })
+})
+
+describe('pct (1544-b8)', () => {
+  it('un ratio común se lee con una coma y un decimal', () => {
+    expect(pct(0.31)).toBe('31,0%')
+    expect(pct(-0.052)).toBe('-5,2%')
+  })
+
+  it('bonificaciones sobre venta 0 (ratio infinito) no dice «Infinity%»', () => {
+    expect(pct(5000 / 0)).toBe('—')
+    expect(pct(-5000 / 0)).toBe('—')
+  })
+
+  it('0, NaN y undefined siguen dando 0,0%', () => {
+    expect(pct(0)).toBe('0,0%')
+    expect(pct(0 / 0)).toBe('0,0%')
+    expect(pct(undefined as unknown as number)).toBe('0,0%')
+  })
+})
+
+describe('pctSobre — la base 0 o negativa no da un porcentaje', () => {
+  it('con base positiva es el porcentaje de siempre', () => {
+    expect(pctSobre(31, 100)).toBe('31,0%')
+    expect(pctSobre(-5, 100)).toBe('-5,0%')
+  })
+
+  it('con venta 0 muestra «—», no «Infinity%» ni «0,0%»', () => {
+    expect(pctSobre(5000, 0)).toBe('—')
+    expect(pctSobre(0, 0)).toBe('—')
+  })
+
+  it('con venta negativa (neta de notas de crédito) muestra «—», no un 175,8 % al revés', () => {
+    // margen −1.758 sobre venta −1.000: dividir negativo con negativo daría +175,8 %.
+    expect(pctSobre(-1758, -1000)).toBe('—')
+    expect(pctSobre(300, -1000)).toBe('—')
+  })
+
+  it('con una base que no es un número muestra «—»', () => {
+    expect(pctSobre(5, Number.NaN)).toBe('—')
+    expect(pctSobre(5, undefined as unknown as number)).toBe('—')
   })
 })

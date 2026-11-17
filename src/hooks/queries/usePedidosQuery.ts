@@ -19,6 +19,7 @@ import { traerTodo } from '../../utils/paginacion'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
 import { camposComboRPC, type CamposCombo } from '../../utils/combosPedido'
+import { invalidarMora, invalidarNotasCreditoYMora } from './invalidacionesDeuda'
 
 // Query keys
 export const pedidosKeys = {
@@ -1201,6 +1202,7 @@ export function useCancelarPedidoMutation() {
       // FRT-2: cancelar saca la boleta de la deuda y deja lo cobrado como saldo a
       // favor; el saldo cacheado del cliente quedaba viejo hasta 5 minutos.
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
+      invalidarNotasCreditoYMora(queryClient) // 1544-b1: la cancelación aplica el crédito que deja y baja la deuda
       // #827 (mig 269): cancelar por falta de stock deja una merma por producto.
       if (tipo === 'falta_stock') {
         queryClient.invalidateQueries({ queryKey: ['mermas'] })
@@ -1284,6 +1286,7 @@ export function useCambiarClientePedidoMutation() {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
+      invalidarNotasCreditoYMora(queryClient) // 1544-b1: la deuda y el crédito de los dos clientes cambian
       queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
@@ -1403,6 +1406,7 @@ export function usePagosMasivosMutation() {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       // FRT-2: el cobro masivo baja el saldo de cada cliente cobrado.
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
+      invalidarMora(queryClient) // 1544-b1: y saca a esos clientes de la lista de mora
     },
   })
 }
@@ -1519,6 +1523,7 @@ export function useEntregaYPagoMasivosMutation() {
       // que reflejarse (saldo, stock, la parada cerrada en la ruta activa).
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
+      invalidarMora(queryClient) // 1544-b1: lo cobrado en el paso baja la deuda
       queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
       // La parada que se cierra está en la ruta del chofer (#1549).

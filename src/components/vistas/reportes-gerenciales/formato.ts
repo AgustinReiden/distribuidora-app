@@ -11,8 +11,23 @@ export const N = new Intl.NumberFormat('es-AR')
 /** Monto completo en pesos: $1.234.567 */
 export const money = (x: number): string => F.format(Math.round(x || 0))
 
-/** Porcentaje a partir de un ratio (0.31 -> "31,0%"). */
-export const pct = (x: number): string => ((x || 0) * 100).toFixed(1).replace('.', ',') + '%'
+/**
+ * Porcentaje a partir de un ratio (0.31 -> "31,0%"). Un ratio sobre una base 0 (bonificaciones
+ * con venta 0) llega como ±Infinity: no es un porcentaje, va «—» (#1544, 1544-b8).
+ */
+export const pct = (x: number): string => {
+  if (x === Infinity || x === -Infinity) return '—'
+  return ((x || 0) * 100).toFixed(1).replace('.', ',') + '%'
+}
+
+/**
+ * Porcentaje de `parte` sobre `base`, o «—» si la base no es un número mayor que 0. Con la venta
+ * neta de notas de crédito un mes, un vendedor o una categoría puede tener venta 0 o NEGATIVA, y ahí
+ * un margen sobre venta no significa nada (un 175,8 % «bueno» por dividir negativo con negativo).
+ * No cambia ninguna cuenta: sólo cómo se muestra un porcentaje sin sentido.
+ */
+export const pctSobre = (parte: number, base: number): string =>
+  Number.isFinite(base) && base > 0 ? pct(parte / base) : '—'
 
 /** Compacto inteligente: millones con 2 decimales, miles con K, sin "$0 M". */
 export function moneyC(x: number): string {

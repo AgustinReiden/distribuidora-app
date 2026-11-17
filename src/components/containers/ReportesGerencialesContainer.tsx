@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react'
 import { useReporteGerencialQuery, useReporteCombosQuery, useReporteCombosRotacionQuery, useAnalisisMensualQuery, useMetasGerencialQuery, useGuardarMetaMutation, useCalcularComisionesQuery, useSucursalesActivasQuery } from '../../hooks/queries'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { useAlertasCombos } from '../../hooks/useAlertasCombos'
+import { useDiaArgentino } from '../../hooks/useDiaArgentino'
 import type { PeriodoOpt, SucursalOpt } from '../vistas/VistaReportesGerenciales'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { escribirRango, escribirSucursal, leerRango, leerSucursal } from '../../utils/paramsReporte'
@@ -18,8 +19,7 @@ const MESES_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio'
  * trimestre hardcodeado. Además del listado, el usuario puede elegir un rango
  * personalizado (manejado vía onRango en la vista).
  */
-function generarPeriodos(): PeriodoOpt[] {
-  const hoy = hoyArgentinaLocal()
+function generarPeriodos(hoy: Date): PeriodoOpt[] {
   const y = hoy.getFullYear()
   const m = hoy.getMonth()
   const hoyYmd = ymd(hoy)
@@ -60,13 +60,20 @@ function periodoCustom(desde: string, hasta: string): PeriodoOpt {
 }
 
 export default function ReportesGerencialesContainer(): React.ReactElement {
-  const periodos = useMemo(() => generarPeriodos(), [])
+  // «Este mes» y los demás presets llegan hasta hoy: se rearman cuando cambia el día argentino, no
+  // quedan fijos en el día en que se montó la pantalla (#1597, 1597-b3).
+  const hoyArgentina = useDiaArgentino()
+  // Hoy como `Date` local a mediodía (el mismo que `hoyArgentinaLocal`), pero atado a ese día.
+  const hoy = useMemo(() => {
+    const [anio, mes, dia] = hoyArgentina.split('-').map(Number)
+    return new Date(anio, mes - 1, dia, 12)
+  }, [hoyArgentina])
+  const periodos = useMemo(() => generarPeriodos(hoy), [hoy])
   // Opción "Personalizado" al final del selector (rango default: últimos 30 días).
   const customDefault = useMemo(() => {
-    const hoy = hoyArgentinaLocal()
     const hace30 = new Date(hoy.getTime() - 29 * 24 * 60 * 60 * 1000)
     return periodoCustom(ymd(hace30), ymd(hoy))
-  }, [])
+  }, [hoy])
   const opcionesPeriodo = useMemo<PeriodoOpt[]>(() => [...periodos, customDefault], [periodos, customDefault])
 
   // El período y la sucursal viven en la URL para que "Ver detalle" pueda

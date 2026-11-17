@@ -9,6 +9,7 @@
 import React, { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Download, Pencil, Plus, Settings2, Trash2 } from 'lucide-react'
 import PageHeader from '../layout/PageHeader'
+import QueryErrorState from '../layout/QueryErrorState'
 import { Button } from '../ui/Button'
 import Card from '../ui/Card'
 import { Badge } from '../ui/Badge'
@@ -41,6 +42,9 @@ export interface VistaGastosProps {
   /** Claves (`claveRendicion`) de las rendiciones cerradas: sus gastos se cambian desde «Editar cierre». */
   rendicionesCerradas: Set<string>
   loading: boolean
+  /** La carga de los gastos del mes falló: sin gastos en pantalla no se dice «no hay gastos» (#1561). */
+  error?: boolean
+  onRetry?: () => void
   usuarioId: string
   esAdmin: boolean
   /** El usuario tiene todas las sucursales activas: puede tocar cualquier compartido. */
@@ -81,7 +85,7 @@ function Pastilla({ activa, onClick, children }: { activa: boolean; onClick: () 
 }
 
 export default function VistaGastos({
-  mes, onCambiarMes, gastos, rubros, vehiculos, transportistas, empleados, rendicionesCerradas, loading, usuarioId, esAdmin, tieneTodasLasSucursales,
+  mes, onCambiarMes, gastos, rubros, vehiculos, transportistas, empleados, rendicionesCerradas, loading, error = false, onRetry, usuarioId, esAdmin, tieneTodasLasSucursales,
   sucursalActual, onNuevoGasto, onEditarGasto, onAnularGasto, onAbrirRubros, onExportar,
 }: VistaGastosProps): React.ReactElement {
   const [grupo, setGrupo] = useState<FiltroGrupo>('todos')
@@ -262,6 +266,8 @@ export default function VistaGastos({
       {/* Lista */}
       {loading ? (
         <p className="text-sm text-gray-500" role="status">Cargando gastos…</p>
+      ) : error && gastos.length === 0 ? (
+        <QueryErrorState onRetry={onRetry} />
       ) : visibles.length === 0 ? (
         <Card variant="section">
           <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-6">

@@ -8,6 +8,7 @@ import Paginacion from '../../layout/Paginacion';
 import { usePaginado } from '../../../hooks/state/usePaginado';
 import { Button } from '../../ui/Button';
 import QueryErrorState from '../../layout/QueryErrorState';
+import { fechaLocalISO } from '../../../utils/formatters';
 import type { ClienteDB, ReporteCuentaPorCobrar } from '../../../types';
 
 export interface ReporteCuentasPorCobrarProps {
@@ -105,8 +106,9 @@ export function ReporteCuentasPorCobrar({
             }
           },
         ],
-        // Sin período: la cuenta corriente es una foto de HOY, no de un rango.
-        `cuentas-por-cobrar-${new Date().toLocaleDateString('sv-SE')}`
+        // Sin período: la cuenta corriente es una foto de HOY, no de un rango. El día es el
+        // argentino, no el del dispositivo (#1544, 1544-b9): a la noche el reloj UTC ya es mañana.
+        `cuentas-por-cobrar-${fechaLocalISO()}`
       );
     } finally {
       setExportando(false);

@@ -1669,6 +1669,8 @@ export default function PedidosContainer(): React.ReactElement {
       await refreshPagosPedido(String(pedidoPago.id))
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       queryClient.invalidateQueries({ queryKey: ['clientes'] })
+      // 1544-b1/b2: si el pago quitado era de una NC, vuelve a figurar con saldo por imputar; y cambia la mora.
+      for (const queryKey of [['notas_credito_venta'], ['deudores-mora']]) queryClient.invalidateQueries({ queryKey })
       notify.success(yaEstabaSuelto
         ? 'Ese pago ya estaba fuera de la boleta.'
         : 'Se quitó de la boleta: vuelve a saldo a favor del cliente.')

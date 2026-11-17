@@ -124,6 +124,36 @@ describe('hojasResumen — los KPIs van transpuestos', () => {
   })
 })
 
+describe('hojasResumen — venta bruta y neta de notas de crédito (REP-D, server nuevo)', () => {
+  const filasResumen = (r: ReporteGerencial) => hojasResumen(r).find(h => h.name === 'Resumen')!.data
+  const conBruta = () => reporte({
+    kpis: { ...reporte().kpis, venta: 98000, venta_bruta: 100000, notas_credito_venta: 2000 } as ReporteGerencial['kpis'],
+  })
+
+  it('con venta_bruta: bruta, − notas y venta (neta) en ese orden, la última como resultado', () => {
+    const filas = filasResumen(conBruta())
+    expect(filas.slice(0, 3)).toEqual([
+      { Indicador: 'Venta bruta (antes de notas de crédito)', Valor: 100000 },
+      { Indicador: '− Notas de crédito de venta', Valor: 2000 },
+      { Indicador: 'Venta (neta de notas de crédito) = bruta − notas', Valor: 98000 },
+    ])
+  })
+
+  it('con venta_bruta, la otra fila de notas dice que ya están restadas', () => {
+    const indicadores = filasResumen(conBruta()).map(f => f.Indicador)
+    expect(indicadores).toContain('Notas de crédito de venta (ya restadas de la venta)')
+    expect(indicadores).not.toContain('Notas de crédito de venta')
+  })
+
+  it('sin venta_bruta (server de hoy) queda como siempre: una fila «Venta» y las notas aparte', () => {
+    const filas = filasResumen(reporte())
+    expect(filas[0]).toEqual({ Indicador: 'Venta', Valor: 100000 })
+    const indicadores = filas.map(f => f.Indicador)
+    expect(indicadores).toContain('Notas de crédito de venta')
+    expect(indicadores.some(i => /bruta/i.test(String(i)))).toBe(false)
+  })
+})
+
 describe('hojasEvolucion — la serie diaria viene en TUPLAS', () => {
   it('mapea las tuplas a objetos con encabezados de verdad', () => {
     // Pasarle `[['2026-08-01', 3000]]` a createMultiSheetExcel produce columnas
@@ -256,6 +286,16 @@ describe('las tablas simples', () => {
   })
 })
 
+describe('hojasCobranza — el total que no se llama venta (1562-b10)', () => {
+  it('cobrado + crédito aplicado + pendiente se lee como TOTAL A COBRAR, no como «venta»', () => {
+    const r = reporte({ cobranza: { formas: [], cobrado: 80000, credito_aplicado: 5000, pendiente: 20000 } })
+    const filas = hojasCobranza(r)[0].data
+    const total = filas.find(f => String(f['Forma de pago']).startsWith('TOTAL'))
+    expect(total).toMatchObject({ 'Forma de pago': 'TOTAL A COBRAR', Monto: 105000 })
+    expect(filas.some(f => /venta/i.test(String(f['Forma de pago'])))).toBe(false)
+  })
+})
+
 describe('hojasCompras', () => {
   it('lleva el desembolso mes a mes, que es lo que muestra la card', () => {
     const hojas = hojasCompras(reporte())
@@ -266,6 +306,24 @@ describe('hojasCompras', () => {
 
   it('sin serie mensual devuelve [] en vez de una hoja en blanco', () => {
     expect(hojasCompras(reporte({ mensual: [] }))).toEqual([])
+  })
+})
+
+describe('hojasCompras — notas de crédito de compra (server nuevo, #1562)', () => {
+  const conNotas = (monto: number) => reporte({
+    kpis: { ...reporte().kpis, compras_notas_credito: monto } as ReporteGerencial['kpis'],
+  })
+
+  it('si el server manda compras_notas_credito, va como renglón negativo, ya restada de Compras', () => {
+    const filas = hojasCompras(conNotas(4500))[0].data
+    expect(filas).toHaveLength(2)
+    expect(filas[0]).toEqual({ Mes: '2026-08', Compras: 70000 })
+    expect(filas[1]).toEqual({ Mes: 'Notas de crédito (ya restadas de Compras)', Compras: -4500 })
+  })
+
+  it('sin la clave (server de hoy) o con 0, no hay renglón', () => {
+    expect(hojasCompras(reporte())[0].data).toHaveLength(1)
+    expect(hojasCompras(conNotas(0))[0].data).toHaveLength(1)
   })
 })
 
@@ -303,6 +361,22 @@ describe('hojasAlertas', () => {
     expect(hojasAlertas(reporte())[0].data[0]).toMatchObject({
       Severidad: 'warning', Título: 'Deuda vencida', Valor: 15000,
     })
+  })
+
+  it('un conteo no lleva formato de moneda: «44» y no «$44,00» (1544-b7)', () => {
+    const r = reporte({
+      alertas: [
+        { severidad: 'warning', codigo: 'clientes_inactivos', titulo: 'Clientes que dejaron de comprar', detalle: '44 clientes', valor: 44, seccion: 'clientes' },
+        { severidad: 'warning', codigo: 'margen_categoria_negativo', titulo: 'Categorías con margen negativo', detalle: '2 categorías', valor: 2, seccion: 'categorias' },
+        { severidad: 'critical', codigo: 'cobranza_vencida', titulo: 'Cobranza vencida', detalle: '3 clientes', valor: 15000, seccion: 'sec-cobranza' },
+      ],
+    })
+    const hoja = hojasAlertas(r)[0]
+    const formatoDe = (i: number) => hoja.formatoCelda?.(hoja.data[i], 'Valor')
+    expect(formatoDe(0)).toBe('entero')
+    expect(formatoDe(1)).toBe('entero')
+    expect(formatoDe(2)).toBe('moneda')
+    expect(hoja.formatoCelda?.(hoja.data[0], 'Título')).toBeUndefined()
   })
 
   it('sin alertas no genera hoja', () => {

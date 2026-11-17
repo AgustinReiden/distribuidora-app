@@ -56,7 +56,7 @@ export default function GastosContainer(): React.ReactElement {
   const [gastoAnulando, setGastoAnulando] = useState<Gasto | null>(null)
   const [rubrosAbierto, setRubrosAbierto] = useState(false)
 
-  const { data: gastos = [], isLoading } = useGastosDelMesQuery(mes)
+  const { data: gastos = [], isLoading, isError, refetch } = useGastosDelMesQuery(mes)
   const { data: rubros = [] } = useRubrosGastoQuery()
   const { data: vehiculos = [] } = useVehiculosQuery()
   const { data: sucursalesActivas = [] } = useSucursalesActivasQuery()
@@ -148,6 +148,8 @@ export default function GastosContainer(): React.ReactElement {
           empleados={empleados}
           rendicionesCerradas={cerradas}
           loading={isLoading}
+          error={isError}
+          onRetry={refetch}
           usuarioId={user?.id ?? ''}
           esAdmin={isAdmin}
           tieneTodasLasSucursales={tieneTodasLasSucursales}

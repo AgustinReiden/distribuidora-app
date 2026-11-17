@@ -141,6 +141,10 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
       void refetchFicha()
       queryClient.invalidateQueries({ queryKey: ['clientes'] })
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      // 1544-b1/b2: quitar el crédito de una NC lo deja suelto (la NC vuelve a figurar con saldo
+      // por imputar), y la deuda vencida de la lista de mora cambia con el pago.
+      queryClient.invalidateQueries({ queryKey: ['notas_credito_venta'] })
+      queryClient.invalidateQueries({ queryKey: ['deudores-mora'] })
       notify.success(!quitar
         ? 'Pago anulado. Se ajustó el saldo del cliente.'
         : yaEstabaSuelto
@@ -664,8 +668,9 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                           {esSaldoAFavorAplicado(pago) ? (
                             <span>
                               ¿Quitar este pago de <strong>{formatCurrency(pago.monto)}</strong> de la boleta #{pago.pedido_id}?{' '}
-                              Vuelve a saldo a favor del cliente y el saldo no cambia. Queda a favor hasta su próximo
-                              pedido o pago a cuenta, o hasta que lo imputes a mano.
+                              Vuelve a saldo a favor del cliente y el saldo no cambia. Ojo: el próximo pedido o pago a
+                              cuenta de este cliente lo vuelve a tomar solo, de la boleta más vieja a la más nueva, y casi
+                              siempre cae de nuevo en esta misma. Para dirigirlo a otra boleta, imputalo a mano antes.
                             </span>
                           ) : (
                             <span>
