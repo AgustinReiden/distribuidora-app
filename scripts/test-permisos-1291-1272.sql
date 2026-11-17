@@ -350,7 +350,8 @@ BEGIN
     EXECUTE 'SELECT public.auditoria_rpcs_definer()' INTO r;
     SELECT count(*) INTO v_n FROM jsonb_array_elements(r->'gestion_usuarios') g
      WHERE g->>'nombre' IN ('asignar_usuario_sucursal', 'desasignar_usuario_sucursal') AND (g->>'acota')::boolean;
-    IF v_n <> CASE WHEN to_regprocedure('public.desasignar_usuario_sucursal(uuid,bigint)') IS NULL THEN 1 ELSE 2 END THEN
+    -- El CASE va entre paréntesis: PL/pgSQL corta la expresión de un IF en el primer THEN, también el de adentro.
+    IF v_n <> (CASE WHEN to_regprocedure('public.desasignar_usuario_sucursal(uuid,bigint)') IS NULL THEN 1 ELSE 2 END) THEN
       v_fallas := v_fallas || format('6.2 · el gate ve %s de las RPCs de #1291 acotando al usuario', v_n);
     END IF;
     SELECT count(*) INTO v_n FROM jsonb_array_elements(r->'parametros') p

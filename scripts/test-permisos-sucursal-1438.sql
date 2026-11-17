@@ -190,11 +190,11 @@ BEGIN
     v_g := public.auditoria_rpcs_definer();
     IF jsonb_typeof(v_g->'tablas_sucursal') IS DISTINCT FROM 'array' THEN
       v_fallas := v_fallas || 'G1 auditoria_rpcs_definer no devuelve tablas_sucursal'::text;
-    ELSIF (pg_temp.t_gate('actualizar_precios_masivo(jsonb)')->>'nombra_sucursal') IS DISTINCT FROM 'true'
+    ELSIF (pg_temp.t_gate('actualizar_precios_masivo(jsonb,jsonb)')->>'nombra_sucursal') IS DISTINCT FROM 'true'
        OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_g->'tablas_sucursal') t
                    WHERE t->>'nombre' IN ('get_audit_history', 'get_suspicious_activity')) THEN
       v_fallas := v_fallas || format('G1 precios %s; auditoría en la lista: %s',
-        pg_temp.t_gate('actualizar_precios_masivo(jsonb)'),
+        pg_temp.t_gate('actualizar_precios_masivo(jsonb,jsonb)'),
         (SELECT jsonb_agg(t) FROM jsonb_array_elements(v_g->'tablas_sucursal') t
           WHERE t->>'nombre' IN ('get_audit_history', 'get_suspicious_activity')));
     END IF;
