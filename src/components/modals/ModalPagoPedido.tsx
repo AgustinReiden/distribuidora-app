@@ -208,9 +208,13 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   const rangoEntrega = rangoFechaEntrega(reglaEntrega)
   const diasEntrega = diasDeLaEntrega(reglaEntrega)
   const [fechaEntregaElegida, setFechaEntrega] = useState<string>(hoy)
-  // El admin que no tocó la fecha del cobro la deja acompañar a la de la entrega, como cuando era
-  // un solo campo; en cuanto la toca, cada una va por su lado.
+  // Las dos fechas se acompañan por defecto, en los dos sentidos (decisión del dueño, H3): cambio la
+  // del cobro y la entrega la sigue, cambio la de la entrega y la del cobro la sigue. Pero pueden
+  // ser distintas: un campo que el usuario editó a mano no se vuelve a pisar. Cada una se acota a
+  // su propio rango (el de la entrega por rol, el del cobro por la caja cerrada), y lo que se manda
+  // es lo que se ve. Quien no es admin no puede cambiar el cobro (siempre hoy): no hay nada que seguir.
   const [cobroTocado, setCobroTocado] = useState<boolean>(!!sinConfirmar)
+  const [entregaTocada, setEntregaTocada] = useState<boolean>(false)
   // Fecha minima: dia siguiente al ultimo cierre de caja de la sucursal (mig 134).
   const fechaMinima = useFechaMinimaPago()
   const [observaciones, setObservaciones] = useState<string>(sinConfirmar?.observaciones ?? '')
@@ -328,11 +332,16 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
       setError('Cambió el día desde que abriste esta pantalla: cerrala y volvé a abrirla para cobrar con la fecha de hoy.')
       return
     }
-    if (!isAdmin && fechaElegida !== hoy) {
-      setError('El cobro va con la fecha de hoy. Si necesitás otra fecha para el cobro, pedísela a un admin.')
-      return
-    }
+    // Quien no es admin cobra con hoy (`fechaPago`, lo que se ve y se manda). Compararlo con
+    // `fechaElegida` trababa a quien tenía un cobro sin confirmar de otro día: el campo está
+    // deshabilitado y muestra hoy, y no había cómo corregirlo (lente B10, H2).
     if (modoEntregaTransportista) {
+      // Una fecha vacía no se juzga en `errorDeFechaEntrega`, y viajaba como '' hasta caer en hoy
+      // sin que nadie lo dijera (H4): se exige.
+      if (!fechaEntregaElegida) {
+        setError('Ingresá la fecha de la entrega.')
+        return
+      }
       const errorEntrega = errorDeFechaEntrega(fechaEntregaElegida, reglaEntrega)
       if (errorEntrega) {
         setError(errorEntrega)
@@ -639,8 +648,9 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
               onChange={e => {
                 const nueva = e.target.value
                 setFechaEntrega(nueva)
+                setEntregaTocada(true)
                 if (isAdmin && !cobroTocado && nueva) {
-                  setFechaPago(fechaMinima && nueva < fechaMinima ? fechaMinima : nueva)
+                  setFechaPago(fechaMinima && nueva < fechaMinima ? fechaMinima : nueva > hoy ? hoy : nueva)
                 }
               }}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
@@ -675,7 +685,14 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                 min={isAdmin ? fechaMinima : hoy}
                 max={hoy}
                 disabled={!isAdmin}
-                onChange={e => { setCobroTocado(true); setFechaPago(e.target.value) }}
+                onChange={e => {
+                  const nueva = e.target.value
+                  setCobroTocado(true)
+                  setFechaPago(nueva)
+                  if (modoEntregaTransportista && !entregaTocada && nueva) {
+                    setFechaEntrega(nueva < rangoEntrega.min ? rangoEntrega.min : nueva > rangoEntrega.max ? rangoEntrega.max : nueva)
+                  }
+                }}
                 className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-60"
               />
               {!isAdmin && !modoEntregaTransportista && (

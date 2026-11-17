@@ -7,7 +7,13 @@
  * tiraban un 400 (PGRST100) y dejaban la lista entera en error.
  */
 import { describe, it, expect } from 'vitest'
-import { construirFiltrosPedidos, aplicarFiltroConSalvedad, TOPE_IDS_FILTRO_SALVEDAD } from './construirFiltrosPedidos'
+import {
+  construirFiltrosPedidos,
+  aplicarFiltroConSalvedad,
+  motivoDelFiltroSalvedad,
+  FiltroSalvedadDemasiadoGrandeError,
+  TOPE_IDS_FILTRO_SALVEDAD,
+} from './construirFiltrosPedidos'
 import type { FiltrosPedidosState } from '../types'
 
 interface Llamada { metodo: string; args: unknown[] }
@@ -267,14 +273,27 @@ describe('aplicarFiltroConSalvedad', () => {
     it('pasado el tope, con_salvedad no manda la URL: avisa qué hacer', () => {
       const { builder, llamadas } = crearQueryFalsa()
       expect(() => aplicarFiltroConSalvedad(builder, 'con_salvedad', ids(TOPE_IDS_FILTRO_SALVEDAD + 1)))
-        .toThrow(/demasiados pedidos con salvedad/i)
+        .toThrow(FiltroSalvedadDemasiadoGrandeError)
       expect(llamadas).toHaveLength(0)
     })
 
     it('lo mismo con sin_salvedad', () => {
       const { builder } = crearQueryFalsa()
       expect(() => aplicarFiltroConSalvedad(builder, 'sin_salvedad', ids(TOPE_IDS_FILTRO_SALVEDAD + 1)))
-        .toThrow(/demasiados pedidos con salvedad/i)
+        .toThrow(/son demasiados para filtrar por salvedad/i)
+    })
+
+    it('el tope no baja de lo que antes andaba (~700 ids en la URL)', () => {
+      expect(TOPE_IDS_FILTRO_SALVEDAD).toBeGreaterThanOrEqual(700)
+    })
+
+    it('el motivo que se le muestra a la pantalla es el del filtro, y sólo el suyo', () => {
+      const { builder } = crearQueryFalsa()
+      let error: unknown
+      try { aplicarFiltroConSalvedad(builder, 'con_salvedad', ids(TOPE_IDS_FILTRO_SALVEDAD + 5)) } catch (e) { error = e }
+      expect(motivoDelFiltroSalvedad(error)).toMatch(/Hay 705 pedidos con salvedad.*acotá por fecha/)
+      expect(motivoDelFiltroSalvedad(new Error('Failed to fetch'))).toBeUndefined()
+      expect(motivoDelFiltroSalvedad(null)).toBeUndefined()
     })
 
     it('«todos» nunca mira el tamaño de la lista', () => {

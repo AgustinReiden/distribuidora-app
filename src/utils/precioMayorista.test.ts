@@ -478,7 +478,7 @@ describe('cantidadesPorProducto (1559-c1)', () => {
     expect(m.get('p2')).toBe(1)
   })
 
-  it('con las líneas sumadas, un producto que no baja no bloquea la edición', () => {
+  it('con las líneas sumadas, un producto que baja bloquea aunque la última línea fuera menor', () => {
     // Antes: `new Map(lineas.map(...))` guardaba 6 (la última línea). Bajar de 10 a 8 parecía
     // «subir» de 6 a 8 y no bloqueaba.
     const original = cantidadesPorProducto([{ productoId: 'p1', cantidad: 4 }, { productoId: 'p1', cantidad: 6 }])

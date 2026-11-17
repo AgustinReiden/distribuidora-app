@@ -10,22 +10,31 @@
  */
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, cleanup } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 // `vi.mock` se hoistea arriba de todo: las factories no pueden capturar consts
 // de este módulo, así que los spies viven en `vi.hoisted`.
-const { invalidateQueries, supabaseStub, registrarPagosBatch, fetchPagosPedido, notifyMock, PEDIDO } = vi.hoisted(() => {
+const { invalidateQueries, supabaseStub, registrarPagosBatch, fetchPagosPedido, eliminarPago, listaMock, notifyMock, PEDIDO, PEDIDO_IMPAGO } = vi.hoisted(() => {
   const rpcFn = vi.fn()
   return {
     invalidateQueries: vi.fn(),
     registrarPagosBatch: vi.fn(),
     fetchPagosPedido: vi.fn(),
+    eliminarPago: vi.fn(),
+    // El error con que falla la lista (null = anda).
+    listaMock: { error: null as unknown },
     notifyMock: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() },
     PEDIDO: {
       id: 42, cliente_id: '9', estado: 'entregado', total: 1000, monto_pagado: 0, items: [],
+      cliente: { id: '9', nombre_fantasia: 'Kiosco Sur' },
+    },
+    // Una entrega con saldo: abre el modal de pago en modo entrega.
+    PEDIDO_IMPAGO: {
+      id: 43, cliente_id: '9', estado: 'asignado', estado_pago: 'pendiente', canal: 'app', total: 1000, monto_pagado: 0, items: [],
+      transportista_id: 't-1',
       cliente: { id: '9', nombre_fantasia: 'Kiosco Sur' },
     },
     supabaseStub: {
@@ -66,6 +75,7 @@ vi.mock('../../../hooks/queries', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   usePedidosPaginatedQuery: () => ({
     data: { pedidos: [PEDIDO], total: 1, totalPages: 1 }, isLoading: false, isFetching: false,
+    isError: listaMock.error !== null, error: listaMock.error,
   }),
   usePedidoStatsQuery: () => ({ data: undefined, isLoading: false }),
   EMPTY_PEDIDO_STATS_SUMMARY: {},
@@ -124,7 +134,7 @@ vi.mock('../../../hooks/useRegistrarGeolocalizacionPedido', () => ({
 }))
 vi.mock('../../../hooks/supabase/usePagos', () => ({
   usePagos: () => ({
-    registrarPago: vi.fn(), registrarPagosBatch, anularPago: vi.fn(), obtenerPagosPedido: vi.fn(), fetchPagosPedido,
+    registrarPago: vi.fn(), registrarPagosBatch, anularPago: vi.fn(), obtenerPagosPedido: vi.fn(), fetchPagosPedido, eliminarPago,
   }),
 }))
 vi.mock('../../../hooks/usePromocionPedido', () => ({
@@ -139,27 +149,34 @@ vi.mock('../../../hooks/usePromocionPedido', () => ({
 
 // La vista abre cada modal; los modales confirman con un payload mínimo.
 vi.mock('../../vistas/VistaPedidos', () => ({
-  default: ({ onAbrirPagoPedido, onMarcarEntregadoConSalvedad }: {
+  default: ({ onAbrirPagoPedido, onMarcarEntregadoConSalvedad, onMarcarEntregado, errorMotivo }: {
+    errorMotivo?: string
     onAbrirPagoPedido: (p: unknown) => void
     onMarcarEntregadoConSalvedad: (p: unknown) => void
+    onMarcarEntregado: (p: unknown) => void
   }) => (
     <>
+      {errorMotivo && <p role="alert">{errorMotivo}</p>}
       <button type="button" onClick={() => onAbrirPagoPedido(PEDIDO)}>Cobrar</button>
+      <button type="button" onClick={() => onMarcarEntregado(PEDIDO_IMPAGO)}>Entregar impago</button>
       <button type="button" onClick={() => onMarcarEntregadoConSalvedad(PEDIDO)}>Salvedad</button>
     </>
   ),
 }))
 vi.mock('../../modals/ModalPagoPedido', () => ({
-  default: ({ onConfirmar }: { onConfirmar: (payload: unknown) => Promise<void> }) => (
-    <button
-      type="button"
-      onClick={() => void onConfirmar({
-        pedidoId: '42', clienteId: '9', fechaPago: '2026-11-10', pagadoAntes: 0,
-        pagos: [{ formaPago: 'efectivo', monto: 500 }], clientRequestIds: ['req-1'],
-      })}
-    >
-      Confirmar cobro
-    </button>
+  default: ({ onConfirmar, onAnularPago }: { onConfirmar: (payload: unknown) => Promise<void>; onAnularPago?: (id: string) => Promise<void> }) => (
+    <>
+      <button
+        type="button"
+        onClick={() => void onConfirmar({
+          pedidoId: '42', clienteId: '9', fechaPago: '2026-11-10', pagadoAntes: 0,
+          pagos: [{ formaPago: 'efectivo', monto: 500 }], clientRequestIds: ['req-1'],
+        })}
+      >
+        Confirmar cobro
+      </button>
+      <button type="button" onClick={() => void onAnularPago?.('5')}>Anular pago</button>
+    </>
   ),
 }))
 vi.mock('../../modals/ModalEntregaConSalvedad', () => ({
@@ -177,6 +194,7 @@ vi.mock('../../modals/ModalEntregaConSalvedad', () => ({
 }))
 
 import PedidosContainer from '../PedidosContainer'
+import { FiltroSalvedadDemasiadoGrandeError } from '../../../utils/construirFiltrosPedidos'
 
 function renderContainer() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -199,6 +217,7 @@ function invalidoClientes() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  listaMock.error = null
   fetchPagosPedido.mockResolvedValue([])
   registrarPagosBatch.mockResolvedValue({ idempotentReplay: false })
   supabaseStub.rpc.mockImplementation(() => Promise.resolve({ data: { success: true }, error: null }))
@@ -226,6 +245,54 @@ describe('PedidosContainer — el saldo del cliente se entera (FRT-2)', () => {
 
     await waitFor(() => expect(supabaseStub.rpc).toHaveBeenCalledWith('registrar_salvedad', expect.anything()))
     await waitFor(() => expect(invalidoClientes()).toBe(true))
+  })
+
+  // H1 (lente B10): el filtro con salvedad pasado el tope fallaba con el «No se pudo cargar» genérico.
+  it('la lista que falla por el filtro de salvedad muestra su motivo; otro error, no', async () => {
+    listaMock.error = new FiltroSalvedadDemasiadoGrandeError(812)
+    renderContainer()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Hay 812 pedidos con salvedad.*acotá por fecha/)
+    cleanup()
+
+    listaMock.error = new Error('Failed to fetch')
+    renderContainer()
+    await screen.findByRole('button', { name: 'Cobrar' })
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  // H5 (lente B10): «Entregar y registrar pago» no invalidaba los clientes ni el recorrido DESPUÉS
+  // del cobro: el saldo del cliente quedaba viejo y el recorrido se refrescaba antes de que entrara el pago.
+  it('entregar y registrar pago invalida clientes y recorridos después del cobro', async () => {
+    const user = userEvent.setup()
+    renderContainer()
+
+    await user.click(await screen.findByRole('button', { name: 'Entregar impago' }))
+    await user.click(await screen.findByRole('button', { name: 'Confirmar cobro' }, ESPERA_MODAL))
+
+    await waitFor(() => expect(registrarPagosBatch).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(notifyMock.success).toHaveBeenCalledWith('Pedido entregado y pago registrado'))
+    const ordenCobro = registrarPagosBatch.mock.invocationCallOrder[0]
+    const despuesDelCobro = (clave: string) => invalidateQueries.mock.calls.some(([arg], i) => {
+      const key = (arg as { queryKey?: unknown[] } | undefined)?.queryKey
+      return Array.isArray(key) && key[0] === clave && invalidateQueries.mock.invocationCallOrder[i] > ordenCobro
+    })
+    expect(despuesDelCobro('clientes')).toBe(true)
+    expect(despuesDelCobro('recorridos')).toBe(true)
+    expect(despuesDelCobro('recorrido-activo')).toBe(true)
+  })
+
+  // H6 (lente B10): si el DELETE no borró ninguna fila (1559-b13) se avisa, pero la lista del modal
+  // seguía mostrando el pago que ya no existe.
+  it('si anular un pago falla, la lista de pagos del modal se vuelve a leer', async () => {
+    eliminarPago.mockRejectedValue(new Error('No se anuló ningún pago: ya no existe o no tenés permiso para anularlo.'))
+    const user = userEvent.setup()
+    renderContainer()
+
+    await user.click(await screen.findByRole('button', { name: 'Cobrar' }))
+    await user.click(await screen.findByRole('button', { name: 'Anular pago' }, ESPERA_MODAL))
+    await waitFor(() => expect(notifyMock.error).toHaveBeenCalledWith(expect.stringMatching(/No se anuló ningún pago/)))
+    const lecturasAlAbrir = 1
+    await waitFor(() => expect(fetchPagosPedido.mock.calls.length).toBeGreaterThan(lecturasAlAbrir))
   })
 
   // 1543-b4: una salvedad sobre un regalo libera su cupo de promo.

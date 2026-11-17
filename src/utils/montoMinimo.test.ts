@@ -318,6 +318,11 @@ describe('el total flotante se redondea a centavos antes de comparar (1598-b1)',
     expect(franjaCargo(flotante, R)).toBe('arriba')
   })
 
+  it('en un medio redondea como Postgres (1.005 sube a 1.01), no como Math.round', () => {
+    expect(cumpleMontoMinimo(1.005, 1.01)).toBe(true)
+    expect(cumpleMontoMinimo(1.004, 1.01)).toBe(false)
+  })
+
   it('un centavo menos sigue siendo menos', () => {
     expect(cumpleMontoMinimo(434.99, 435)).toBe(false)
   })

@@ -104,6 +104,64 @@ describe('ModalPagoPedido — la fecha del cobro según el rol (FRV-2)', () => {
     expect(onConfirmar).not.toHaveBeenCalled()
   })
 
+  // H4 (lente B10): la fecha de la entrega vacía viajaba como '' y caía en hoy sin avisar.
+  it('con la fecha de la entrega vacía no se confirma: se exige', async () => {
+    const onConfirmar = vi.fn().mockResolvedValue(undefined)
+    renderModal({ isAdmin: true, onConfirmar })
+    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    fireEvent.change(inputFechaEntrega(), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
+
+    await waitFor(() => expect(screen.getByText(/ingresá la fecha de la entrega/i)).toBeTruthy())
+    expect(onConfirmar).not.toHaveBeenCalled()
+  })
+
+  // H3 (decisión del dueño): se acompañan en los dos sentidos, pero pueden ser distintas.
+  it('el admin cambia sólo el cobro: la entrega lo sigue', async () => {
+    const onConfirmar = vi.fn().mockResolvedValue(undefined)
+    renderModal({ isAdmin: true, onConfirmar })
+    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    fireEvent.change(inputFechaCobro(), { target: { value: diasAtras(2) } })
+    expect(inputFechaEntrega().value).toBe(diasAtras(2))
+    fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
+
+    await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
+    expect(onConfirmar.mock.calls[0][0].fechaPago).toBe(diasAtras(2))
+    expect(onConfirmar.mock.calls[0][0].fechaEntrega).toBe(diasAtras(2))
+  })
+
+  it('el admin cambia el cobro y después la entrega: quedan distintas, y no se vuelven a pisar', async () => {
+    const onConfirmar = vi.fn().mockResolvedValue(undefined)
+    renderModal({ isAdmin: true, onConfirmar })
+    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    fireEvent.change(inputFechaCobro(), { target: { value: diasAtras(1) } })
+    fireEvent.change(inputFechaEntrega(), { target: { value: diasAtras(4) } })
+    expect(inputFechaCobro().value).toBe(diasAtras(1))
+    expect(inputFechaEntrega().value).toBe(diasAtras(4))
+    // Tocar el cobro de nuevo no pisa la entrega que ya se editó a mano.
+    fireEvent.change(inputFechaCobro(), { target: { value: diasAtras(2) } })
+    expect(inputFechaEntrega().value).toBe(diasAtras(4))
+    fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
+
+    await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
+    expect(onConfirmar.mock.calls[0][0].fechaPago).toBe(diasAtras(2))
+    expect(onConfirmar.mock.calls[0][0].fechaEntrega).toBe(diasAtras(4))
+  })
+
+  it('quien no es admin no puede cambiar el cobro y no queda trabado: elige la entrega y cobra hoy', async () => {
+    const onConfirmar = vi.fn().mockResolvedValue(undefined)
+    renderModal({ isAdmin: false, diasAtrasFechaEntrega: 7, onConfirmar })
+    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    expect(inputFechaCobro().disabled).toBe(true)
+    fireEvent.change(inputFechaEntrega(), { target: { value: diasAtras(3) } })
+    expect(inputFechaCobro().value).toBe(fechaLocalISO())
+    fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
+
+    await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
+    expect(onConfirmar.mock.calls[0][0].fechaPago).toBe(fechaLocalISO())
+    expect(onConfirmar.mock.calls[0][0].fechaEntrega).toBe(diasAtras(3))
+  })
+
   it('el admin: la fecha del cobro acompaña a la de la entrega hasta que la toca', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     renderModal({ isAdmin: true, onConfirmar })

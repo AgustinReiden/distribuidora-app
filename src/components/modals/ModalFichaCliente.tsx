@@ -148,6 +148,8 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
           : 'Se quitó de la boleta: vuelve a saldo a favor del cliente.')
       setAnulandoId(null)
     } catch (err) {
+      // El pago pudo haber dejado de existir (0 filas, 1559-b13): la lista tiene que mostrarlo.
+      void fetchPagosCliente(cliente.id)
       notify.error(err instanceof Error ? err.message : esSaldoAFavorAplicado(pago) ? 'No se pudo quitar el pago de la boleta' : 'No se pudo anular el pago')
     } finally {
       setProcesandoAnular(false)

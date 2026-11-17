@@ -91,7 +91,7 @@ import {
   fetchPedidoIdsConSalvedad,
   type RegistrarCambioInput,
 } from '../../hooks/queries'
-import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
+import { construirFiltrosPedidos, aplicarFiltroConSalvedad, motivoDelFiltroSalvedad } from '../../utils/construirFiltrosPedidos'
 import { filtrosParaStats } from '../../utils/kpiFiltroPedidos'
 import { useRecorridoActivoQuery } from '../../hooks/queries/useRecorridoActivoQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
@@ -265,6 +265,7 @@ export default function PedidosContainer(): React.ReactElement {
     data: paginatedResult,
     isLoading: loadingPedidos,
     isError: errorPedidos,
+    error: errorPedidosDetalle,
     refetch: refetchPedidos,
     dataUpdatedAt: pedidosActualizadosAt,
     isSuccess: pedidosCargados,
@@ -1588,6 +1589,13 @@ export default function PedidosContainer(): React.ReactElement {
       await handleConfirmarPago(payload)
       return
     }
+    // Después del cobro, no antes: el `onSettled` de `cambiarEstado` ya invalidó el recorrido con el
+    // pago todavía sin entrar, y el saldo del cliente nunca se refrescaba (lente B10, H5).
+    const invalidarTrasEntregaConPago = () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['clientes'] }),
+      queryClient.invalidateQueries({ queryKey: ['recorridos'] }),
+      queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] }),
+    ])
     setGuardando(true)
     try {
       // La entrega lleva su propia fecha (la que eligió quien entrega); sin ella, la del cobro.
@@ -1614,12 +1622,14 @@ export default function PedidosContainer(): React.ReactElement {
       } catch (pagoErr) {
         notify.error(avisoEntregaConPagoFallido(pedido.id, (pagoErr as Error).message), { persist: true })
         queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+        void invalidarTrasEntregaConPago()
         setModalPagoPedidoOpen(false)
         setPedidoPago(null)
         setPedidoEntregaConPago(null)
         return
       }
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      void invalidarTrasEntregaConPago()
       setModalPagoPedidoOpen(false)
       setPedidoPago(null)
       setPedidoEntregaConPago(null)
@@ -1643,7 +1653,11 @@ export default function PedidosContainer(): React.ReactElement {
       // El saldo del cliente cambia al anular un cobro: la ficha y los selectores lo leen de ahí.
       queryClient.invalidateQueries({ queryKey: ['clientes'] })
       notify.success('Pago anulado')
-    } catch (e) { notify.error((e as Error).message) }
+    } catch (e) {
+      notify.error((e as Error).message)
+      // El pago pudo haber dejado de existir (0 filas, 1559-b13): la lista tiene que mostrarlo.
+      void refreshPagosPedido(String(pedidoPago.id))
+    }
     setGuardando(false)
   }, [pedidoPago, isAdmin, eliminarPago, refreshPagosPedido, queryClient, notify])
 
@@ -1661,7 +1675,10 @@ export default function PedidosContainer(): React.ReactElement {
       notify.success(yaEstabaSuelto
         ? 'Ese pago ya estaba fuera de la boleta.'
         : 'Se quitó de la boleta: vuelve a saldo a favor del cliente.')
-    } catch (e) { notify.error((e as Error).message) }
+    } catch (e) {
+      notify.error((e as Error).message)
+      void refreshPagosPedido(String(pedidoPago.id))
+    }
     setGuardando(false)
   }, [pedidoPago, isAdmin, desimputarPago, refreshPagosPedido, queryClient, notify])
 
@@ -2792,6 +2809,7 @@ export default function PedidosContainer(): React.ReactElement {
           usuarios={usuarios}
           loading={loadingPedidos}
           error={errorPedidos}
+          errorMotivo={motivoDelFiltroSalvedad(errorPedidosDetalle)}
           onRetry={refetchPedidos}
           exportando={exportando}
           onBusquedaChange={handleBusquedaChange}

@@ -12,13 +12,15 @@
  * Si cambiás esta regla, cambiá también `pedido_incumple_minimo`.
  */
 import { formatCurrency } from './formatters'
-import { redondear } from './calculations'
+import { redondearSQL } from './calculations'
 
 /**
  * El total que se compara, al centavo: el server lo ve en `numeric` y el front suma doubles
  * (4.35 × 100 da 434.99999999999994 y «< 435» bloquearía un pedido que el server acepta, 1598-b1).
+ * Con el redondeo de Postgres (`redondearSQL`, medio hacia afuera), no con `Math.round`: en un
+ * medio (1.005) el server sube y `Math.round` baja.
  */
-const alCentavo = (total: number): number => (Number.isFinite(total) ? redondear(total, 2) : 0)
+const alCentavo = (total: number): number => (Number.isFinite(total) ? redondearSQL(total, 2) : 0)
 
 /** Un pedido que da exactamente el mínimo pasa. */
 export function cumpleMontoMinimo(total: number, minimo: number): boolean {
