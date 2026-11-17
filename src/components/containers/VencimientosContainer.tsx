@@ -49,11 +49,14 @@ export default function VencimientosContainer() {
   const horizonte = diasAlertaVencimiento + 1
   const { data: lotes = [], isLoading, isFetching, isError, refetch } = useVencimientosQuery(horizonte)
 
-  const handleDarDeBaja = useCallback(async (loteId: number, cantidad: number) => {
+  // `motivo` llega sólo para un lote que todavía no venció (#1558, 1558-b6).
+  const handleDarDeBaja = useCallback(async (loteId: number, cantidad: number, motivo?: string) => {
     try {
-      const res = await darDeBaja.mutateAsync({ loteId, cantidad })
+      const res = await darDeBaja.mutateAsync({ loteId, cantidad, observaciones: motivo })
       notify.success(
-        `${cantidad} u. dadas de baja por vencimiento. Stock del producto: ${res.stock}.`
+        motivo
+          ? `${cantidad} u. dadas de baja (${motivo}). Stock del producto: ${res.stock}.`
+          : `${cantidad} u. dadas de baja por vencimiento. Stock del producto: ${res.stock}.`
       )
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'No se pudo dar de baja el lote')

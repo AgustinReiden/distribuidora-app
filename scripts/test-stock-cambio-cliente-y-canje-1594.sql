@@ -278,8 +278,9 @@ BEGIN
   p := pg_temp.prod('[{"dias":30,"cantidad":100,"restante":50}]', 40);
   v_cid := public.registrar_cambio_producto(v_cli::int, p, 3, q, 3, 'ensayo 1594', 'vencimiento');
   SELECT id INTO v_mid FROM mermas_stock WHERE producto_id = p;
+  -- Sin la fila del alta del producto del ensayo (0->90 'alta_producto', 1594-b1 de la ola 2 de #1603).
   SELECT string_agg(format('%s->%s %s %s', stock_anterior, stock_nuevo, origen, referencia_tipo), ' | ' ORDER BY id) INTO v_t
-    FROM stock_historico WHERE producto_id = p;
+    FROM stock_historico WHERE producto_id = p AND origen IS DISTINCT FROM 'alta_producto';
   IF v_t IS DISTINCT FROM '90->93 cambio_producto_merma cambios_productos | 93->90 merma mermas_stock' THEN
     v_fallas := v_fallas || format('K6: ledger del devuelto %s', COALESCE(v_t, '(nada)'));
   END IF;
