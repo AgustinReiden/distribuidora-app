@@ -345,7 +345,10 @@ BEGIN
         ('preventista', v_pre, 'PASA 0'), ('chofer', v_tra, 'PASA 0'), ('desactivado', v_des, 'PASA 0'),
         ('encargado', v_enc, 'PASA 1'), ('admin', v_adm1, 'PASA 1'), ('depósito', v_dep, 'PASA 1')
       ) AS t(quien, u, esperado),
-      LATERAL (SELECT pg_temp.intenta(u, format('SELECT count(*) FROM stock_historico WHERE producto_id = %s', v_prod)) AS visto) s
+      -- Se cuenta sólo el ajuste del ensayo: con la migración de stock y lotes (517) el alta del
+      -- producto anota además una fila alta_producto, y sin ella no.
+      LATERAL (SELECT pg_temp.intenta(u, format('SELECT count(*) FROM stock_historico WHERE producto_id = %s '
+                                                 || 'AND origen IS DISTINCT FROM ''alta_producto''', v_prod)) AS visto) s
      WHERE s.visto <> esperado
   LOOP
     v_fallas := v_fallas || ('P13 · historial de stock: ' || v_t);
