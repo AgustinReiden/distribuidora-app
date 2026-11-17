@@ -341,7 +341,8 @@ suelta en `sucursales`.
   por `pedidos.fecha`, así que su total puede no coincidir con lo liquidado.
   **La nota de crédito resta de la comisión** (B16, #1545; decisión del dueño): `_comision_lineas`
   baja cada clave por lo que acreditan las notas vigentes de la boleta en ella (de `_ventas_nc`, con
-  tope en lo que la clave vende; sin renglón, en la del mismo producto). Una nota emitida después de
+  tope en lo que la clave vende; sin renglón, en la del mismo producto o, si la boleta no lo tiene, en
+  la de su renglón de mayor venta). Una nota emitida después de
   liquidar sale como ajuste en la liquidación siguiente, y anularla lo devuelve. La base del
   gerencial (`nc`) resta lo mismo.
   El efectivo a entregar resta también los pagos al personal de esa rendición

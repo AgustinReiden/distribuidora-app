@@ -16,7 +16,8 @@
 --   · `notas_credito_venta.fecha` pasa a ser la fecha de imputación: la de su
 --     boleta (`pedidos.fecha`). Cuándo se creó lo sigue diciendo `created_at`.
 --   · El freno está en la tabla: `trg_notas_credito_venta_fecha_de_boleta`
---     (BEFORE INSERT OR UPDATE OF fecha, pedido_id) le pone la fecha de su
+--     (BEFORE INSERT OR UPDATE OF fecha, pedido_id; lee la boleta FOR SHARE, así
+--     un cambio de fecha concurrente no la deja atrás) le pone la fecha de su
 --     boleta, mande lo que mande quien escribe. Y si cambia la fecha de la
 --     boleta, `trg_pedidos_fecha_arrastra_notas_credito` lleva sus notas
 --     (vigentes y anuladas) a la nueva: la nota no se separa de su boleta, y
@@ -43,7 +44,9 @@
 --     (producto + combo + origen) baja por lo que acreditan las notas vigentes
 --     de esa boleta en esa clave, con tope en lo que la clave vende. La nota
 --     cae en la clave de su renglón; si el renglón ya no está (la edición rehace
---     las líneas), en la del mismo producto de la boleta. La parte pagada con
+--     las líneas), en la del mismo producto de la boleta, y si la boleta no lo
+--     tiene (sólo por una carga directa del server), en la de su renglón de
+--     mayor venta, como la resta el gerencial. La parte pagada con
 --     adelanto de sueldo ya no comisionaba, y la nota resta en la misma
 --     proporción. Las notas salen de `_ventas_nc` (la regla de B8b), no de una
 --     copia. Con eso cambian calcular_comisiones (/comisiones), la
@@ -162,9 +165,14 @@ AS $function$
 DECLARE
   v_fecha date;
 BEGIN
+  -- FOR SHARE (H2 de la revisión): un cambio de fecha de la boleta en otra
+  -- transacción espera a que ésta termine, o ésta lee la fecha que dejó. La RPC
+  -- ya tiene la boleta FOR UPDATE, y el arrastre la tiene por su UPDATE: es la
+  -- misma transacción, no espera.
   SELECT p.fecha INTO v_fecha
     FROM pedidos p
-   WHERE p.id = NEW.pedido_id AND p.sucursal_id = NEW.sucursal_id;
+   WHERE p.id = NEW.pedido_id AND p.sucursal_id = NEW.sucursal_id
+     FOR SHARE;
   -- Sin boleta, la FK compuesta rechaza la fila: no hay fecha que poner.
   IF v_fecha IS NOT NULL THEN
     NEW.fecha := v_fecha;
@@ -314,10 +322,13 @@ $n$      AND ped.factor > 0
   -- comisión. Las notas vigentes de estas boletas (_ventas_nc: la nota se imputa
   -- al día de su boleta, así que el rango de las boletas las trae a todas), cada
   -- renglón en la clave de su renglón de la boleta o, si la edición lo rehízo, en
-  -- la del mismo producto. Con el mismo factor del adelanto de sueldo.
+  -- la del mismo producto; si la boleta no tiene ese producto (sólo por una carga
+  -- directa del server), en la de su renglón de mayor venta, como la resta el
+  -- gerencial (por boleta). Con el mismo factor del adelanto de sueldo.
   nc AS (
     SELECT v.pedido_id,
-           COALESCE(COALESCE(pi.producto_id, v.producto_id)::text, '-') || '|'
+           COALESCE((CASE WHEN pi.id IS NOT NULL THEN pi.producto_id
+                          ELSE COALESCE(alt.producto_id, v.producto_id) END)::text, '-') || '|'
              || COALESCE((CASE WHEN pi.id IS NOT NULL THEN pi.combo_id ELSE alt.combo_id END)::text, '-') || '|'
              || COALESCE(CASE WHEN pi.id IS NOT NULL THEN pi.origen_precio::text ELSE alt.origen_precio END, '-') AS clave,
            v.monto * ped.factor AS monto
@@ -326,18 +337,29 @@ $n$      AND ped.factor > 0
       JOIN ped ON ped.id = v.pedido_id
       LEFT JOIN pedido_items pi ON pi.id = v.pedido_item_id AND pi.pedido_id = v.pedido_id
       LEFT JOIN LATERAL (
-        SELECT x.combo_id, x.origen_precio::text AS origen_precio
+        SELECT x.producto_id, x.combo_id, x.origen_precio::text AS origen_precio
           FROM pedido_items x
-         WHERE x.pedido_id = v.pedido_id AND x.producto_id = v.producto_id
+         WHERE x.pedido_id = v.pedido_id
            AND COALESCE(x.es_bonificacion, false) = false
-         ORDER BY (x.combo_id IS NULL) DESC, x.id
+         ORDER BY (x.producto_id IS NOT DISTINCT FROM v.producto_id) DESC,
+                  CASE WHEN x.producto_id IS NOT DISTINCT FROM v.producto_id
+                       THEN (x.combo_id IS NULL)::int ELSE 0 END DESC,
+                  CASE WHEN x.producto_id IS NOT DISTINCT FROM v.producto_id
+                       THEN 0 ELSE x.subtotal END DESC,
+                  x.id
          LIMIT 1
       ) alt ON pi.id IS NULL
   ),
   -- Lo que restan las notas en cada clave, con tope en lo que la clave vende.
-  nc_clave AS (
+  -- MATERIALIZED (H1 de la revisión de B16): sin eso el planner, que estima `lin`
+  -- en una fila, lo reordenaba por cada renglón (un mes de boletas con una sola
+  -- nota pasaba de 1 s a más de 8). Sólo las boletas con nota.
+  nc_clave AS MATERIALIZED (
     SELECT k.pedido_id, k.clave, k.base, LEAST(n.monto, k.base) AS monto
-      FROM (SELECT lin.pedido_id, lin.clave, SUM(lin.subtotal) AS base FROM lin GROUP BY lin.pedido_id, lin.clave) k
+      FROM (SELECT lin.pedido_id, lin.clave, SUM(lin.subtotal) AS base
+              FROM lin
+             WHERE lin.pedido_id IN (SELECT nc.pedido_id FROM nc)
+             GROUP BY lin.pedido_id, lin.clave) k
       JOIN (SELECT nc.pedido_id, nc.clave, SUM(nc.monto) AS monto FROM nc GROUP BY nc.pedido_id, nc.clave) n
         ON n.pedido_id = k.pedido_id AND n.clave = k.clave
      WHERE k.base > 0
@@ -482,10 +504,11 @@ DECLARE
 BEGIN
   v_def := pg_temp.parche(v_def,
 $a$  WITH ventas_filtradas AS ($a$,
-$n$  WITH nc AS (
+$n$  WITH nc AS MATERIALIZED (
     -- B16 (#1545): las notas de crédito de las boletas del período (_ventas_nc,
     -- imputadas al día de su boleta) restan de la venta, del top de clientes y de
-    -- lo facturado por producto. No de las unidades.
+    -- lo facturado por producto. No de las unidades. MATERIALIZED: _ventas_nc corre
+    -- una vez, no una por boleta.
     SELECT n.pedido_id, n.producto_id, n.monto
       FROM public._ventas_nc(ARRAY[p_sucursal_id], p_desde, p_hasta) n
   ),
@@ -509,9 +532,10 @@ $n$    ORDER BY facturado DESC LIMIT p_limit$n$, 'bot_ventas_periodo · orden');
   v_def := pg_temp.def('public.bot_mis_ventas(uuid,date,date,bigint,integer)');
   v_def := pg_temp.parche(v_def,
 $a$  WITH ventas_filtradas AS ($a$,
-$n$  WITH nc AS (
+$n$  WITH nc AS MATERIALIZED (
     -- B16 (#1545): las notas de crédito de sus boletas restan (_ventas_nc). El
-    -- resumen del preventista (bot_digest_preventista) lo lee de acá.
+    -- resumen del preventista (bot_digest_preventista) lo lee de acá. MATERIALIZED:
+    -- _ventas_nc corre una vez, no una por boleta.
     SELECT n.pedido_id, n.monto
       FROM public._ventas_nc(ARRAY[p_sucursal_id], p_desde, p_hasta) n
      WHERE n.usuario_id = p_preventista_id

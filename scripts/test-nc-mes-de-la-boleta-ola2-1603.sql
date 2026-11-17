@@ -27,6 +27,10 @@
 --        C2 por renglón: la clave de A en P1 da 800, la de B 200 (la NC2 anulada no resta), la de A en P2
 --           400 (la NC3 sin renglón cae en el renglón del mismo producto).
 --        C3 el gerencial: kpis.base_comision y vendedores[V].base_nc, 1.400.
+--        C4 (v2, H4 de la revisión) una nota sin renglón y de un producto que la boleta no tiene (sólo por
+--           una carga directa del server) cae en el renglón de mayor venta: P3 (del admin, de hoy, A×1 a
+--           100) con una nota de B por 30 comisiona 70, lo mismo que su base en el gerencial.
+--   Los tiempos (H1 de la revisión) los mide scripts/test-nc-mes-de-la-boleta-rendimiento-ola2-1603.sql.
 --   L  · La liquidación (libro de deltas): un empleado de V que comisiona.
 --        L1 sin nada liquidado, las líneas iniciales suman base 1.400 y comisión 28.
 --        L2 liquidado eso, una nota nueva sobre P2 (A×1, 100) sale como un ajuste de −100 de base y −2 de
@@ -334,6 +338,27 @@ BEGIN
   v_j := public.bot_digest_preventista(v_ven, v_s, v_finmes)::jsonb;
   IF NOT pg_temp.igual((v_j#>>'{mis_ventas,mes_total}')::numeric, 1400) THEN
     v_fallas := v_fallas || format('B3 el resumen del preventista: el mes en 1400: %s', v_j->'mis_ventas');
+  END IF;
+
+  -- ============================== C4 · una nota sin clave en su boleta (v2, H4)
+  -- Sólo por una carga directa del server: sin renglón y de un producto (B) que la boleta P3 (del admin,
+  -- de hoy, A×1 a 100) no tiene. Cae en el renglón de mayor venta y resta igual que en el gerencial.
+  INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, fecha_entrega, canal,
+                       retiro_deposito, tipo_factura)
+    VALUES (v_c1, v_s, v_adm, 100, 'entregado', v_hoy, now(), 'app', true, 'ZZ') RETURNING id INTO v_liq;
+  INSERT INTO pedido_items (pedido_id, producto_id, cantidad, precio_unitario, subtotal, sucursal_id, costo_unitario_al_crear)
+    VALUES (v_liq, v_a, 1, 100, 100, v_s, 60);
+  INSERT INTO notas_credito_venta (sucursal_id, cliente_id, pedido_id, fecha, motivo, total, usuario_id, neto, iva)
+    VALUES (v_s, v_c1, v_liq, v_hoy, 'otro', 30, v_adm, 30, 0) RETURNING id INTO v_nc4;
+  INSERT INTO nota_credito_venta_items (nota_credito_id, sucursal_id, pedido_item_id, producto_id, cantidad,
+                                        precio_unitario, subtotal)
+    VALUES (v_nc4, v_s, NULL, v_b, 1, 30, 30);
+  v_j := public.reporte_gerencial(v_s, v_hoy, v_hoy);
+  v_n := (SELECT sum(base) FROM public._comision_lineas(ARRAY[v_liq]));
+  IF NOT pg_temp.igual(v_n, 70)
+     OR NOT pg_temp.igual((pg_temp.fila(v_j->'vendedores', 'id', v_adm::text)->>'base_nc')::numeric, v_n) THEN
+    v_fallas := v_fallas || format('C4 la nota sin clave resta 30 en la comisión (70) como en el gerencial: %s y %s',
+      v_n, pg_temp.fila(v_j->'vendedores', 'id', v_adm::text)->>'base_nc');
   END IF;
 
   -- ======================================================= F5 · el arrastre
