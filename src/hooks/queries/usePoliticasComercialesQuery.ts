@@ -112,13 +112,51 @@ function modoValido(modo: unknown): ModoMinimoPedido {
   return modo === 'cargo' || modo === 'escalas' ? modo : 'bloquear'
 }
 
-async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComerciales> {
-  const { data, error } = await supabase
-    .from('politicas_comerciales')
-    .select('monto_minimo_pedido, modo_minimo_pedido, monto_envio_gratis, cargo_envio_pedido, comision_pct_preventista, comision_pct_otros, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock, ventana_precio_anterior_horas, combo_margen_minimo_pct, combo_descuento_maximo_pct, dias_atras_fecha_pedido, multiplo_redondeo_precio')
-    .maybeSingle()
+/**
+ * Lo que `authenticated` lee de `politicas_comerciales` por REST: lo que necesita quien vende
+ * (decisión del dueño D50, 1564-b6 del plan #1603). La tabla se concede columna por columna:
+ * un `*` o una columna de las reservadas en este select hace fallar la consulta entera.
+ */
+export const POLITICA_COLUMNAS_PARA_VENDER =
+  'monto_minimo_pedido, modo_minimo_pedido, monto_envio_gratis, cargo_envio_pedido, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock, dias_atras_fecha_pedido, multiplo_redondeo_precio'
 
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la política comercial. Revisá la señal e intentá de nuevo.')
+/** Lo que sólo ven admin y encargado: lo da la RPC `politica_comercial_reservada()`. */
+export const POLITICA_COLUMNAS_RESERVADAS =
+  'comision_pct_preventista, comision_pct_otros, ventana_precio_anterior_horas, combo_margen_minimo_pct, combo_descuento_maximo_pct'
+
+const SIN_CONEXION_POLITICA = 'Sin conexión: no se pudo cargar la política comercial. Revisá la señal e intentá de nuevo.'
+
+/**
+ * Las comisiones, las alertas de combos y la ventana del precio anterior, para admin y
+ * encargado; para el resto la RPC no devuelve fila (null). Mientras la
+ * migración de B9 no esté aplicada la RPC no existe (PGRST202) y esas columnas todavía se leen
+ * por REST: así este front anda antes y después de la migración.
+ */
+async function fetchPoliticaReservada(): Promise<Record<string, unknown> | null> {
+  const { data, error } = await supabase.rpc('politica_comercial_reservada')
+  if (!error) {
+    const fila = Array.isArray(data) ? data[0] : data
+    return (fila as Record<string, unknown> | null | undefined) ?? null
+  }
+  if ((error as { code?: string }).code === 'PGRST202') {
+    const previo = await supabase.from('politicas_comerciales').select(POLITICA_COLUMNAS_RESERVADAS).maybeSingle()
+    if (previo.error) throw errorDeSupabase(previo.error, SIN_CONEXION_POLITICA)
+    return (previo.data as Record<string, unknown> | null) ?? null
+  }
+  throw errorDeSupabase(error, SIN_CONEXION_POLITICA)
+}
+
+async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComerciales> {
+  const [{ data: paraVender, error }, reservada] = await Promise.all([
+    supabase.from('politicas_comerciales').select(POLITICA_COLUMNAS_PARA_VENDER).maybeSingle(),
+    fetchPoliticaReservada(),
+  ])
+
+  if (error) throw errorDeSupabase(error, SIN_CONEXION_POLITICA)
+
+  const data = (paraVender || reservada
+    ? { ...((paraVender as Record<string, unknown> | null) ?? {}), ...(reservada ?? {}) }
+    : null) as ({ [columna: string]: unknown; mostrar_sin_stock?: boolean | null } | null)
 
   // Sin fila = sin política. La mig 204 siembra una por sucursal, pero una
   // sucursal creada después todavía no la tendría, y eso no es un error.

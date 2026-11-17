@@ -94,7 +94,10 @@ suelta en `sucursales`.
   `perfiles.activo = false`. Un helper de rol nuevo mira `activo` igual, y una RPC que decide por
   el rol de quien llama usa esos helpers o mira `activo` (#1490): `scripts/check-rol-sin-activo.mjs`
   falla ante una lectura de `perfiles.rol` de `auth.uid()` (o de un alias) sin `activo`, salvo las
-  de `scripts/rol-sin-activo-permitidas.json`, que sólo se achica. Nadie edita su propio
+  de `scripts/rol-sin-activo-permitidas.json`, que sólo se achica. Una **policy** tampoco lee el rol
+  sin `activo` (1564-b11 de #1603): usa los helpers o suma `COALESCE(activo, true)` a la subconsulta
+  sobre `perfiles` (el depósito no tiene helper), y el mismo gate falla ante cualquiera, sin lista
+  de permitidas. Nadie edita su propio
   perfil (decisión del dueño): `perfiles` se escribe sólo por `perfiles_update_admin`. Y ningún
   `UPDATE` ni `DELETE` de `perfiles` deja la base sin un admin activo (`perfiles_guard_desactivacion`).
 - **El rol es uno solo en toda sucursal: `perfiles.rol`** (mig 486, #1519). Lo que cambia por
@@ -102,8 +105,22 @@ suelta en `sucursales`.
   `'mismo'` por un CHECK hasta que #1525 la dropee, y nombrarla en un `select` rompe la consulta
   cuando se vaya. `_rol_en_sucursal(uid, suc)` da `perfiles.rol` si el usuario es de esa sucursal.
 - **El path de un bucket privado empieza por la sucursal** (`<sucursal_id>/…`, #1474). Sus
-  policies comparan `(storage.foldername(name))[1]` con las sucursales del usuario, nunca sólo el
-  rol. Lo vigila `scripts/check-storage.mjs`, que además falla ante un bucket público.
+  policies comparan `(storage.foldername(name))[1]` con la sucursal **activa**
+  (`current_sucursal_id()`), nunca sólo el rol ni todas las sucursales del usuario: el de dos
+  sucursales ve las facturas de la que está trabajando (decisión del dueño, 1564-b7 de #1603). Lo
+  vigila `scripts/check-storage.mjs`, que además falla ante un bucket público.
+- **La política comercial se lee por columna** (decisión del dueño, 1564-b6 de #1603).
+  `authenticated` lee de `politicas_comerciales` sólo lo de vender (el mínimo y su modo, el envío,
+  mostrar sin stock, los días atrás de la fecha, los de vencimiento y el múltiplo de redondeo); las
+  comisiones, las alertas de combos y la ventana del precio anterior los da
+  `politica_comercial_reservada()` a admin y encargado. Como con `productos`: un `*` sobre la
+  tabla por PostgREST falla la consulta entera, y una columna nueva nace invisible: si la necesita
+  quien vende, su migración la concede (`GRANT SELECT (col) ... TO authenticated`) y se suma a
+  `POLITICA_COLUMNAS_PARA_VENDER`; si no, va a la RPC.
+- **Una `auditoria_*` que lee código limpia el cuerpo con `_sql_sin_comentarios` o
+  `_sql_sin_comentarios_ni_literales`** (#1541): una sola pasada que entiende las comillas. Sacar
+  primero los `--` y después los literales rompe la paridad con un literal `' -- '` y esconde lo
+  que sigue. Espejo en `scripts/lib/locks.mjs`.
 - **Toda tabla nueva** de `public` nace sin escritura REST y sin nada para `anon` (los
   defaults de la migración del barrido, #1135). Si el front la escribe por REST, o la escribe
   un trigger INVOKER como `authenticated`, la migración concede **el privilegio exacto** (por
@@ -378,9 +395,12 @@ suelta en `sucursales`.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
   **visible para todos los preventistas** (mig 028), o sea lo contrario de reservado. Y
-  `reservado_admin` **no** es "solo lo ve admin": lo ven también encargado, transportista y
-  depósito, y el preventista que ya le vendió —esa excepción es la que evita que sus pedidos
-  viejos pierdan el cliente y desaparezcan por los `!inner` de `usePedidosQuery`—. Todo
+  `reservado_admin` **no** es "solo lo ve admin": lo ven también el encargado, el chofer que le
+  reparte un pedido y el preventista que ya le vendió —esa excepción es la que evita que sus pedidos
+  viejos pierdan el cliente y desaparezcan por los `!inner` de `usePedidosQuery`—. El depósito no
+  ve ningún cliente. `mt_clientes_select` es una lista positiva (1564-b12 de #1603, decisión del
+  dueño): admin y encargado ven todos; quien actúa como preventista, los libres y los suyos; el
+  chofer, sólo los de sus pedidos; un rol nuevo no hereda nada. Todo
   camino nuevo que ofrezca clientes *para operar* lo excluye; todo camino de *historial* lo
   sigue mostrando.
   Desde la 358 esa excepción de historial vale para **cualquier** cliente, no sólo el
@@ -514,8 +534,9 @@ corregida en la 263: ni `tsc`, ni los tests (que mockean la RPC), ni `deno task 
 y el digest se habría quedado mudo sin que fallara nada.
 
 Y el cuarto: **nada de columnas computadas ni de `*` sobre una tabla que `authenticated` lee
-columna por columna** (hoy `pedido_items` y `productos`). A una columna computada —una función
-`f(tabla)` que se pide en el `select`— PostgREST le pasa la fila entera, y la fila pide SELECT
+columna por columna** (hoy `pedido_items`, `productos` y `politicas_comerciales`). A una columna
+computada —una función `f(tabla)` que se pide en el `select`— PostgREST le pasa la fila entera, y
+la fila pide SELECT
 sobre **todas** las columnas: la consulta entera da `42501` para todos los roles, aunque la
 función tenga `EXECUTE`. Así cayó la lista de Pedidos con `regalo_mueve_stock_foto(pedido_items)`
 (#1416). Un dato derivado de esas tablas va por RPC o por columna real, como

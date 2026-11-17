@@ -2,8 +2,16 @@ import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-// @ts-expect-error -- módulo .mjs de scripts/, sin tipos
-import { aplanar, consultaDelLock, hallazgosLocks, tomaVariasFilasSinOrden } from '../../scripts/lib/locks.mjs'
+import {
+  aplanar,
+  consultaDelLock,
+  hallazgosLocks,
+  sentenciasConLock,
+  sinComentarios,
+  sinComentariosNiLiterales,
+  tomaVariasFilasSinOrden,
+  // @ts-expect-error -- módulo .mjs de scripts/, sin tipos
+} from '../../scripts/lib/locks.mjs'
 
 /**
  * El criterio del gate `scripts/check-locks.mjs` (#1520, gate 4). La base devuelve las sentencias con un lock de
@@ -102,6 +110,36 @@ describe('tomaVariasFilasSinOrden', () => {
 
   it('una sentencia sin lock no se marca', () => {
     expect(marca('UPDATE t SET x = 1 WHERE y = 2')).toBe(false)
+  })
+})
+
+describe('la preparación del cuerpo (#1541, espejo de _sql_sin_comentarios_ni_literales)', () => {
+  // La línea del motivo de la merma de cancelar_pedido_con_stock, y después el lock de la 447 sin orden.
+  const CUERPO = [
+    "  v_motivo := 'Cancelación' || COALESCE(' -- ' || NULLIF(btrim(p_motivo), ''), '');",
+    '  -- un comentario con una comilla: no es un literal',
+    '  PERFORM 1 FROM pagos WHERE pedido_id = p_pedido_id FOR NO KEY UPDATE;',
+    "  v_nota := 'listo';",
+  ].join('\n')
+
+  it('un literal con -- adentro no se corta: el lock que sigue llega como sentencia y se marca', () => {
+    const sentencias = sentenciasConLock(CUERPO)
+    expect(sentencias).toEqual(['PERFORM 1 FROM pagos WHERE pedido_id = p_pedido_id FOR NO KEY UPDATE'])
+    expect(hallazgosLocks({ sentencias: sentencias.map((sentencia: string) => ({ firma: 'f()', sentencia })) }).marcadas)
+      .toHaveLength(1)
+  })
+
+  it('con el orden viejo (comentarios antes que literales) el lock se perdía', () => {
+    const viejo = CUERPO.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ').replace(/'[^']*'/g, "''")
+    expect(viejo).not.toMatch(/FOR NO KEY UPDATE/)
+  })
+
+  it('saca los comentarios de línea y de bloque, y vacía los literales con sus comillas dobladas', () => {
+    expect(sinComentariosNiLiterales("x := 'it''s'; /* a ' b */ y := '/* no */'; -- z '")).toBe("x := '';  y := ''; ")
+  })
+
+  it('sinComentarios deja los literales enteros, aunque traigan -- o /*', () => {
+    expect(sinComentarios("a := ' -- ' || b; -- fin\nc := '/* x */'; /* d */")).toBe("a := ' -- ' || b; \nc := '/* x */'; ")
   })
 })
 

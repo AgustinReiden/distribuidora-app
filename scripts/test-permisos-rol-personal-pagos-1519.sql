@@ -174,7 +174,11 @@ BEGIN
   END;
 
   BEGIN
-    -- R3 · obtener_sucursales_usuario
+    -- R3 · obtener_sucursales_usuario. Se borró en la migración de B9 del plan #1603 (nadie la
+    -- llamaba, decisión del dueño D48): sin ella, R3 no aplica.
+    IF to_regprocedure('public.obtener_sucursales_usuario()') IS NULL THEN
+      RAISE EXCEPTION USING ERRCODE = 'ZZ001';
+    END IF;
     PERFORM pg_temp.como(v_p, v_p_suc);
     v_res := pg_temp.rest_val('SELECT public.obtener_sucursales_usuario()::text');
     IF v_res LIKE 'ERR%' OR v_res = '(null)'
