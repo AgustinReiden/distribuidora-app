@@ -1,5 +1,6 @@
 -- Ensayo de la migración de la ola 2 del plan #1603, tarjeta B19 (H1 de la revisión de B3, y en
--- la v2 H1 a H5 de la revisión de B19): migrations/NNN_edicion_mueve_solo_la_diferencia_de_la_barra.sql.
+-- la v2 H1 a H5 de la revisión de B19): migrations/527_edicion_mueve_solo_la_diferencia_de_la_barra.sql
+-- (aplicada en producción el 17/11; adentro sigue diciendo NNN, como se aplicó).
 --
 -- La edición de un pedido (`actualizar_pedido_items`) deshacía la barra de regalos entera con
 -- `aplicar_uso_promo_acumulador(-c)` —que devuelve el fardo al lote que nombra el bloque— y la
