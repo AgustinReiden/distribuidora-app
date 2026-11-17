@@ -76,9 +76,10 @@ const PERMITIDOS: Record<string, number> = {
   'hooks/queries/usePromocionesQuery.ts': 1,
   // catch de traerTodo (#1561): relanza su Error ya normalizado; sólo traga "does not exist".
   'hooks/queries/useGruposPrecioQuery.ts': 1,
-  // catch (err) { ...; throw err }: relanza lo que ya salió normalizado de adentro. El 6º es
-  // desimputarPago (mig 479), con el mismo patrón que eliminarPago.
-  'hooks/supabase/usePagos.ts': 6,
+  // catch (err) { ...; throw err }: relanza lo que ya salió normalizado de adentro. Eran 6 con
+  // eliminarPago y desimputarPago, que ya no notifican ni relanzan en un catch: lanzan sin envolver
+  // y avisa quien llama (1544-b5), así que quedan 4.
+  'hooks/supabase/usePagos.ts': 4,
   // el catch devuelve un valor vacío: el error nunca sale.
   'hooks/supabase/useRecorridos.ts': 1,
   // AuthError de supabase-js SÍ es un Error (a diferencia de PostgrestError).

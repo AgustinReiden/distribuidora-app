@@ -8,6 +8,7 @@ import { Button } from '../ui/Button';
 import { formatPrecio, parseDateSafe, fechaHaceDias, diaArgentino, fechaLocalISO } from '../../utils/formatters';
 import { fechaReferenciaPromo as fechaReferenciaPromoDe } from '../../utils/fechaReferenciaPromo';
 import { fechaPedidoFueraDeRango, mensajeFechaAnteriorAlPiso, pisoFechaPedido } from '../../utils/fechaPedido';
+import { errorDeFechaEntrega, rangoFechaEntrega } from '../../utils/fechaEntrega';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio';
@@ -23,7 +24,7 @@ import { calcularNetoVenta, numeroEditable, parsePrecio } from '../../utils/calc
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta';
 import { esTipoVB } from '../../utils/valeBlanco';
 import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente, esDescuentoDeCategoria } from '../../utils/descuentoCliente';
-import { moqQueBloqueaLaEdicion, obtenerMOQ } from '../../utils/precioMayorista';
+import { cantidadesPorProducto, moqQueBloqueaLaEdicion, obtenerMOQ } from '../../utils/precioMayorista';
 import { esProductoMostrable } from '../../utils/productosOperativos';
 import { tienePrecioDeVenta } from '../../utils/precioVenta';
 import { factorDeLaLinea } from '../../utils/unidadesRegalo';
@@ -554,6 +555,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     : fechaFueraDeRango?.tipo === 'anterior'
       ? mensajeFechaAnteriorAlPiso(fechaFueraDeRango.piso, fechaFueraDeRango.dias)
       : null;
+  // 1598 (L6 #1603): la fecha de una entrega ya hecha tiene piso y techo (`fechaEntrega.ts`, espejo
+  // de `_fecha_entrega_fuera_de_rango`). El server sólo la juzga cuando el día cambia: un pedido con
+  // la entrega más vieja que el piso se sigue editando sin tocarla.
+  const reglaEntrega = { esAdmin: !!isAdmin, diasAtras: politicas.diasAtrasFechaPedido };
+  const rangoEntrega = rangoFechaEntrega(reglaEntrega);
+  const errorFechaEntrega = puedeEditarFechas && pedidoEntregado && fechaEntrega && fechaEntrega !== fechaEntregaOriginal
+    ? errorDeFechaEntrega(fechaEntrega, reglaEntrega)
+    : null;
   const sugerenciasCombos = useMemo(() => {
     if (combos.length === 0 || itemsConPrecioBase.length === 0) return [];
     const porId = new Map(productos.map(p => [String(p.id), p]));
@@ -679,7 +688,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const bloqueoMOQ = puedeEditarItems && !pedidoEntregado
     ? moqQueBloqueaLaEdicion(
         violacionesMOQ,
-        new Map(itemsOriginales.map(o => [String(o.productoId), Number(o.cantidad)])),
+        cantidadesPorProducto(itemsOriginales),
       )
     : [];
 
@@ -1003,6 +1012,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     // #1514: la fecha del pedido fuera del piso o del techo no se manda.
     if (mensajeFechaFueraDeRango) {
       setErrorValidacion(mensajeFechaFueraDeRango);
+      return;
+    }
+
+    if (errorFechaEntrega) {
+      setErrorValidacion(errorFechaEntrega);
       return;
     }
 
@@ -1865,8 +1879,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
               type="date"
               value={fechaEntrega}
               onChange={e => setFechaEntrega(e.target.value)}
+              min={rangoEntrega.min}
+              max={rangoEntrega.max}
+              aria-invalid={errorFechaEntrega ? true : undefined}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             />
+            {errorFechaEntrega && (
+              <p role="alert" className="mt-1 text-xs text-rose-600">{errorFechaEntrega}</p>
+            )}
             {fechaEntrega !== fechaEntregaOriginal && (
               <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
                 Cambiar esta fecha moverá el pedido a la rendición del día elegido. Si alguno de los días ya está controlado, primero hay que reabrirlo desde Rendiciones.

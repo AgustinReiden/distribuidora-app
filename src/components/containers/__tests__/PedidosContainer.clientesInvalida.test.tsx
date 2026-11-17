@@ -227,4 +227,22 @@ describe('PedidosContainer — el saldo del cliente se entera (FRT-2)', () => {
     await waitFor(() => expect(supabaseStub.rpc).toHaveBeenCalledWith('registrar_salvedad', expect.anything()))
     await waitFor(() => expect(invalidoClientes()).toBe(true))
   })
+
+  // 1543-b4: una salvedad sobre un regalo libera su cupo de promo.
+  it('registrar una salvedad invalida los cupos de promo', async () => {
+    const user = userEvent.setup()
+    renderContainer()
+
+    await user.click(await screen.findByRole('button', { name: 'Salvedad' }))
+    await user.click(await screen.findByRole('button', { name: 'Guardar salvedad' }, ESPERA_MODAL))
+
+    await waitFor(() => expect(supabaseStub.rpc).toHaveBeenCalledWith('registrar_salvedad', expect.anything()))
+    await waitFor(() => {
+      const cupos = invalidateQueries.mock.calls
+        .map(([arg]) => arg as { queryKey?: unknown[]; predicate?: (q: { queryKey: unknown[] }) => boolean })
+        .filter(a => a.queryKey?.[0] === 'promociones')
+      expect(cupos).toHaveLength(1)
+      expect(cupos[0].predicate?.({ queryKey: ['promociones', 1, 'cupos', null] })).toBe(true)
+    })
+  })
 })

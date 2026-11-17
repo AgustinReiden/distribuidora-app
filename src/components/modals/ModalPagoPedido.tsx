@@ -40,6 +40,9 @@ import {
 } from '../../utils/requestIdPersistente'
 import { useRequestIdPersistente } from '../../hooks/useRequestIdPersistente'
 import CampoQuienRepartio from './CampoQuienRepartio'
+// La confirmación va DENTRO del ModalBase (regla de CLAUDE.md): como hermano en el container
+// quedaría detrás del overlay de Radix y fallaría en silencio.
+import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion'
 import type { EleccionChofer } from '../../utils/choferDeEntrega'
 import type { PedidoDB, PagoDBWithUsuario, PerfilDB } from '../../types'
 
@@ -47,6 +50,11 @@ export interface PagoPedidoPayload {
   pedidoId: string
   clienteId: string
   fechaPago: string
+  /**
+   * Sólo en modo entrega: el día en que se entregó, que no es el del cobro (un chofer que no es
+   * admin cobra con la fecha de hoy aunque la entrega sea de hace unos días). Sin él, la del pago.
+   */
+  fechaEntrega?: string
   observaciones?: string
   pagos: Array<{ formaPago: string; monto: number }>
   /**
@@ -193,14 +201,16 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   // FRV-2: el server sólo deja a un admin cobrar con otra fecha que hoy. Para el
   // resto la fecha del cobro es la de hoy.
   const fechaPago = isAdmin ? fechaElegida : hoy
-  // L6 (#1603): una entrega SIN cobro («Entregar a cuenta corriente») tiene su propio
-  // rango (`fechaEntrega.ts`): quien no es admin la fecha hasta N días atrás. En el modo
-  // entrega el campo es ése; si hay cobro, quien no es admin lo registra hoy.
+  // La fecha de la ENTREGA es otra que la del cobro (L6 #1603, 1598): tiene su propio rango
+  // (`fechaEntrega.ts`: quien no es admin, hasta N días atrás) y la elige quien entrega. La del
+  // cobro sigue la regla de siempre: hoy para quien no es admin.
   const reglaEntrega = { esAdmin: isAdmin, diasAtras: diasAtrasFechaEntrega, hoy }
   const rangoEntrega = rangoFechaEntrega(reglaEntrega)
   const diasEntrega = diasDeLaEntrega(reglaEntrega)
-  const fechaEditable = isAdmin || !!modoEntregaTransportista
-  const fechaDelCampo = fechaEditable ? fechaElegida : hoy
+  const [fechaEntregaElegida, setFechaEntrega] = useState<string>(hoy)
+  // El admin que no tocó la fecha del cobro la deja acompañar a la de la entrega, como cuando era
+  // un solo campo; en cuanto la toca, cada una va por su lado.
+  const [cobroTocado, setCobroTocado] = useState<boolean>(!!sinConfirmar)
   // Fecha minima: dia siguiente al ultimo cierre de caja de la sucursal (mig 134).
   const fechaMinima = useFechaMinimaPago()
   const [observaciones, setObservaciones] = useState<string>(sinConfirmar?.observaciones ?? '')
@@ -216,6 +226,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
       : [{ formaPago: 'efectivo', monto: '' }],
   )
   const [error, setError] = useState<string>('')
+  const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null)
   const [eleccionChofer, setEleccionChofer] = useState<EleccionChofer | null>(null)
   const faltaChofer = !!modoEntregaTransportista && !!pedirChofer && !eleccionChofer
   // pagoId en curso de edicion de forma_pago (para mostrar spinner inline).
@@ -318,8 +329,15 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
       return
     }
     if (!isAdmin && fechaElegida !== hoy) {
-      setError('El cobro va con la fecha de hoy. Si la entrega fue otro día, entregala a cuenta corriente con esa fecha y registrá el cobro desde el menú de pago.')
+      setError('El cobro va con la fecha de hoy. Si necesitás otra fecha para el cobro, pedísela a un admin.')
       return
+    }
+    if (modoEntregaTransportista) {
+      const errorEntrega = errorDeFechaEntrega(fechaEntregaElegida, reglaEntrega)
+      if (errorEntrega) {
+        setError(errorEntrega)
+        return
+      }
     }
     if (faltaChofer) {
       setError('Elegí quién repartió el pedido.')
@@ -346,6 +364,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
         pedidoId: String(pedido.id),
         clienteId: String(pedido.cliente_id),
         fechaPago,
+        ...(modoEntregaTransportista ? { fechaEntrega: fechaEntregaElegida } : {}),
         observaciones: observaciones.trim() || undefined,
         pagos,
         clientRequestIds,
@@ -374,6 +393,22 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
     } finally {
       setEditandoPagoId(null)
     }
+  }
+
+  // 1544-b3: quitar el saldo a favor aplicado se confirma, como en la ficha del cliente.
+  const pedirQuitarDeBoleta = (pagoId: string): void => {
+    if (!onQuitarDeBoleta) return
+    setConfirmConfig({
+      visible: true,
+      tipo: 'warning',
+      titulo: 'Quitar de la boleta',
+      mensaje: 'El pago sale de esta boleta y vuelve a saldo a favor del cliente: el saldo no cambia y la caja no se mueve. Queda a favor hasta su próximo uso.',
+      textoConfirmar: 'Sí, quitar',
+      onConfirm: () => {
+        setConfirmConfig(null)
+        void onQuitarDeBoleta(pagoId)
+      },
+    })
   }
 
   const handleEntregarSinPago = async (fechaEntrega: string): Promise<void> => {
@@ -525,7 +560,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                           type="button"
                           variant="ghost"
                           size="iconSm"
-                          onClick={() => { void onQuitarDeBoleta(p.id) }}
+                          onClick={() => pedirQuitarDeBoleta(p.id)}
                           disabled={guardando}
                           className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 dark:text-red-400"
                           aria-label="Quitar de la boleta"
@@ -589,6 +624,34 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
           </div>
         )}
 
+        {/* La fecha de la entrega: aparte de la del cobro, y también sin saldo (sólo confirma). */}
+        {modoEntregaTransportista && (
+          <div>
+            <label htmlFor="fecha-entrega-pedido" className="block text-sm font-medium mb-1 dark:text-gray-200">
+              Fecha de la entrega
+            </label>
+            <input
+              id="fecha-entrega-pedido"
+              type="date"
+              value={fechaEntregaElegida}
+              min={rangoEntrega.min}
+              max={rangoEntrega.max}
+              onChange={e => {
+                const nueva = e.target.value
+                setFechaEntrega(nueva)
+                if (isAdmin && !cobroTocado && nueva) {
+                  setFechaPago(fechaMinima && nueva < fechaMinima ? fechaMinima : nueva)
+                }
+              }}
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            />
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              La entrega puede ir hasta{' '}
+              {diasEntrega === 0 ? 'hoy' : `${diasEntrega} ${diasEntrega === 1 ? 'día' : 'días'} atrás`}.
+            </p>
+          </div>
+        )}
+
         {/* Form nuevo pago */}
         {!soloAnulacion && saldoPendiente > 0 ? (
           <>
@@ -600,20 +663,19 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
             )}
             <div>
               <label htmlFor="fecha-pago-pedido" className="block text-sm font-medium mb-1 dark:text-gray-200">
-                {modoEntregaTransportista ? 'Fecha de entrega y pago' : 'Fecha de pago'}
+                {modoEntregaTransportista ? 'Fecha del cobro' : 'Fecha de pago'}
               </label>
               <input
                 id="fecha-pago-pedido"
                 type="date"
-                value={fechaDelCampo}
+                value={fechaPago}
                 // #1246: el server no acepta un pago con fecha futura, y otra
                 // fecha que hoy sólo la carga un admin (FRV-2): para el resto
-                // el campo queda fijo en hoy, salvo en la entrega, que tiene
-                // su rango (L6).
-                min={isAdmin ? fechaMinima : fechaEditable ? rangoEntrega.min : hoy}
+                // el campo queda fijo en hoy.
+                min={isAdmin ? fechaMinima : hoy}
                 max={hoy}
-                disabled={!fechaEditable}
-                onChange={e => setFechaPago(e.target.value)}
+                disabled={!isAdmin}
+                onChange={e => { setCobroTocado(true); setFechaPago(e.target.value) }}
                 className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-60"
               />
               {!isAdmin && !modoEntregaTransportista && (
@@ -623,8 +685,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
               )}
               {!isAdmin && modoEntregaTransportista && (
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  El cobro va con la fecha de hoy. Una entrega a cuenta corriente puede ir hasta{' '}
-                  {diasEntrega === 0 ? 'hoy' : `${diasEntrega} ${diasEntrega === 1 ? 'día' : 'días'} atrás`}.
+                  El cobro va con la fecha de hoy, aunque la entrega sea de otro día.
                 </p>
               )}
             </div>
@@ -733,7 +794,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
           <Button
             variant="primary"
             size="md"
-            onClick={() => { void handleEntregarSinPago(fechaDelCampo) }}
+            onClick={() => { void handleEntregarSinPago(fechaEntregaElegida) }}
             disabled={guardando || faltaChofer}
             loading={guardando}
           >
@@ -748,8 +809,8 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
             variant="secondary"
             size="md"
             className="border-amber-400 text-amber-800 hover:bg-amber-50 dark:border-amber-600 dark:text-amber-300 dark:hover:bg-amber-900/20"
-            onClick={() => { void handleEntregarSinPago(fechaDelCampo) }}
-            disabled={guardando || faltaChofer || !fechaDelCampo}
+            onClick={() => { void handleEntregarSinPago(fechaEntregaElegida) }}
+            disabled={guardando || faltaChofer || !fechaEntregaElegida}
             loading={guardando}
           >
             Entregar a cuenta corriente
@@ -767,6 +828,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
           </Button>
         )}
       </div>
+      <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </ModalBase>
   )
 })

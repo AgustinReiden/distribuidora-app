@@ -9,6 +9,7 @@ import type { PedidoDB, PedidoItemDB, PerfilDB, FiltrosPedidosState, PedidoSalve
 import { productosKeys } from './useProductosQuery'
 import { clientesKeys } from './useClientesQuery'
 import { promocionesKeys } from './usePromocionesQuery'
+import { invalidarCuposPromo } from './cuposPromoCache'
 import { fechaLocalISO } from '../../utils/formatters'
 import { nuevoRequestId, type VerificacionDeAlta } from '../../utils/idempotencia'
 import { isTransientNetworkError, conPlazoDeRed } from '../../utils/retryWithBackoff'
@@ -1198,6 +1199,8 @@ export function useCancelarPedidoMutation() {
     onSuccess: (_data, { tipo }) => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })
+      // Cancelar libera el cupo de las promos del pedido (1543-b4).
+      void invalidarCuposPromo(queryClient)
       // FRT-2: cancelar saca la boleta de la deuda y deja lo cobrado como saldo a
       // favor; el saldo cacheado del cliente quedaba viejo hasta 5 minutos.
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
@@ -1282,6 +1285,8 @@ export function useCambiarClientePedidoMutation() {
     mutationFn: cambiarClientePedido,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
+      // Cancela el pedido viejo y crea el nuevo: libera y consume cupo (1543-b4).
+      void invalidarCuposPromo(queryClient)
       queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['recorridos'] })

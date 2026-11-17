@@ -56,6 +56,11 @@ describe('ModalEntregaYPagoMasivos · fecha de entrega', () => {
     expect(boton).toBeEnabled()
   })
 
+  it('el encargado ve el aviso con su coma: «otra fecha, pedíselo»', () => {
+    renderModal({ isEncargado: true })
+    expect(screen.getByText(/Si necesitás otra fecha, pedíselo a un admin\./)).toBeInTheDocument()
+  })
+
   it('el encargado sigue fijo en hoy', () => {
     renderModal({ isEncargado: true })
     const campo = screen.getByLabelText('Fecha')

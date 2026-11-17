@@ -7,7 +7,7 @@
  * tiraban un 400 (PGRST100) y dejaban la lista entera en error.
  */
 import { describe, it, expect } from 'vitest'
-import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from './construirFiltrosPedidos'
+import { construirFiltrosPedidos, aplicarFiltroConSalvedad, TOPE_IDS_FILTRO_SALVEDAD } from './construirFiltrosPedidos'
 import type { FiltrosPedidosState } from '../types'
 
 interface Llamada { metodo: string; args: unknown[] }
@@ -251,5 +251,35 @@ describe('aplicarFiltroConSalvedad', () => {
     const { builder, llamadas } = crearQueryFalsa()
     aplicarFiltroConSalvedad(builder, 'sin_salvedad', null)
     expect(llamadas).toContainEqual({ metodo: 'not', args: ['id', 'in', '(-1)'] })
+  })
+
+  // 1598-b4: los ids viajan en la URL (`id=in.(…)`). Sin tope, con la tabla creciendo la URL pasa
+  // el límite del proxy y el filtro falla con un error de red que no dice nada.
+  describe('tope de ids en la URL (1598-b4)', () => {
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => 10_000 + i)
+
+    it('hasta el tope arma el filtro como siempre', () => {
+      const { builder, llamadas } = crearQueryFalsa()
+      aplicarFiltroConSalvedad(builder, 'con_salvedad', ids(TOPE_IDS_FILTRO_SALVEDAD))
+      expect(llamadas).toHaveLength(1)
+    })
+
+    it('pasado el tope, con_salvedad no manda la URL: avisa qué hacer', () => {
+      const { builder, llamadas } = crearQueryFalsa()
+      expect(() => aplicarFiltroConSalvedad(builder, 'con_salvedad', ids(TOPE_IDS_FILTRO_SALVEDAD + 1)))
+        .toThrow(/demasiados pedidos con salvedad/i)
+      expect(llamadas).toHaveLength(0)
+    })
+
+    it('lo mismo con sin_salvedad', () => {
+      const { builder } = crearQueryFalsa()
+      expect(() => aplicarFiltroConSalvedad(builder, 'sin_salvedad', ids(TOPE_IDS_FILTRO_SALVEDAD + 1)))
+        .toThrow(/demasiados pedidos con salvedad/i)
+    })
+
+    it('«todos» nunca mira el tamaño de la lista', () => {
+      const { builder } = crearQueryFalsa()
+      expect(() => aplicarFiltroConSalvedad(builder, 'todos', ids(TOPE_IDS_FILTRO_SALVEDAD * 3))).not.toThrow()
+    })
   })
 })

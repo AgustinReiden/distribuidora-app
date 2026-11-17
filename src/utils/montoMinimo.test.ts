@@ -292,3 +292,33 @@ describe('etiquetaEstadoEnvio (#1231)', () => {
     expect(etiquetaEstadoEnvio('toString')).toBe('toString')
   })
 })
+
+describe('el total flotante se redondea a centavos antes de comparar (1598-b1)', () => {
+  // 434.99999999999994 es lo que da 4.35 * 100 en coma flotante: el server (numeric) ve 435.
+  const flotante = 4.35 * 100
+  const cargo = { modo: 'cargo', montoMinimo: 435, montoEnvioGratis: 0, cargoEnvio: 1500 } as const
+  const escalas = { modo: 'escalas', montoMinimo: 435, montoEnvioGratis: 900, cargoEnvio: 1500 } as const
+
+  it('el supuesto del caso: el flotante crudo es menor que 435', () => {
+    expect(flotante).toBeLessThan(435)
+  })
+
+  it('cumpleMontoMinimo no bloquea un pedido que da justo el mínimo', () => {
+    expect(cumpleMontoMinimo(flotante, 435)).toBe(true)
+    expect(motivoMontoMinimo(flotante, 435)).toBeNull()
+  })
+
+  it('cargoEnvioPedido no cobra envío a un pedido que llega justo al mínimo', () => {
+    expect(cargoEnvioPedido(flotante, cargo)).toBe(0)
+    expect(cargoEnvioPedido(flotante, escalas)).toBe(1500) // en escalas, 435 entra en el tramo medio
+  })
+
+  it('franjaCargo toma el umbral de gratis redondeado', () => {
+    const R = { modo: 'escalas', montoMinimo: 100, montoEnvioGratis: 435, cargoEnvio: 1500 } as const
+    expect(franjaCargo(flotante, R)).toBe('arriba')
+  })
+
+  it('un centavo menos sigue siendo menos', () => {
+    expect(cumpleMontoMinimo(434.99, 435)).toBe(false)
+  })
+})

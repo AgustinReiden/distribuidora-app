@@ -329,20 +329,25 @@ export function usePagos(): UsePagosReturnExtended {
     }
   }
 
+  // eliminarPago y desimputarPago NO notifican: relanzan y quien llama muestra el aviso
+  // (antes salían dos toasts por el mismo fallo, 1544-b5).
   const eliminarPago = async (pagoId: string): Promise<void> => {
-    try {
-      const llamar = async (signal: AbortSignal) => {
-        const { error } = await supabase.from('pagos').delete().eq('id', pagoId).abortSignal(signal)
-        if (error) throw errorDeSupabase(error, MENSAJE_ELIMINAR_PAGO_SIN_CONFIRMAR)
+    let intentos = 0
+    const llamar = async (signal: AbortSignal) => {
+      intentos++
+      const { data, error } = await supabase.from('pagos').delete().eq('id', pagoId).select('id').abortSignal(signal)
+      if (error) throw errorDeSupabase(error, MENSAJE_ELIMINAR_PAGO_SIN_CONFIRMAR)
+      // 0 filas en el PRIMER intento: no se borró nada (el pago ya no existe o la policy no lo
+      // deja ver) y decir "Pago anulado" sería mentira (1559-b13). En un reintento sí es legal:
+      // el intento anterior pudo haber entrado antes de cortarse la red.
+      if (intentos === 1 && (data ?? []).length === 0) {
+        throw new Error('No se anuló ningún pago: ya no existe o no tenés permiso para anularlo. Actualizá la pantalla y revisá la cuenta del cliente.')
       }
-      // Un DELETE por id es idempotente: si el primer intento entró, el segundo
-      // borra 0 filas sin error. Por eso reintenta ante un fallo de red.
-      await escrituraIdempotente(llamar, MENSAJE_ELIMINAR_PAGO_SIN_CONFIRMAR, { reintentar: true })
-      setPagos(prev => prev.filter(p => p.id !== pagoId))
-    } catch (error) {
-      notifyError('Error al eliminar pago: ' + (error as Error).message)
-      throw error
     }
+    // Un DELETE por id es idempotente: si el primer intento entró, el segundo
+    // borra 0 filas sin error. Por eso reintenta ante un fallo de red.
+    await escrituraIdempotente(llamar, MENSAJE_ELIMINAR_PAGO_SIN_CONFIRMAR, { reintentar: true })
+    setPagos(prev => prev.filter(p => p.id !== pagoId))
   }
 
   /**
@@ -354,26 +359,21 @@ export function usePagos(): UsePagosReturnExtended {
     pagoId: string,
     pedidoId: string,
   ): Promise<{ yaEstabaSuelto: boolean; saldoAFavor: number }> => {
-    try {
-      const llamar = async (signal: AbortSignal) => {
-        const { data, error } = await supabase.rpc('desimputar_pago', {
-          p_pago_id: pagoId,
-          p_pedido_id: pedidoId,
-        }).abortSignal(signal)
-        if (error) throw errorDeSupabase(error, MENSAJE_DESIMPUTAR_PAGO_SIN_CONFIRMAR)
-        return data
-      }
-      // La RPC es idempotente: con el pago ya suelto contesta `ya_estaba_suelto`. Por eso
-      // reintenta ante un fallo de red.
-      const data = await escrituraIdempotente(llamar, MENSAJE_DESIMPUTAR_PAGO_SIN_CONFIRMAR, { reintentar: true })
-      const raw = (data ?? {}) as { ya_estaba_suelto?: boolean; saldo_a_favor?: number | string | null }
-      return {
-        yaEstabaSuelto: raw.ya_estaba_suelto === true,
-        saldoAFavor: Number(raw.saldo_a_favor ?? 0) || 0,
-      }
-    } catch (error) {
-      notifyError('Error al quitar el pago de la boleta: ' + (error as Error).message)
-      throw error
+    const llamar = async (signal: AbortSignal) => {
+      const { data, error } = await supabase.rpc('desimputar_pago', {
+        p_pago_id: pagoId,
+        p_pedido_id: pedidoId,
+      }).abortSignal(signal)
+      if (error) throw errorDeSupabase(error, MENSAJE_DESIMPUTAR_PAGO_SIN_CONFIRMAR)
+      return data
+    }
+    // La RPC es idempotente: con el pago ya suelto contesta `ya_estaba_suelto`. Por eso
+    // reintenta ante un fallo de red.
+    const data = await escrituraIdempotente(llamar, MENSAJE_DESIMPUTAR_PAGO_SIN_CONFIRMAR, { reintentar: true })
+    const raw = (data ?? {}) as { ya_estaba_suelto?: boolean; saldo_a_favor?: number | string | null }
+    return {
+      yaEstabaSuelto: raw.ya_estaba_suelto === true,
+      saldoAFavor: Number(raw.saldo_a_favor ?? 0) || 0,
     }
   }
 

@@ -12,11 +12,18 @@
  * Si cambiás esta regla, cambiá también `pedido_incumple_minimo`.
  */
 import { formatCurrency } from './formatters'
+import { redondear } from './calculations'
+
+/**
+ * El total que se compara, al centavo: el server lo ve en `numeric` y el front suma doubles
+ * (4.35 × 100 da 434.99999999999994 y «< 435» bloquearía un pedido que el server acepta, 1598-b1).
+ */
+const alCentavo = (total: number): number => (Number.isFinite(total) ? redondear(total, 2) : 0)
 
 /** Un pedido que da exactamente el mínimo pasa. */
 export function cumpleMontoMinimo(total: number, minimo: number): boolean {
   if (!Number.isFinite(minimo) || minimo <= 0) return true // 0 = sin política
-  return (Number.isFinite(total) ? total : 0) >= minimo
+  return alCentavo(total) >= minimo
 }
 
 /**
@@ -27,7 +34,7 @@ export function cumpleMontoMinimo(total: number, minimo: number): boolean {
  */
 export function motivoMontoMinimo(total: number, minimo: number): string | null {
   if (cumpleMontoMinimo(total, minimo)) return null
-  const faltante = minimo - (Number.isFinite(total) ? total : 0)
+  const faltante = minimo - alCentavo(total)
   return (
     `El pedido no alcanza la compra mínima de ${formatCurrency(minimo)}. ` +
     `Faltan ${formatCurrency(faltante)}.`
@@ -87,7 +94,7 @@ export function motivoRechazoMinimo(total: number, regla: ReglaMinimoPedido): st
 
 /** Cargo de envío que le toca a un pedido nuevo (0 si ninguno). */
 export function cargoEnvioPedido(total: number, regla: ReglaMinimoPedido): number {
-  const t = Number.isFinite(total) ? total : 0
+  const t = alCentavo(total)
   if (t <= 0) return 0 // sin productos no hay envío que cobrar
   if (!(regla.cargoEnvio > 0)) return 0
   if (regla.modo === 'cargo') {
@@ -103,7 +110,7 @@ export function cargoEnvioPedido(total: number, regla: ReglaMinimoPedido): numbe
 export function faltanteParaEnvioGratis(total: number, regla: ReglaMinimoPedido): number | null {
   if (cargoEnvioPedido(total, regla) <= 0) return null
   const umbral = regla.modo === 'cargo' ? regla.montoMinimo : regla.montoEnvioGratis
-  return Math.max(umbral - (Number.isFinite(total) ? total : 0), 0)
+  return Math.max(umbral - alCentavo(total), 0)
 }
 
 /*
@@ -134,7 +141,7 @@ export function politicaCobraCargo(regla: ReglaMinimoPedido): boolean {
 
 /** `debajo` ⇔ 0 < total < umbral. El total 0 (sin productos) cuenta como `arriba`. */
 export function franjaCargo(total: number, regla: ReglaMinimoPedido): 'debajo' | 'arriba' {
-  const t = Number.isFinite(total) ? total : 0
+  const t = alCentavo(total)
   return t > 0 && t < umbralEnvioGratis(regla) ? 'debajo' : 'arriba'
 }
 

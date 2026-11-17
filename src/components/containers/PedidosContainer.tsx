@@ -13,7 +13,9 @@ import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta'
 import { avisoCobroAltaRecortado, mensajeSaldoAFavorAlta, montoCobroAlta, saldoMostradoAlta } from '../../utils/saldoAFavor'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import AvisosPedidos from '../pedidos/AvisosPedidos'
-import { filasPedidosExcel } from '../../utils/pedidosExcel'
+import { filasPedidosExcel, resumenPagosExcel } from '../../utils/pedidosExcel'
+import { invalidarCuposPromo } from '../../hooks/queries/cuposPromoCache'
+import { campoFechaDeEntrega, type ReglaFechaEntrega } from '../../utils/fechaEntrega'
 import { fechaLocalISO, fechaHaceDias, formatPrecio } from '../../utils/formatters'
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo'
 import { motivoDatosDePrecio } from '../../utils/datosDePrecio'
@@ -188,7 +190,7 @@ interface ConfirmConfig {
   titulo?: string
   mensaje?: string
   /** Campo de fecha opcional; su valor llega como argumento de onConfirm. */
-  campoFecha?: { label: string; valorInicial: string; max?: string; ayuda?: string }
+  campoFecha?: { label: string; valorInicial: string; min?: string; max?: string; ayuda?: string; validar?: (fecha: string) => string | null }
   onConfirm?: (fecha?: string) => void
 }
 
@@ -198,12 +200,8 @@ interface ConfirmConfig {
  * Se arma en cada apertura y no como constante de módulo porque `fechaLocalISO()`
  * cambia a medianoche y esta app vive en pestañas abiertas por días.
  */
-const campoFechaEntrega = (): NonNullable<ConfirmConfig['campoFecha']> => ({
-  label: 'Fecha de entrega',
-  valorInicial: fechaLocalISO(),
-  max: fechaLocalISO(),
-  ayuda: 'Si estás cargando la entrega de un día anterior, cambiala: define en qué día se contabiliza.',
-})
+const campoFechaEntrega = (regla: ReglaFechaEntrega): NonNullable<ConfirmConfig['campoFecha']> =>
+  campoFechaDeEntrega(regla)
 
 export default function PedidosContainer(): React.ReactElement {
   const queryClient = useQueryClient()
@@ -851,7 +849,7 @@ export default function PedidosContainer(): React.ReactElement {
         visible: true, titulo: 'Confirmar cambio/devolución',
         mensaje: `¿Confirmar el cambio/devolución del pedido #${pedido.id}? Se ajustará el stock.`,
         tipo: 'success',
-        campoFecha: campoFechaEntrega(),
+        campoFecha: campoFechaEntrega({ esAdmin: isAdmin, diasAtras: politicas.diasAtrasFechaPedido }),
         onConfirm: async (fechaEntrega?: string) => {
           try {
             await aplicarCambioParadaMut.mutateAsync({
@@ -874,7 +872,7 @@ export default function PedidosContainer(): React.ReactElement {
         // La fecha es editable porque lo habitual es marcar hoy las entregas de
         // ayer: con la fecha fija en hoy, la rendición del día del reparto
         // quedaba vacía y la del día que se cargó, inflada.
-        campoFecha: campoFechaEntrega(),
+        campoFecha: campoFechaEntrega({ esAdmin: isAdmin, diasAtras: politicas.diasAtrasFechaPedido }),
         onConfirm: async (fechaEntrega?: string) => {
           try {
             await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado', fechaEntrega })
@@ -892,7 +890,7 @@ export default function PedidosContainer(): React.ReactElement {
     setPagosPreviosFallaron(false)
     setModalPagoPedidoOpen(true)
     await refreshPagosPedido(String(pedido.id))
-  }, [cambiarEstado, notify, refreshPagosPedido, aplicarCambioParadaMut])
+  }, [cambiarEstado, notify, refreshPagosPedido, aplicarCambioParadaMut, isAdmin, politicas.diasAtrasFechaPedido])
 
   const handleMarcarEntregado = useCallback(async (pedido: PedidoDB) => {
     // Sin chofer y sin cobro de por medio: la confirmación trae el chofer. Con
@@ -1287,19 +1285,8 @@ export default function PedidosContainer(): React.ReactElement {
         Porcentaje: pedidosExport.length > 0 ? cantidad / pedidosExport.length : 0,
       }))
 
-      // Hoja 4: Resumen Pagos
-      const pagosCounts: Record<string, { cantidad: number; total: number }> = {}
-      pedidosExport.forEach(p => {
-        const ep = p.estado_pago || 'pendiente'
-        if (!pagosCounts[ep]) pagosCounts[ep] = { cantidad: 0, total: 0 }
-        pagosCounts[ep].cantidad++
-        pagosCounts[ep].total += p.total
-      })
-      const pagosData = Object.entries(pagosCounts).map(([estado, info]) => ({
-        'Estado Pago': estado,
-        Cantidad: info.cantidad,
-        'Total $': info.total,
-      }))
+      // Hoja 4: Resumen Pagos (el vale blanco va aparte como consumo interno: 1598-b3)
+      const pagosData = resumenPagosExcel(pedidosExport)
 
       const suffix = modo === 'filtro' ? 'completo' : 'pagina'
       await createMultiSheetExcel([
@@ -1446,6 +1433,8 @@ export default function PedidosContainer(): React.ReactElement {
     // desde la ruta armada via useRecorridosHojaRutaQuery) reflejen el precio
     // editado y no sirvan paradas cacheadas con el valor viejo.
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+    // Editar las líneas libera o consume cupo de promo (1543-b4).
+    void invalidarCuposPromo(queryClient)
     queryClient.invalidateQueries({ queryKey: ['recorridos'] })
     queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
     queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
@@ -1601,11 +1590,11 @@ export default function PedidosContainer(): React.ReactElement {
     }
     setGuardando(true)
     try {
-      // La entrega pertenece al día que el usuario eligió para el cobro, no a hoy.
+      // La entrega lleva su propia fecha (la que eligió quien entrega); sin ella, la del cobro.
       await cambiarEstado.mutateAsync({
         pedidoId: pedido.id,
         nuevoEstado: 'entregado',
-        fechaEntrega: payload.fechaPago,
+        fechaEntrega: payload.fechaEntrega ?? payload.fechaPago,
         ...datosDeEntrega(payload.eleccionChofer),
       })
       let cobroRepetido = false
@@ -1944,7 +1933,7 @@ export default function PedidosContainer(): React.ReactElement {
         setModalPedidoOpen(false)
         notify.warning(
           'Sin conexión: el pedido quedó guardado en el teléfono y se va a sincronizar solo ' +
-            'cuando vuelva la señal. El cobro se registra después.',
+            'cuando vuelva la señal. El cobro no se guarda con el pedido: cuando vuelva la señal, cargalo a mano desde la ficha del pedido.',
           { persist: true },
         )
         setGuardando(false)
@@ -2647,6 +2636,8 @@ export default function PedidosContainer(): React.ReactElement {
     // Invalidar cache de productos y pedidos para reflejar cambios de stock y totales
     queryClient.invalidateQueries({ queryKey: ['productos'] })
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+    // Una salvedad sobre un regalo libera su cupo de promo (1543-b4).
+    void invalidarCuposPromo(queryClient)
     // FRT-2: una salvedad baja el total de la boleta, y con él el saldo del cliente.
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
     // FRT-01 (#1549): la pantalla del chofer no lee de `['pedidos']` sino de su ruta
@@ -3063,6 +3054,8 @@ export default function PedidosContainer(): React.ReactElement {
             permitirRetiro={isAdmin || isEncargado}
             onConfirm={(eleccion, fecha) => { void handleConfirmarEntregaConChofer(eleccion, fecha) }}
             onClose={() => setPedidoSinChofer(null)}
+            esAdmin={isAdmin}
+            diasAtrasFechaEntrega={politicas.diasAtrasFechaPedido}
           />
         </Suspense>
       )}

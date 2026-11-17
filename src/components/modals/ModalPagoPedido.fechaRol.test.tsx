@@ -34,7 +34,11 @@ function renderModal(extra: Partial<ModalPagoPedidoProps> = {}) {
   )
 }
 
-const inputFecha = (): HTMLInputElement => screen.getByLabelText(/fecha de (entrega y )?pago/i) as HTMLInputElement
+// En «Registrar pago» hay un solo campo (la fecha del pago). En «Entregar» hay dos: la fecha de la
+// entrega y la del cobro (1598: la entrega ya no queda atada a la del cobro).
+const inputFecha = (): HTMLInputElement => screen.getByLabelText(/fecha de pago/i) as HTMLInputElement
+const inputFechaCobro = (): HTMLInputElement => screen.getByLabelText(/fecha del cobro/i) as HTMLInputElement
+const inputFechaEntrega = (): HTMLInputElement => screen.getByLabelText(/fecha de la entrega/i) as HTMLInputElement
 const inputMonto = (): HTMLInputElement =>
   screen.getAllByPlaceholderText(/0[.,]00/i)[0] as HTMLInputElement
 
@@ -74,20 +78,51 @@ describe('ModalPagoPedido — la fecha del cobro según el rol (FRV-2)', () => {
     expect(onConfirmar.mock.calls[0][0].fechaPago).toBe(fechaLocalISO())
   })
 
-  it('con otra fecha que hoy, quien no es admin no cobra: se le dice cómo hacerlo', async () => {
+  it('al entregar y cobrar, quien no es admin fecha la entrega por su cuenta y el cobro va con hoy', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
-    renderModal({ isAdmin: false, onConfirmar })
+    renderModal({ isAdmin: false, diasAtrasFechaEntrega: 7, onConfirmar })
     await waitFor(() => expect(inputMonto().value).toBe('21600'))
-    fireEvent.change(inputFecha(), { target: { value: ayer() } })
+    expect(inputFechaCobro().disabled).toBe(true)
+    expect(inputFechaCobro().value).toBe(fechaLocalISO())
+    expect(inputFechaEntrega().disabled).toBe(false)
+    fireEvent.change(inputFechaEntrega(), { target: { value: ayer() } })
     fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
 
-    await waitFor(() => expect(screen.getByText(/el cobro va con la fecha de hoy\. si la entrega fue otro día/i)).toBeTruthy())
+    await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
+    expect(onConfirmar.mock.calls[0][0].fechaEntrega).toBe(ayer())
+    expect(onConfirmar.mock.calls[0][0].fechaPago).toBe(fechaLocalISO())
+  })
+
+  it('al entregar y cobrar, una entrega fuera del rango no se confirma, con el motivo del server', async () => {
+    const onConfirmar = vi.fn().mockResolvedValue(undefined)
+    renderModal({ isAdmin: false, diasAtrasFechaEntrega: 0, onConfirmar })
+    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    fireEvent.change(inputFechaEntrega(), { target: { value: ayer() } })
+    fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
+
+    await waitFor(() => expect(screen.getByText(/no puede ser anterior a hoy\. si la entrega es de antes, la carga un admin/i)).toBeTruthy())
     expect(onConfirmar).not.toHaveBeenCalled()
+  })
+
+  it('el admin: la fecha del cobro acompaña a la de la entrega hasta que la toca', async () => {
+    const onConfirmar = vi.fn().mockResolvedValue(undefined)
+    renderModal({ isAdmin: true, onConfirmar })
+    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    fireEvent.change(inputFechaEntrega(), { target: { value: diasAtras(3) } })
+    expect(inputFechaCobro().value).toBe(diasAtras(3))
+    fireEvent.change(inputFechaCobro(), { target: { value: diasAtras(1) } })
+    fireEvent.change(inputFechaEntrega(), { target: { value: diasAtras(5) } })
+    expect(inputFechaCobro().value).toBe(diasAtras(1))
+    fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
+
+    await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
+    expect(onConfirmar.mock.calls[0][0].fechaEntrega).toBe(diasAtras(5))
+    expect(onConfirmar.mock.calls[0][0].fechaPago).toBe(diasAtras(1))
   })
 
   it('el admin elige la fecha, hasta hoy', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
-    renderModal({ isAdmin: true, onConfirmar })
+    renderModal({ isAdmin: true, onConfirmar, modoEntregaTransportista: false, onEntregarSinPago: undefined })
     const input = inputFecha()
     expect(input.disabled).toBe(false)
     expect(input.max).toBe(fechaLocalISO())
@@ -95,10 +130,11 @@ describe('ModalPagoPedido — la fecha del cobro según el rol (FRV-2)', () => {
 
     await waitFor(() => expect(inputMonto().value).toBe('21600'))
     fireEvent.change(input, { target: { value: ayer() } })
-    fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^registrar pago$/i }))
 
     await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
     expect(onConfirmar.mock.calls[0][0].fechaPago).toBe(ayer())
+    expect(onConfirmar.mock.calls[0][0]).not.toHaveProperty('fechaEntrega')
   })
 })
 
@@ -110,17 +146,18 @@ describe('ModalPagoPedido — la fecha del cobro según el rol (FRV-2)', () => {
 describe('ModalPagoPedido — la fecha de una entrega a cuenta corriente (L6)', () => {
   it('quien no es admin elige la fecha de la entrega dentro de su rango', () => {
     renderModal({ isAdmin: false, diasAtrasFechaEntrega: 3 })
-    const input = inputFecha()
+    const input = inputFechaEntrega()
     expect(input.disabled).toBe(false)
     expect(input.min).toBe(diasAtras(3))
     expect(input.max).toBe(fechaLocalISO())
-    expect(screen.getByText(/el cobro va con la fecha de hoy\. una entrega a cuenta corriente puede ir hasta 3 días atrás/i)).toBeTruthy()
+    expect(screen.getByText(/la entrega puede ir hasta 3 días atrás/i)).toBeTruthy()
+    expect(screen.getByText(/el cobro va con la fecha de hoy/i)).toBeTruthy()
   })
 
   it('la entrega a cuenta corriente de quien no es admin va con la fecha elegida', async () => {
     const onEntregarSinPago = vi.fn().mockResolvedValue(undefined)
     renderModal({ isAdmin: false, diasAtrasFechaEntrega: 7, onEntregarSinPago })
-    fireEvent.change(inputFecha(), { target: { value: ayer() } })
+    fireEvent.change(inputFechaEntrega(), { target: { value: ayer() } })
     fireEvent.click(screen.getByRole('button', { name: /^entregar a cuenta corriente$/i }))
 
     await waitFor(() => expect(onEntregarSinPago).toHaveBeenCalledTimes(1))
@@ -130,7 +167,7 @@ describe('ModalPagoPedido — la fecha de una entrega a cuenta corriente (L6)', 
   it('fuera del rango no se entrega, con el motivo del server', async () => {
     const onEntregarSinPago = vi.fn().mockResolvedValue(undefined)
     renderModal({ isAdmin: false, diasAtrasFechaEntrega: 0, onEntregarSinPago })
-    fireEvent.change(inputFecha(), { target: { value: ayer() } })
+    fireEvent.change(inputFechaEntrega(), { target: { value: ayer() } })
     fireEvent.click(screen.getByRole('button', { name: /^entregar a cuenta corriente$/i }))
 
     await waitFor(() => expect(screen.getByText(/no puede ser anterior a hoy\. si la entrega es de antes, la carga un admin/i)).toBeTruthy())

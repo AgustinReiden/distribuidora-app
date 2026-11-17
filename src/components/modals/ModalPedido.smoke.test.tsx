@@ -1013,7 +1013,7 @@ describe('ModalPedido — sin conexión', () => {
     const estadoPago = screen.getByDisplayValue('Pendiente')
     expect(estadoPago).toBeDisabled()
     expect(
-      screen.getByText('Sin conexión el cobro se registra después, desde la ficha del pedido.'),
+      screen.getByText('Sin conexión el cobro no se guarda con el pedido: cargalo a mano desde la ficha cuando vuelva la señal.'),
     ).toBeInTheDocument()
     // El pedido igual se puede confirmar: offline no bloquea el alta.
     expect(botonConfirmar()).toBeEnabled()
@@ -1621,6 +1621,17 @@ describe('ModalPedido — vale blanco', () => {
     await user.click(botonCarrito())
     expect(screen.getByDisplayValue('Efectivo')).toBeInTheDocument()
     expect(screen.getAllByText('$ 1.250,00').length).toBeGreaterThan(0)
+  })
+})
+
+describe('ModalPedido — aviso de stock bajo', () => {
+  it('«quedarán», con tilde (el futuro de quedar)', async () => {
+    estadoMock.productosExtra = [{ id: '8', nombre: 'Yerba Chica', precio: 700, stock: 6, stock_minimo: 5, categoria: 'Almacen' }]
+    const { user } = montar()
+    await elegirCliente(user, 'Empresa Propia')
+    await agregarProducto(user, 'Yerba')
+    await user.click(botonCarrito())
+    expect(screen.getByText('Stock bajo: quedarán 5')).toBeInTheDocument()
   })
 })
 
