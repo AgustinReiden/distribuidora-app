@@ -77,14 +77,16 @@ suelta en `sucursales`.
   (migs 403b y 404, #1243 y #1244). `handle_new_user()` toma el rol y la sucursal de
   `raw_app_meta_data`: en la admin API, `app_metadata: {rol, sucursal_id}`; por SQL, la
   columna. Nunca los toma de `raw_user_meta_data`, que escribe el que se registra; de ahí sólo
-  sale el nombre. Sin app_metadata (el alta del panel) nace preventista activo de la 1. El
+  sale el nombre. Sin app_metadata (el alta del panel) nace preventista activo de la primera
+  sucursal activa, nunca de una sucursal fija (1596-b5, decisión del dueño). El
   signup queda cerrado en el panel, y `scripts/check-auth.mjs` falla si se abre o si un trigger
   de `auth.users` lee el metadata del usuario para algo más. Para **ver** a un usuario, el admin
   tiene que compartir una sucursal con él (`admin_comparte_sucursal_con`). Para **cambiarle**
   el rol, el activo, el bot o sus sucursales (`asignar_usuario_sucursal`, #1291) tiene que estar
   en **todas** sus sucursales (`admin_abarca_sucursales_de`), porque el rol y el activo valen
   para todas (decisión del dueño). Nadie queda sin sucursal: un usuario sin ninguna no es de
-  ningún admin. Toda rama admin de una policy mira la sucursal, y `scripts/check-rama-admin.mjs`
+  ningún admin. Y quien tiene sucursales tiene una default: asignar sin default la que ya lo era
+  la conserva, y desasignar la default pasa la marca a otra (1596-b4, 1561-b3). Toda rama admin de una policy mira la sucursal, y `scripts/check-rama-admin.mjs`
   lo vigila; sus excepciones van con su huella y su motivo. Una RPC SECURITY DEFINER no pasa por
   RLS: la que reciba un usuario o una sucursal lo acota, y `scripts/check-rpcs-definer.mjs` falla
   ante una que no esté en `scripts/rpcs-definer-permitidas.json`, que sólo se achica.
@@ -101,9 +103,9 @@ suelta en `sucursales`.
   perfil (decisión del dueño): `perfiles` se escribe sólo por `perfiles_update_admin`. Y ningún
   `UPDATE` ni `DELETE` de `perfiles` deja la base sin un admin activo (`perfiles_guard_desactivacion`).
 - **El rol es uno solo en toda sucursal: `perfiles.rol`** (mig 486, #1519). Lo que cambia por
-  sucursal son los extra de `perfil_roles`. `usuario_sucursales.rol` no se lee: queda fija en
-  `'mismo'` por un CHECK hasta que #1525 la dropee, y nombrarla en un `select` rompe la consulta
-  cuando se vaya. `_rol_en_sucursal(uid, suc)` da `perfiles.rol` si el usuario es de esa sucursal.
+  sucursal son los extra de `perfil_roles`. `usuario_sucursales` ya no tiene columna `rol`
+  (#1525): nombrarla en un `select` rompe la consulta entera. `_rol_en_sucursal(uid, suc)` da
+  `perfiles.rol` si el usuario es de esa sucursal.
 - **El path de un bucket privado empieza por la sucursal** (`<sucursal_id>/…`, #1474). Sus
   policies comparan `(storage.foldername(name))[1]` con las sucursales del usuario, nunca sólo el
   rol. Lo vigila `scripts/check-storage.mjs`, que además falla ante un bucket público.
@@ -117,6 +119,12 @@ suelta en `sucursales`.
   `_sql_sin_comentarios_ni_literales`** (#1541): una sola pasada que entiende las comillas. Sacar
   primero los `--` y después los literales rompe la paridad con un literal `' -- '` y esconde lo
   que sigue. Espejo en `scripts/lib/locks.mjs`.
+- **Los avisos se guardan 90 días y `audit_logs` 24 meses** (1561-b10 y 1596-b10, decisión del
+  dueño). Los borra `purgar_retencion()`, sólo de `service_role`, que corre
+  `.github/workflows/purgar-retencion.yml`: nada más borra `audit_logs`, que es evidencia. La baja
+  de stock por venta (`pedido_creado`, `pedido_creado_bot` y `pedido_editado` para abajo) no se
+  audita en `productos` porque ya está en `stock_historico`: la filtra el `WHEN` de
+  `audit_productos_update`. Un origen de venta nuevo que baje stock se suma ahí.
 - **Toda tabla nueva** de `public` nace sin escritura REST y sin nada para `anon` (los
   defaults de la migración del barrido, #1135). Si el front la escribe por REST, o la escribe
   un trigger INVOKER como `authenticated`, la migración concede **el privilegio exacto** (por
@@ -280,6 +288,12 @@ suelta en `sucursales`.
   `canal <> 'cambio'` (desde la 252: la venta del bot se factura igual), pero pregunta qué se
   facturó, no quién vendió: parte por `tipo_factura` y el VB va aparte, informativo (`vb_*`).
   En `auditoria_integridad()` el filtro VB va sólo en los checks que son de venta.
+  **La venta de los rankings es neta de notas de crédito de venta** (REP-D, #1545; decisión del
+  dueño): el gerencial, Ventas por cliente, por zona y por preventista, los rubros y el tablero le
+  restan `_ventas_nc`, que es la séptima parte: la nota vigente cuya boleta es venta, por la fecha
+  **de la nota**, al cliente de la nota y al vendedor de la boleta. Resta plata, no pedidos,
+  clientes, unidades ni CMV. La comisión, las metas, las jornadas y el resto del bot siguen por
+  boleta. Un ranking nuevo de venta resta `_ventas_nc` igual.
   **El envío vive en `pedidos.cargo_envio`, dentro de `total`** (migs 389 y NNN cargo_1–4), y su
   desglose (`cargo_envio_desglose`) dentro de `total_neto`/`total_iva`, no de `total_real`. La plata
   a cobrar (saldo, cobranza, deuda, recorridos, rendiciones, transportista) usa `total`; la venta, la
@@ -480,6 +494,11 @@ suelta en `sucursales`.
   asignadas, o todas las activas para el servidor. No una copia: con dos definiciones, dos
   números de la Red no cerraban entre sí. Lo vigilan **REPORTE-A** (un JOIN interno a productos,
   al vendedor o a zonas en `reporte_*` y `tablero_*`) y los cruces de `check-integridad.mjs`.
+  Una línea sin costo queda **fuera del margen** y se muestra aparte, y el % del margen va sobre
+  la venta con costo (`margenSobreConCosto`) (#1562, decisión del dueño),
+  y el rubro de un producto se rotula con **`_rubro_rotulo`** (el de `categoria_id`, el texto, o
+  «Sin rubro»), igual en todos los reportes. «Compras del período» es neta de las notas de
+  crédito de compra, con las notas aparte (`compras_notas_credito`, #1557).
 
 ## Trampas
 

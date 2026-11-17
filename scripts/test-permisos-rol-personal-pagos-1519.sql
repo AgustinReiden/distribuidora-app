@@ -19,14 +19,15 @@
 -- en vez de 6); con ella pegada antes, 'ENSAYO OK'.
 --
 -- R · el rol (SEG-02 · VTA-08)
---   R1  · ninguna función lee us.rol ni usuario_sucursales.rol; el CHECK fija 'mismo'; la firma
---         vieja de asignar_usuario_sucursal no está y la nueva la ejecuta authenticated, no anon
+--   R1  · ninguna función lee us.rol ni usuario_sucursales.rol; la columna ya no existe (#1525;
+--         hasta entonces un CHECK la fijaba en 'mismo'); la firma vieja de
+--         asignar_usuario_sucursal no está y la nueva la ejecuta authenticated, no anon
 --   R2  · _rol_en_sucursal(u, s) es perfiles.rol en cada fila de usuario_sucursales, y NULL para
 --         una sucursal que no es del usuario
 --   R3  · obtener_sucursales_usuario da perfiles.rol en cada sucursal, y nada a un desactivado
 --   R4  · reporte_stock_red: el admin sólo de la 2 entra; el encargado, no
 --   R5  · asignar_usuario_sucursal: el preventista no asigna; el admin de las dos reasigna la
---         default de un preventista de la 1 y la fila sigue en 'mismo'
+--         default de un preventista de la 1
 -- A · audit_logs (GTO-1)
 --   A1  · el admin sólo de la 1 no lee ninguna fila de empleados ni de empleado_*, y sí las demás
 --   A2  · el admin de las dos, en la 1, lee todas las de personal de la 1
@@ -149,9 +150,10 @@ BEGIN
     IF v_txt IS NOT NULL THEN
       v_fallas := v_fallas || format('R1 · leen usuario_sucursales.rol: %s', v_txt);
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.usuario_sucursales'::regclass
-                     AND pg_get_constraintdef(oid) = 'CHECK (((rol)::text = ''mismo''::text))') THEN
-      v_fallas := v_fallas || text 'R1 · usuario_sucursales.rol no está fija en mismo';
+    -- #1525: la columna, fija en 'mismo' desde la 486, ya no existe.
+    IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.usuario_sucursales'::regclass
+                 AND attname = 'rol' AND NOT attisdropped) THEN
+      v_fallas := v_fallas || text 'R1 · usuario_sucursales todavía tiene la columna rol';
     END IF;
     IF to_regprocedure('public.asignar_usuario_sucursal(uuid,bigint,character varying,boolean)') IS NOT NULL
        OR to_regprocedure('public.asignar_usuario_sucursal(uuid,bigint,boolean)') IS NULL THEN
@@ -220,7 +222,6 @@ BEGIN
     v_res := pg_temp.rest_val(format('SELECT public.asignar_usuario_sucursal(%L, %s, true)::text', v_p, v_p_suc));
     PERFORM pg_temp.servidor();
     IF v_res <> '{"success": true}'
-       OR (SELECT rol FROM usuario_sucursales WHERE usuario_id = v_p AND sucursal_id = v_p_suc) <> 'mismo'
        OR NOT (SELECT es_default FROM usuario_sucursales WHERE usuario_id = v_p AND sucursal_id = v_p_suc) THEN
       v_fallas := v_fallas || format('R5 · el admin de las dos: %s', v_res);
     END IF;

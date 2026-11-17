@@ -12,7 +12,8 @@
 --       pone la app).
 --   5 · #1316 ASG-2 · cambiar el rol suelta la cartera y las zonas, y un cliente
 --       asignado a mano vuelve al dueño de su zona; salir de la sucursal suelta lo
---       de esa sucursal; el UPDATE de rol/es_default de usuario_sucursales no.
+--       de esa sucursal; el UPDATE de es_default de usuario_sucursales no (#1525: ya
+--       no tiene rol).
 --       perfil_roles no admite el extra preventista (CHECK): se saltea.
 --
 -- Corre contra prod SIN dejar rastro: un único DO que termina SIEMPRE en RAISE
@@ -97,6 +98,8 @@ BEGIN
      AND pe.tipo_factura IS DISTINCT FROM 'VB'
      AND pe.fecha BETWEEN '2026-01-01' AND v_hoy
      AND pe.sucursal_id = ANY (public._sucursales_red());
+  -- REP-D (#1545): la venta es neta de las notas de crédito del período, por la fecha de la nota.
+  v_x := v_x - (SELECT COALESCE(sum(n.monto), 0) FROM public._ventas_nc(public._sucursales_red(), '2026-01-01', v_hoy) n);
   IF v_y <> v_x OR (v_j->'totales'->>'total')::numeric <> v_x THEN
     v_fallas := v_fallas || format('2.2 · totales %s, Σ zonas %s, venta de pedidos %s', v_j->'totales'->>'total', v_y, v_x);
   END IF;
@@ -194,8 +197,8 @@ BEGIN
      ORDER BY p.id LIMIT 1;
     UPDATE perfiles SET rol = 'encargado' WHERE id = v_enc;
   END IF;
-  INSERT INTO usuario_sucursales (usuario_id, sucursal_id, rol, es_default)
-  SELECT u, v_suc, 'mismo', false FROM unnest(ARRAY[v_p0, v_enc]) AS u WHERE u IS NOT NULL AND v_suc IS NOT NULL
+  INSERT INTO usuario_sucursales (usuario_id, sucursal_id, es_default)
+  SELECT u, v_suc, false FROM unnest(ARRAY[v_p0, v_enc]) AS u WHERE u IS NOT NULL AND v_suc IS NOT NULL
   ON CONFLICT (usuario_id, sucursal_id) DO NOTHING;
 
   IF v_z IS NULL OR v_z2 IS NULL THEN
@@ -285,12 +288,12 @@ BEGIN
     DELETE FROM cliente_preventistas WHERE cliente_id = v_k;
     INSERT INTO cliente_preventistas (cliente_id, preventista_id) VALUES (v_k, v_o);
 
-    -- 5.1 · El UPDATE de asignar_usuario_sucursal (rol, es_default) no suelta nada.
+    -- 5.1 · El UPDATE de asignar_usuario_sucursal (es_default) no suelta nada.
     SELECT count(*) INTO v_n FROM cliente_preventistas WHERE preventista_id = v_o;
-    UPDATE usuario_sucursales SET rol = rol, es_default = es_default
+    UPDATE usuario_sucursales SET es_default = es_default
      WHERE usuario_id = v_o AND sucursal_id = v_suc;
     IF (SELECT count(*) FROM cliente_preventistas WHERE preventista_id = v_o) <> v_n THEN
-      v_fallas := v_fallas || '5.1 · actualizar rol/es_default de usuario_sucursales soltó la cartera'::text;
+      v_fallas := v_fallas || '5.1 · actualizar es_default de usuario_sucursales soltó la cartera'::text;
     END IF;
 
     -- 5.2 · O pasa a transportista: suelta cartera y zonas; K vuelve a O2 y los
