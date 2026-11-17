@@ -223,7 +223,8 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   **La conversión es una** (#1325): `regalo_cantidad_tras_eslabon`, proporcional a su eslabón en
   cualquier categoría, con espejo en `cantidadTrasEslabon` (`conversiones` del fixture). Es la que
   invierte `regalo_usos_de_linea`. Una cuenta nueva sobre el regalo de un pedido se hace en cortes
-  (`regalo_usos_de_linea`, no `SUM(cantidad)`) y vuelve a la unidad de la línea con `_regalo_recorte`:
+  (el guardado, `pedido_items.regalo_corte`, y sin él `regalo_usos_de_linea`; no `SUM(cantidad)`) y
+  vuelve a la unidad de la línea con `_regalo_recorte`:
   una línea cambiada por valor (A×4 → P×19) está en la unidad del sustituto.
   **El sustituto de un regalo tiene tope para quien no es admin** (#1592 PRM-1, decisión del dueño
   del 16/11): entra si es del mismo rubro que el regalo con igual o menor cantidad, o si no vale
@@ -262,12 +263,19 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   sustitución y el reparto que le dejarían a un producto del regalo más unidades de las que tiene
   se rechazan (`regalo_de_tramo_anterior`); bajarlo o sacarlo sigue. Un camino nuevo que le sume
   regalo a un pedido que ya existe mira `NOT regalo_mueve_stock` de la foto y `_regalo_barra_vale`.
-  La barra deshace sus bloques con la configuración de hoy, así que el factor, el stock por bloque,
-  el contenedor y el ajuste automático de una promo de fracción no cambian mientras haya pedidos sin
+  **Cada bloque de la barra se deshace con la configuración con la que se cerró** (#1592 H6, ola 2
+  de #1603): la fila de `promo_ajustes` que cierra bloques anota su barra (`barra_regalo_id`, el
+  regalo de la barra), sus unidades y su stock por bloque y cuántos siguen cerrados
+  (`bloques_vivos`). Bajar la barra por debajo de 0 los abre del último al primero, el fardo vuelve
+  al contenedor del que salió y lo que queda se vuelve a cerrar con la configuración de hoy (en el
+  mismo contenedor se mueve sólo la diferencia). Un camino nuevo que cierre bloques los anota igual;
+  abrirlos es sólo de `aplicar_uso_promo_acumulador`, y `_contenedores_de_promos` toma también los
+  contenedores de los bloques vivos. Un bloque sin anotar usa la cuenta de hoy, con el tope de lo
+  que la promo le sacó a ese contenedor (PROMO-A). Aparte, el factor, el stock por bloque, el
+  contenedor y el ajuste automático de una promo de fracción no cambian mientras haya pedidos sin
   entregar ni cancelar que entraron en ella (`trg_promo_config_barra_con_pedidos`, #1592 PRM-2;
   decisión del dueño, como el bulto de un producto). El tipo sí, y el regalo con su contenedor cuando
-  el contenedor era el mismo regalo (la rotación muda la barra). La salvedad sobre un pedido ya
-  entregado sigue deshaciendo con la configuración de hoy (H6, ola 2; la ve PROMO-A). Y sólo una promo de fracción con
+  el contenedor era el mismo regalo (la rotación muda la barra). Y sólo una promo de fracción con
   ajuste automático tiene barra: en la que mueve stock o no tiene ajuste, `usos_pendientes` es un
   contador en la unidad de la línea, que `aplicar_uso_promo_acumulador` no convierte en bloques ni
   la renormalización tampoco (1592-b2), y la sustitución le pasa la diferencia (1592-b3).
@@ -323,8 +331,10 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   a cada parte su cantidad y el cambio de cliente copia el de la línea de X. Sin la marca, lo escrito
   a mano se recalcula, y un UPDATE de la cantidad (la salvedad) le suma lo que cambió medido con
   `regalo_usos_de_linea`. Un camino nuevo que inserte regalos en otra unidad que la de la promo, o
-  que mude líneas entre pedidos, escribe el corte con la marca. `regalo_usos_de_linea` sigue midiendo
-  la línea para la salvedad y las simulaciones. `trg_limite_usos_promo`, constraint trigger diferido sobre `pedido_items`, cuenta
+  que mude líneas entre pedidos, escribe el corte con la marca. La salvedad sobre la venta y las dos
+  simulaciones miden con el corte guardado (sin él, `regalo_usos_de_linea`), y el recorte escribe el
+  corte nuevo con la marca aunque la cantidad de la línea no cambie (1583-a: W×1 sigue W×1 con corte
+  10). `trg_limite_usos_promo`, constraint trigger diferido sobre `pedido_items`, cuenta
   al confirmar en los pedidos no cancelados, con la promo bloqueada, y rechaza si pasa
   `limite_usos`; el admin no está exento. Un camino nuevo que escriba regalos no cuenta nada: lo
   cubre el trigger. El límite no se puede bajar por debajo de lo ya regalado

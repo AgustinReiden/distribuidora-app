@@ -49,6 +49,48 @@
 --
 --   psql "$DATABASE_URL" -f scripts/test-anular-salvedad-lote-bolsa.sql
 
+-- Ola 2 de #1603 (B1, 1595-b5; decisión del dueño D23): una salvedad se registra sólo sobre un
+-- pedido en camino o entregado. El ensayo carga pedidos y les registra salvedades enseguida: este
+-- envoltorio pone el pedido en camino (asignado) para la salvedad y lo devuelve al estado que tenía,
+-- así el resto del caso no cambia.
+CREATE OR REPLACE FUNCTION pg_temp.ola2_estado_pedido(p_ped bigint, p_estado text)
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER AS $ola2$
+DECLARE
+  v_prev   text;
+  v_claims text := current_setting('request.jwt.claims', true);
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_ped;
+  IF v_prev IS DISTINCT FROM p_estado THEN
+    PERFORM set_config('request.jwt.claims', '', true);
+    UPDATE public.pedidos SET estado = p_estado WHERE id = p_ped;
+    PERFORM set_config('request.jwt.claims', COALESCE(v_claims, ''), true);
+  END IF;
+  RETURN v_prev;
+END
+$ola2$;
+
+CREATE OR REPLACE FUNCTION pg_temp.salvedad_en_camino(p_pedido_id bigint, p_pedido_item_id bigint,
+  p_cantidad_afectada integer, p_motivo character varying, p_descripcion text DEFAULT NULL,
+  p_foto_url text DEFAULT NULL, p_devolver_stock boolean DEFAULT true, p_client_request_id uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql AS $ola2$
+DECLARE
+  v_prev text;
+  v_res  jsonb;
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_pedido_id;
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, 'asignado');
+  END IF;
+  v_res := public.registrar_salvedad(p_pedido_id, p_pedido_item_id, p_cantidad_afectada, p_motivo,
+                                     p_descripcion, p_foto_url, p_devolver_stock, p_client_request_id);
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, v_prev);
+  END IF;
+  RETURN v_res;
+END
+$ola2$;
+
+
 DO $ensayo$
 DECLARE
   v_admin    uuid;
@@ -166,7 +208,7 @@ BEGIN
         v_motivo, v_foto, pg_temp.huella(v_ped, v_prod);
     END IF;
 
-    v_res := public.registrar_salvedad(v_ped, v_item, 10, v_motivo,
+    v_res := pg_temp.salvedad_en_camino(v_ped, v_item, 10, v_motivo,
                                        'ensayo 1050, se anula enseguida', NULL, true, NULL);
     IF NOT COALESCE((v_res->>'success')::boolean, false)
        OR NOT COALESCE((v_res->>'stock_devuelto')::boolean, false) THEN
@@ -221,7 +263,7 @@ BEGIN
     RAISE EXCEPTION 'B · el pedido no dejo el punto de partida esperado: %, huella %', v_foto, pg_temp.huella(v_ped, v_prod);
   END IF;
 
-  v_res := public.registrar_salvedad(v_ped, v_item, 10, 'otro', 'ensayo 1050 B, mismo lote', NULL, true, NULL);
+  v_res := pg_temp.salvedad_en_camino(v_ped, v_item, 10, 'otro', 'ensayo 1050 B, mismo lote', NULL, true, NULL);
   v_salv := (v_res->>'salvedad_id')::bigint;
   IF pg_temp.lote(v_lote_a) <> 50 OR pg_temp.lote(v_lote_b) <> 40 THEN
     RAISE EXCEPTION 'B · la salvedad no volvio al lote B: A % B %', pg_temp.lote(v_lote_a), pg_temp.lote(v_lote_b);
@@ -259,7 +301,7 @@ BEGIN
         v_motivo, pg_temp.huella(v_ped, v_prod), pg_temp.foto(v_prod);
     END IF;
 
-    v_res := public.registrar_salvedad(v_ped, v_item, CASE v_motivo WHEN 'parcial' THEN 4 ELSE 10 END,
+    v_res := pg_temp.salvedad_en_camino(v_ped, v_item, CASE v_motivo WHEN 'parcial' THEN 4 ELSE 10 END,
                                        'cliente_rechaza', NULL, NULL, true, NULL);
     IF NOT COALESCE((v_res->>'success')::boolean, false) THEN
       RAISE EXCEPTION 'F/% · registrar: %', v_motivo, v_res;
@@ -310,7 +352,7 @@ BEGIN
       RAISE EXCEPTION 'H · el alta no dejo la huella esperada (A 0, B 2)';
     END IF;
 
-    v_res := public.registrar_salvedad(v_ped, v_a, 5, 'cliente_rechaza', NULL, NULL, true, NULL);
+    v_res := pg_temp.salvedad_en_camino(v_ped, v_a, 5, 'cliente_rechaza', NULL, NULL, true, NULL);
     v_salv := (v_res->>'salvedad_id')::bigint;
     IF (SELECT COALESCE(SUM(cantidad), 0) FROM pedido_item_lotes WHERE pedido_item_id = v_b) <> 2 THEN
       v_fallas := v_fallas || format('H · la salvedad sobre A le saco la huella a B: B quedo en %s',
@@ -388,7 +430,7 @@ BEGIN
     false, 'pendiente', v_suc, v_req, true
   ) RETURNING id INTO v_salv;
 
-  v_res := public.registrar_salvedad(v_ped, v_item, 2, 'producto_danado', NULL, NULL, true, v_req);
+  v_res := pg_temp.salvedad_en_camino(v_ped, v_item, 2, 'producto_danado', NULL, NULL, true, v_req);
   IF NOT COALESCE((v_res->>'idempotent_replay')::boolean, false) THEN
     RAISE EXCEPTION 'D · el reintento no reconocio la salvedad: %', v_res;
   END IF;
@@ -401,14 +443,14 @@ BEGIN
   -- -------------------------------------------------------------------------
   -- (sigue usando la salvedad de D: tiene client_request_id)
   PERFORM set_config('request.jwt.claims', '{}', true);
-  v_res := public.registrar_salvedad(v_ped, v_item, 2, 'producto_danado', NULL, NULL, true, v_req);
+  v_res := pg_temp.salvedad_en_camino(v_ped, v_item, 2, 'producto_danado', NULL, NULL, true, v_req);
   IF v_res ? 'salvedad_id' OR COALESCE((v_res->>'success')::boolean, false) THEN
     v_fallas := v_fallas || format('E · sin sesion, el reintento devolvio los datos: %s', v_res);
   END IF;
 
   IF v_otro IS NOT NULL THEN
     PERFORM set_config('request.jwt.claims', json_build_object('sub', v_otro)::text, true);
-    v_res := public.registrar_salvedad(v_ped, v_item, 2, 'producto_danado', NULL, NULL, true, v_req);
+    v_res := pg_temp.salvedad_en_camino(v_ped, v_item, 2, 'producto_danado', NULL, NULL, true, v_req);
     IF v_res ? 'salvedad_id' OR COALESCE((v_res->>'success')::boolean, false) THEN
       v_fallas := v_fallas || format('E · un usuario sin permiso sobre el pedido recibio los datos: %s', v_res);
     END IF;
@@ -419,7 +461,7 @@ BEGIN
   IF v_suc2 IS NOT NULL THEN
     PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin)::text, true);
     PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc2::text)::text, true);
-    v_res := public.registrar_salvedad(v_ped, v_item, 2, 'producto_danado', NULL, NULL, true, v_req);
+    v_res := pg_temp.salvedad_en_camino(v_ped, v_item, 2, 'producto_danado', NULL, NULL, true, v_req);
     IF v_res ? 'salvedad_id' OR COALESCE((v_res->>'success')::boolean, false) THEN
       v_fallas := v_fallas || format('E · desde otra sucursal el reintento devolvio los datos: %s', v_res);
     END IF;

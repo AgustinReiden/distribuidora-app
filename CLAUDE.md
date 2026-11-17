@@ -237,6 +237,10 @@ suelta en `sucursales`.
 - **La diferencia de un canje es informativa** (#1329). `_aplicar_cambio_producto` mueve el
   stock y guarda `cambios_productos.diferencia_monto`, pero no toca `saldo_cuenta`: sin boleta
   ni pago detrás rompe CC-A y no se puede cobrar. Si hay que cobrarla, se hace un pedido.
+- **Una salvedad va sólo sobre un pedido en camino o entregado** (1595-b5, decisión del dueño
+  D23). `registrar_salvedad` rechaza uno pendiente o en preparación (`pedido_sin_salir`): lo que
+  no va se saca editándolo. Un ensayo que registre salvedades pone antes el pedido en `asignado`
+  o `entregado`.
 - Una confirmación disparada desde un modal Radix tiene que renderizarse **dentro** del
   modal. Como hermano en el container queda detrás del overlay y falla en silencio.
 - **Toda lectura nueva de `clientes` decide qué hace con los inactivos.** Un cliente con
