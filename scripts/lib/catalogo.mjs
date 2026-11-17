@@ -23,6 +23,35 @@ export function problemasDeTabla(t) {
   return p;
 }
 
+// ---------------------------------------------------------------- Realtime ---
+
+/**
+ * La publicación de postgres_changes, `supabase_realtime`, y sus tablas. NO la otra de
+ * Supabase (`supabase_realtime_messages_publication`, Broadcast): lleva las particiones
+ * `realtime.messages_AAAA_MM_DD`, que cambian cada día, son de Supabase y authenticated no
+ * las lee. Devuelve un jsonb {publicaciones, tablas}.
+ */
+export const SQL_REALTIME = String.raw`
+SELECT jsonb_build_object(
+  'publicaciones', COALESCE((
+    SELECT jsonb_agg(jsonb_build_object('nombre', p.pubname, 'todas', p.puballtables) ORDER BY p.pubname)
+      FROM pg_publication p WHERE p.pubname = 'supabase_realtime'), '[]'::jsonb),
+  'tablas', COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+             'publicacion', pt.pubname,
+             'tabla', pt.schemaname || '.' || pt.tablename,
+             'rls', c.relrowsecurity,
+             'columnas_publicadas', COALESCE(array_length(pt.attnames, 1), 0),
+             'columnas_tabla', (SELECT count(*) FROM pg_attribute a
+                                 WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped),
+             'auth_tabla', has_table_privilege('authenticated', c.oid, 'SELECT'),
+             'auth_columnas', has_any_column_privilege('authenticated', c.oid, 'SELECT'),
+             'anon_algo', has_any_column_privilege('anon', c.oid, 'SELECT'))
+           ORDER BY pt.pubname, pt.schemaname, pt.tablename)
+      FROM pg_publication_tables pt
+      JOIN pg_class c ON c.oid = (quote_ident(pt.schemaname) || '.' || quote_ident(pt.tablename))::regclass
+     WHERE pt.pubname = 'supabase_realtime'), '[]'::jsonb))`;
+
 // -------------------------------------------------- Tablas legibles por anon ---
 
 /**

@@ -2,7 +2,7 @@
 /**
  * Gate de la publicación de Realtime (#1564, 1564-g1).
  * Lee el catálogo (pg_publication, pg_class, los grants) y falla (exit 1) si una
- * tabla que entra en una publicación de Realtime (`supabase_realtime`) puede
+ * tabla que entra en la publicación `supabase_realtime` (la de postgres_changes) puede
  * mandar por el websocket lo que no se lee por REST:
  *
  *   · una tabla con SELECT **por columna** para authenticated o anon (`productos`,
@@ -17,6 +17,11 @@
  * `ALTER PUBLICATION supabase_realtime ADD TABLE productos` ponía los costos en un
  * canal y nada se ponía rojo. Ver #1564.
  *
+ * Mira SÓLO `supabase_realtime`. La otra publicación de Supabase,
+ * `supabase_realtime_messages_publication` (Realtime Broadcast), lleva las particiones
+ * `realtime.messages_AAAA_MM_DD`, que cambian de nombre todos los días, son de Supabase
+ * y el authenticated no las lee: no es de este gate y no puede ponerlo rojo.
+ *
  * Lo que NO ve: las columnas que filtra una publicación con lista de columnas
  * (`ADD TABLE t (a, b)`) no cambian el veredicto: se avisa pero la regla es la de
  * arriba; y los filtros de fila. Lo que viaja lo decide la RLS de la tabla, que
@@ -25,7 +30,7 @@
  * Requiere una base: GATE_DB_CONTENEDOR, GATE_DB_URL o SUPABASE_DB_URL (scripts/lib/pg.mjs).
  * Uso local:  GATE_DB_CONTENEDOR=conc-c1 node scripts/check-realtime.mjs
  */
-import { problemasDeTabla } from './lib/catalogo.mjs';
+import { problemasDeTabla, SQL_REALTIME } from './lib/catalogo.mjs';
 import { consultaJson, destino } from './lib/pg.mjs';
 
 const d = destino();
@@ -34,29 +39,7 @@ if (!d) {
   process.exit(2);
 }
 
-// Una fila por (publicación, tabla). Los roles de la API son authenticated y anon.
-const SQL = `
-SELECT jsonb_build_object(
-  'publicaciones', COALESCE((
-    SELECT jsonb_agg(jsonb_build_object('nombre', p.pubname, 'todas', p.puballtables) ORDER BY p.pubname)
-      FROM pg_publication p WHERE p.pubname LIKE 'supabase\\_realtime%'), '[]'::jsonb),
-  'tablas', COALESCE((
-    SELECT jsonb_agg(jsonb_build_object(
-             'publicacion', pt.pubname,
-             'tabla', pt.schemaname || '.' || pt.tablename,
-             'rls', c.relrowsecurity,
-             'columnas_publicadas', COALESCE(array_length(pt.attnames, 1), 0),
-             'columnas_tabla', (SELECT count(*) FROM pg_attribute a
-                                 WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped),
-             'auth_tabla', has_table_privilege('authenticated', c.oid, 'SELECT'),
-             'auth_columnas', has_any_column_privilege('authenticated', c.oid, 'SELECT'),
-             'anon_algo', has_any_column_privilege('anon', c.oid, 'SELECT'))
-           ORDER BY pt.pubname, pt.schemaname, pt.tablename)
-      FROM pg_publication_tables pt
-      JOIN pg_class c ON c.oid = (quote_ident(pt.schemaname) || '.' || quote_ident(pt.tablename))::regclass
-     WHERE pt.pubname LIKE 'supabase\\_realtime%'), '[]'::jsonb))`;
-
-const r = consultaJson(SQL);
+const r = consultaJson(SQL_REALTIME);
 
 console.log(`Publicaciones de Realtime (${d.descripcion}): ${r.publicaciones.map((x) => x.nombre).join(', ') || '(ninguna)'}`);
 console.log(`Tablas publicadas: ${r.tablas.length}${r.tablas.length ? ' · ' + r.tablas.map((t) => t.tabla).join(', ') : ''}`);

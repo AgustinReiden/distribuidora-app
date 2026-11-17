@@ -49,9 +49,35 @@ muerde() {
   fi
 }
 
+# no_muerde <nombre> <gate.mjs> <sql que arma> <sql que deshace>: el caso contrario. Arma algo que el
+# gate tiene que DEJAR PASAR (exit 0): un gate que se pone rojo por lo que no es suyo hace ruido y se
+# termina ignorando.
+no_muerde() {
+  local nombre="$1" gate="$2" arma="$3" deshace="$4"
+  echo ""
+  echo "=== $nombre"
+  if ! SQL "$arma"; then
+    echo "   no pude armar el caso"; MAL+=("$nombre (no armó)"); SQL "$deshace" || true; return
+  fi
+  node "scripts/$gate" > /tmp/muerde.out 2>&1
+  local c=$?
+  SQL "$deshace" || { echo "   NO pude deshacer el caso"; MAL+=("$nombre (no deshizo)"); }
+  if [ $c -eq 0 ]; then
+    echo "   ✓ el gate lo deja pasar (exit 0), como tiene que ser"
+  else
+    echo "   ✗ el gate dio exit $c ante algo que no es suyo"
+    tail -5 /tmp/muerde.out | sed 's/^/     /'
+    MAL+=("$nombre (exit $c)")
+  fi
+}
+
 muerde "Realtime: una tabla con SELECT por columna entra en la publicación" check-realtime.mjs \
   "ALTER PUBLICATION supabase_realtime ADD TABLE public.productos" \
   "ALTER PUBLICATION supabase_realtime DROP TABLE public.productos"
+
+# Prod tiene, además de supabase_realtime, la publicación de Broadcast con particiones diarias
+# (realtime.messages_AAAA_MM_DD, sin SELECT para authenticated): no es de este gate.
+no_muerde "Realtime: la publicación de Broadcast de Supabase (particiones diarias) no lo pone rojo" check-realtime.mjs   "DO \$f\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime_messages_publication') THEN CREATE PUBLICATION supabase_realtime_messages_publication; END IF; END \$f\$; CREATE TABLE public.zz_gate_messages_2026_11_14 (id int); REVOKE ALL ON public.zz_gate_messages_2026_11_14 FROM PUBLIC, anon, authenticated; ALTER PUBLICATION supabase_realtime_messages_publication ADD TABLE public.zz_gate_messages_2026_11_14"   "ALTER PUBLICATION supabase_realtime_messages_publication DROP TABLE public.zz_gate_messages_2026_11_14; DROP TABLE public.zz_gate_messages_2026_11_14"
 
 muerde "Tablas anon: una tabla VACÍA legible por anon" check-tablas-anon.mjs \
   "CREATE TABLE public.zz_gate_anon (id int); ALTER TABLE public.zz_gate_anon ENABLE ROW LEVEL SECURITY; GRANT SELECT ON public.zz_gate_anon TO anon; CREATE POLICY zz_abierta ON public.zz_gate_anon FOR SELECT TO anon USING (true)" \

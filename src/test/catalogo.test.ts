@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   problemasDeTabla,
+  SQL_REALTIME,
   SQL_ROL_SIN_ACTIVO_SIN_API,
   SQL_TABLAS_ANON_CATALOGO,
   // @ts-expect-error -- módulo .mjs de scripts/, sin tipos
@@ -49,6 +50,16 @@ describe('problemasDeTabla (Realtime)', () => {
 
   it('una tabla que authenticated no lee no tiene nada que hacer en la publicación', () => {
     expect(problemasDeTabla({ ...sana, auth_tabla: false, auth_columnas: false })[0]).toMatch(/no la lee/)
+  })
+})
+
+describe('SQL_REALTIME', () => {
+  it('mira sólo la publicación supabase_realtime, no la de Broadcast con particiones diarias', () => {
+    // Prod tiene también supabase_realtime_messages_publication con realtime.messages_AAAA_MM_DD,
+    // que cambian de nombre todos los días y authenticated no lee: no puede poner el gate rojo.
+    expect(SQL_REALTIME).toMatch(/pubname = 'supabase_realtime'/)
+    expect(SQL_REALTIME).not.toMatch(/LIKE/i)
+    expect(SQL_REALTIME).not.toMatch(/messages/)
   })
 })
 
