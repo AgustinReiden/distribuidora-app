@@ -26,6 +26,8 @@ import {
 } from '../../hooks/queries/useCombosQuery'
 import { Tabs, type TabItem } from '../ui/Tabs'
 import { useNotification } from '../../contexts/NotificationContext'
+import { useAccionEnCurso } from '../../hooks/useAccionEnCurso'
+import AvisoEspera from '../ui/AvisoEspera'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
@@ -150,6 +152,9 @@ export default function PromocionesContainer(): React.ReactElement {
   const [comboModalOpen, setComboModalOpen] = useState(false)
   const [comboEditando, setComboEditando] = useState<ComboAdmin | null>(null)
 
+  // Releer la lista antes de abrir o escribir espera la red: se avisa y no se repite (H5).
+  const { enCurso: esperando, correr: correrEspera } = useAccionEnCurso()
+
   const handleNuevaPromocion = useCallback(() => {
     setPromoEditando(null)
     setModalOpen(true)
@@ -158,7 +163,7 @@ export default function PromocionesContainer(): React.ReactElement {
   // El editor parte de la promo tal como está en la base, no de la lista (hasta 2
   // minutos de caché): el guardado reescribe la promo entera y pisaría lo que otro
   // admin cambió en el medio (#1599, 1599-b8). Si no se puede traer, no se abre.
-  const handleEditarPromocion = useCallback(async (promo: PromocionConDetalles) => {
+  const handleEditarPromocion = useCallback((promo: PromocionConDetalles) => correrEspera(async () => {
     let fresca: PromocionConDetalles | undefined
     try {
       const { data } = await reintentarPromociones({ throwOnError: true })
@@ -173,7 +178,7 @@ export default function PromocionesContainer(): React.ReactElement {
     }
     setPromoEditando(fresca)
     setModalOpen(true)
-  }, [reintentarPromociones, notify])
+  }), [reintentarPromociones, notify, correrEspera])
 
   // Borrar una promo con historial NO es inocente: a diferencia de clientes
   // (mig 200) las FKs de promociones no son RESTRICT -- pedido_items.promocion_id
@@ -289,7 +294,7 @@ export default function PromocionesContainer(): React.ReactElement {
     }
   }, [reintentarCombos, notify])
 
-  const handleEditarCombo = useCallback(async (combo: ComboAdmin) => {
+  const handleEditarCombo = useCallback((combo: ComboAdmin) => correrEspera(async () => {
     const frescos = await traerCombosFrescos()
     if (!frescos) return
     const fresco = frescos.find(c => c.id === combo.id)
@@ -299,12 +304,12 @@ export default function PromocionesContainer(): React.ReactElement {
     }
     setComboEditando(fresco)
     setComboModalOpen(true)
-  }, [traerCombosFrescos, notify])
+  }), [traerCombosFrescos, notify, correrEspera])
 
   // Un combo no se borra (un pedido viejo pudo venderlo): se desactiva. Se manda
   // el combo entero con `activo` cambiado, que es lo que `guardar_combo` espera.
   // Al reactivarlo vuelve a competir: se reubica con la regla automática (#1213).
-  const handleToggleCombo = useCallback(async (comboEnLista: ComboAdmin) => {
+  const handleToggleCombo = useCallback((comboEnLista: ComboAdmin) => correrEspera(async () => {
     try {
       // El combo y el grupo con el que compite, como están ahora en la base.
       const frescos = await traerCombosFrescos()
@@ -335,7 +340,7 @@ export default function PromocionesContainer(): React.ReactElement {
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'Error al cambiar estado')
     }
-  }, [guardarCombo, notify, traerCombosFrescos, productos])
+  }), [guardarCombo, notify, traerCombosFrescos, productos, correrEspera])
 
   // Si falla, la promesa se rechaza y el modal muestra el mensaje del server
   // (precio fuera de rango, producto repetido...) y queda abierto para corregir.
@@ -348,6 +353,7 @@ export default function PromocionesContainer(): React.ReactElement {
 
   return (
     <>
+      <AvisoEspera visible={esperando} />
       <Tabs value={pestana} onValueChange={setPestana} tabs={PESTANAS} etiqueta="Tipo de promoción">
         {pestana === 'regalos' ? (
           <Suspense fallback={<LoadingState />}>

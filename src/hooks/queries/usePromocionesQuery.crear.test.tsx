@@ -95,4 +95,19 @@ describe('crear una promo (1561-b12)', () => {
 
     expect(estado.log).not.toContain('promociones.delete')
   })
+
+  it('también si falla invalida la lista: la promo que quedó a medias tiene que verse', async () => {
+    estado.respuestas['promocion_productos.insert'] = { error: { code: 'P0001', message: 'producto inactivo' } }
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+    const invalidar = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(() => useCrearPromocionMutation(), {
+      wrapper: ({ children }: { children: React.ReactNode }) => (
+        <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+      ),
+    })
+
+    await result.current.mutateAsync(entrada as never).catch(() => {})
+
+    await vi.waitFor(() => expect(invalidar).toHaveBeenCalled())
+  })
 })

@@ -156,4 +156,20 @@ describe('PromocionesContainer — parte de la base, no de la lista en caché', 
     await vi.waitFor(() => expect(mocks.notifyError).toHaveBeenCalledWith(expect.stringMatching(/versión actual del combo/)))
     expect(mocks.guardarCombo).not.toHaveBeenCalled()
   })
+
+  it('mientras relee la lista muestra «Verificando…» y un segundo toque no repite la lectura', async () => {
+    let soltar: (v: unknown) => void = () => {}
+    mocks.refetchCombos.mockReturnValue(new Promise(r => { soltar = r }))
+    const user = await irACombos()
+    const boton = await screen.findByRole('button', { name: 'editar combo' }, ESPERA)
+
+    await user.click(boton)
+    expect(await screen.findByRole('status')).toHaveTextContent('Verificando')
+    await user.click(boton)
+    expect(mocks.refetchCombos).toHaveBeenCalledTimes(1)
+
+    soltar({ data: [COMBO_FRESCO] })
+    expect(await screen.findByText('editando combo: Combo fresco', {}, ESPERA)).toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
 })

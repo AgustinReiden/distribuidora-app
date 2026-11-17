@@ -184,8 +184,10 @@ export function errorDeSupabase(error: unknown, mensajeSinConexion: string): Err
   if (!huboServidor && esFalloDeRed(error)) {
     return new ErrorDeSupabase(mensajeSinConexion, error, true)
   }
-  // Un CHECK violado (23514) llega en inglés y con el nombre técnico: se traduce.
-  if (code === '23514') return new ErrorDeSupabase(mensajeDeCheckViolado(error), error, false)
+  // Un CHECK violado (23514) llega en inglés y con el nombre técnico: se traduce. Sólo el
+  // mensaje crudo de Postgres: hay RAISE ... ERRCODE 'check_violation' con un motivo de negocio
+  // en castellano (compra mínima, precio 0, sin chofer...) que tiene que llegar intacto.
+  if (code === '23514' && /violates check constraint "/i.test(String((error as { message?: unknown } | null)?.message ?? ''))) return new ErrorDeSupabase(mensajeDeCheckViolado(error), error, false)
   // Un `message` vacío con `code` de servidor daría un Error en blanco: peor que el literal de la UI.
   return new ErrorDeSupabase(getErrorMessage(error).trim() || 'Error del servidor', error, false)
 }

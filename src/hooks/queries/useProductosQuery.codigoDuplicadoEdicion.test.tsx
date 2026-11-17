@@ -12,6 +12,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const neq = vi.fn()
 const maybeSingleCodigo = vi.fn()
+// Lo que el producto tiene guardado hoy (select('codigo').eq('id').maybeSingle()).
+const maybeSingleGuardado = vi.fn()
 const update = vi.fn()
 
 vi.mock('../supabase/base', () => ({
@@ -21,6 +23,7 @@ vi.mock('../supabase/base', () => ({
       // Consulta del código: select().eq('codigo').neq('id').limit().maybeSingle()
       select: () => ({
         eq: () => ({
+          maybeSingle: maybeSingleGuardado,
           neq: (...args: unknown[]) => {
             neq(...args)
             return { limit: () => ({ maybeSingle: maybeSingleCodigo }) }
@@ -56,7 +59,11 @@ function setup() {
 }
 
 describe('editar producto con código duplicado', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // Por defecto el producto tiene otro código guardado: el código del payload cambió.
+    maybeSingleGuardado.mockResolvedValue({ data: { codigo: 'VIEJO' }, error: null })
+  })
 
   it('rechaza el código de otro producto, lo nombra y no escribe', async () => {
     maybeSingleCodigo.mockResolvedValue({ data: { id: 3, nombre: 'ARROZ LARGO x 1kg' }, error: null })
@@ -93,5 +100,24 @@ describe('editar producto con código duplicado', () => {
 
     expect(neq).not.toHaveBeenCalled()
     expect(update).toHaveBeenCalledTimes(1)
+  })
+
+  it('un código que no cambió no se verifica: dos productos con el mismo código se siguen editando', async () => {
+    maybeSingleGuardado.mockResolvedValue({ data: { codigo: '0802' }, error: null })
+    maybeSingleCodigo.mockResolvedValue({ data: { id: 3, nombre: 'OTRO CON EL MISMO CÓDIGO' }, error: null })
+    const { result } = setup()
+
+    await result.current.mutateAsync({ id: '7', data: { codigo: '0802', precio: 10 } })
+
+    expect(neq).not.toHaveBeenCalled()
+    expect(update).toHaveBeenCalledTimes(1)
+  })
+
+  it('si la lectura del código repetido falla, no da el código por libre y no escribe', async () => {
+    maybeSingleCodigo.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'timeout de lectura' } })
+    const { result } = setup()
+
+    await expect(result.current.mutateAsync({ id: '7', data: { codigo: '0802' } })).rejects.toThrow('timeout de lectura')
+    expect(update).not.toHaveBeenCalled()
   })
 })

@@ -70,4 +70,18 @@ describe('ModalUsuario — capacidades extra', () => {
     expect(aviso).toMatch(/Se guardó el usuario, pero no se pudieron guardar sus capacidades extra/)
     expect(aviso).toContain('Se quitaron los roles x')
   })
+
+  it('hasta que cargan los roles guardados, «Puede llevar la ruta» está deshabilitado', () => {
+    mocks.rolesGuardados = undefined
+    render(<ModalUsuario usuario={usuario} onSave={vi.fn()} onClose={vi.fn()} guardando={false} />)
+
+    expect(screen.getByRole('checkbox', { name: /Puede llevar la ruta/ })).toBeDisabled()
+  })
+
+  it('con los roles cargados se puede tildar', () => {
+    mocks.rolesGuardados = []
+    render(<ModalUsuario usuario={usuario} onSave={vi.fn()} onClose={vi.fn()} guardando={false} />)
+
+    expect(screen.getByRole('checkbox', { name: /Puede llevar la ruta/ })).toBeEnabled()
+  })
 })

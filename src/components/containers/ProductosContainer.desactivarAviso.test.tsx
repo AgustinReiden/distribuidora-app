@@ -116,6 +116,23 @@ describe('ProductosContainer: aviso al desactivar', () => {
     expect(dialogo.textContent).toContain('No se pudo verificar si es parte de algún combo')
   })
 
+  it('mientras trae los combos muestra «Verificando…» y no repite la lectura con un segundo toque', async () => {
+    let soltar: (v: unknown) => void = () => {}
+    combos.fetch.mockReturnValue(new Promise(r => { soltar = r }))
+    const user = userEvent.setup()
+    montar()
+    const boton = await screen.findByRole('button', { name: 'Desactivar Galletitas' }, { timeout: 15000 })
+
+    await user.click(boton)
+    expect(await screen.findByRole('status')).toHaveTextContent('Verificando')
+    await user.click(boton)
+    expect(combos.fetch).toHaveBeenCalledTimes(1)
+
+    soltar(COMBOS)
+    await screen.findByRole('dialog', {}, { timeout: 15000 })
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
   it('un producto sin promos mantiene el mensaje de siempre', async () => {
     const user = userEvent.setup()
     montar()

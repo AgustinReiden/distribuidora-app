@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createClient, FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from '@supabase/supabase-js'
-import { errorDeSupabase, esErrorDeJwt, esErrorReintentable, respuestaDeErrorLegible } from './errorDeSupabase'
+import { errorDeSupabase, mensajeDeCheckViolado, esErrorDeJwt, esErrorReintentable, respuestaDeErrorLegible } from './errorDeSupabase'
 import { isTransientNetworkError, retryWithBackoff, PlazoDeRedVencido } from './retryWithBackoff'
 import { esFalloDeRed } from './falloDeRed'
 import { RechazoDeNegocioError } from './rechazoDeNegocio'
@@ -409,9 +409,24 @@ describe('errorDeSupabase — CHECK violado (23514)', () => {
     expect(e.message).toMatch(/cantidad mínima de venta.*99\.999\.999/)
   })
 
-  it('sin nombre de restricción da el texto genérico', () => {
-    const e = errorDeSupabase({ message: 'algo raro', code: '23514' }, SIN_CONEXION)
-    expect(e.message).toBe('Hay un dato fuera de rango o vacío. Revisá lo que cargaste e intentá de nuevo.')
+  // Hay RAISE EXCEPTION ... USING ERRCODE = 'check_violation' con un motivo de negocio en castellano:
+  // el motivo tiene que llegar intacto, no el genérico (compra mínima, precio 0, sin chofer, cancelar
+  // con motivo, bot apagado, subrubros...).
+  it.each([
+    'La compra mínima de "Fideos" es 3 unidades (se cargaron 2)',
+    'El producto "Aceite" no puede venderse a precio 0',
+    'El pedido #12 no tiene chofer: asignale uno antes de entregarlo',
+    'Un pedido se cancela con motivo',
+    'Un administrador le apagó el bot a este usuario: sólo otro administrador puede prenderlo',
+  ])('un RAISE de negocio con ERRCODE 23514 llega intacto: %s', (motivo) => {
+    const e = errorDeSupabase({ message: motivo, details: null, hint: null, code: '23514' }, SIN_CONEXION)
+    expect(e.message).toBe(motivo)
+    expect(e.code).toBe('23514')
+  })
+
+  it('sin nombre de restricción y llamado directo, mensajeDeCheckViolado da el texto genérico', () => {
+    expect(mensajeDeCheckViolado({ message: 'algo raro', code: '23514' }))
+      .toBe('Hay un dato fuera de rango o vacío. Revisá lo que cargaste e intentá de nuevo.')
   })
 
   it('no cambia el resto de los códigos', () => {

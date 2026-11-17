@@ -100,7 +100,9 @@ async function verificarCodigoLibre(codigo: string | null | undefined, excluirId
     .select('id, nombre')
     .eq('codigo', codigo)
   if (excluirId !== undefined) consulta = consulta.neq('id', excluirId)
-  const { data: existente } = await consulta.limit(1).maybeSingle()
+  const { data: existente, error } = await consulta.limit(1).maybeSingle()
+  // Si la lectura falla no se puede decir que el código está libre: se corta (H8).
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo verificar que el código no esté repetido. Revisá la señal e intentá de nuevo.')
   if (existente) {
     // El mensaje tiene que decir qué hacer, no sólo que no se pudo: el que
     // llega acá casi siempre está cargando una factura y no sabe que el
@@ -173,8 +175,18 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
 }
 
 async function updateProducto({ id, data: producto }: { id: string; data: Partial<ProductoFormInput> }): Promise<ProductoDB> {
-  // Cambiar el código a uno que ya tiene otro producto: se rechaza antes de escribir.
-  if (producto.codigo) await verificarCodigoLibre(producto.codigo, id)
+  // Cambiar el código a uno que ya tiene otro producto: se rechaza antes de escribir. Sólo si
+  // el código CAMBIÓ: la ficha manda el formulario entero, y dos productos que ya comparten
+  // código (la base no tiene UNIQUE) tienen que poder seguir editándose.
+  if (producto.codigo) {
+    const { data: guardado, error: errorLeer } = await supabase
+      .from('productos')
+      .select('codigo')
+      .eq('id', id)
+      .maybeSingle()
+    if (errorLeer) throw errorDeSupabase(errorLeer, 'Sin conexión: no se pudo verificar el código del producto. Revisá la señal e intentá de nuevo.')
+    if ((guardado?.codigo ?? '') !== producto.codigo) await verificarCodigoLibre(producto.codigo, id)
+  }
 
   const updateData: Record<string, unknown> = {}
   if (producto.nombre !== undefined) updateData.nombre = producto.nombre

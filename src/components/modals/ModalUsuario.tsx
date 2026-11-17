@@ -218,10 +218,16 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
                   type="checkbox"
                   checked={puedeLlevarRuta}
                   onChange={e => setPuedeLlevarRuta(e.target.checked)}
-                  className="w-4 h-4 rounded mt-0.5"
+                  // Sin los roles guardados cargados el cambio no se escribe (ver handleSubmit):
+                  // el checkbox espera, en vez de aceptar un cambio que se descartaría.
+                  disabled={rolesExtraGuardados === undefined}
+                  className="w-4 h-4 rounded mt-0.5 disabled:opacity-60"
                 />
                 <span>
                   Puede llevar la ruta (transportista)
+                  {rolesExtraGuardados === undefined && (
+                    <span className="block text-xs text-gray-500 dark:text-gray-400">Cargando…</span>
+                  )}
                   <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                     Le permite recibir la ruta del dia, marcar entregado y cobrar los pedidos
                     de esa ruta. NO le da acceso a cobrar cuenta corriente desde la ficha

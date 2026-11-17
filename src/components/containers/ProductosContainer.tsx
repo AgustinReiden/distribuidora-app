@@ -22,6 +22,8 @@ import { useCategoriasQuery, useSubcategoriasQuery, useAsegurarCatalogo, type No
 import { useCrearGrupoPrecioMutation, useGruposPrecioQuery, fetchDatosListaPrecios } from '../../hooks/queries'
 import { usePromocionesListQuery } from '../../hooks/queries'
 import { promosAfectadasPorDesactivar, avisoDesactivarProducto } from '../../utils/promosAfectadasPorDesactivar'
+import { useAccionEnCurso } from '../../hooks/useAccionEnCurso'
+import AvisoEspera from '../ui/AvisoEspera'
 import { combosAfectadosPorDesactivar, avisoCombosDesactivarProducto } from '../../utils/combosAfectadosPorDesactivar'
 import { resumenCondicionesPorProducto } from '../../utils/resumenCondicionesProducto'
 import type { TabProductos } from '../productos/ProductosTabs'
@@ -234,6 +236,9 @@ export default function ProductosContainer(): React.ReactElement {
   )
 
   // Handlers
+  // Traer los combos antes del aviso de desactivar espera la red: se avisa y no se repite (H5).
+  const { enCurso: esperando, correr: correrEspera } = useAccionEnCurso()
+
   const handleNuevoProducto = useCallback(() => {
     setProductoEditando(null)
     setModalProductoOpen(true)
@@ -271,7 +276,7 @@ export default function ProductosContainer(): React.ReactElement {
   // Desactivar / reactivar. Confirma como el eliminar, pero es reversible.
   // Al desactivar, el aviso también nombra los combos vigentes que lo usan (#1596, 1596-b11):
   // se leen de la base en ese momento (sólo lo necesita quien desactiva, no cada pantalla).
-  const handleToggleActivoProducto = useCallback(async (producto: ProductoDB) => {
+  const handleToggleActivoProducto = useCallback((producto: ProductoDB) => correrEspera(async () => {
     const reactivar = !esProductoOperativo(producto)
     let avisoCombos = ''
     if (!reactivar) {
@@ -305,7 +310,7 @@ export default function ProductosContainer(): React.ReactElement {
         }
       },
     })
-  }, [actualizarProducto, notify, promociones, productos])
+  }), [actualizarProducto, notify, promociones, productos, correrEspera])
 
   const handleBajaStock = useCallback((producto: ProductoDB) => {
     setProductoMerma(producto)
@@ -524,6 +529,7 @@ export default function ProductosContainer(): React.ReactElement {
 
   return (
     <>
+      <AvisoEspera visible={esperando} />
       <Suspense fallback={<LoadingState />}>
         <VistaProductos
           productos={productos}

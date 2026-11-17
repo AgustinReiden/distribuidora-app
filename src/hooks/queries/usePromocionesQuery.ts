@@ -472,7 +472,8 @@ export function useCrearPromocionMutation() {
   const { currentSucursalId } = useSucursal()
   return useMutation({
     mutationFn: createPromocion,
-    onSuccess: () => {
+    // También si falla: una promo que quedó a medias tiene que verse en la lista.
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: promocionesKeys.all(currentSucursalId) })
     },
   })
