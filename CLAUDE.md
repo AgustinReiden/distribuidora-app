@@ -205,7 +205,8 @@ suelta en `sucursales`.
   `registrar_salvedad` guarda su costo, su lista, su origen, su descuento y su escala en
   `salvedad_linea_foto` (sólo de server: lleva el costo), y `anular_salvedad` la reinserta con
   eso. Sin foto (las anteriores), el costo de hoy. Un camino nuevo que borre la línea de una
-  salvedad guarda la foto igual, y uno que repunte escalas repunta también la de la foto.
+  salvedad guarda la foto igual (como `_combo_trasladar` al fusionar las dos líneas de un
+  combo), y uno que repunte escalas repunta también la de la foto.
   Anular una salvedad que devuelve el derecho a un regalo se rechaza si **cualquier** salvedad
   del pedido, viva o anulada, recortó un regalo de esa promo (1592-b5 y su revisión): mirar
   sólo la propia hacía que el resultado dependiera del orden en que se anulan.
@@ -246,6 +247,11 @@ suelta en `sucursales`.
   —selectores, rutas, recorridos— los oculta; el historial —reportes, cuenta corriente y los
   embeds `cliente:clientes(*)`— **tiene** que seguir viéndolos, que es de lo que se trata la
   baja lógica. Una consulta que no elige está eligiendo mal por omisión.
+- **Una promo con uso no se borra: se desactiva** (1556-b1, decisión del dueño). Sus FKs no son
+  RESTRICT (el regalo de un pedido quedaba sin promo y no volvía al stock al cancelarlo), así que
+  lo frena `trg_promocion_no_se_borra_con_uso`: líneas de pedido de cualquier estado, ajustes de
+  stock o salvedades. El front cuenta lo mismo antes de ofrecer "Eliminar"
+  (`promocionesEliminacion.ts`): si cambia la regla de un lado, cambia del otro.
 - **El stock por lote lo lleva un trigger, no las RPCs** (y cómo devolver, etiquetar y lockear) → `migrations/CLAUDE.md`.
 - **"Venta por vendedor" tiene UNA definición y se escribe siempre igual** (migs 241 y 318, #568):
   `estado = 'entregado'` · `canal <> 'cambio'` · `tipo_factura IS DISTINCT FROM 'VB'` · por

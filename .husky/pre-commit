@@ -6,5 +6,6 @@
 # Ejecutar lint en archivos staged
 npx lint-staged
 
-# Ejecutar unit tests
-npm run test:run
+# Unit tests: sólo los relacionados con lo que cambió (#1587, D60). La suite entera corre
+# en el CI (ci.yml, job `test`). Ver scripts/tests-del-commit.sh.
+npm run test:commit

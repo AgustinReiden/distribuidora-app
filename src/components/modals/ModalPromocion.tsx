@@ -11,6 +11,7 @@ import { fechaLocalISO } from '../../utils/formatters'
 import type { ProductoDB } from '../../types'
 import type { PromocionConDetalles, PromocionFormInput } from '../../hooks/queries/usePromocionesQuery'
 import { usePreviewCambioFactorQuery, usePromoPedidosAbiertosQuery } from '../../hooks/queries/usePromocionesQuery'
+import { stockPorBloqueDelFormulario } from '../../utils/promocionFormulario'
 
 export interface ModalPromocionProps {
   promocion: PromocionConDetalles | null
@@ -150,6 +151,8 @@ export default function ModalPromocion({
   const tipoCambia = isEditing && (tipoRegalo === 'unidad_entera') !== Boolean(promocion?.regalo_mueve_stock)
   const { data: pedidosAbiertos = 0 } = usePromoPedidosAbiertosQuery(promocion?.id ?? null, tipoCambia)
 
+  // No es un campo visible: la promo conserva el que tiene, y una nueva nace con 1.
+  const stockBloque = stockPorBloqueDelFormulario(promocion?.stock_por_bloque)
   const factorNuevo = parseInt(unidadesPorBloque)
   // Al pasar a fracción la barra arranca en 0 (trg_promo_tipo_reinicia_barra): no
   // hay bloques que cerrar, y el contador de unidad entera no es una barra.
@@ -162,7 +165,7 @@ export default function ModalPromocion({
   const { data: preview, isLoading: cargandoPreview } = usePreviewCambioFactorQuery(
     promocion?.id ?? null,
     Number.isFinite(factorNuevo) ? factorNuevo : null,
-    1,
+    stockBloque,
     factorCambia
   )
   const barrasQueCierran = (preview ?? []).filter(b => b.bloques_a_cerrar > 0)
@@ -254,9 +257,8 @@ export default function ModalPromocion({
     const limite = limiteUsos ? parseInt(limiteUsos) : null
     const prio = parseInt(prioridad)
     const unidBloque = parseInt(unidadesPorBloque)
-    // stock_por_bloque siempre es 1 en el modelo fraccional (no es un campo
-    // visible al usuario). El backend lo usa al cerrar un bloque.
-    const stockBloque = 1
+    // stock_por_bloque (stockBloque, arriba) no es un campo visible: va el que la
+    // promo ya tiene, o 1. El backend lo usa al cerrar un bloque.
     // En fracción el "producto de regalo" canónico es el fardo contenedor:
     // de él se descuenta stock por bloques y es lo que el chofer carga.
     // La UI sólo muestra el campo en unidad_entera; en fracción derivamos.

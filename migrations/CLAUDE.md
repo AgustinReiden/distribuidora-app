@@ -281,7 +281,9 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   `combo_fuera_de_regla` comprueba que sean legítimos (estructura para todo rol; vigencia, tope,
   total y reparto exactos para quien no es admin). Las tres puras que recalcula el server
   (`_combo_total`, `_combo_prorrateo`, `_combo_cantidad`) tienen espejo con gate
-  (`combos.espejo.json`): si cambiás una, cambiá la otra. `precio_fuera_de_politica` valida la
+  (`combos.espejo.json`): si cambiás una, cambiá la otra. El reparto no deja ninguna línea en $0
+  (1592-b4): si el de siempre deja una por debajo de un centavo, cada unidad toma un centavo y el
+  resto se reparte igual sin bajar de 0; si ni así se puede, NULL. `precio_fuera_de_politica` valida la
   línea de combo por su precio **sin** combo, y saca del conteo de escalas las unidades de un
   combo excluyente. La foto del combo de cada pedido es `pedido_combos`: al editar, un combo que
   el pedido ya tenía se mide contra su foto, y en un cambio de cliente, contra la del pedido
