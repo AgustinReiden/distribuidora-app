@@ -268,7 +268,9 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   regalo de la barra), sus unidades y su stock por bloque y cuántos siguen cerrados
   (`bloques_vivos`). Bajar la barra por debajo de 0 los abre del último al primero, el fardo vuelve
   al contenedor del que salió y lo que queda se vuelve a cerrar con la configuración de hoy (en el
-  mismo contenedor se mueve sólo la diferencia). Un camino nuevo que cierre bloques los anota igual;
+  mismo contenedor se mueve sólo la diferencia). Una baja de la barra (salvedad, cancelación,
+  edición a la baja) nunca falla por falta de stock: ese recierre se limita a lo que tiene el
+  contenedor de hoy y el resto queda en la barra, aunque pase de N, hasta la próxima venta. Un camino nuevo que cierre bloques los anota igual;
   abrirlos es sólo de `aplicar_uso_promo_acumulador`, y `_contenedores_de_promos` toma también los
   contenedores de los bloques vivos. Un bloque sin anotar usa la cuenta de hoy, con el tope de lo
   que la promo le sacó a ese contenedor (PROMO-A). Aparte, el factor, el stock por bloque, el
@@ -334,7 +336,7 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   que mude líneas entre pedidos, escribe el corte con la marca. La salvedad sobre la venta y las dos
   simulaciones miden con el corte guardado (sin él, `regalo_usos_de_linea`), y el recorte escribe el
   corte nuevo con la marca aunque la cantidad de la línea no cambie (1583-a: W×1 sigue W×1 con corte
-  10). `trg_limite_usos_promo`, constraint trigger diferido sobre `pedido_items`, cuenta
+  10). Para `anular_salvedad` una baja del corte también es un recorte (1592-b5): se rechaza. `trg_limite_usos_promo`, constraint trigger diferido sobre `pedido_items`, cuenta
   al confirmar en los pedidos no cancelados, con la promo bloqueada, y rechaza si pasa
   `limite_usos`; el admin no está exento. Un camino nuevo que escriba regalos no cuenta nada: lo
   cubre el trigger. El límite no se puede bajar por debajo de lo ya regalado

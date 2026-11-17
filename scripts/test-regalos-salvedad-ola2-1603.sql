@@ -18,6 +18,13 @@
 --       H5 · un bloque sin anotar (anterior a la migración) usa la cuenta de hoy
 --            con tope: nunca devuelve más fardos de los que la promo sacó (antes
 --            51 y PROMO-A en rojo).
+--       H6 · el factor baja de 6 a 4 y el contenedor pasa de K1 a K2, con K2 en
+--            0: la salvedad del regalo entra igual (el recierre no tiene stock y
+--            lo que sobra queda en la barra, en 4), el fardo vuelve a K1 y K2 no
+--            se toca. La segunda salvedad deja la barra en 0. (Antes de la
+--            revisión, la salvedad se rechazaba por «stock insuficiente».)
+--       H7 · el factor baja de 6 a 4 y el stock por bloque sube de 1 a 2, con el
+--            contenedor en 0: lo mismo, el fardo vuelve y la barra queda en 4.
 --   C · 1583-a (#1583) · la salvedad sobre la venta baja el corte guardado.
 --       Promo "1 V da 1 R" que mueve stock: V×10 + R×10, R×10 → W×1 por valor,
 --       edición a V×14 (W×1 con corte 14).
@@ -27,6 +34,11 @@
 --       C3 · con un límite de 14 usos, después de la salvedad de 4 V entra otro
 --            pedido de R×4 (antes lo rechazaba el cupo).
 --       C4 · _regalo_recorte devuelve la línea que sólo pierde corte.
+--       C5 · anular la salvedad de 4 V, que sólo bajó el corte, se rechaza como
+--            cualquier recorte (1592-b5), y el corte queda en 10. Con un límite de
+--            14, otro pedido de R×4 entra (14 + 4 cuentan 14). Si la anulación
+--            pasara, la venta volvía a V×14 con el corte en 10 y el cupo dejaba
+--            pasar de más.
 --   B · 1595-b5 (#1595, D23) · la salvedad sólo va sobre un pedido en camino o
 --       entregado: pendiente y en preparación se rechazan (`pedido_sin_salir`),
 --       en camino entra.
@@ -40,7 +52,7 @@
 --
 --   tr -d '\r' < scripts/test-regalos-salvedad-ola2-1603.sql | docker exec -i <contenedor> psql -U postgres -d postgres -q
 --
--- Sin la migración fallan H1, H2, H3, H4, H5, C1, C2, C3, C4, B y S.
+-- Sin la migración fallan H1, H2, H3, H4, H5, H6, H7, C1, C2, C3, C4, C5, B y S.
 
 SET client_min_messages = warning;
 
@@ -174,6 +186,25 @@ END
 $fn$;
 
 -- Entregado (retiro en depósito, hoy): ninguna guarda de la barra lo cuenta como abierto.
+CREATE OR REPLACE FUNCTION pg_temp.b1_anular(p_user uuid, p_suc bigint, p_salv bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  j jsonb;
+BEGIN
+  PERFORM pg_temp.b1_claims(p_user, p_suc);
+  j := public.anular_salvedad(p_salv, 'ensayo b1');
+  PERFORM pg_temp.b1_reset();
+  RETURN j;
+END
+$fn$;
+
+-- Cada RPC es su transacción en la vida real: lo escrito en audit_logs hasta acá
+-- pasa a «un minuto antes», para que la anulación (1592-b5) separe las salvedades.
+CREATE OR REPLACE FUNCTION pg_temp.b1_audit_atras()
+RETURNS void LANGUAGE sql AS $fn$
+  UPDATE public.audit_logs SET created_at = created_at - interval '1 minute' WHERE created_at = now();
+$fn$;
+
 CREATE OR REPLACE FUNCTION pg_temp.b1_entregar(p_ped bigint)
 RETURNS void LANGUAGE sql AS $fn$
   UPDATE public.pedidos SET estado = 'entregado', retiro_deposito = true, fecha_entrega = now() WHERE id = p_ped;
@@ -392,15 +423,74 @@ BEGIN
   END;
 
   -- =======================================================================
+  -- H6 · factor 6 → 4 y contenedor K1 → K2, con K2 en 0
+  -- =======================================================================
+  BEGIN
+    V := pg_temp.b1_prod(v_suc, 'V');
+    R := pg_temp.b1_prod(v_suc, 'R', 100, 50);
+    K1 := pg_temp.b1_prod(v_suc, 'K1', 600, 50);
+    K2 := pg_temp.b1_prod(v_suc, 'K2', 600, 0);
+    p := pg_temp.b1_promo(v_suc, V, R, 10, 4, false, true, K1, 6, 1);
+    ped1 := pg_temp.b1_alta(c1, v_adm, v_suc, pg_temp.b1_items(V, 10, R, 4, p));
+    ped2 := pg_temp.b1_alta(c1, v_adm, v_suc, pg_temp.b1_items(V, 10, R, 4, p));
+    PERFORM pg_temp.b1_entregar(ped1);
+    PERFORM pg_temp.b1_entregar(ped2);
+    UPDATE promociones SET unidades_por_bloque = 4, ajuste_producto_id = K2 WHERE id = p;
+    j := pg_temp.b1_salv(v_adm, v_suc, ped1, pg_temp.b1_item_regalo(ped1), 4);
+    v_txt := format('%s K1=%s K2=%s up=%s', COALESCE(j->>'success', '?'), (SELECT stock FROM productos WHERE id = K1),
+                    (SELECT stock FROM productos WHERE id = K2), pg_temp.b1_up(p));
+    IF v_txt <> 'true K1=50 K2=0 up=4' THEN
+      v_f := v_f || format('H6 la primera salvedad dio %s (se esperaba true K1=50 K2=0 up=4; %s)', v_txt, j->>'error');
+    END IF;
+    j := pg_temp.b1_salv(v_adm, v_suc, ped2, pg_temp.b1_item_regalo(ped2), 4);
+    v_txt := format('%s K1=%s K2=%s up=%s', COALESCE(j->>'success', '?'), (SELECT stock FROM productos WHERE id = K1),
+                    (SELECT stock FROM productos WHERE id = K2), pg_temp.b1_up(p));
+    IF v_txt <> 'true K1=50 K2=0 up=0' OR pg_temp.b1_promo_a(p) > 0 THEN
+      v_f := v_f || format('H6 la segunda salvedad dio %s, PROMO-A=%s (se esperaba true K1=50 K2=0 up=0 y 0; %s)',
+                           v_txt, pg_temp.b1_promo_a(p), j->>'error');
+    END IF;
+    RAISE EXCEPTION USING ERRCODE = 'ZZ001';
+  EXCEPTION WHEN SQLSTATE 'ZZ001' THEN NULL;
+            WHEN OTHERS THEN v_f := v_f || format('H6 · error: %s', SQLERRM);
+  END;
+
+  -- =======================================================================
+  -- H7 · factor 6 → 4 y stock por bloque 1 → 2, con el contenedor en 0
+  -- =======================================================================
+  BEGIN
+    V := pg_temp.b1_prod(v_suc, 'V');
+    R := pg_temp.b1_prod(v_suc, 'R', 600, 1);
+    p := pg_temp.b1_promo(v_suc, V, R, 10, 4, false, true, R, 6, 1);
+    ped1 := pg_temp.b1_alta(c1, v_adm, v_suc, pg_temp.b1_items(V, 10, R, 4, p));
+    ped2 := pg_temp.b1_alta(c1, v_adm, v_suc, pg_temp.b1_items(V, 10, R, 4, p));
+    PERFORM pg_temp.b1_entregar(ped1);
+    PERFORM pg_temp.b1_entregar(ped2);
+    UPDATE promociones SET unidades_por_bloque = 4, stock_por_bloque = 2 WHERE id = p;
+    j := pg_temp.b1_salv(v_adm, v_suc, ped1, pg_temp.b1_item_regalo(ped1), 4);
+    v_txt := format('%s R=%s up=%s', COALESCE(j->>'success', '?'), (SELECT stock FROM productos WHERE id = R), pg_temp.b1_up(p));
+    IF v_txt <> 'true R=1 up=4' THEN
+      v_f := v_f || format('H7 la primera salvedad dio %s (se esperaba true R=1 up=4; %s)', v_txt, j->>'error');
+    END IF;
+    j := pg_temp.b1_salv(v_adm, v_suc, ped2, pg_temp.b1_item_regalo(ped2), 4);
+    v_txt := format('%s R=%s up=%s', COALESCE(j->>'success', '?'), (SELECT stock FROM productos WHERE id = R), pg_temp.b1_up(p));
+    IF v_txt <> 'true R=1 up=0' OR pg_temp.b1_promo_a(p) > 0 THEN
+      v_f := v_f || format('H7 la segunda salvedad dio %s (se esperaba true R=1 up=0; %s)', v_txt, j->>'error');
+    END IF;
+    RAISE EXCEPTION USING ERRCODE = 'ZZ001';
+  EXCEPTION WHEN SQLSTATE 'ZZ001' THEN NULL;
+            WHEN OTHERS THEN v_f := v_f || format('H7 · error: %s', SQLERRM);
+  END;
+
+  -- =======================================================================
   -- C · 1583-a · la salvedad sobre la venta baja el corte guardado
   -- =======================================================================
-  FOREACH v_caso IN ARRAY ARRAY['C1', 'C3', 'C4'] LOOP
+  FOREACH v_caso IN ARRAY ARRAY['C1', 'C3', 'C4', 'C5'] LOOP
     BEGIN
       V := pg_temp.b1_prod(v_suc, 'V', 100, 500);
       R := pg_temp.b1_prod(v_suc, 'R', 100, 500);
       W := pg_temp.b1_prod(v_suc, 'W', 1000, 50);
       p := pg_temp.b1_promo(v_suc, V, R, 1, 1, true, false, NULL, NULL, NULL,
-                            CASE WHEN v_caso = 'C3' THEN 14 END);
+                            CASE WHEN v_caso IN ('C3', 'C5') THEN 14 END);
       ped1 := pg_temp.b1_alta(c1, v_adm, v_suc, pg_temp.b1_items(V, 10, R, 10, p));
       j := pg_temp.b1_sust(v_adm, v_suc, pg_temp.b1_item_regalo(ped1), W, 1);
       IF NOT COALESCE((j->>'success')::boolean, false) THEN
@@ -435,7 +525,9 @@ BEGIN
       END IF;
 
       v_n := (SELECT stock FROM productos WHERE id = W);
+      PERFORM pg_temp.b1_audit_atras();
       j := pg_temp.b1_salv(v_adm, v_suc, ped1, pg_temp.b1_item_venta(ped1), 4);
+      v_nc := (j->>'salvedad_id')::bigint;
       v_txt := (SELECT format('W×%s corte %s', pi.cantidad, pi.regalo_corte)
                   FROM pedido_items pi WHERE pi.pedido_id = ped1 AND pi.es_bonificacion);
       IF NOT COALESCE((j->>'success')::boolean, false) OR v_txt IS DISTINCT FROM 'W×1 corte 10'
@@ -452,6 +544,23 @@ BEGIN
         IF NOT COALESCE((j->>'success')::boolean, false) OR v_txt IS DISTINCT FROM 'W×1 corte 4' THEN
           v_f := v_f || format('C2 la salvedad de 6 V dejó %s (se esperaba W×1 corte 4; %s)', v_txt, j->>'error');
         END IF;
+      ELSIF v_caso = 'C5' THEN
+        -- C5 · anular la salvedad que sólo bajó el corte se rechaza como un recorte.
+        j := pg_temp.b1_anular(v_adm, v_suc, v_nc);
+        v_txt := (SELECT format('V×%s W×%s corte %s',
+                                (SELECT cantidad FROM pedido_items WHERE id = pg_temp.b1_item_venta(ped1)),
+                                pi.cantidad, pi.regalo_corte)
+                    FROM pedido_items pi WHERE pi.pedido_id = ped1 AND pi.es_bonificacion);
+        IF COALESCE(j->>'codigo', '') <> 'anulacion_toca_promociones' OR v_txt IS DISTINCT FROM 'V×10 W×1 corte 10' THEN
+          v_f := v_f || format('C5 anular la salvedad que bajó el corte dio %s y dejó %s (se esperaba el rechazo anulacion_toca_promociones y V×10 W×1 corte 10)',
+                               j, v_txt);
+        END IF;
+        BEGIN
+          ped2 := pg_temp.b1_alta(c1, v_adm, v_suc, pg_temp.b1_items(V, 4, R, 4, p));
+          SET CONSTRAINTS ALL IMMEDIATE;
+        EXCEPTION WHEN OTHERS THEN
+          v_f := v_f || format('C5 con la anulación rechazada, otro pedido de R×4 no entra en el cupo de 14: %s', left(SQLERRM, 200));
+        END;
       ELSE
         -- C3 · el cupo de 14 ya no cuenta los 4 que se rechazaron: entra otro R×4.
         BEGIN
@@ -519,6 +628,6 @@ BEGIN
   IF array_length(v_f, 1) > 0 THEN
     RAISE EXCEPTION E'ENSAYO FALLÓ (%):\n%', array_length(v_f, 1), array_to_string(v_f, E'\n');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · regalos y salvedad de la ola 2 (#1603 B1): bloques con su configuración (H1-H5), corte guardado en la salvedad (C1-C4), salvedad en camino o entregado (B) y la sucursal antes que la NC (S)';
+  RAISE EXCEPTION 'ENSAYO OK · regalos y salvedad de la ola 2 (#1603 B1): bloques con su configuración y recierre sin stock (H1-H7), corte guardado en la salvedad y su anulación (C1-C5), salvedad en camino o entregado (B) y la sucursal antes que la NC (S)';
 END
 $ensayo$;

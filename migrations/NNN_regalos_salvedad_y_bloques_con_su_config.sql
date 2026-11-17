@@ -46,14 +46,22 @@
 --     se mueve sólo la diferencia (una subida que se compensa con una bajada
 --     del mismo producto no va a ningún lado, migrations/CLAUDE.md). Así la
 --     barra sigue en [0, factor) y lo que el cliente se quedó tiene su fardo.
+--   · Una baja de la barra (salvedad, cancelación, edición a la baja) nunca
+--     falla por falta de stock (H1 de la revisión): ese recierre se limita a
+--     lo que el contenedor de hoy tiene, más lo que el mismo movimiento le
+--     devuelve, y el resto queda en la barra aunque pase del factor. La
+--     próxima venta lo cierra con su FLOOR.
 --   · Un bloque cerrado antes de esta migración no tiene el dato: abajo se
---     anotan los que cada barra tiene cerrados, con la configuración de hoy,
---     en una fila sin unidades ni stock (lo que haría la cuenta vieja, pero
---     congelado: un cambio de factor posterior ya no los toca). Lo que no se
---     pudo anotar (dos barras de la promo con el mismo contenedor) sigue con
---     la cuenta de hoy, con un tope: nunca devuelve a un contenedor más
---     fardos de los que la promo le sacó y siguen sin dueño en la pila (la
---     cuenta de PROMO-A). Lo que pasa el tope se pierde en la barra, que
+--     anotan los que cada barra tiene cerrados, con la configuración de hoy
+--     (la del día en que se anotan), en una fila sin unidades ni stock (lo que
+--     haría la cuenta vieja, pero congelado: un cambio de factor posterior ya
+--     no los toca). Eso es exacto sólo si la promo nunca cambió de factor, ni
+--     de contenedor, y si ninguna barra comparte contenedor con otra: una
+--     premisa aborta la migración si al aplicarla no es así (H3 de la
+--     revisión; al 17/11 en prod no hay ningún caso). Un bloque sin anotar
+--     sigue con la cuenta de hoy, con un tope: nunca devuelve a un contenedor
+--     más fardos de los que la promo le sacó y siguen sin dueño en la pila
+--     (la cuenta de PROMO-A). Lo que pasa el tope se pierde en la barra, que
 --     queda en 0, como ya hacía el piso de la barra default.
 --   · `_contenedores_de_promos` suma los contenedores de los bloques vivos:
 --     la salvedad, la cancelación, la edición y el resto toman con ella los
@@ -80,6 +88,12 @@
 --   · Las dos simulaciones miden igual (`_regalo_corte_tras_cantidad`: el
 --     corte que la línea tendría después de la salvedad del lote sobre el
 --     regalo mismo, la cuenta de `sellar_corte_regalo_item`).
+--   · `anular_salvedad` cuenta como recorte también una baja de
+--     `regalo_corte` (H2 de la revisión): un recorte que sólo baja el corte
+--     es un recorte, y anularlo se rechaza como cualquier otro (1592-b5).
+--     Si no, la anulación devolvía la venta y el corte quedaba bajo, y el
+--     cupo de la promo dejaba pasar de más. Se parcha por ancla y sin md5:
+--     otra tarjeta de la ola la toca antes.
 -- Lo que ve el usuario no cambia: la cantidad de la línea es la misma de
 -- antes; sólo el cupo deja de contar de más.
 --
@@ -103,6 +117,8 @@
 BEGIN;
 
 SET LOCAL lock_timeout = '5s';
+-- La única tabla con DDL (H4 de la revisión): el lock va antes de todo y sin esperar.
+LOCK TABLE public.promo_ajustes IN ACCESS EXCLUSIVE MODE NOWAIT;
 
 DO $lf$
 BEGIN
@@ -152,8 +168,69 @@ BEGIN
                  AND NOT attisdropped) THEN
     RAISE EXCEPTION 'mig NNN · la función o las columnas nuevas ya existen: revisar a mano';
   END IF;
+  -- H2: el ancla de anular_salvedad. Sin md5: otra tarjeta de la ola la parcha antes.
+  IF position($ancla$                      AND (f.accion = 'DELETE'
+                           OR (f.new_data->>'cantidad')::numeric < (f.old_data->>'cantidad')::numeric))$ancla$
+              IN (SELECT prosrc FROM pg_proc
+                   WHERE oid = 'public.anular_salvedad(bigint,text)'::regprocedure)) = 0 THEN
+    RAISE EXCEPTION 'mig NNN · anular_salvedad ya no tiene la detección de recortes de 1592-b5 como se leyó: rehacer el parche';
+  END IF;
 END
 $premisas$;
+
+-- ---------------------------------------------------------------------------
+-- Premisa de datos (H3 de la revisión): el bloque de datos de 1e anota los
+-- bloques ya cerrados con la configuración de hoy y en el contenedor de hoy de
+-- cada barra. Es exacto sólo si no hay fardos afuera en un contenedor que ya no
+-- es de ninguna barra de su promo, si ninguna promo cambió de factor y si
+-- ninguna barra comparte contenedor con otra de su promo. Al 17/11 en prod no
+-- hay ningún caso. Si aparece uno, se decide ahí (con el dueño) qué hacer con
+-- esos fardos antes de aplicar.
+-- ---------------------------------------------------------------------------
+DO $premisa_datos$
+DECLARE
+  v_anterior   text;
+  v_factor     text;
+  v_comparten  text;
+BEGIN
+  SELECT left(string_agg(format('promo %s contenedor %s (%s fardos)', x.promocion_id, x.producto_id, x.neto), ', '), 300)
+    INTO v_anterior
+    FROM (SELECT pa.promocion_id, pa.producto_id, SUM(pa.unidades_ajustadas) AS neto
+            FROM public.promo_ajustes pa
+            JOIN public.promociones p ON p.id = pa.promocion_id AND p.sucursal_id = pa.sucursal_id
+           WHERE pa.producto_id IS NOT NULL
+             AND pa.producto_id IS DISTINCT FROM p.ajuste_producto_id
+             AND NOT EXISTS (SELECT 1 FROM public.promo_acumuladores a
+                              WHERE a.promocion_id = pa.promocion_id AND a.sucursal_id = pa.sucursal_id
+                                AND a.ajuste_producto_id = pa.producto_id)
+           GROUP BY 1, 2
+          HAVING SUM(pa.unidades_ajustadas) > 0) x;
+  SELECT left(string_agg(DISTINCT pa.promocion_id::text, ', '), 300) INTO v_factor
+    FROM public.promo_ajustes pa
+   WHERE pa.observaciones LIKE 'Cambio de factor:%';
+  SELECT left(string_agg(format('promo %s contenedor %s', y.promo, y.cont), ', '), 300) INTO v_comparten
+    FROM (SELECT b.promo, b.cont
+    FROM (SELECT p.id AS promo, p.sucursal_id AS suc, p.ajuste_producto_id AS cont
+            FROM public.promociones p
+           WHERE p.producto_regalo_id IS NOT NULL AND p.ajuste_producto_id IS NOT NULL
+             AND p.regalo_mueve_stock IS FALSE AND COALESCE(p.ajuste_automatico, false)
+             AND COALESCE(p.unidades_por_bloque, 0) > 0 AND COALESCE(p.stock_por_bloque, 0) > 0
+          UNION ALL
+          SELECT p.id, p.sucursal_id, a.ajuste_producto_id
+            FROM public.promo_acumuladores a
+            JOIN public.promociones p ON p.id = a.promocion_id AND p.sucursal_id = a.sucursal_id
+           WHERE a.ajuste_producto_id IS NOT NULL
+             AND a.producto_regalo_id IS DISTINCT FROM p.producto_regalo_id
+             AND p.regalo_mueve_stock IS FALSE AND COALESCE(p.ajuste_automatico, false)
+             AND COALESCE(p.unidades_por_bloque, 0) > 0 AND COALESCE(p.stock_por_bloque, 0) > 0) b
+   GROUP BY b.promo, b.suc, b.cont
+  HAVING count(*) > 1) y;
+  IF v_anterior IS NOT NULL OR v_factor IS NOT NULL OR v_comparten IS NOT NULL THEN
+    RAISE EXCEPTION 'mig NNN · los bloques ya cerrados no se pueden anotar con exactitud: fardos en un contenedor anterior [%]; promos que cambiaron de factor [%]; barras que comparten contenedor [%]. Decidir qué hacer con ellos antes de aplicar.',
+      COALESCE(v_anterior, '-'), COALESCE(v_factor, '-'), COALESCE(v_comparten, '-');
+  END IF;
+END
+$premisa_datos$;
 
 -- Reemplaza una sola aparición de un ancla en una definición.
 CREATE FUNCTION pg_temp.parche(p_def text, p_ancla text, p_nuevo text, p_que text)
@@ -314,7 +391,22 @@ $r$  -- mig NNN (#1592 H6): cada bloque se deshace con la configuración con la 
   END IF;
 
   -- Lo que queda cierra con la configuración de hoy.
-  v_cierra     := FLOOR(v_usos_raw / v_n)::INT;
+  v_cierra := FLOOR(v_usos_raw / v_n)::INT;
+  -- Una baja de la barra (salvedad, cancelación, edición a la baja) no falla por falta
+  -- de stock: el recierre se limita a lo que el contenedor de hoy tiene, más lo que este
+  -- mismo movimiento le devuelve, y el resto queda en la barra aunque pase de N. La
+  -- próxima venta lo cierra. Sólo el alta (una suba) rechaza por stock insuficiente.
+  IF p_delta < 0 AND v_cierra > 0 AND v_contenedor IS NOT NULL THEN
+    SELECT COALESCE(SUM((x->>'s')::INT), 0) INTO v_ya
+      FROM jsonb_array_elements(v_movs) x
+     WHERE (x->>'c')::BIGINT = v_contenedor;
+    SELECT stock INTO v_stock_anterior
+      FROM productos
+     WHERE id = v_contenedor AND sucursal_id = p_sucursal_id
+     FOR UPDATE;
+    v_cierra := LEAST(v_cierra,
+                      GREATEST(FLOOR((COALESCE(v_stock_anterior, 0) + v_ya)::NUMERIC / v_spb)::INT, 0));
+  END IF;
   v_usos_final := v_usos_raw - (v_cierra * v_n);
   IF v_cierra > 0 AND v_contenedor IS NOT NULL THEN
     v_movs := v_movs || jsonb_build_array(jsonb_build_object(
@@ -602,10 +694,12 @@ $parche_contenedores$;
 -- Por cada barra de una promo de fracción con ajuste automático (la del regalo
 -- de la promo y las de promo_acumuladores) cuyo contenedor no comparte con otra
 -- barra de la misma promo: lo que la promo le sacó a ese contenedor y no devolvió
--- (la cuenta de PROMO-A) son sus bloques cerrados, con la configuración de hoy,
--- que es con la que hoy se deshacen. La fila no mueve stock ni unidades: sólo
--- anota la pila. Dos barras con el mismo contenedor no se pueden separar: siguen
--- con la cuenta de hoy y su tope.
+-- (la cuenta de PROMO-A) son sus bloques cerrados. Se anotan con la
+-- configuración de hoy, el día de la anotación, que es con la que hoy se
+-- deshacen (la premisa de datos de arriba garantiza que nunca hubo otra). La fila
+-- no mueve stock ni unidades: sólo anota la pila. Dos barras con el mismo
+-- contenedor no se pueden separar (la premisa ya lo descarta): seguirían con la
+-- cuenta de hoy y su tope.
 DO $bloques_previos$
 DECLARE
   r       record;
@@ -659,7 +753,7 @@ BEGIN
       observaciones, sucursal_id, barra_regalo_id, usos_por_bloque, stock_por_bloque, bloques_vivos
     ) VALUES (
       r.promo, 0, 0, r.cont, NULL, NULL,
-      'Mig NNN: bloques que la barra ya tenía cerrados, con la configuración de ese día', r.suc,
+      'Mig NNN: bloques que la barra ya tenía cerrados, anotados con la configuración de la promo el día de la anotación', r.suc,
       r.regalo, v_n, v_spb, v_k
     );
     v_filas := v_filas + 1;
@@ -930,6 +1024,30 @@ $r$, 'simular_salvedades_promo_impacto (el corte del lote)');
 END
 $parche_simular_lote$;
 
+-- =========================================================================
+-- 2d · anular_salvedad: un recorte que sólo baja el corte también es un
+--      recorte (H2 de la revisión). Por ancla y sin md5: otra tarjeta de la
+--      ola parcha esta función antes; la premisa de arriba comprueba el ancla.
+-- =========================================================================
+DO $parche_anular$
+DECLARE
+  v_def text := pg_get_functiondef('public.anular_salvedad(bigint,text)'::regprocedure);
+BEGIN
+  v_def := pg_temp.parche(v_def,
+$a$                      AND (f.accion = 'DELETE'
+                           OR (f.new_data->>'cantidad')::numeric < (f.old_data->>'cantidad')::numeric))
+$a$,
+$r$                      AND (f.accion = 'DELETE'
+                           OR (f.new_data->>'cantidad')::numeric < (f.old_data->>'cantidad')::numeric
+                           -- mig NNN (1583-a, H2 de la revisión): el recorte que sólo baja el
+                           -- corte guardado (W×1 sigue W×1, corte 14 → 10) también es un recorte.
+                           OR (f.new_data->>'regalo_corte')::numeric < (f.old_data->>'regalo_corte')::numeric))
+$r$, 'anular_salvedad (el recorte del corte)');
+
+  EXECUTE v_def;
+END
+$parche_anular$;
+
 -- ---------------------------------------------------------------------------
 -- Poscondición: los cuerpos, el definer y los EXECUTE quedaron como en el repo
 -- ---------------------------------------------------------------------------
@@ -939,7 +1057,7 @@ DECLARE
   x record;
 BEGIN
   FOR r IN SELECT * FROM (VALUES
-    ('public.aplicar_uso_promo_acumulador(bigint,bigint,numeric,bigint,bigint,uuid,text)', '9dfa6412695bced659ada7dc716e05fd', true,
+    ('public.aplicar_uso_promo_acumulador(bigint,bigint,numeric,bigint,bigint,uuid,text)', 'b55ff7a09db621f71f6e29d55bfea808', true,
      '{postgres=X/postgres,service_role=X/postgres}'),
     ('public.renormalizar_bloques_por_cambio_factor()', '2b282b2a6629e3b067f4de39157889e9', true,
      '{postgres=X/postgres,service_role=X/postgres}'),
@@ -967,6 +1085,14 @@ BEGIN
              HAVING SUM(COALESCE(bloques_vivos, 0) * COALESCE(stock_por_bloque, 0))
                     > GREATEST(SUM(COALESCE(unidades_ajustadas, 0)), 0)) THEN
     RAISE EXCEPTION 'mig NNN · la pila anotó más bloques vivos que los fardos que la promo sacó';
+  END IF;
+  -- anular_salvedad va sin md5 (la parcha otra tarjeta de la ola): la línea nueva, una vez.
+  IF (SELECT (length(prosrc) - length(replace(prosrc,
+        $l$OR (f.new_data->>'regalo_corte')::numeric < (f.old_data->>'regalo_corte')::numeric))$l$, '')))
+        / length($l$OR (f.new_data->>'regalo_corte')::numeric < (f.old_data->>'regalo_corte')::numeric))$l$)
+        FROM pg_proc WHERE oid = 'public.anular_salvedad(bigint,text)'::regprocedure) <> 1
+     OR NOT (SELECT prosecdef FROM pg_proc WHERE oid = 'public.anular_salvedad(bigint,text)'::regprocedure) THEN
+    RAISE EXCEPTION 'mig NNN · anular_salvedad no quedó con la detección del recorte del corte';
   END IF;
 END
 $post$;

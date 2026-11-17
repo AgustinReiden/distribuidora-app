@@ -600,7 +600,8 @@ BEGIN
     ('public.desafectar_sobrepago_pedido(bigint)', 'b038256f1acf602b0ed20475215a3080',
      '{postgres=X/postgres,service_role=X/postgres}'),
     -- El cuerpo lo cambió después la migración de M4 (#1603: VTA-1, 1592-b5, 1559-c2); antes, c521503ea76283748fc1addcbc9f8842.
-    ('public.anular_salvedad(bigint,text)', '59aaf9fa97cc0c99ad852a9daeec6270',
+    -- Y después la de B1 de la ola 2 (#1603, H2 de su revisión: el recorte del corte); antes, 59aaf9fa97cc0c99ad852a9daeec6270.
+    ('public.anular_salvedad(bigint,text)', 'fc8d1a7ea7795e267425cbd8b07230cc',
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}')
   ) AS t(fn, h, acl) LOOP
     SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS d INTO x FROM pg_proc WHERE oid = r.fn::regprocedure;
