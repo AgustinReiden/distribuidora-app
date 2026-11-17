@@ -94,6 +94,8 @@ BEGIN
      AND pe.tipo_factura IS DISTINCT FROM 'VB'
      AND pe.fecha BETWEEN '2026-01-01' AND v_hoy
      AND pe.sucursal_id = ANY (public._sucursales_red());
+  -- REP-D (#1545): la venta es neta de las notas de crédito del período, por la fecha de la nota.
+  v_x := v_x - (SELECT COALESCE(sum(n.monto), 0) FROM public._ventas_nc(public._sucursales_red(), '2026-01-01', v_hoy) n);
   IF v_y <> v_x OR (v_j->'totales'->>'total')::numeric <> v_x THEN
     v_fallas := v_fallas || format('2.2 · totales %s, Σ zonas %s, venta de pedidos %s', v_j->'totales'->>'total', v_y, v_x);
   END IF;

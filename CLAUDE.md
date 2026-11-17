@@ -275,6 +275,12 @@ suelta en `sucursales`.
   `canal <> 'cambio'` (desde la 252: la venta del bot se factura igual), pero pregunta qué se
   facturó, no quién vendió: parte por `tipo_factura` y el VB va aparte, informativo (`vb_*`).
   En `auditoria_integridad()` el filtro VB va sólo en los checks que son de venta.
+  **La venta de los rankings es neta de notas de crédito de venta** (REP-D, #1545; decisión del
+  dueño): el gerencial, Ventas por cliente, por zona y por preventista, los rubros y el tablero le
+  restan `_ventas_nc`, que es la séptima parte: la nota vigente cuya boleta es venta, por la fecha
+  **de la nota**, al cliente de la nota y al vendedor de la boleta. Resta plata, no pedidos,
+  clientes, unidades ni CMV. La comisión, las metas, las jornadas y el resto del bot siguen por
+  boleta. Un ranking nuevo de venta resta `_ventas_nc` igual.
   **El envío vive en `pedidos.cargo_envio`, dentro de `total`** (migs 389 y NNN cargo_1–4), y su
   desglose (`cargo_envio_desglose`) dentro de `total_neto`/`total_iva`, no de `total_real`. La plata
   a cobrar (saldo, cobranza, deuda, recorridos, rendiciones, transportista) usa `total`; la venta, la
@@ -467,6 +473,11 @@ suelta en `sucursales`.
   asignadas, o todas las activas para el servidor. No una copia: con dos definiciones, dos
   números de la Red no cerraban entre sí. Lo vigilan **REPORTE-A** (un JOIN interno a productos,
   al vendedor o a zonas en `reporte_*` y `tablero_*`) y los cruces de `check-integridad.mjs`.
+  Una línea sin costo queda **fuera del margen** y se muestra aparte, y el % del margen va sobre
+  la venta con costo (`margenSobreConCosto`) (#1562, decisión del dueño),
+  y el rubro de un producto se rotula con **`_rubro_rotulo`** (el de `categoria_id`, el texto, o
+  «Sin rubro»), igual en todos los reportes. «Compras del período» es neta de las notas de
+  crédito de compra, con las notas aparte (`compras_notas_credito`, #1557).
 
 ## Trampas
 
