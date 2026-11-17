@@ -18,6 +18,8 @@
 --         1.210. La NC por lote de una ZZ con −150 de descuento también: 850.
 --   B4W · 1590-b (H4) · ZZ con W1 y W2 de 10 × 100 y un descuento de −200 prorrateado sólo a
 --         W1 (total 1.800): devolver W1 acredita 800 y W2 1.000 (con el factor parejo, 900 y 900).
+--   B4R · 1590-b (H4-r) · FC A con P1 al 21 % y P2 exento, y un descuento gravado de −200 con pesos
+--         sólo en P1 que no prorratea al costo: devolver todo da 968 + 500 = 1.468 de 1.468.
 --   B4  · 1557-b4 · El ajuste de una ZZ con IVA se rechaza; sin IVA entra.
 --   B5  · 1557-b5 · Compras de 10 a 100 (anteayer) y de 10 a 120 (ayer): reposición 120.
 --         Devolver entera la de ayer la vuelve a 100; anular esa nota, a 120.
@@ -315,6 +317,35 @@ BEGIN
                   (SELECT sum(total) FROM notas_credito WHERE compra_id = v_c), (SELECT total FROM compras WHERE id = v_c));
     IF v_t IS DISTINCT FROM 'W1 true 800.00 | W2 true 1000.00 | suma 1800.00 de 1800.00' THEN
       v_fallas := v_fallas || format('B4W · el descuento de −200 sólo sobre W1: esperaba W1 800, W2 1000, suma 1800 de 1800 y dio %s', v_t);
+    END IF;
+  END;
+
+  -- ================================================================ B4R ====
+  -- H4-r: un descuento gravado en factura con pesos sólo en P1 que NO prorratea al costo. El
+  -- motor reparte la base del IVA por los pesos igual: devolver todo da 968 + 500 = 1.468 de
+  -- 1.468 (con el descuento parejo daba 1.048,67 + 433,33 = 1.482).
+  DECLARE
+    v_p1 bigint := pg_temp.producto(1, 'B4R gravado', 0, NULL);
+    v_p2 bigint := pg_temp.producto(1, 'B4R exento', 0, NULL);
+    v_c  bigint;
+    v_d  jsonb := jsonb_build_array(jsonb_build_object('concepto', 'Descuento P1', 'monto', -200, 'condicion_iva', 'gravado',
+                    'en_factura', true, 'prorratea_al_costo', false, 'base_prorrateo', 'unidades',
+                    'pesos', jsonb_build_object('0', 10)));
+    v_t1 text; v_t2 text;
+  BEGIN
+    v_c := pg_temp.compra(v_adm, pg_temp.lineas(jsonb_build_array(
+             jsonb_build_object('producto_id', v_p1, 'cantidad', 10, 'costo_unitario', 100, 'porcentaje_iva', 21,
+                                'condicion_iva', 'gravado'),
+             jsonb_build_object('producto_id', v_p2, 'cantidad', 10, 'costo_unitario', 50, 'porcentaje_iva', 0,
+                                'condicion_iva', 'exento'))), 'FC', v_hoy, 168, 1468, v_d, 'A', -200);
+    v_j := pg_temp.nc(v_adm, v_c, jsonb_build_array(jsonb_build_object('producto_id', v_p1, 'cantidad', 10, 'subtotal', 1000)), 1000, 210);
+    v_t1 := format('%s %s', v_j->>'success', v_j->>'total');
+    v_j := pg_temp.nc(v_adm, v_c, jsonb_build_array(jsonb_build_object('producto_id', v_p2, 'cantidad', 10, 'subtotal', 500)), 500, 0);
+    v_t2 := format('%s %s', v_j->>'success', v_j->>'total');
+    v_t := format('P1 %s | P2 %s | suma %s de %s', v_t1, v_t2,
+                  (SELECT sum(total) FROM notas_credito WHERE compra_id = v_c), (SELECT total FROM compras WHERE id = v_c));
+    IF v_t IS DISTINCT FROM 'P1 true 968.00 | P2 true 500.00 | suma 1468.00 de 1468.00' THEN
+      v_fallas := v_fallas || format('B4R · el descuento gravado de −200 sólo sobre P1, sin prorratear al costo: esperaba P1 968, P2 500, suma 1468 de 1468 y dio %s', v_t);
     END IF;
   END;
 
@@ -673,7 +704,7 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = format(E'ENSAYO FALLÓ (%s fallas, todo revertido):\n- %s\nnotas:\n  %s',
       cardinality(v_fallas), array_to_string(v_fallas, E'\n- '), array_to_string(v_notas, E'\n  '));
   END IF;
-  RAISE EXCEPTION USING ERRCODE = 'ZZ0OK', MESSAGE = format(E'ENSAYO OK (todo revertido) · A AJ B B4W B4 B5 B7 B8 S16 B7V C1 C3 C5 K12 K14 H11 P10 S1 SN\nnotas:\n  %s',
+  RAISE EXCEPTION USING ERRCODE = 'ZZ0OK', MESSAGE = format(E'ENSAYO OK (todo revertido) · A AJ B B4W B4R B4 B5 B7 B8 S16 B7V C1 C3 C5 K12 K14 H11 P10 S1 SN\nnotas:\n  %s',
     array_to_string(v_notas, E'\n  '));
 END
 $ensayo$;

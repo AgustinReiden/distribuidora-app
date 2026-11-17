@@ -62,8 +62,8 @@
 -- `_compra_factor_neto(compra, producto)`. Los descuentos de cabecera son, en
 -- una ZZ, sus cargos en factura negativos; en una FC, sus cargos gravados en
 -- factura negativos más la parte de `compras.bonificaciones` que no explican
--- sus cargos (si es negativa). Un descuento que se prorratea con reparto
--- (`compra_cargo_repartos`) le baja el neto sólo a los renglones que alcanza,
+-- sus cargos (si es negativa). Un descuento con reparto (`compra_cargo_repartos`),
+-- prorratee o no al costo (H4-r), le baja el neto sólo a los renglones que alcanza,
 -- con la misma cuenta que el motor (`prorratear_cargo`, H4: −200 sobre W1 de
 -- dos renglones de 1.000 acredita 800 y 1.000, no 900 y 900); lo que no tiene
 -- reparto se reparte parejo, en proporción al neto. Un flete no suma (el factor
@@ -357,9 +357,10 @@ AS $function$
   -- con esto: nunca acredita más que lo pagado. Descuentos (en negativo): en una ZZ, sus cargos
   -- en factura negativos (su total los incluye, #1593); en una FC, sus cargos gravados en
   -- factura negativos (van a `bonificaciones`) más la parte de `bonificaciones` que no explican
-  -- sus cargos, si es negativa. Un descuento que se prorratea con reparto le baja el neto sólo
-  -- a sus renglones, con `prorratear_cargo` (la cuenta del motor y de COMPRA-A3); el resto se
-  -- reparte parejo en proporción al neto (H4). Un flete no suma: el factor no pasa de 1.
+  -- sus cargos, si es negativa. Un descuento con reparto (pesos) le baja el neto sólo a sus
+  -- renglones, con `prorratear_cargo` (la cuenta del motor y de COMPRA-A3), prorratee o no al
+  -- costo: el motor reparte por los pesos la base del IVA igual (H4-r); el resto se reparte
+  -- parejo en proporción al neto (H4). Un flete no suma: el factor no pasa de 1.
   WITH c AS (
     SELECT c.id, c.sucursal_id, c.tipo_factura, COALESCE(c.bonificaciones, 0) AS bonif
       FROM compras c
@@ -371,8 +372,7 @@ AS $function$
      WHERE ci.compra_id = p_compra AND ci.sucursal_id = p_sucursal
   ), descuento AS (
     SELECT cc.id, cc.monto,
-           cc.prorratea_al_costo
-             AND EXISTS (SELECT 1 FROM compra_cargo_repartos r WHERE r.cargo_id = cc.id AND r.peso > 0) AS repartido
+           EXISTS (SELECT 1 FROM compra_cargo_repartos r WHERE r.cargo_id = cc.id AND r.peso > 0) AS repartido
       FROM compra_cargos cc
       JOIN c ON cc.compra_id = c.id AND cc.sucursal_id = c.sucursal_id
      WHERE cc.en_factura AND cc.monto < 0
@@ -1086,7 +1086,7 @@ $r$    RAISE EXCEPTION 'La compra % esta cancelada: no se le pueden cargar venci
   END IF;
   -- H9: un día más que la edición (7 desde el alta), que la llama justo después de guardar.
   IF EXTRACT(EPOCH FROM (now() - v_creada)) / 86400 > 8 THEN
-    RAISE EXCEPTION 'La compra % se cargó hace más de 7 días: sus vencimientos ya no se cambian desde la compra. Un lote se corrige desde la ficha del producto.', p_compra_id;
+    RAISE EXCEPTION 'La compra % se cargó hace más de 8 días: sus vencimientos ya no se cambian desde la compra. Un lote se corrige desde la ficha del producto.', p_compra_id;
   END IF;
   IF NOT public.es_admin()
      AND EXISTS (SELECT 1 FROM public.producto_lotes l
@@ -1286,7 +1286,7 @@ BEGIN
     ('public.aceptar_movimiento_sucursal(bigint,jsonb)',
      '8dc1b5fdb24362cfa655db1af7ae3093', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.sincronizar_lotes_compra(bigint,jsonb)',
-     '46a5c59f948074714a75876eb9c6c3f0', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+     'b998975ddf3aff9038150fc583d0acdf', true, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public._cpp_arrastrar(bigint,bigint,bigint,timestamp with time zone,integer,numeric,numeric)',
      '3cbb27fa967fad761c660aab300b3c2d', false, '{postgres=X/postgres,service_role=X/postgres}'),
     ('public._cpp_devolucion_compra(bigint,bigint,bigint,integer,integer)',
@@ -1298,7 +1298,7 @@ BEGIN
     ('public._compra_producto_devuelto(bigint,bigint,bigint)',
      '293e276020f1a426a088ca1912609c93', false, '{postgres=X/postgres,service_role=X/postgres}'),
     ('public._compra_factor_neto(bigint,bigint,bigint)',
-     'd0ba3c950c3205b0363b93f9e1e8b317', false, '{postgres=X/postgres,service_role=X/postgres}'),
+     'd7a38e7073d194fc170c57e08ba1144b', false, '{postgres=X/postgres,service_role=X/postgres}'),
     ('public._reposicion_aplicar_envios(bigint,bigint,timestamp with time zone)',
      'bd6054824334c11783b97071ae27bdc7', false, '{postgres=X/postgres,service_role=X/postgres}'),
     ('public._reposicion_tras_nota(bigint,bigint,bigint)',
