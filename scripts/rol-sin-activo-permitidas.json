@@ -29,7 +29,6 @@
     "registrar_nota_credito_lote(bigint,numeric,text,text)": "sin sucursal: 'No se pudo determinar la sucursal activa' antes de leer el lote",
     "registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)": "sin sucursal: devuelve success false, 'No se pudo determinar la sucursal activa', antes de leer el pedido",
     "reporte_vencimientos(integer)": "sin sucursal: 'No se pudo determinar la sucursal activa' antes de leer los lotes",
-    "sincronizar_lotes_compra(bigint,jsonb)": "sin sucursal: 'No se pudo determinar la sucursal activa' antes de leer la compra",
     "sustituir_regalo_pedido(bigint,bigint,numeric,text,bigint,uuid)": "sin sucursal: devuelve success false, 'No hay sucursal activa', antes de leer la línea",
     "tablero_guardar_meta_cobertura(bigint,date,numeric,integer)": "antes del rol pasa por _tablero_sucursales(), que mira activo: 'Acceso denegado: se requiere rol admin o encargado'",
     "verificar_duplicado_cliente(numeric,numeric,text,bigint)": "sin sucursal: 42501 'No se pudo verificar duplicados: sin sesión o sin sucursal activa' antes de buscar"

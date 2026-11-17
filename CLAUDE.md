@@ -354,9 +354,14 @@ suelta en `sucursales`.
   10 × 100 con un flete de 300 dan 1.300. La ZZ guarda `bonificaciones` y `no_gravado` en 0: el
   cuadre del alta y COMPRA-A1 suman los cargos `en_factura` de `compra_cargos`, y el front los
   lleva en `cargosEnFactura`. En una FC no cambia: el cargo gravado va a `bonificaciones`.
-- **Una NC de compra no pasa lo que le queda a la compra** (su total menos todas sus notas): el ajuste
-  siempre, y la devolución si la compra tiene un ajuste (#1557, #1565; decisión del dueño). Sin ajustes
-  la devolución total entra siempre, aunque acredite más que el total. Un camino nuevo de NC hace igual.
+- **Una NC de compra no pasa lo que le queda a la compra** (su total menos sus notas vigentes): el ajuste
+  siempre, y la devolución si la compra tiene un ajuste (#1557, #1565; decisión del dueño). La devolución
+  se valúa neta de la bonificación y de los descuentos de cabecera (`_compra_factor_neto`, #1590 D16):
+  devolver todo nunca acredita más que lo pagado. Un camino nuevo de NC hace igual.
+- **Una NC de compra se anula, no se borra** (`anular_nota_credito_compra`, #1590 D15): queda
+  `anulada` con su motivo, y deshace el stock, los lotes que tomó (`notas_credito.lotes_tomados`), el
+  promedio y la reposición. Toda suma de las notas de una compra filtra `NOT anulada`; un camino nuevo
+  que baje lotes por una nota los anota ahí.
 - **El total de una ZZ lo pone el server** (#1603): el subtotal, los otros impuestos y los cargos
   `en_factura`, en el alta y en la edición, mande lo que mande el front (un PWA de antes de la 506
   manda el subtotal). Un descuento en factura que lo deja negativo se rechaza con su motivo. Un camino

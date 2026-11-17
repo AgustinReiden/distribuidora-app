@@ -174,7 +174,12 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   por `(fecha_compra, created_at, id)` y sin regalos, en los dos lugares que la eligen
   (`_ninguna_compra_mas_nueva` y `_reposicion_desde_ultima_compra`): el clon tiene un id nuevo
   pero la hora del alta original (#1294). Y una B o C deja `ultimo_tipo_compra = 'FC B'` /
-  `'FC C'`, que la ficha costea como lo pagado.
+  `'FC C'`, que la ficha costea como lo pagado. Tampoco cuenta una compra que sus notas vigentes
+  devuelven entera para ese producto (`_compra_producto_devuelto`, #1557 D10, también en el alta):
+  la nota que la deja así, o su anulación, recalcula la reposición (`_reposicion_tras_nota`). Y lo
+  que la recalcula desde una compra le aplica encima el mayor de los envíos aceptados después
+  (`_reposicion_aplicar_envios`, D12), como hizo aceptarlos. El `costo_con_iva` lleva lo que el
+  motor le suma al costo real (cargos, factor del II declarado), sin el IVA del cargo (1593-b1).
 - **Dentro de una compra los renglones que fijan costo van antes que los regalos** (#1593 CMP-A):
   el alta y la edición los recorren e insertan así, y la cadena va por id. Un regalo primero sobre
   un producto agotado no diluía nada y el pagado de después se promediaba con esas unidades al
@@ -197,7 +202,8 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   lo que la bajada del trigger consumiera FEFO lo contaría como vendido (100 corregida a 80
   quedaba 60/80 y bolsa 20) y le comería a lotes de otras compras. Lo que la bolsa no cubre
   sale de los lotes de esa compra, en cantidad y restante a la vez; `cantidad > 0`
-  (CHECK) obliga a dejar 1 en cada lote intacto en una primera pasada. Un camino nuevo que baje
+  (CHECK) obliga a dejar 1 en cada lote intacto en una primera pasada, y el que la segunda saca
+  entero se borra si nada lo referencia (STK-12: en 1/0 era una unidad «vendida» que no salió). Un camino nuevo que baje
   las unidades de una compra con vencimientos hace lo mismo. La nota de crédito no: lo devuelto
   sí salió, y baja sólo el restante de los lotes de su compra (#1079).
 - **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** (#1057). Cada
