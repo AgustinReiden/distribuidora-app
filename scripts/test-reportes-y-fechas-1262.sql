@@ -11,6 +11,10 @@
 -- funciones nuevas no existen). El antes/después con los números está en la
 -- propia migración.
 --
+-- Desde la migración de reportes de la ola 2 de #1603 (REP-D de #1545) la venta del
+-- gerencial es neta de las notas de crédito de venta del período, por la fecha de la
+-- nota (`_ventas_nc`): los pasos 1 a 3 cruzan contra las líneas menos esas notas.
+--
 --   psql "$DATABASE_URL" -f scripts/test-reportes-y-fechas-1262.sql
 
 DO $ensayo$
@@ -40,7 +44,9 @@ BEGIN
   IF v_x <> v_y THEN
     v_fallas := v_fallas || format('gerencial · Σ categorías %s <> Σ vendedores %s', v_x, v_y);
   END IF;
-  SELECT COALESCE(sum(pi.subtotal), 0) INTO v_y
+  -- REP-D (#1545): menos las notas de crédito de venta del período (por la fecha de la nota).
+  SELECT COALESCE(sum(pi.subtotal), 0)
+         - (SELECT COALESCE(sum(n.monto), 0) FROM public._ventas_nc(v_sucs, v_desde, v_hoy) n) INTO v_y
     FROM pedidos p JOIN pedido_items pi ON pi.pedido_id = p.id
    WHERE p.estado = 'entregado' AND p.canal <> 'cambio' AND p.tipo_factura IS DISTINCT FROM 'VB'
      AND p.fecha BETWEEN v_desde AND v_hoy AND p.sucursal_id = ANY(v_sucs);
@@ -49,7 +55,9 @@ BEGIN
   END IF;
 
   -- ---------------- 2 · las líneas de productos borrados están, como tales
-  SELECT COALESCE(sum(pi.subtotal), 0) INTO v_y
+  SELECT COALESCE(sum(pi.subtotal), 0)
+         - (SELECT COALESCE(sum(n.monto), 0) FROM public._ventas_nc(v_sucs, v_desde, v_hoy) n
+             WHERE NOT EXISTS (SELECT 1 FROM productos pr WHERE pr.id = n.producto_id)) INTO v_y
     FROM pedidos p JOIN pedido_items pi ON pi.pedido_id = p.id
    WHERE pi.producto_id IS NULL
      AND p.estado = 'entregado' AND p.canal <> 'cambio' AND p.tipo_factura IS DISTINCT FROM 'VB'
@@ -61,7 +69,9 @@ BEGIN
   END IF;
 
   -- --------------------------------- 3 · los pedidos sin vendedor están
-  SELECT COALESCE(sum(pi.subtotal), 0) INTO v_y
+  SELECT COALESCE(sum(pi.subtotal), 0)
+         - (SELECT COALESCE(sum(n.monto), 0) FROM public._ventas_nc(v_sucs, v_desde, v_hoy) n
+             WHERE n.usuario_id IS NULL) INTO v_y
     FROM pedidos p JOIN pedido_items pi ON pi.pedido_id = p.id
    WHERE p.usuario_id IS NULL
      AND p.estado = 'entregado' AND p.canal <> 'cambio' AND p.tipo_factura IS DISTINCT FROM 'VB'

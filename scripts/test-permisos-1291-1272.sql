@@ -106,7 +106,7 @@ BEGIN
   SELECT string_agg(sucursal_id || ':' || es_default, ',' ORDER BY sucursal_id) INTO v_antes
     FROM usuario_sucursales WHERE usuario_id = v_u1;
   EXECUTE 'SET LOCAL ROLE authenticated';
-  EXECUTE 'SELECT public.asignar_usuario_sucursal($1, $2, ''mismo'', true)' INTO r USING v_u1, v_s2;
+  EXECUTE 'SELECT public.asignar_usuario_sucursal($1, $2, true)' INTO r USING v_u1, v_s2;
   EXECUTE 'RESET ROLE';
   IF COALESCE((r->>'success')::boolean, false)
      OR (SELECT string_agg(sucursal_id || ':' || es_default, ',' ORDER BY sucursal_id)
@@ -116,7 +116,7 @@ BEGIN
 
   -- 1.2 · Tampoco a uno que es de la suya y de otra (v_ared): le cambiaría la default.
   EXECUTE 'SET LOCAL ROLE authenticated';
-  EXECUTE 'SELECT public.asignar_usuario_sucursal($1, $2, ''mismo'', true)' INTO r USING v_ared, v_s2;
+  EXECUTE 'SELECT public.asignar_usuario_sucursal($1, $2, true)' INTO r USING v_ared, v_s2;
   EXECUTE 'RESET ROLE';
   IF COALESCE((r->>'success')::boolean, false) THEN
     v_fallas := v_fallas || format('1.2 · el admin de la %s reasignó a un usuario que también es de otra: %s', v_s2, r);
@@ -124,7 +124,7 @@ BEGIN
 
   -- 1.3 · A uno suyo, sí.
   EXECUTE 'SET LOCAL ROLE authenticated';
-  EXECUTE 'SELECT public.asignar_usuario_sucursal($1, $2, ''mismo'', true)' INTO r USING v_u2, v_s2;
+  EXECUTE 'SELECT public.asignar_usuario_sucursal($1, $2, true)' INTO r USING v_u2, v_s2;
   EXECUTE 'RESET ROLE';
   IF NOT COALESCE((r->>'success')::boolean, false) THEN
     v_fallas := v_fallas || format('1.3 · el admin de la %s no pudo asignar a uno suyo: %s', v_s2, r);
@@ -133,7 +133,7 @@ BEGIN
   -- 1.4 · El admin de todas sí se trae a v_u1 a la otra sucursal.
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_ared, 'role', 'authenticated')::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
-  EXECUTE 'SELECT public.asignar_usuario_sucursal($1, $2, ''mismo'', false)' INTO r USING v_u1, v_s2;
+  EXECUTE 'SELECT public.asignar_usuario_sucursal($1, $2, false)' INTO r USING v_u1, v_s2;
   EXECUTE 'RESET ROLE';
   IF NOT COALESCE((r->>'success')::boolean, false)
      OR NOT EXISTS (SELECT 1 FROM usuario_sucursales WHERE usuario_id = v_u1 AND sucursal_id = v_s2) THEN
