@@ -9,8 +9,13 @@
  * cliente, de la más vieja a la más nueva; sólo queda de saldo a favor lo que no
  * alcanza a ninguna. Anular la NC (COB-3) quita todo su crédito, suelto y ya
  * aplicado: las boletas que pagaba vuelven a deber eso. La NC es un documento aparte: NO toca el
- * pedido (ni total, ni ítems, ni estado), así que no afecta la venta por
- * vendedor ni la comisión, y no mueve stock.
+ * pedido (ni total, ni ítems, ni estado) y no mueve stock.
+ *
+ * Decisiones del dueño del 16/11 (B16 de #1603, en #1545): la nota se imputa al
+ * día de su boleta (`fecha` es la de la boleta, la que cuenta para los reportes y
+ * la posición fiscal; cuándo se emitió es `created_at`), y resta de la comisión y
+ * de las metas del vendedor de la boleta. Su crédito es plata del día en que se
+ * emitió.
  *
  * Esto es la cuenta que ve la UI antes de confirmar. La que vale es la de la
  * RPC `crear_nota_credito_venta_impl`, que toma el precio del pedido y vuelve a
@@ -21,9 +26,28 @@
  *   - total = Σ cantidad × precio_unitario del pedido, y tiene que ser > 0.
  */
 
-import { formatPrecio } from './formatters'
+import { diaArgentino, formatFecha, formatPrecio } from './formatters'
 
-export const LEYENDA_NC_NO_AFECTA_COMISION = 'No afecta la comisión del vendedor'
+export const LEYENDA_NC_COMISION =
+  'Se imputa al mes de la boleta y resta de la comisión y de las metas del vendedor'
+
+type FechasNC = { fecha: string; created_at?: string | null }
+
+/** El día argentino (YYYY-MM-DD) en que se emitió la nota; sin `created_at`, su `fecha`. */
+export function diaEmisionNotaCreditoVenta(nc: FechasNC): string {
+  return nc.created_at ? diaArgentino(nc.created_at) : nc.fecha
+}
+
+/**
+ * Las fechas de una nota para mostrar (B16): `fecha` es la de imputación (la de
+ * su boleta) y `created_at`, cuándo se emitió. Si caen el mismo día argentino,
+ * una sola; si no, las dos.
+ */
+export function fechasNotaCreditoVenta(nc: FechasNC): string {
+  const emitida = diaEmisionNotaCreditoVenta(nc)
+  if (emitida === nc.fecha) return formatFecha(nc.fecha)
+  return `Imputada al ${formatFecha(nc.fecha)} (día de la boleta) · emitida el ${formatFecha(emitida)}`
+}
 
 export type MotivoNCVenta = 'producto_vencido' | 'producto_danado' | 'otro'
 

@@ -89,6 +89,12 @@ describe('VistaComisiones', () => {
     )).toBeInTheDocument()
   })
 
+  // B16 (decisión del dueño del 16/11): la nota de crédito resta de la comisión.
+  it('dice que la base es neta de las notas de crédito', () => {
+    render(<VistaComisiones {...props} resultado={resultado} />)
+    expect(screen.getByText(/menos las notas de\s+crédito de esas boletas/)).toBeInTheDocument()
+  })
+
   it('el botón de reglas solo aparece si el container lo habilita', () => {
     const { rerender } = render(<VistaComisiones {...props} resultado={resultado} />)
     expect(screen.queryByRole('button', { name: /Reglas de comisión/ })).not.toBeInTheDocument()

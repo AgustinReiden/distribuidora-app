@@ -50,9 +50,12 @@ describe('ModalNotaCreditoVenta', () => {
     pedidosCliente = []
   })
 
+  // Cambió de regla (B16, decisión del dueño del 16/11): la nota se imputa al mes
+  // de la boleta y resta de la comisión y de las metas; antes decía que no la afectaba.
   it('muestra la leyenda de comisión y no ofrece los regalos', () => {
     render(<ModalNotaCreditoVenta pedido={pedido} onClose={() => {}} />)
-    expect(screen.getByText('No afecta la comisión del vendedor')).toBeInTheDocument()
+    expect(screen.getByText('Se imputa al mes de la boleta y resta de la comisión y de las metas del vendedor')).toBeInTheDocument()
+    expect(screen.queryByText(/No afecta la comisión/)).toBeNull()
     expect(screen.queryByText('Regalo')).toBeNull()
   })
 

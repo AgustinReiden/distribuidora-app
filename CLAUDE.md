@@ -316,8 +316,17 @@ suelta en `sucursales`.
   dueño): el gerencial, Ventas por cliente, por zona y por preventista, los rubros y el tablero le
   restan `_ventas_nc`, que es la séptima parte: la nota vigente cuya boleta es venta, por la fecha
   **de la nota**, al cliente de la nota y al vendedor de la boleta. Resta plata, no pedidos,
-  clientes, unidades ni CMV. La comisión, las metas, las jornadas y el resto del bot siguen por
-  boleta. Un ranking nuevo de venta resta `_ventas_nc` igual.
+  clientes, unidades ni CMV. Desde B16 (#1545, decisión del dueño) restan también la comisión, las
+  metas (facturación, no unidades), Rendimiento y el bot (`bot_ventas_periodo`, `bot_mis_ventas` y
+  el resumen del preventista); las jornadas y Rentabilidad siguen por boleta. Un ranking nuevo de
+  venta resta `_ventas_nc` igual.
+  **La nota de crédito de venta se imputa al día de su boleta** (B16, #1545; decisión del dueño):
+  `notas_credito_venta.fecha` es la de imputación, la de `pedidos.fecha`, y es la que cuenta para los
+  reportes y la posición fiscal; cuándo se emitió es `created_at`, y su crédito (los pagos) es plata
+  de ese día. La pone `trg_notas_credito_venta_fecha_de_boleta`, mande lo que mande quien escribe, y
+  cambiar la fecha de la boleta arrastra sus notas (`trg_pedidos_fecha_arrastra_notas_credito`). Una
+  nota sobre una boleta de un mes cerrado cambia ese mes. Un camino nuevo que cree notas no manda la
+  fecha. La NC de compra no: su fecha es la del comprobante del proveedor.
   **El envío vive en `pedidos.cargo_envio`, dentro de `total`** (migs 389 y NNN cargo_1–4), y su
   desglose (`cargo_envio_desglose`) dentro de `total_neto`/`total_iva`, no de `total_real`. La plata
   a cobrar (saldo, cobranza, deuda, recorridos, rendiciones, transportista) usa `total`; la venta, la
@@ -330,6 +339,11 @@ suelta en `sucursales`.
   (`empleado_liquidacion_lineas`, un libro de deltas, con el vendedor de cada línea: si cambia
   `pedidos.usuario_id`, al anterior le sale como ajuste). `calcular_comisiones` es un cálculo y va
   por `pedidos.fecha`, así que su total puede no coincidir con lo liquidado.
+  **La nota de crédito resta de la comisión** (B16, #1545; decisión del dueño): `_comision_lineas`
+  baja cada clave por lo que acreditan las notas vigentes de la boleta en ella (de `_ventas_nc`, con
+  tope en lo que la clave vende; sin renglón, en la del mismo producto). Una nota emitida después de
+  liquidar sale como ajuste en la liquidación siguiente, y anularla lo devuelve. La base del
+  gerencial (`nc`) resta lo mismo.
   El efectivo a entregar resta también los pagos al personal de esa rendición
   (`total_pagos_personal`), que el encargado ve sólo como un total. `confirmar_rendicion` rechaza
   si esa suma cambió desde que se abrió el cierre (`pagos_personal_visto`), como con los gastos.
@@ -385,7 +399,7 @@ suelta en `sucursales`.
   (`cambiar_tipo_factura_pedido`). Una foto 0 en una línea de venta es ambigua —miles de líneas
   anteriores a julio 2026 la tienen por default— y cae al producto. La NC de venta guarda su
   `neto` e `iva` (la foto de lo que acredita) y `posicion_fiscal` los resta por la fecha de la
-  nota (#1257). Por eso el ZZ↔FC exige que no haya NC vigente.
+  nota (#1257), que es la de su boleta (B16). Por eso el ZZ↔FC exige que no haya NC vigente.
 - **El techo del impuesto interno es 99 % nominal** (CAT-9 de #1596, decisión del dueño).
   `productos.impuestos_internos` y `compra_items.impuestos_internos` son la tasa **efectiva**
   sobre el neto, `100·n/(1−n)`: van de 0 a 9900, no de 0 a 100. El nominal lo frenan

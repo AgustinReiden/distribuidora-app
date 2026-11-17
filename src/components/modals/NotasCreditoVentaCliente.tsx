@@ -15,7 +15,8 @@ import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { formatPrecio, formatFecha } from '../../utils/formatters'
 import {
-  LEYENDA_NC_NO_AFECTA_COMISION,
+  LEYENDA_NC_COMISION,
+  fechasNotaCreditoVenta,
   motivoNCVentaLabel,
   totalNotasCreditoVigentes,
 } from '../../utils/notaCreditoVenta'
@@ -95,7 +96,7 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
       </div>
       <p className="flex items-center gap-2 rounded-lg bg-teal-50 p-2 text-xs text-teal-800 dark:bg-teal-900/20 dark:text-teal-300">
         <Info className="h-4 w-4 shrink-0" />
-        {LEYENDA_NC_NO_AFECTA_COMISION}. El crédito baja primero su boleta y después las otras abiertas del cliente; lo que no alcanza queda a favor. Aparece en Pagos como “Nota de crédito”.
+        {LEYENDA_NC_COMISION}. El crédito baja primero su boleta y después las otras abiertas del cliente; lo que no alcanza queda a favor. Aparece en Pagos como “Nota de crédito”.
       </p>
 
       {notas.length === 0 ? (
@@ -119,14 +120,14 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
                   NC #{nc.id} · {formatPrecio(nc.total)}
                 </p>
                 <p className="text-sm text-gray-500">
-                  {formatFecha(nc.fecha)} • {motivoNCVentaLabel(nc.motivo)} • Pedido #{nc.pedido_id}
+                  {fechasNotaCreditoVenta(nc)} • {motivoNCVentaLabel(nc.motivo)} • Pedido #{nc.pedido_id}
                 </p>
                 {nc.observaciones && <p className="mt-1 text-sm text-gray-400">{nc.observaciones}</p>}
               </div>
               <div className="flex items-center gap-2">
                 {nc.anulada
                   ? <Badge tone="danger" icon={XCircle}>Anulada</Badge>
-                  : <Badge tone="brand">No afecta comisión</Badge>}
+                  : <Badge tone="brand">Resta comisión</Badge>}
                 {onImputar && !nc.anulada && pagoLibre && (
                   <Button
                     variant="secondary"

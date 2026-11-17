@@ -1152,7 +1152,10 @@ export interface NotaCreditoVentaDB {
   sucursal_id: string;
   cliente_id: string;
   pedido_id: string;
-  /** Día argentino (YYYY-MM-DD). */
+  /**
+   * Día argentino (YYYY-MM-DD) de imputación: el de su boleta (B16). Es el que
+   * cuenta para los reportes y la posición fiscal; cuándo se emitió es `created_at`.
+   */
   fecha: string;
   motivo: MotivoNotaCreditoVenta;
   observaciones?: string | null;

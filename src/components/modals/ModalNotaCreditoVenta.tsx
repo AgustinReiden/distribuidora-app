@@ -5,8 +5,9 @@
  * se le reconoce un crédito en su cuenta corriente. Desde la mig 479 (COB-1) el
  * crédito baja primero este pedido, si sigue impago, y lo que sobra va FIFO a las
  * otras boletas abiertas del cliente; sólo queda de saldo a favor lo que no
- * alcanza a ninguna. La NC NO modifica el pedido (ni total, ni ítems, ni estado),
- * no mueve stock y no afecta la comisión del vendedor.
+ * alcanza a ninguna. La NC NO modifica el pedido (ni total, ni ítems, ni estado)
+ * y no mueve stock. Se imputa al día del pedido y resta de la comisión y de las
+ * metas del vendedor (B16, decisiones del dueño del 16/11).
  *
  * La cuenta es la de `utils/notaCreditoVenta`; el servidor la rehace con el
  * precio del pedido y revalida las cantidades.
@@ -24,8 +25,9 @@ import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio, formatFecha } from '../../utils/formatters'
 import {
-  LEYENDA_NC_NO_AFECTA_COMISION,
+  LEYENDA_NC_COMISION,
   MOTIVOS_NC_VENTA,
+  diaEmisionNotaCreditoVenta,
   itemsNotaCreditoParaRPC,
   lineasAcreditables,
   lineasReparticionCreditoNC,
@@ -198,7 +200,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
         <div className="flex items-start gap-2 rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-800 dark:border-teal-800 dark:bg-teal-900/20 dark:text-teal-300">
           <Info className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
-            <p className="font-semibold">{LEYENDA_NC_NO_AFECTA_COMISION}</p>
+            <p className="font-semibold">{LEYENDA_NC_COMISION}</p>
             <p>
               El pedido no se modifica y no se mueve stock. El crédito baja primero este pedido,
               si todavía debe algo, y lo que sobra va a las otras boletas abiertas del cliente,
@@ -210,7 +212,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
         {notasVigentes.length > 0 && (
           <p className="text-sm text-gray-600 dark:text-gray-400">
             Este pedido ya tiene {notasVigentes.length === 1 ? 'una nota de crédito' : `${notasVigentes.length} notas de crédito`}{' '}
-            ({notasVigentes.map(n => `#${n.id} ${formatFecha(n.fecha)}`).join(', ')}). Lo ya acreditado se descuenta.
+            ({notasVigentes.map(n => `#${n.id} del ${formatFecha(diaEmisionNotaCreditoVenta(n))}`).join(', ')}). Lo ya acreditado se descuenta.
           </p>
         )}
 

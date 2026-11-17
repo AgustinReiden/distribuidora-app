@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  diaEmisionNotaCreditoVenta,
+  fechasNotaCreditoVenta,
   itemsNotaCreditoParaRPC,
   lineasAcreditables,
   lineasReparticionCreditoNC,
@@ -123,5 +125,31 @@ describe('lineasReparticionCreditoNC', () => {
 
   it('sin nada que contar, no hay líneas', () => {
     expect(lineasReparticionCreditoNC({ aplicadoPedido: 0, aplicadoOtras: 0, disponible: 0 })).toEqual([])
+  })
+})
+
+// B16 (decisión del dueño del 16/11): `fecha` es la de imputación (la de la boleta)
+// y `created_at`, cuándo se emitió. El día de emisión es el argentino.
+describe('fechas de una nota (B16)', () => {
+  it('emitida otro día que su boleta: muestra las dos', () => {
+    const nc = { fecha: '2026-09-15', created_at: '2026-10-03T15:00:00Z' }
+    expect(diaEmisionNotaCreditoVenta(nc)).toBe('2026-10-03')
+    expect(fechasNotaCreditoVenta(nc)).toBe('Imputada al 15/9 (día de la boleta) · emitida el 3/10')
+  })
+
+  it('emitida el día de su boleta: una sola fecha', () => {
+    expect(fechasNotaCreditoVenta({ fecha: '2026-10-03', created_at: '2026-10-03T15:00:00Z' })).toBe('3/10')
+  })
+
+  it('el día de emisión es el argentino: a las 22 h del 31/10 todavía es 31/10', () => {
+    // 01:00 UTC del 1/11 son las 22 h del 31/10 en Argentina.
+    const nc = { fecha: '2026-10-31', created_at: '2026-11-01T01:00:00Z' }
+    expect(diaEmisionNotaCreditoVenta(nc)).toBe('2026-10-31')
+    expect(fechasNotaCreditoVenta(nc)).toBe('31/10')
+  })
+
+  it('sin created_at: la fecha de la nota', () => {
+    expect(diaEmisionNotaCreditoVenta({ fecha: '2026-09-15' })).toBe('2026-09-15')
+    expect(fechasNotaCreditoVenta({ fecha: '2026-09-15', created_at: null })).toBe('15/9')
   })
 })

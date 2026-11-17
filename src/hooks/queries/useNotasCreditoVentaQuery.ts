@@ -82,7 +82,10 @@ export interface CrearNotaCreditoVentaResult {
   nota_credito_id: number
   pago_id: number
   total: number
+  /** La de imputación: el día de la boleta (B16). */
   fecha: string
+  /** El día en que se emitió (B16). Opcional: un server anterior no lo manda. */
+  creada_el?: string
   /**
    * Adónde fue el crédito (mig 479, COB-1): lo que bajó la boleta de origen, lo que fue
    * FIFO a otras boletas abiertas del cliente y lo que quedó suelto. Opcionales: un PWA viejo
