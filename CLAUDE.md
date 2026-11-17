@@ -594,6 +594,13 @@ resuelve antes de ir a la base (un `42501` quiere decir que el embed resolvió).
 positivo se prueba con el JWT de una sesión, o en SQL con `SET LOCAL ROLE authenticated` +
 `request.jwt.claims`.
 
+Y al revés: **una FK nueva entre dos tablas que ya tienen otra rompe los embeds que ya
+existían**, también en los bundles viejos del PWA, que un deploy no arregla. Antes de aplicar
+una migración que suma una FK, buscá en `src/` los embeds entre esas dos tablas; el que quede
+pide su relación explícita (`perfiles!notas_credito_usuario_id_fkey(...)`). Pasó con la 523
+(`notas_credito.anulada_por → perfiles`: el detalle de una compra dejó de cargar sus notas de
+crédito); la 524 sacó esa FK.
+
 Pariente de la misma familia: **dos sobrecargas SQL con rangos `[obligatorios, total]`
 superpuestos** hacen que PostgREST no sepa cuál llamar y tire `PGRST203`, también en
 runtime y también invisible para `tsc` y para los tests. Al cambiarle la firma a una
