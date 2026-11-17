@@ -5,10 +5,11 @@
 --       (plan #1603, ola 2, tarjeta B1c: 1556-b1 y 1556-b3 de #1556, 1592-b4
 --        de #1592, y lo que dejó la ola 1 sobre `_combo_trasladar`)
 --
--- Parcha por ancla tres funciones puras o de server (`_combo_prorrateo`,
--- `_combo_cantidad` y `_combo_trasladar`), con premisa de md5 sobre el cuerpo
--- vivo del 16/11 (ledger en la 512), y crea una guarda de borrado sobre
--- `promociones`. No cambia tablas ni firmas.
+-- Parcha por ancla cuatro funciones de server (`_combo_prorrateo`,
+-- `_combo_cantidad`, `_combo_trasladar` y el mensaje de `combo_fuera_de_regla`),
+-- con premisa de md5 sobre el cuerpo vivo del 16/11 (ledger en la 512; los
+-- mismos con la 514), y crea una guarda de borrado sobre `promociones`. No
+-- cambia tablas ni firmas. Toma el lock de `promociones` al principio (NOWAIT).
 -- Ensayo: scripts/test-promos-combos-ola2-1603.sql. Se aplica en LF.
 --
 -- =========================================================================
@@ -44,7 +45,9 @@
 -- #1259 cada una toma el precio más cercano a su proporción entre 0 y lo que
 -- todavía falta repartir. Si ni así hay reparto (un combo de centavos que no
 -- alcanza para un centavo por unidad), NULL, como un total que no se puede
--- repartir: `combo_fuera_de_regla` lo rechaza y el front no lo arma.
+-- repartir: `combo_fuera_de_regla` lo rechaza y el front no lo arma. El
+-- rechazo dice que el combo no se puede repartir a ese precio, no «recargá la
+-- app» (H3 de la revisión): recargar no lo arregla.
 -- Cuando ninguna línea queda en 0 el reparto es el de siempre (lo prueba el
 -- ensayo contra una copia del cuerpo anterior), así que un pedido ya armado se
 -- valida igual. El espejo es `prorratearTotal` (src/utils/combos.ts), con los
@@ -72,11 +75,14 @@
 -- Ahora `_combo_trasladar` la guarda antes del DELETE, con lo mismo que
 -- `registrar_salvedad`.
 --
--- Revertir: volver los tres cuerpos a los de la premisa, y borrar el trigger y
+-- Revertir: volver los cuatro cuerpos a los de la premisa, y borrar el trigger y
 -- su función.
 -- =========================================================================
 
 BEGIN;
+
+-- La única tabla con DDL (el CREATE TRIGGER): su lock primero, sin esperar.
+LOCK TABLE public.promociones IN SHARE ROW EXCLUSIVE MODE NOWAIT;
 
 SET LOCAL lock_timeout = '5s';
 
@@ -99,7 +105,8 @@ BEGIN
   FOR r IN SELECT * FROM (VALUES
     ('public._combo_prorrateo(numeric,jsonb)', '3eff1124bef26ea2735c8019cdb6e68e'),
     ('public._combo_cantidad(jsonb,jsonb)', '843fb0cba28e984da189e862d2e27135'),
-    ('public._combo_trasladar(bigint,bigint,integer)', '032d7bd15efbe15c5d71b68f17aa089a')
+    ('public._combo_trasladar(bigint,bigint,integer)', '032d7bd15efbe15c5d71b68f17aa089a'),
+    ('public.combo_fuera_de_regla(jsonb,bigint,date,bigint,boolean)', '912892a3f0b92ef5e59e2208d8124312')
   ) AS t(f, h) LOOP
     IF to_regprocedure(r.f) IS NULL THEN
       RAISE EXCEPTION 'mig NNN · % no existe: rehacer sobre lo vigente', r.f;
@@ -297,6 +304,29 @@ $r$, '_combo_trasladar (la foto antes del DELETE)');
 END
 $trasladar$;
 
+-- =========================================================================
+-- H3 de la revisión · `combo_fuera_de_regla`: el combo sin reparto lo dice
+-- =========================================================================
+DO $mensaje$
+DECLARE
+  v_def text := pg_get_functiondef('public.combo_fuera_de_regla(jsonb,bigint,date,bigint,boolean)'::regprocedure);
+BEGIN
+  v_def := pg_temp.parche(v_def,
+$a$    v_prorr := public._combo_prorrateo(v_total, v_lineas);
+    IF v_prorr IS NULL
+$a$,
+$r$    v_prorr := public._combo_prorrateo(v_total, v_lineas);
+    -- 1592-b4 (H3 de la revisión): sin reparto (no deja un centavo en cada
+    -- línea), el combo no se vende a ese precio. Recargar la app no lo arregla.
+    IF v_prorr IS NULL THEN
+      RETURN format('El combo "%s" no se puede repartir entre sus productos a ese precio. Cargá los productos sin el combo.', v_nombre);
+    END IF;
+    IF v_prorr IS NULL
+$r$, 'combo_fuera_de_regla (el mensaje sin reparto)');
+  EXECUTE v_def;
+END
+$mensaje$;
+
 
 -- =========================================================================
 -- 1556-b1 · la guarda de borrado de promociones
@@ -368,6 +398,8 @@ BEGIN
     ('public._combo_cantidad(jsonb,jsonb)', '63f1e91870100ee1b90cec6c7f0773a6', false,
      '{postgres=X/postgres,service_role=X/postgres}'),
     ('public._combo_trasladar(bigint,bigint,integer)', '5cacddb5d177dc18d4d79c16d2f42af0', false,
+     '{postgres=X/postgres,service_role=X/postgres}'),
+    ('public.combo_fuera_de_regla(jsonb,bigint,date,bigint,boolean)', '589942c33c244c752112bf7712d1fe84', false,
      '{postgres=X/postgres,service_role=X/postgres}'),
     ('public.promocion_no_se_borra_con_uso()', '0b9b4e8c7575194d141c17dc79383f54', true,
      '{postgres=X/postgres,service_role=X/postgres}')

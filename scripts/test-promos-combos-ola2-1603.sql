@@ -32,6 +32,9 @@
 --        anterior, pg_temp.k_prorrateo_viejo).
 --   K8 · [F] el alta de un pedido con ese combo a 3.999,99 + 0,01 pasa (antes
 --        el server recalculaba 4.000 + 0 y la rechazaba); ninguna línea en $0.
+--   K9 · [F] H3 de la revisión. Un combo sin reparto (2 A + 3 B por $0,06): el
+--        alta del encargado se rechaza diciendo que el combo no se puede
+--        repartir a ese precio, no «recargá la app».
 --   C1 · [F] 1556-b3. `_combo_cantidad` con cantidades escritas 1.0 y 2.0 da lo
 --        mismo que con 1 y 2 (antes NULL; el TS ya las aceptaba).
 --   C2 · [R] una cantidad 1.5 sigue dando NULL.
@@ -47,7 +50,7 @@
 -- Arma su propio cliente, productos, promos y combos en la primera sucursal
 -- activa de un admin activo (y un encargado en auth.users para K8). Cada caso
 -- corre en un sub-bloque que se revierte, y el DO termina siempre en una
--- excepción: no deja nada. El veredicto es esa excepción, 'ENSAYO OK (17
+-- excepción: no deja nada. El veredicto es esa excepción, 'ENSAYO OK (18
 -- casos)' o 'ENSAYO FALLO (n fallas)' con la lista. En una base local, nunca
 -- contra prod (escribe en auth.users):
 --
@@ -653,6 +656,31 @@ BEGIN
 END
 $fn$;
 
+CREATE OR REPLACE FUNCTION pg_temp.caso_k9(p_cli bigint, p_adm uuid, p_suc bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v_a bigint; v_b bigint; v_combo bigint; v_enc uuid; v_res jsonb;
+BEGIN
+  v_a := pg_temp.t_prod(p_suc, p_adm, 'Chicle A', 0.02);
+  v_b := pg_temp.t_prod(p_suc, p_adm, 'Chicle B', 0.02);
+  PERFORM pg_temp.t_claims(p_adm, p_suc);
+  v_combo := pg_temp.t_combo(0.06, jsonb_build_array(
+    jsonb_build_object('cantidad', 2, 'productos', jsonb_build_array(v_a)),
+    jsonb_build_object('cantidad', 3, 'productos', jsonb_build_array(v_b))));
+  v_enc := pg_temp.t_usuario('encargado', p_suc);
+  v_res := pg_temp.t_alta(p_cli, v_enc, p_suc, jsonb_build_array(
+    jsonb_build_object('producto_id', v_a, 'cantidad', 2, 'precio_unitario', 0.01,
+                       'combo_id', v_combo, 'precio_sin_combo_unitario', 0.02),
+    jsonb_build_object('producto_id', v_b, 'cantidad', 3, 'precio_unitario', 0.01,
+                       'combo_id', v_combo, 'precio_sin_combo_unitario', 0.02)));
+  f := pg_temp.t_si(f, NOT COALESCE((v_res->>'success')::boolean, false)
+                       AND v_res::text LIKE '%no se puede repartir entre sus productos a ese precio%'
+                       AND v_res::text NOT LIKE '%Recargá la app%',
+                    format('alta con un combo sin reparto: %s; esperado el rechazo que dice que no se puede repartir', v_res));
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
 CREATE OR REPLACE FUNCTION pg_temp.caso_c1(p_cli bigint, p_adm uuid, p_suc bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -784,7 +812,7 @@ BEGIN
   PERFORM pg_temp.t_claims(v_admin, v_suc);
   PERFORM set_config('app.omitir_minimo_pedido', '1', true);
 
-  FOREACH v_caso IN ARRAY ARRAY['p1', 'p2', 'p3', 'p4', 'p5', 'k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7', 'k8',
+  FOREACH v_caso IN ARRAY ARRAY['p1', 'p2', 'p3', 'p4', 'p5', 'k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7', 'k8', 'k9',
                                 'c1', 'c2', 't1', 'g1'] LOOP
     v_out := NULL;
     BEGIN
@@ -810,6 +838,6 @@ BEGIN
     RAISE EXCEPTION E'ENSAYO FALLO (% fallas)\n- %', cardinality(v_fallas), array_to_string(v_fallas, E'\n- ');
   END IF;
   -- Termina siempre en una excepción: nada de lo de arriba queda escrito.
-  RAISE EXCEPTION 'ENSAYO OK (17 casos)';
+  RAISE EXCEPTION 'ENSAYO OK (18 casos)';
 END
 $ensayo$;
