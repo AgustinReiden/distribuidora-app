@@ -638,7 +638,7 @@ describe('ModalGasto — km del tablero al editar', () => {
     kmDelGasto.isLoading = false
     const { user, onSave } = renderModal({ gasto: combustible })
 
-    expect(screen.getByLabelText('Km del tablero')).toHaveValue('184230')
+    expect(screen.getByLabelText('Km del tablero')).toHaveValue('184.230')
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
 
     expect(onSave.mock.calls[0][0]).toMatchObject({ id: 41, litros: 38.5, km_tablero: 184230 })
@@ -1092,7 +1092,7 @@ describe('ModalGasto — abierto desde el cierre de una rendición', () => {
 
     expect(screen.getByLabelText(/Monto total/)).toHaveValue('52.000')
     expect(screen.getByLabelText(/^Rubro/)).toHaveValue('Combustible')
-    expect(screen.getByLabelText('Km del tablero')).toHaveValue('184230')
+    expect(screen.getByLabelText('Km del tablero')).toHaveValue('184.230')
     // El hook se llama siempre, pero con null: queda deshabilitado y no va a `vehiculo_km`.
     expect(kmPedidos.every(id => id === null)).toBe(true)
     expect(screen.getByText('Editar gasto')).toBeInTheDocument()
@@ -1227,7 +1227,7 @@ describe('ModalGasto — GAS-1: litros y km al editar', () => {
     const { user, onSave } = renderModal({ gasto: delGasto({}), rubros: SIN_COMBUSTIBLE })
 
     expect(screen.getByLabelText('Litros')).toHaveValue('38,50')
-    expect(screen.getByLabelText('Km del tablero')).toHaveValue('184230')
+    expect(screen.getByLabelText('Km del tablero')).toHaveValue('184.230')
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
 
     expect(onSave.mock.calls[0][0]).toMatchObject({ id: 41, litros: 38.5, km_tablero: 184230 })
@@ -1242,7 +1242,7 @@ describe('ModalGasto — GAS-1: litros y km al editar', () => {
 
     // Lo guardado sigue a la vista, no se esconde por no saber.
     expect(screen.getByLabelText('Litros')).toHaveValue('38,50')
-    expect(screen.getByLabelText('Km del tablero')).toHaveValue('184230')
+    expect(screen.getByLabelText('Km del tablero')).toHaveValue('184.230')
     poner(/Monto total/, '60000')
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
 
@@ -1259,7 +1259,7 @@ describe('ModalGasto — GAS-1: litros y km al editar', () => {
     })
 
     expect(screen.getByLabelText('Litros')).toHaveValue('38,50')
-    expect(screen.getByLabelText('Km del tablero')).toHaveValue('184230')
+    expect(screen.getByLabelText('Km del tablero')).toHaveValue('184.230')
     poner(/Monto total/, '70000')
     await user.click(screen.getByRole('button', { name: 'Aplicar cambios' }))
 

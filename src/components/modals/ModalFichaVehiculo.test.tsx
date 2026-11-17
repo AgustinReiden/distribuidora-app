@@ -72,7 +72,9 @@ describe('ModalFichaVehiculo', () => {
     const { user, onRegistrarKm } = renderFicha()
     await user.click(screen.getByRole('button', { name: '+ Registrar km' }))
     fireEvent.change(screen.getByLabelText('Fecha'), { target: { value: '2026-10-28' } })
-    await user.type(screen.getByLabelText('Km del tablero'), '185.400')
+    // B20 (D17, cambió de regla): los miles los pone el campo; «185.400» tipeado sería 185,4.
+    await user.type(screen.getByLabelText('Km del tablero'), '185400')
+    expect(screen.getByLabelText('Km del tablero')).toHaveValue('185.400')
     await user.click(screen.getByRole('button', { name: 'Guardar lectura' }))
 
     expect(onRegistrarKm).toHaveBeenCalledTimes(1)

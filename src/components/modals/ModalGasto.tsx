@@ -19,6 +19,8 @@ import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { Combobox } from '../ui/Combobox'
 import { InputMonto } from '../ui/InputMonto'
+import { CampoNumero } from '../ui/CampoNumero'
+import { leerEntero, numeroConMiles } from '../../utils/normalizarNumero'
 import { cn } from '../../lib/utils'
 import { useKmDelGastoQuery } from '../../hooks/queries/useGastosQuery'
 import { getErrorMessage } from '../../utils/errorHandling'
@@ -405,7 +407,8 @@ export default function ModalGasto({
   const [renglonesTxt, setRenglonesTxt] = useState(() => String(
     ini?.renglones_factura ?? (ini && daCreditoFiscal(ini.comprobante) ? renglonesParaIva(ini) : 1)))
   const [renglonesTocados, setRenglonesTocados] = useState(false)
-  const renglones = /^\s*\d+\s*$/.test(renglonesTxt) ? Number(renglonesTxt) : Number.NaN
+  // Un entero, con los miles que pone el campo (B20, D17); con coma no es una cantidad.
+  const renglones = leerEntero(renglonesTxt) ?? Number.NaN
   const mostrarRenglones = conCredito
     && (renglonesTocados || renglones !== 1 || Math.round(iva * 100) > topeIvaGastoCentavos(desglose))
 
@@ -424,7 +427,7 @@ export default function ModalGasto({
   const [kmEditado, setKmEditado] = useState<string | null>(null)
   // Un borrador trae sus km: no hay lectura que pedir.
   const kmInicial = borrador ? (borrador.km_tablero ?? null) : (kmPrevio ?? null)
-  const kmTxt = kmEditado ?? (kmInicial != null ? String(kmInicial) : '')
+  const kmTxt = kmEditado ?? (kmInicial != null ? numeroConMiles(kmInicial) : '')
   const [mostrarLitrosManual, setMostrarLitros] = useState(Boolean(ini?.litros))
   const mostrarLitros = mostrarLitrosManual || kmInicial != null
   const pideVehiculo = rubro?.grupo === 'vehiculos'
@@ -802,12 +805,12 @@ export default function ModalGasto({
                   <label htmlFor={`${id}-renglones`} className="text-xs text-gray-600 dark:text-gray-400">
                     Renglones de la factura
                   </label>
-                  <input
+                  <CampoNumero
                     id={`${id}-renglones`}
-                    type="text"
-                    inputMode="numeric"
+                    entero
                     value={renglonesTxt}
-                    onChange={e => { setRenglonesTxt(e.target.value); setRenglonesTocados(true) }}
+                    onChange={t => { setRenglonesTxt(t); setRenglonesTocados(true) }}
+                    motivo={renglonesTxt.trim() !== '' && leerEntero(renglonesTxt) === null ? 'Los renglones van sin coma' : null}
                     className={cn(CLASE_CAMPO_IVA, 'w-20')}
                   />
                   <span className="text-xs text-gray-500">
@@ -901,22 +904,22 @@ export default function ModalGasto({
             )}
             {pideLitros && (mostrarLitros ? (
               <div className="mt-2 grid grid-cols-2 gap-2">
-                <input
-                  type="text"
-                  inputMode="decimal"
+                {/* Los litros no llevan miles (B20, D17): la tecla del punto es la coma. */}
+                <CampoNumero
+                  sinMiles
                   aria-label="Litros"
                   placeholder="Litros"
                   value={litrosTxt}
-                  onChange={e => setLitrosTxt(e.target.value)}
+                  onChange={setLitrosTxt}
                   className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-right text-sm dark:bg-gray-700 dark:text-white"
                 />
-                <input
-                  type="text"
-                  inputMode="numeric"
+                {/* Los miles los pone el campo (B20, D17); una coma la rechaza el schema. */}
+                <CampoNumero
+                  entero
                   aria-label="Km del tablero"
                   placeholder="Km del tablero"
                   value={kmTxt}
-                  onChange={e => setKmEditado(e.target.value)}
+                  onChange={setKmEditado}
                   className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-right text-sm dark:bg-gray-700 dark:text-white"
                 />
               </div>

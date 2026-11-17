@@ -186,10 +186,12 @@ describe('ModalEmpleado', () => {
     expect(await screen.findByText('Escribí el monto con números, por ejemplo 280.000 o 280.000,50')).toBeInTheDocument()
   })
 
-  it('el sueldo con puntos de miles se lee entero', async () => {
+  // B20 (D17, cambió de regla): los miles los pone el campo; «280.000» tipeado sería 280,000.
+  it('el sueldo se tipea sin puntos y el campo pone los miles', async () => {
     const { onSave, user } = renderModal()
     await cargarAlta(user)
-    await user.type(screen.getByLabelText(/^Sueldo fijo/), '280.000')
+    await user.type(screen.getByLabelText(/^Sueldo fijo/), '280000')
+    expect(screen.getByLabelText(/^Sueldo fijo/)).toHaveValue('280.000')
     await user.click(screen.getByRole('button', { name: 'Dar de alta' }))
 
     expect(onSave.mock.calls[0][0].arreglo).toMatchObject({ sueldo: 280000 })

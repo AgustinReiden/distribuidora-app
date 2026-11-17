@@ -8,6 +8,7 @@ import type { FormEvent } from 'react'
 import { z } from 'zod'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
+import { CampoNumero } from '../ui/CampoNumero'
 import { Badge } from '../ui/Badge'
 import Card from '../ui/Card'
 import { getErrorMessage } from '../../utils/errorHandling'
@@ -226,12 +227,12 @@ export default function ModalFichaVehiculo({
                   </div>
                   <div>
                     <label htmlFor={idKm} className="block text-xs text-gray-500 mb-1">Km del tablero</label>
-                    <input
+                    {/* Los miles los pone el campo (B20, D17); una coma la rechaza el schema. */}
+                    <CampoNumero
                       id={idKm}
-                      type="text"
-                      inputMode="numeric"
+                      entero
                       value={kmTxt}
-                      onChange={e => setKmTxt(e.target.value)}
+                      onChange={setKmTxt}
                       className="w-36 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-right dark:bg-gray-700 dark:text-white"
                     />
                   </div>

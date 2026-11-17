@@ -64,7 +64,8 @@ describe('ModalMovimientoEmpleado', () => {
   it('un ajuste A su favor manda el monto positivo', async () => {
     const { onSave, user } = renderModal()
     await user.click(screen.getByRole('button', { name: 'Ajuste' }))
-    await user.type(screen.getByLabelText(/^Monto/), '1.500')
+    // B20 (D17, cambió de regla): los miles los pone el campo.
+    await user.type(screen.getByLabelText(/^Monto/), '1500')
     await user.type(screen.getByLabelText(/^Por qué/), 'Diferencia')
     await user.click(screen.getByRole('button', { name: 'Registrar movimiento' }))
     expect(onSave.mock.calls[0][0]).toMatchObject({ tipo: 'ajuste', monto: 1500 })

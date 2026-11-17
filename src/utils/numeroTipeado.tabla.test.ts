@@ -323,10 +323,9 @@ describe('los lectores que quedan leen la tabla igual', () => {
       // normalizarNumero (el import de compras): 0 para lo que no se entiende.
       expect(normalizarNumero(texto)).toBe(leido ?? 0)
       // parseMonto (gastos y personal) es más estricto —sin signo, hasta dos decimales— pero lo
-      // que acepta lo lee igual. La excepción es la tira de 400 nueves: parseMonto da Infinity
-      // (`personal.ts` no es de esta tarjeta; queda anotado en el informe).
+      // que acepta lo lee igual (y desde B20 tampoco da Infinity con la tira de 400 nueves).
       const monto = parseMonto(texto)
-      if (monto !== null && Number.isFinite(monto)) expect(monto).toBe(leido)
+      if (monto !== null) expect(monto).toBe(leido)
     }
   })
 

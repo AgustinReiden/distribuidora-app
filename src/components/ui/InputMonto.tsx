@@ -1,11 +1,20 @@
 /**
- * InputMonto - Campo de importe que pone solo los puntos de miles mientras se tipea
- * («280000» → «280.000») y, al salir, escribe con coma el decimal tipeado con punto
- * («12.5» → «12,5»). El valor sigue siendo el texto: lo lee `parseMonto`. Las reglas viven en
- * `formatearMontoTipeado` y `cerrarMontoTipeado`.
+ * InputMonto - Campo de importe de gastos y personal. El valor es el texto, y lo lee `parseMonto`
+ * (sin signo, hasta dos decimales).
+ *
+ * Sigue la regla del dueño (D17, B20 de #1603), como `NumberInput` y `CampoNumero`: el punto y la
+ * coma tipeados son decimales (la tecla del punto se ve como coma), y el punto de miles lo pone el
+ * campo mientras se tipea («280000» → «280.000»). Lo pegado se lee como se muestra la plata
+ * («1.250,50» es 1250,5). Antes un punto tipeado con tres dígitos detrás era de miles («1.500» era
+ * mil quinientos); ahora es la coma («1,500», que `parseMonto` rechaza por tener tres decimales).
+ *
+ * Lo que `parseMonto` no entiende queda en rojo (`aria-invalid`); el motivo lo dice el formulario
+ * al guardar (`MENSAJE_MONTO_ILEGIBLE`), que no lo guarda.
  */
-import { useLayoutEffect, useRef, type InputHTMLAttributes } from 'react'
-import { cerrarMontoTipeado, formatearMontoTipeado } from '../../utils/personal'
+import type { InputHTMLAttributes } from 'react'
+import { useTecleoNumero } from '../../hooks/useTecleoNumero'
+import { parseMonto } from '../../utils/personal'
+import { CLASES_CAMPO_ILEGIBLE } from './CampoNumero'
 
 type PropsHeredadas = Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type' | 'inputMode'>
 
@@ -14,36 +23,20 @@ export interface InputMontoProps extends PropsHeredadas {
   onChange: (valor: string) => void
 }
 
-export function InputMonto({ value, onChange, onBlur, ...resto }: InputMontoProps) {
-  const ref = useRef<HTMLInputElement>(null)
-  // Al reformatear, React deja el cursor al final: se repone después del mismo dígito.
-  const cursor = useRef<number | null>(null)
-  useLayoutEffect(() => {
-    const input = ref.current
-    if (cursor.current !== null && input && document.activeElement === input) {
-      input.setSelectionRange(cursor.current, cursor.current)
-    }
-    cursor.current = null
-  })
-
+export function InputMonto({ value, onChange, className, ...resto }: InputMontoProps) {
+  // El menos tipeado queda a la vista para que parseMonto lo rechace: el signo lo dan los botones.
+  const tecleo = useTecleoNumero({ negativo: true })
+  const ilegible = value.trim() !== '' && parseMonto(value) === null
   return (
     <input
       autoComplete="off"
       {...resto}
-      ref={ref}
       type="text"
       inputMode="decimal"
       value={value}
-      onChange={e => {
-        const formateado = formatearMontoTipeado(e.target.value, value, e.target.selectionStart ?? e.target.value.length)
-        cursor.current = formateado.cursor
-        onChange(formateado.texto)
-      }}
-      onBlur={e => {
-        const cerrado = cerrarMontoTipeado(value)
-        if (cerrado !== value) onChange(cerrado)
-        onBlur?.(e)
-      }}
+      aria-invalid={ilegible ? true : resto['aria-invalid']}
+      className={ilegible ? `${className ?? ''} ${CLASES_CAMPO_ILEGIBLE}` : className}
+      onChange={e => onChange(tecleo(value, e))}
     />
   )
 }

@@ -46,7 +46,9 @@ describe('ModalArregloEmpleado', () => {
     expect(screen.getByText('Los períodos anteriores conservan el arreglo que tenían.')).toBeInTheDocument()
     expect((screen.getByLabelText(/^Vale desde/) as HTMLInputElement).value).toBe('2026-10-26')
 
-    await user.type(screen.getByLabelText(/^Sueldo fijo/), '300.000')
+    // B20 (D17, cambió de regla): los miles los pone el campo; el punto tipeado es la coma decimal.
+    await user.type(screen.getByLabelText(/^Sueldo fijo/), '300000')
+    expect(screen.getByLabelText(/^Sueldo fijo/)).toHaveValue('300.000')
     await user.click(screen.getByRole('button', { name: 'Guardar arreglo' }))
 
     expect(onSave).toHaveBeenCalledWith({
