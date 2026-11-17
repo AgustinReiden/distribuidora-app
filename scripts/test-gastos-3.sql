@@ -593,6 +593,14 @@ BEGIN
     v_fallas := v_fallas || pg_temp.falla('9 resuelta: editar g1 desde Gastos', v_adm, v_a,
                   pg_temp.gg(v_base || jsonb_build_object('id', g1, 'monto_total', 9200)),
                   'Este gasto es de una rendición cerrada: se cambia');
+    -- Desde la 446 (gastos 6) una rendición con la diferencia RESUELTA no se desmarca: hay que deshacer la resolución primero
+    -- (decisión del dueño: se deshace todo junto). Antes este paso desmarcaba directo.
+    v_fallas := v_fallas || pg_temp.falla('9 resuelta: desmarcar sin deshacer la resolución', v_adm, v_a,
+                  format('SELECT public.desmarcar_rendicion_controlada(p_fecha => %L::date, p_transportista_id => %L::uuid)', v_d, v_t),
+                  'tiene una diferencia resuelta');
+    PERFORM pg_temp.como(v_adm, v_a, format(
+              'SELECT public.deshacer_resolucion_rendicion(p_fecha => %L::date, p_transportista_id => %L::uuid, p_motivo => %L)',
+              v_d, v_t, 'ensayo gastos 3'));
     PERFORM pg_temp.como(v_adm, v_a, format(
               'SELECT public.desmarcar_rendicion_controlada(p_fecha => %L::date, p_transportista_id => %L::uuid)', v_d, v_t));
     PERFORM pg_temp.como(v_adm, v_a, pg_temp.gg(v_base || jsonb_build_object('id', g1, 'monto_total', 9300)));
@@ -725,7 +733,11 @@ BEGIN
     v_n := pg_temp.gasto_a(v_adm, v_a);
     v_fallas := v_fallas || pg_temp.chk(v_n = 0, format('11 GASTO-A da %s en una resuelta con g1 anterior a resuelta_at (esperado 0)', v_n));
 
-    -- Confirmada con controlada hace 2 h: g1 (hace 90 min) es posterior -> 1.
+    -- Confirmada con controlada hace 2 h: g1 (hace 90 min) es posterior -> 1. Desde la 446 una rendición con la diferencia
+    -- resuelta no cambia su cierre sin deshacer antes la resolución (se deshace todo junto): se la deshace primero.
+    PERFORM pg_temp.como(v_adm, v_a, format(
+              'SELECT public.deshacer_resolucion_rendicion(p_fecha => %L::date, p_transportista_id => %L::uuid, p_motivo => %L)',
+              v_d, v_t, 'ensayo gastos 3'));
     PERFORM pg_temp.como(v_adm, v_a, pg_temp.cr(v_d, v_t, 'confirmada',
               jsonb_build_object('vistos', pg_temp.vistos(v_adm, v_a, v_d, v_t))));
     UPDATE rendiciones_control SET controlada_at = now() - interval '2 hours'

@@ -17,7 +17,7 @@ import { Bar, Line, Doughnut } from 'react-chartjs-2'
 import { useTheme } from '../../../contexts/ThemeContext'
 import { money, N, margenNetoMesPct, etiquetaDiaSerie, serieCruzaAnios } from './formato'
 import { labelMotivo } from '../../../utils/mermasMotivo'
-import { contribucionEstimada } from '../../../utils/contribucionGerencial'
+import { pasosCascada } from '../../../utils/cascadaGerencial'
 import type { ReporteMes, ReporteVendedor, ReporteCategoria, ReporteCobranza, BonifPromo, MermaMotivo } from '../../../hooks/queries'
 
 ChartJS.register(
@@ -56,7 +56,11 @@ function baseTooltip(bg: string) {
 }
 
 // --- Evolución mensual: venta + bonificaciones (barras) + margen neto % (línea) ---
-export function EvolucionChart({ data }: { data: ReporteMes[] }): React.ReactElement {
+export function EvolucionChart({ data, sinCostoDe }: {
+  data: ReporteMes[]
+  /** Lo vendido sin costo que el server dejó fuera del margen de ese mes (`sinCostoFueraDelMargen`). Sin él, 0. */
+  sinCostoDe?: (m: ReporteMes) => number
+}): React.ReactElement {
   const t = useChartTheme()
   // Gráfico mixto (barras + línea): tipamos laxo para react-chartjs-2.
   const chartData: any = {
@@ -66,7 +70,8 @@ export function EvolucionChart({ data }: { data: ReporteMes[] }): React.ReactEle
       { type: 'bar', label: 'Bonificaciones', data: data.map(m => m.bonif), backgroundColor: PALETTE.amber, borderRadius: 4, order: 2, yAxisID: 'y' },
       {
         type: 'line', label: 'Margen neto %',
-        data: data.map(m => margenNetoMesPct(m) * 100),
+        // Un mes sin base (venta ≤ sin costo) no tiene margen: null, sin punto en la línea.
+        data: data.map(m => { const x = margenNetoMesPct(m, sinCostoDe?.(m) ?? 0); return x == null ? null : x * 100 }),
         borderColor: PALETTE.violet, backgroundColor: PALETTE.violet, tension: 0.35,
         borderWidth: 2.5, pointRadius: 4, pointBackgroundColor: t.surface, pointBorderWidth: 2,
         order: 1, yAxisID: 'y1',
@@ -233,27 +238,18 @@ export function CategoriasChart({ data }: { data: ReporteCategoria[] }): React.R
 
 // --- Composición del resultado (waterfall) ---
 export function WaterfallChart({
-  venta, cmv, bonif, mermas, comision, descuentos = 0, notasCredito = 0,
-}: { venta: number; cmv: number; bonif: number; mermas: number; comision: number; descuentos?: number; notasCredito?: number }): React.ReactElement {
+  venta, cmv, bonif, mermas, comision, descuentos = 0, notasCredito = 0, sinCosto = 0,
+}: {
+  venta: number; cmv: number; bonif: number; mermas: number; comision: number; descuentos?: number; notasCredito?: number
+  /** Venta sin costo que el server dejó fuera del margen (1562-b6): suma el paso «− Sin costo». Ver `sinCostoFueraDelMargen`. */
+  sinCosto?: number
+}): React.ReactElement {
   const t = useChartTheme()
   // Descuentos de proveedores (mig 280): restan del lado del costo, así que el
-  // margen comercial ya los incluye, igual que `kpis.margen_comercial`.
-  const mc = venta - cmv + descuentos
-  const mn = mc - bonif
-  // Misma definición que la card (#845): las NC de venta restan acá, no en los márgenes.
-  const contrib = contribucionEstimada({ margen_neto: mn, mermas, notas_credito_venta: notasCredito }, comision)
-  const trasComision = mn - mermas - comision
-  const steps = [
-    { l: 'Venta', v: venta, r: [0, venta], c: PALETTE.blue },
-    { l: '− CMV', v: -cmv, r: [venta - cmv, venta], c: PALETTE.red },
-    ...(descuentos ? [{ l: '+ Desc. prov.', v: descuentos, r: [venta - cmv, mc], c: PALETTE.emerald }] : []),
-    { l: 'Mg comerc.', v: mc, r: [0, mc], c: PALETTE.cyan },
-    { l: '− Bonif.', v: -bonif, r: [mn, mc], c: PALETTE.red },
-    { l: '− Mermas', v: -mermas, r: [mn - mermas, mn], c: PALETTE.red },
-    { l: '− Comis.', v: -comision, r: [trasComision, mn - mermas], c: PALETTE.red },
-    ...(notasCredito ? [{ l: '− Notas de crédito', v: -notasCredito, r: [contrib, trasComision], c: PALETTE.red }] : []),
-    { l: 'Contrib.', v: contrib, r: [0, contrib], c: PALETTE.emerald },
-  ]
+  // margen comercial ya los incluye, igual que `kpis.margen_comercial`. Los pasos y su cierre
+  // contra la card de margen salen de `pasosCascada` (probado aparte).
+  const { pasos } = pasosCascada({ venta, cmv, bonif, mermas, comision, descuentos, notasCredito, sinCosto })
+  const steps = pasos.map(p => ({ ...p, c: PALETTE[p.tono] }))
   return (
     <Bar
       data={{ labels: steps.map(s => s.l), datasets: [{ label: 'monto', data: steps.map(s => s.r) as any, backgroundColor: steps.map(s => s.c), borderRadius: 3 }] }}

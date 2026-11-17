@@ -20,6 +20,48 @@
 -- Fixtures: una sucursal activa con un admin activo, un cliente activo que no sea de vale blanco y la caja de hoy
 -- abierta. El producto y el pedido nacen en el ensayo.
 
+-- Ola 2 de #1603 (B1, 1595-b5; decisión del dueño D23): una salvedad se registra sólo sobre un
+-- pedido en camino o entregado. El ensayo carga pedidos y les registra salvedades enseguida: este
+-- envoltorio pone el pedido en camino (asignado) para la salvedad y lo devuelve al estado que tenía,
+-- así el resto del caso no cambia.
+CREATE OR REPLACE FUNCTION pg_temp.ola2_estado_pedido(p_ped bigint, p_estado text)
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER AS $ola2$
+DECLARE
+  v_prev   text;
+  v_claims text := current_setting('request.jwt.claims', true);
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_ped;
+  IF v_prev IS DISTINCT FROM p_estado THEN
+    PERFORM set_config('request.jwt.claims', '', true);
+    UPDATE public.pedidos SET estado = p_estado WHERE id = p_ped;
+    PERFORM set_config('request.jwt.claims', COALESCE(v_claims, ''), true);
+  END IF;
+  RETURN v_prev;
+END
+$ola2$;
+
+CREATE OR REPLACE FUNCTION pg_temp.salvedad_en_camino(p_pedido_id bigint, p_pedido_item_id bigint,
+  p_cantidad_afectada integer, p_motivo character varying, p_descripcion text DEFAULT NULL,
+  p_foto_url text DEFAULT NULL, p_devolver_stock boolean DEFAULT true, p_client_request_id uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql AS $ola2$
+DECLARE
+  v_prev text;
+  v_res  jsonb;
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_pedido_id;
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, 'asignado');
+  END IF;
+  v_res := public.registrar_salvedad(p_pedido_id, p_pedido_item_id, p_cantidad_afectada, p_motivo,
+                                     p_descripcion, p_foto_url, p_devolver_stock, p_client_request_id);
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, v_prev);
+  END IF;
+  RETURN v_res;
+END
+$ola2$;
+
+
 CREATE OR REPLACE FUNCTION pg_temp.sl_si(p_f text[], p_ok boolean, p_msg text)
 RETURNS text[] LANGUAGE sql AS $fn$
   SELECT CASE WHEN COALESCE(p_ok, false) THEN p_f ELSE p_f || p_msg END;
@@ -51,7 +93,7 @@ RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   v_res jsonb;
 BEGIN
-  v_res := public.registrar_salvedad(p_ped, p_item, p_cant, 'cliente_rechaza', 'ensayo 1508', NULL, true, p_clave);
+  v_res := pg_temp.salvedad_en_camino(p_ped, p_item, p_cant, 'cliente_rechaza', 'ensayo 1508', NULL, true, p_clave);
   PERFORM pg_temp.sl_reset();
   RETURN v_res;
 END
@@ -204,8 +246,10 @@ BEGIN
   SELECT md5(prosrc) AS h, proacl::text AS a, prosrc AS s, prosecdef AS d INTO r
     FROM pg_proc
    WHERE oid = 'public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)'::regprocedure;
-  -- El cuerpo lo cambió después la migración de M4 (#1603: la foto de VTA-1); antes, ce4dcadfe8f7bdeec5f10b2851efb031.
-  f := pg_temp.sl_si(f, r.h = '4d5fd79e669f045c8a3decc1c74387c7', format('registrar_salvedad tiene el md5 %s', r.h));
+  -- Acá se fijaba el md5 del cuerpo de registrar_salvedad (ce4dcadf…, después 4d5fd79e…): se ponía rojo con cada migración que
+  -- toca la función (la foto de VTA-1, la 505…) sin que el lock del replay se hubiera movido. Se sacó (#1603 B13b): lo que
+  -- vale es lo que sigue, que el SELECT del replay termina en FOR SHARE, que sigue siendo definer y sus EXECUTE; el
+  -- comportamiento lo cubren S1 y S1b del arnés de concurrencia.
   -- El SELECT del replay es el que lleva el lock: la clave, la sucursal, el pedido y FOR SHARE, en ese orden.
   f := pg_temp.sl_si(f, r.s ~ 'WHERE client_request_id = p_client_request_id\s+AND sucursal_id = v_sucursal\s+AND pedido_id = p_pedido_id\s+(--[^\n]*\n\s*)*FOR SHARE;',
                      'el SELECT del replay no termina en FOR SHARE');

@@ -46,6 +46,48 @@
 --
 --   psql "$DATABASE_URL" -1 -f scripts/test-salvedad-huella-1126-1127.sql
 
+-- Ola 2 de #1603 (B1, 1595-b5; decisión del dueño D23): una salvedad se registra sólo sobre un
+-- pedido en camino o entregado. El ensayo carga pedidos y les registra salvedades enseguida: este
+-- envoltorio pone el pedido en camino (asignado) para la salvedad y lo devuelve al estado que tenía,
+-- así el resto del caso no cambia.
+CREATE OR REPLACE FUNCTION pg_temp.ola2_estado_pedido(p_ped bigint, p_estado text)
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER AS $ola2$
+DECLARE
+  v_prev   text;
+  v_claims text := current_setting('request.jwt.claims', true);
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_ped;
+  IF v_prev IS DISTINCT FROM p_estado THEN
+    PERFORM set_config('request.jwt.claims', '', true);
+    UPDATE public.pedidos SET estado = p_estado WHERE id = p_ped;
+    PERFORM set_config('request.jwt.claims', COALESCE(v_claims, ''), true);
+  END IF;
+  RETURN v_prev;
+END
+$ola2$;
+
+CREATE OR REPLACE FUNCTION pg_temp.salvedad_en_camino(p_pedido_id bigint, p_pedido_item_id bigint,
+  p_cantidad_afectada integer, p_motivo character varying, p_descripcion text DEFAULT NULL,
+  p_foto_url text DEFAULT NULL, p_devolver_stock boolean DEFAULT true, p_client_request_id uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql AS $ola2$
+DECLARE
+  v_prev text;
+  v_res  jsonb;
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_pedido_id;
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, 'asignado');
+  END IF;
+  v_res := public.registrar_salvedad(p_pedido_id, p_pedido_item_id, p_cantidad_afectada, p_motivo,
+                                     p_descripcion, p_foto_url, p_devolver_stock, p_client_request_id);
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, v_prev);
+  END IF;
+  RETURN v_res;
+END
+$ola2$;
+
+
 CREATE OR REPLACE FUNCTION pg_temp.t_hoy()
 RETURNS date LANGUAGE sql AS $fn$
   SELECT (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
@@ -186,7 +228,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.t_salvedad_res(p_ped bigint, p_item bigint, p_cant int, p_motivo text,
                                                   p_req uuid DEFAULT NULL)
 RETURNS jsonb LANGUAGE sql AS $fn$
-  SELECT public.registrar_salvedad(p_ped, p_item, p_cant, p_motivo,
+  SELECT pg_temp.salvedad_en_camino(p_ped, p_item, p_cant, p_motivo,
                                    'ensayo 1127: descripcion del caso', NULL, true, p_req);
 $fn$;
 
@@ -669,7 +711,9 @@ BEGIN
 END
 $fn$;
 
--- B2 · la baja es una sola (#1080): 'anulado' se rechaza igual.
+-- B2 · la baja es una sola (#1080): 'anulado' ya no es un estado (mig 487, #1520: pedidos_estado_check). Antes este caso
+--      dejaba el pedido en 'anulado' y esperaba que la salvedad se rechazara; hoy el propio UPDATE se rechaza (23514) y
+--      nada cambia: se afirma eso, y que el pedido, su stock y sus líneas quedan como estaban.
 CREATE OR REPLACE FUNCTION pg_temp.caso_b2(p_cli bigint, p_adm uuid, p_suc bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -680,16 +724,18 @@ BEGIN
   v_prod := v->>'prod';
   p := pg_temp.t_pedido(p_cli, p_adm, v_prod, 20);
   v_ped := p->>'pedido'; v_item := p->>'item';
-  UPDATE public.pedidos SET estado = 'anulado' WHERE id = v_ped;
   v_f0 := pg_temp.t_foto(v_prod);
-  v_res := pg_temp.t_salvedad_res(v_ped, v_item, 5, 'producto_danado');
+  BEGIN
+    UPDATE public.pedidos SET estado = 'anulado' WHERE id = v_ped;
+    f := f || 'poner un pedido en anulado tenia que fallar (pedidos_estado_check)'::text;
+  EXCEPTION WHEN check_violation THEN
+    NULL;   -- lo esperado
+  END;
   v_f1 := pg_temp.t_foto(v_prod);
-  f := pg_temp.t_si(f, NOT COALESCE((v_res->>'success')::boolean, false) AND v_res->>'codigo' = 'pedido_cancelado',
-                    format('la salvedad sobre el anulado tendria que rechazarse: %s', v_res));
-  f := pg_temp.t_si(f, v_f1 = v_f0 AND pg_temp.t_cant(v_item) = 20
+  f := pg_temp.t_si(f, (SELECT estado FROM public.pedidos WHERE id = v_ped) <> 'anulado' AND v_f1 = v_f0
+                       AND pg_temp.t_cant(v_item) = 20
                        AND NOT EXISTS (SELECT 1 FROM public.salvedades_items WHERE pedido_id = v_ped),
-                    format('la salvedad sobre el anulado dejo efectos: foto %s (antes %s), linea %s', v_f1, v_f0,
-                           pg_temp.t_cant(v_item)));
+                    format('el UPDATE rechazado dejo efectos: foto %s (antes %s), linea %s', v_f1, v_f0, pg_temp.t_cant(v_item)));
   RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', format('respuesta %s', v_res));
 END
 $fn$;

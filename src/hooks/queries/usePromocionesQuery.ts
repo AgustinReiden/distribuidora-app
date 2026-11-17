@@ -230,6 +230,11 @@ async function createPromocion(input: PromocionFormInput): Promise<PromocionConD
 
   const promoId = (promo as PromocionDB).id
 
+  // Son tres INSERT sin transacción (#1561, 1561-b12): si los productos o las reglas fallan,
+  // la promo recién creada se borra (nadie la usó todavía; los hijos caen en cascada) en vez
+  // de quedar activa y vacía, o sin sus reglas. Cerrarlo del todo pide una RPC que cree la
+  // promo entera en una transacción.
+  try {
   if (input.productoIds.length > 0) {
     const { error } = await supabase
       .from('promocion_productos')
@@ -249,6 +254,15 @@ async function createPromocion(input: PromocionFormInput): Promise<PromocionConD
         valor: r.valor,
       })))
     if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya creado. Revisá antes de reintentar.')
+  }
+
+  } catch (err) {
+    const { error: errorDeshacer } = await supabase.from('promociones').delete().eq('id', promoId)
+    const original = err instanceof Error ? err : new Error(String(err))
+    const aviso = errorDeshacer
+      ? ' La promoción quedó creada a medias: abrila y revisala, o eliminala y volvé a crearla.'
+      : ' No se creó nada: volvé a intentar.'
+    throw Object.assign(original, { message: original.message + aviso })
   }
 
   const { data: productos } = await supabase
@@ -341,20 +355,23 @@ export interface ReferenciasPromocionCount extends ReferenciasPromocion {
 /**
  * Cuenta lo que colgaría de un DELETE de promociones, para poder avisar ANTES
  * de borrarla. A diferencia de clientes (mig 200), acá las FKs no son
- * RESTRICT: el DELETE nunca falla solo, así que no hay un 23503 del que
- * enterarse después. Ver `tienePromocionUso` para el porqué.
+ * RESTRICT; el que rechaza es el trigger de la guarda del server, con la misma
+ * regla. Ver `tienePromocionUso` para el porqué.
  */
 export async function contarReferenciasDePromocion(promocionId: string): Promise<ReferenciasPromocionCount> {
-  const [pedidosRes, ajustesRes] = await Promise.all([
+  const [pedidosRes, ajustesRes, salvedadesRes] = await Promise.all([
     supabase.from('pedido_items').select('id', { count: 'exact', head: true }).eq('promocion_id', promocionId),
     supabase.from('promo_ajustes').select('id', { count: 'exact', head: true }).eq('promocion_id', promocionId),
+    supabase.from('salvedades_items').select('id', { count: 'exact', head: true }).eq('promocion_id', promocionId),
   ])
   if (pedidosRes.error) throw errorDeSupabase(pedidosRes.error, 'Sin conexión: no se pudo cargar los usos de la promoción. Revisá la señal e intentá de nuevo.')
   if (ajustesRes.error) throw errorDeSupabase(ajustesRes.error, 'Sin conexión: no se pudo cargar los usos de la promoción. Revisá la señal e intentá de nuevo.')
+  if (salvedadesRes.error) throw errorDeSupabase(salvedadesRes.error, 'Sin conexión: no se pudo cargar los usos de la promoción. Revisá la señal e intentá de nuevo.')
 
   const referencias: ReferenciasPromocion = {
     pedidos: pedidosRes.count ?? 0,
     ajustes: ajustesRes.count ?? 0,
+    salvedades: salvedadesRes.count ?? 0,
   }
 
   return { ...referencias, tieneUso: tienePromocionUso(referencias) }
@@ -458,7 +475,8 @@ export function useCrearPromocionMutation() {
   const { currentSucursalId } = useSucursal()
   return useMutation({
     mutationFn: createPromocion,
-    onSuccess: () => {
+    // También si falla: una promo que quedó a medias tiene que verse en la lista.
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: promocionesKeys.all(currentSucursalId) })
     },
   })

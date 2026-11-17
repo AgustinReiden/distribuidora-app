@@ -9,7 +9,7 @@ import { useMemo, useState, memo } from 'react';
 import { Loader2, History, ChevronDown, ChevronRight, TrendingUp, TrendingDown } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { formatFecha } from './utils';
-import { useControlStockSesionesQuery, useControlStockDetalleQuery } from '../../hooks/queries/useControlStockQuery';
+import { useControlStockSesionesQuery, useControlStockDetalleQuery, SESIONES_POR_PAGINA } from '../../hooks/queries/useControlStockQuery';
 import type { ProductoDB } from '../../types';
 
 export interface ModalAjustesStockHistorialProps {
@@ -53,7 +53,10 @@ function DetalleSesion({ sesionId, productosMap }: { sesionId: number; productos
 }
 
 const ModalAjustesStockHistorial = memo(function ModalAjustesStockHistorial({ productos, onClose }: ModalAjustesStockHistorialProps) {
-  const { data: sesiones = [], isLoading } = useControlStockSesionesQuery();
+  const [limite, setLimite] = useState(SESIONES_POR_PAGINA);
+  const { data: sesiones = [], isLoading, isFetching } = useControlStockSesionesQuery(true, limite);
+  // Si llegaron tantas como se pidieron, puede haber más viejas (#1599, b3).
+  const hayMasAntiguas = sesiones.length >= limite;
   const [expandida, setExpandida] = useState<number | null>(null);
 
   const productosMap = useMemo(
@@ -108,6 +111,16 @@ const ModalAjustesStockHistorial = memo(function ModalAjustesStockHistorial({ pr
                 </div>
               );
             })}
+            {hayMasAntiguas && (
+              <button
+                type="button"
+                onClick={() => setLimite(l => l + SESIONES_POR_PAGINA)}
+                disabled={isFetching}
+                className="w-full py-2 text-sm text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-60"
+              >
+                {isFetching ? 'Cargando…' : 'Ver más antiguas'}
+              </button>
+            )}
           </div>
         )}
       </div>

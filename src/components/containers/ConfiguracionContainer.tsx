@@ -23,6 +23,7 @@ import { useSucursal } from '../../contexts/SucursalContext'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { formatPrecio } from '../../utils/formatters'
+import QueryErrorState from '../layout/QueryErrorState'
 import type { ReglaMinimoPedido } from '../../utils/montoMinimo'
 
 const VistaConfiguracion = lazyWithReload(() => import('../vistas/VistaConfiguracion'))
@@ -40,7 +41,7 @@ export default function ConfiguracionContainer() {
   const notify = useNotification()
   const { currentSucursalNombre } = useSucursal()
   const { isAdmin } = useAuthData()
-  const { politicas, isLoading } = usePoliticasComercialesQuery()
+  const { politicas, isLoading, isError, data: politicasDelServidor, refetch } = usePoliticasComercialesQuery()
   const actualizar = useActualizarPoliticaMinimoMutation()
   const actualizarComisiones = useActualizarComisionesDefaultMutation()
   const actualizarAlertas = useActualizarAlertasVencimientoMutation()
@@ -159,6 +160,15 @@ export default function ConfiguracionContainer() {
     }
   }, [actualizarMultiploRedondeo, notify])
 
+  // Si la consulta falló y no hay nada del servidor, `politicas` son los valores
+  // por defecto ("sin política"), no los de la sucursal: mostrarlos como si
+  // fueran los vigentes engaña, y guardar una sección escribiría esos valores
+  // encima de los reales (#1561, 1561-b14). Con datos del servidor y un refetch
+  // fallido, se sigue mostrando lo último que llegó.
+  if (isError && !politicasDelServidor) {
+    return <QueryErrorState onRetry={() => { void refetch() }} />
+  }
+
   return (
     <Suspense fallback={<LoadingState />}>
       <VistaConfiguracion
@@ -172,6 +182,7 @@ export default function ConfiguracionContainer() {
         impactoCargando={impactoCargando}
         onMontoTipeado={setMontoTipeado}
         onGuardar={handleGuardar}
+        puedeEditarMinimo={isAdmin}
         nombreSucursal={currentSucursalNombre}
         comisionPctPreventista={politicas.comisionPctPreventista}
         comisionPctOtros={politicas.comisionPctOtros}

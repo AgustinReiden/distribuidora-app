@@ -224,7 +224,7 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
             ) : (
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 {fechaBloqueada
-                  ? 'Como encargado solo podés registrar con fecha de hoy. Si necesitás otra fecha pedíselo a un admin.'
+                  ? 'Como encargado solo podés registrar con fecha de hoy. Si necesitás otra fecha, pedíselo a un admin.'
                   : 'Se aplica a la entrega y al pago. Por defecto hoy.'}
               </p>
             )}

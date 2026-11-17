@@ -10,6 +10,7 @@
 // escape de metacaracteres PostgREST en `q`, mismo guard de sucursal.
 
 import type { Tool } from "../base.ts";
+import { stockBajo, stockMinimoEfectivo } from "../../utils/stockMinimo.ts";
 import {
   aplicarFiltroCatalogo,
   fetchMostrarSinStock,
@@ -146,7 +147,8 @@ export const productosPorCategoriaTool: Tool<
       categoria: cat,
       productos: rows.map((p) => {
         const stock = Number(p.stock ?? 0);
-        const stockMin = Number(p.stock_minimo ?? 0);
+        // CAT-13 (#1596): vacío usa 10 y 0 es "sin alerta", como en las pantallas.
+        const stockMin = stockMinimoEfectivo(p.stock_minimo);
         return {
           id: Number(p.id),
           codigo: p.codigo ?? null,
@@ -154,7 +156,7 @@ export const productosPorCategoriaTool: Tool<
           precio: Number(p.precio ?? 0),
           stock,
           stock_minimo: stockMin,
-          bajo_stock: stock <= stockMin,
+          bajo_stock: stockBajo(stock, stockMin),
           categoria: p.categoria ?? null,
         };
       }),

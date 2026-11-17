@@ -4,13 +4,16 @@
  * Por cada item sugiere el match con un producto del destino (código/nombre
  * exacto). Quien acepta confirma el match, elige otro producto, o crea uno nuevo
  * (copiando el de origen). Al aceptar, el backend mueve el stock atómicamente.
+ *
+ * Un producto desactivado en esta sucursal no se sugiere: se lista aparte y,
+ * si se elige, se pide confirmar que se lo reactiva al recibir (#1558, D7).
  */
 import { memo, useEffect, useMemo, useState } from 'react'
 import { Loader2, Check, X, AlertTriangle, Search, ChevronDown } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { formatPrecio } from '../../utils/formatters'
-import { sugerirMatchProducto } from '../../utils/matchProducto'
+import { sugerirMatchProducto, separarPorActivo, estaDesactivado, armarResoluciones } from '../../utils/matchProducto'
 import { costoDestinoAlAceptar } from '../../utils/movimientos'
 import type { ProductoDB } from '../../types'
 import type { MovimientoSucursalDB, MovimientoItemDB, ResolucionItem } from '../../hooks/queries'
@@ -44,7 +47,8 @@ function MatchSelector({ productos, value, onChange }: {
     const base = t
       ? productos.filter(p => normalizar(p.nombre).includes(t) || normalizar(p.codigo).includes(t))
       : productos
-    return base.slice(0, 50)
+    const { activos, desactivados } = separarPorActivo(base)
+    return { activos: activos.slice(0, 50), desactivados: desactivados.slice(0, 50) }
   }, [productos, q])
 
   const elegir = (v: string) => { onChange(v); setOpen(false); setQ('') }
@@ -85,7 +89,7 @@ function MatchSelector({ productos, value, onChange }: {
                   ➕ Crear nuevo (copia de origen)
                 </button>
               </li>
-              {filtrados.map(p => (
+              {filtrados.activos.map(p => (
                 <li key={p.id}>
                   <button
                     type="button"
@@ -96,7 +100,24 @@ function MatchSelector({ productos, value, onChange }: {
                   </button>
                 </li>
               ))}
-              {filtrados.length === 0 && (
+              {filtrados.desactivados.length > 0 && (
+                <li className="px-3 pt-2 pb-1 text-xs font-medium text-gray-500 dark:text-gray-400 border-t dark:border-gray-700">
+                  Desactivados en esta sucursal
+                </li>
+              )}
+              {filtrados.desactivados.map(p => (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    onClick={() => elegir(String(p.id))}
+                    className={`w-full px-3 py-2 text-left text-sm text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-400 ${String(p.id) === value ? 'bg-gray-50 dark:bg-gray-700/60' : ''}`}
+                  >
+                    {p.nombre}{p.codigo ? <span className="text-gray-400"> ({p.codigo})</span> : ''}
+                    <span className="ml-1 text-xs text-amber-600 dark:text-amber-400">(desactivado)</span>
+                  </button>
+                </li>
+              ))}
+              {filtrados.activos.length === 0 && filtrados.desactivados.length === 0 && (
                 <li className="px-3 py-2 text-sm text-gray-400">Sin resultados</li>
               )}
             </ul>
@@ -126,6 +147,10 @@ const ModalAceptarMovimiento = memo(function ModalAceptarMovimiento({
 }: ModalAceptarMovimientoProps) {
   // item_id -> producto_destino_id (string) | NUEVO
   const [sel, setSel] = useState<Record<number, string>>({})
+  // item_id -> se confirmó reactivar su producto desactivado (#1558, D7)
+  const [reactivar, setReactivar] = useState<Record<number, boolean>>({})
+  // el desactivado que se acaba de elegir y espera la confirmación
+  const [porConfirmar, setPorConfirmar] = useState<{ itemId: number; productoId: string } | null>(null)
   const [modoDenegar, setModoDenegar] = useState(modoDenegarInicial)
   const [motivo, setMotivo] = useState('')
   const [error, setError] = useState('')
@@ -150,14 +175,26 @@ const ModalAceptarMovimiento = memo(function ModalAceptarMovimiento({
     return m
   }, [productosDestino])
 
+  const elegirProducto = (itemId: number, v: string) => {
+    const p = v !== NUEVO ? productosPorId.get(v) : undefined
+    if (p && estaDesactivado(p)) {
+      setPorConfirmar({ itemId, productoId: v })
+      return
+    }
+    setSel(prev => ({ ...prev, [itemId]: v }))
+    setReactivar(prev => ({ ...prev, [itemId]: false }))
+  }
+
+  const confirmarReactivar = () => {
+    if (!porConfirmar) return
+    setSel(prev => ({ ...prev, [porConfirmar.itemId]: porConfirmar.productoId }))
+    setReactivar(prev => ({ ...prev, [porConfirmar.itemId]: true }))
+    setPorConfirmar(null)
+  }
+
   const handleAceptar = async () => {
     setError('')
-    const resoluciones: ResolucionItem[] = items.map(it => {
-      const v = sel[it.id] ?? NUEVO
-      return v === NUEVO
-        ? { item_id: it.id, accion: 'crear_nuevo' }
-        : { item_id: it.id, accion: 'match_existente', producto_destino_id: Number(v) }
-    })
+    const resoluciones: ResolucionItem[] = armarResoluciones(items.map(it => it.id), sel, reactivar, NUEVO)
     try {
       await onConfirmar(resoluciones)
     } catch (e) {
@@ -207,8 +244,22 @@ const ModalAceptarMovimiento = memo(function ModalAceptarMovimiento({
                   <MatchSelector
                     productos={productosDestino}
                     value={v}
-                    onChange={(nuevo) => setSel(prev => ({ ...prev, [it.id]: nuevo }))}
+                    onChange={(nuevo) => elegirProducto(it.id, nuevo)}
                   />
+                  {porConfirmar?.itemId === it.id && (
+                    <div role="alertdialog" aria-label="Reactivar el producto" className="mt-2 p-3 border border-amber-300 dark:border-amber-700 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-sm">
+                      <p className="text-amber-800 dark:text-amber-200">
+                        Este producto está desactivado. ¿Lo reactivamos al recibir?
+                      </p>
+                      <div className="flex gap-2 mt-2">
+                        <Button variant="success" size="sm" onClick={confirmarReactivar}>Sí, reactivarlo</Button>
+                        <Button variant="ghost" size="sm" onClick={() => setPorConfirmar(null)}>Elegir otro</Button>
+                      </div>
+                    </div>
+                  )}
+                  {reactivar[it.id] && v !== NUEVO && (
+                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">Está desactivado: se reactiva al recibir.</p>
+                  )}
                   <p className="text-xs text-gray-500 mt-1">
                     {v === NUEVO
                       ? `Se creará el producto copiando precio y costo de origen.`

@@ -16,7 +16,12 @@ const choferes = [
   { id: 'c-2', nombre: 'Chofer Dos' },
 ] as unknown as PerfilDB[]
 
-const renderModal = (permitirRetiro: boolean, onConfirm = vi.fn(), p: PedidoDB = pedido) => {
+const renderModal = (
+  permitirRetiro: boolean,
+  onConfirm = vi.fn(),
+  p: PedidoDB = pedido,
+  regla: { esAdmin?: boolean; diasAtrasFechaEntrega?: number } = { esAdmin: true },
+) => {
   render(
     <ModalQuienRepartio
       pedido={p}
@@ -24,9 +29,16 @@ const renderModal = (permitirRetiro: boolean, onConfirm = vi.fn(), p: PedidoDB =
       permitirRetiro={permitirRetiro}
       onConfirm={onConfirm}
       onClose={vi.fn()}
+      {...regla}
     />
   )
   return onConfirm
+}
+
+/** `dias` días antes de hoy. */
+const atras = (dias: number): string => {
+  const [y, m, d] = fechaLocalISO().split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d - dias)).toISOString().slice(0, 10)
 }
 
 describe('ModalQuienRepartio', () => {
@@ -46,9 +58,32 @@ describe('ModalQuienRepartio', () => {
   it('la fecha elegida viaja con la entrega', () => {
     const onConfirm = renderModal(true)
     fireEvent.change(screen.getByLabelText('¿Quién lo repartió?'), { target: { value: 'c-1' } })
-    fireEvent.change(screen.getByLabelText('Fecha de entrega'), { target: { value: '2026-01-15' } })
+    fireEvent.change(screen.getByLabelText('Fecha de entrega'), { target: { value: atras(3) } })
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
-    expect(onConfirm).toHaveBeenCalledWith({ tipo: 'chofer', transportistaId: 'c-1' }, '2026-01-15')
+    expect(onConfirm).toHaveBeenCalledWith({ tipo: 'chofer', transportistaId: 'c-1' }, atras(3))
+  })
+
+  // 1598: el campo sólo tenía `max`; el piso es el de `fechaEntrega.ts` (espejo del server).
+  it('quien no es admin: de hoy hasta los días de la política', () => {
+    renderModal(false, vi.fn(), pedido, { esAdmin: false, diasAtrasFechaEntrega: 3 })
+    const campo = screen.getByLabelText('Fecha de entrega')
+    expect(campo).toHaveAttribute('min', atras(3))
+    expect(campo).toHaveAttribute('max', fechaLocalISO())
+  })
+
+  it('el admin: hasta 60 días atrás', () => {
+    renderModal(true)
+    expect(screen.getByLabelText('Fecha de entrega')).toHaveAttribute('min', atras(60))
+  })
+
+  it('una fecha fuera del rango muestra el motivo del server y no se confirma', () => {
+    const onConfirm = renderModal(false, vi.fn(), pedido, { esAdmin: false, diasAtrasFechaEntrega: 3 })
+    fireEvent.change(screen.getByLabelText('¿Quién lo repartió?'), { target: { value: 'c-1' } })
+    fireEvent.change(screen.getByLabelText('Fecha de entrega'), { target: { value: atras(4) } })
+    expect(screen.getByRole('alert')).toHaveTextContent('hasta 3 días atrás')
+    expect(screen.getByRole('button', { name: 'Confirmar' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
+    expect(onConfirm).not.toHaveBeenCalled()
   })
 
   it('el retiro en depósito va sin chofer', () => {

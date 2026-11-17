@@ -76,12 +76,22 @@ describe('ModalFichaCliente — quitar de la boleta el saldo a favor aplicado (C
     await user.click(screen.getByRole('button', { name: 'Quitar de la boleta' }))
     expect(screen.getByText(/¿Quitar este pago de/)).toHaveTextContent(/de la boleta #5501/)
     expect(screen.getByText(/¿Quitar este pago de/)).toHaveTextContent(/el saldo no cambia/)
-    expect(screen.getByText(/¿Quitar este pago de/)).toHaveTextContent(/hasta su próximo\s+pedido o pago a cuenta, o hasta que lo imputes a mano/)
+    // COB-b3 (#1545, decisión del dueño): el texto no promete que el crédito «queda a favor hasta
+    // su próximo pedido»; dice que el próximo pedido o pago a cuenta lo vuelve a tomar solo.
+    const aviso = screen.getByText(/¿Quitar este pago de/)
+    expect(aviso).toHaveTextContent(/el próximo pedido o pago a cuenta de este cliente lo vuelve a tomar solo/)
+    expect(aviso).toHaveTextContent(/casi\s+siempre cae de nuevo en esta misma/)
+    expect(aviso).toHaveTextContent(/imputalo a mano antes/)
+    expect(aviso).not.toHaveTextContent(/Queda a favor hasta/)
     await user.click(screen.getByRole('button', { name: 'Sí, quitar' }))
 
     await waitFor(() => expect(desimputarPago).toHaveBeenCalledWith('10', '5501'))
     expect(eliminarPago).not.toHaveBeenCalled()
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['clientes'] })
+    // 1544-b2: el pago quitado puede ser el crédito de una NC (queda suelto: «pendiente de imputar»),
+    // y la deuda en mora del cliente cambia.
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['notas_credito_venta'] })
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['deudores-mora'] })
     expect(success).toHaveBeenCalledWith('Se quitó de la boleta: vuelve a saldo a favor del cliente.')
   })
 

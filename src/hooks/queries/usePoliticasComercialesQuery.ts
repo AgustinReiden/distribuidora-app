@@ -112,13 +112,59 @@ function modoValido(modo: unknown): ModoMinimoPedido {
   return modo === 'cargo' || modo === 'escalas' ? modo : 'bloquear'
 }
 
-async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComerciales> {
-  const { data, error } = await supabase
-    .from('politicas_comerciales')
-    .select('monto_minimo_pedido, modo_minimo_pedido, monto_envio_gratis, cargo_envio_pedido, comision_pct_preventista, comision_pct_otros, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock, ventana_precio_anterior_horas, combo_margen_minimo_pct, combo_descuento_maximo_pct, dias_atras_fecha_pedido, multiplo_redondeo_precio')
-    .maybeSingle()
+/**
+ * Lo que `authenticated` lee de `politicas_comerciales` por REST: lo que necesita quien vende
+ * (decisión del dueño D50, 1564-b6 del plan #1603). Con la parte 2 (el REVOKE de lo reservado)
+ * la tabla pasa a concederse columna por columna: un `*` o una columna reservada en este select
+ * haría fallar la consulta entera.
+ */
+export const POLITICA_COLUMNAS_PARA_VENDER =
+  'monto_minimo_pedido, modo_minimo_pedido, monto_envio_gratis, cargo_envio_pedido, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock, dias_atras_fecha_pedido, multiplo_redondeo_precio'
 
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar la política comercial. Revisá la señal e intentá de nuevo.')
+/** Lo que sólo ven admin y encargado: lo da la RPC `politica_comercial_reservada()`. */
+export const POLITICA_COLUMNAS_RESERVADAS =
+  'comision_pct_preventista, comision_pct_otros, ventana_precio_anterior_horas, combo_margen_minimo_pct, combo_descuento_maximo_pct'
+
+const SIN_CONEXION_POLITICA = 'Sin conexión: no se pudo cargar la política comercial. Revisá la señal e intentá de nuevo.'
+
+/**
+ * Las comisiones, las alertas de combos y la ventana del precio anterior, para admin y
+ * encargado; para el resto la RPC no devuelve fila (null). La migración de B9 (que crea la RPC)
+ * se aplica antes del merge de este front, así que no hay respaldo por REST: pedir esas columnas
+ * por REST deja de andar con la parte 2 (el REVOKE).
+ */
+async function fetchPoliticaReservada(): Promise<Record<string, unknown> | null> {
+  const { data, error } = await supabase.rpc('politica_comercial_reservada')
+  if (error) throw errorDeSupabase(error, SIN_CONEXION_POLITICA)
+  const fila = Array.isArray(data) ? data[0] : data
+  return (fila as Record<string, unknown> | null | undefined) ?? null
+}
+
+async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComerciales> {
+  const [{ data: paraVender, error }, reservada] = await Promise.all([
+    supabase.from('politicas_comerciales').select(POLITICA_COLUMNAS_PARA_VENDER).maybeSingle(),
+    fetchPoliticaReservada(),
+  ])
+
+  if (error) throw errorDeSupabase(error, SIN_CONEXION_POLITICA)
+
+  const data = (paraVender || reservada
+    ? { ...((paraVender as Record<string, unknown> | null) ?? {}), ...(reservada ?? {}) }
+    : null) as ({ [columna: string]: unknown; mostrar_sin_stock?: boolean | null } | null)
+
+  // M10-2 (ola 1 del plan #1603): los días hacia atrás de la fecha del pedido, los mismos que
+  // aplica el server (`dias_atras_fecha_pedido()`, que lee `_dias_atras_fecha_pedido`). La
+  // RLS le oculta la fila al depósito con el rol extra de chofer, y con la columna el front
+  // le ofrecía el 7. Si la RPC no contesta (un server de antes de la migración), queda lo de
+  // la tabla.
+  let diasAtrasFechaPedido = Number(data?.dias_atras_fecha_pedido ?? DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO)
+  try {
+    const respuesta = await supabase.rpc('dias_atras_fecha_pedido')
+    const dias = respuesta?.error ? null : respuesta?.data
+    if (dias !== null && dias !== undefined && Number.isFinite(Number(dias))) diasAtrasFechaPedido = Number(dias)
+  } catch {
+    // Sin la RPC sigue lo de la tabla.
+  }
 
   // Sin fila = sin política. La mig 204 siembra una por sucursal, pero una
   // sucursal creada después todavía no la tendría, y eso no es un error.
@@ -142,7 +188,7 @@ async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComer
     comboMargenMinimoPct: Number(data?.combo_margen_minimo_pct ?? 10),
     comboDescuentoMaximoPct: Number(data?.combo_descuento_maximo_pct ?? 30),
     // `??`: 0 días es un valor (sólo la fecha de hoy), no un hueco.
-    diasAtrasFechaPedido: Number(data?.dias_atras_fecha_pedido ?? DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO),
+    diasAtrasFechaPedido,
     // `||` y no `??`: el CHECK no deja un 0, así que un 0 sólo puede ser un hueco.
     multiploRedondeoPrecio: Number(data?.multiplo_redondeo_precio ?? MULTIPLO_REDONDEO_PRECIO) || MULTIPLO_REDONDEO_PRECIO,
   }

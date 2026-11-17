@@ -19,7 +19,7 @@
 --
 --   psql -f controles-negativos-t6.sql
 --   node run.mjs t6 --out <dir>   (otra carpeta que la de la corrida limpia)
---   RESTAURAR (más abajo) y repetir `docker-local.mjs huella`: cero diferencias.
+--   RESTAURAR (más abajo, un solo bloque: funciones y REVOKE) y repetir `docker-local.mjs huella`: cero diferencias.
 
 -- ===== MUTAR =====
 CREATE TABLE IF NOT EXISTS conc.mut_orig (firma text PRIMARY KEY, def text NOT NULL);
@@ -58,5 +58,6 @@ $m$;
 GRANT UPDATE (producto_regalo_id, ajuste_producto_id) ON public.promociones TO authenticated;
 
 -- ===== RESTAURAR (correr aparte, después de las variantes) =====
--- DO $r$ DECLARE d text; BEGIN FOR d IN SELECT def FROM conc.mut_orig LOOP EXECUTE d; END LOOP; END $r$; TRUNCATE conc.mut_orig;
--- REVOKE UPDATE (producto_regalo_id, ajuste_producto_id) ON public.promociones FROM authenticated;
+-- UN SOLO BLOQUE (#1539): restaura las funciones Y le saca a authenticated el GRANT que puso MUTAR. Con sólo
+-- el DO de las funciones, la huella da 84 en `acl_columna` y los controles que siguen corren con ese GRANT de más.
+-- DO $r$ DECLARE d text; BEGIN FOR d IN SELECT def FROM conc.mut_orig LOOP EXECUTE d; END LOOP; REVOKE UPDATE (producto_regalo_id, ajuste_producto_id) ON public.promociones FROM authenticated; TRUNCATE conc.mut_orig; END $r$;

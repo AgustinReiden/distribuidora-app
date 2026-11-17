@@ -50,7 +50,8 @@ interface ConversionEspejo {
   caso: string
   cantidad: number
   original: number
-  sustituta: number
+  /** null: un eslabón sin cantidad sustituta (1556-b3). */
+  sustituta: number | null
   esperado: number
 }
 

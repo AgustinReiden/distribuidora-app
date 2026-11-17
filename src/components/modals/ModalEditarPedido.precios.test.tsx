@@ -23,6 +23,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { fechaLocalISO } from '../../utils/formatters'
+
+// Un día reciente: la fecha de una entrega tiene piso (60 días para el admin, 1598), así que la que se
+// tipea tiene que caer dentro del rango de hoy. La que trae el pedido no se juzga si no cambia.
+const NUEVA_ENTREGA = (() => {
+  const [y, m, d] = fechaLocalISO().split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d - 2)).toISOString().slice(0, 10)
+})()
 
 // #1191: los combos tienen su propia query (y su sucursal): acá no hay combos.
 vi.mock('../../hooks/queries/useCombosQuery', () => ({
@@ -241,12 +249,12 @@ describe('ModalEditarPedido — pedido entregado con promo ya desactivada', () =
     const bloqueFecha = screen.getByText('Fecha de Entrega').closest('div') as HTMLElement
     const inputFechaEntrega = within(bloqueFecha).getByDisplayValue('2026-09-01')
     await user.clear(inputFechaEntrega)
-    await user.type(inputFechaEntrega, '2026-09-05')
+    await user.type(inputFechaEntrega, NUEVA_ENTREGA)
 
     await user.click(screen.getByRole('button', { name: 'Guardar' }))
 
     await waitFor(() => expect(onSave).toHaveBeenCalled())
-    expect(onSave.mock.calls[0][0]).toMatchObject({ fechaEntrega: '2026-09-05' })
+    expect(onSave.mock.calls[0][0]).toMatchObject({ fechaEntrega: NUEVA_ENTREGA })
     // Lo que importa: nunca se intentó el UPDATE que el server rechaza.
     expect(onSaveItems).not.toHaveBeenCalled()
   })

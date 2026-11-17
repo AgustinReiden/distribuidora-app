@@ -13,7 +13,7 @@ import { formatCurrency } from '../../utils/formatters';
 import { leerPlataTipeada, numeroEditable, parsePrecio } from '../../utils/calculations';
 import { DIAS_ATRAS_FECHA_PEDIDO_MAXIMO, DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO } from '../../utils/fechaPedido';
 import { errorDeMultiploRedondeo, MULTIPLO_REDONDEO_PRECIO } from '../../utils/precios';
-import type { ModoMinimoPedido, ReglaMinimoPedido } from '../../utils/montoMinimo';
+import { MONTO_MINIMO_TECHO, type ModoMinimoPedido, type ReglaMinimoPedido } from '../../utils/montoMinimo';
 
 export interface VistaConfiguracionProps {
   montoMinimoActual: number;
@@ -31,6 +31,11 @@ export interface VistaConfiguracionProps {
   /** Lo dispara el container al tipear, para recalcular el impacto. */
   onMontoTipeado: (monto: number) => void;
   onGuardar: (regla: ReglaMinimoPedido) => void;
+  /**
+   * La compra mínima la cambia sólo el admin (1561-b9, #1561; decisión del dueño
+   * D35): el encargado la ve y no la edita. Las RPC rechazan al resto.
+   */
+  puedeEditarMinimo?: boolean;
   nombreSucursal?: string | null;
   /** % por defecto de quien tiene rol preventista (mig 207). */
   comisionPctPreventista: number;
@@ -488,11 +493,16 @@ function FormDiasAtrasFechaPedido({
             onChange={(e) => setValor(e.target.value)}
             disabled={!puedeEditar}
             aria-invalid={invalido}
-            aria-describedby={invalido ? 'dias-atras-fecha-pedido-error' : undefined}
+            aria-describedby={invalido ? 'dias-atras-fecha-pedido-error dias-atras-fecha-pedido-ayuda' : 'dias-atras-fecha-pedido-ayuda'}
             className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
           <span className="text-stone-500 dark:text-stone-400">días</span>
         </div>
+        {/* 1543-b5: con 0 la medianoche corta un pedido tomado sin señal. Es el diseño. */}
+        <p id="dias-atras-fecha-pedido-ayuda" className="text-xs text-stone-500 dark:text-stone-400 mt-2">
+          Con 0, un pedido tomado sin señal a las 23:50 y sincronizado a las 00:10 se rechaza: su
+          fecha ya no es la de hoy. Es así a propósito. Con 1 o más días ese pedido entra.
+        </p>
         {invalido && (
           <p id="dias-atras-fecha-pedido-error" role="alert" className="text-xs text-red-600 mt-2">
             Ingresá una cantidad entera de días entre 0 y {DIAS_ATRAS_FECHA_PEDIDO_MAXIMO}.
@@ -935,6 +945,7 @@ export default function VistaConfiguracion({
   impactoCargando,
   onMontoTipeado,
   onGuardar,
+  puedeEditarMinimo = false,
   nombreSucursal,
   comisionPctPreventista,
   comisionPctOtros,
@@ -987,7 +998,8 @@ export default function VistaConfiguracion({
   const parseadoCargo = parsearMonto(cargo);
   const cobraEnvio = modo !== 'bloquear';
   const esEscalas = modo === 'escalas';
-  const valido = Number.isFinite(parseado) && parseado >= 0;
+  // El techo es el de la base (D36): contra un error de tipeo.
+  const valido = Number.isFinite(parseado) && parseado >= 0 && parseado <= MONTO_MINIMO_TECHO;
   const montosValidos = valido
     && (!cobraEnvio || (Number.isFinite(parseadoCargo) && parseadoCargo >= 0))
     && (!esEscalas || (Number.isFinite(parseadoGratis) && parseadoGratis > parseado));
@@ -1007,8 +1019,9 @@ export default function VistaConfiguracion({
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!puedeEditarMinimo) return;
     if (!valido) {
-      setError('Ingresá un monto válido (0 o mayor).');
+      setError('Ingresá un monto válido, de 0 a $ 99.999.999.');
       return;
     }
     if (cobraEnvio && !(Number.isFinite(parseadoCargo) && parseadoCargo >= 0)) {
@@ -1064,6 +1077,11 @@ export default function VistaConfiguracion({
             Qué pasa con un pedido que no llega al mínimo — en la app, sin señal y desde el bot.
             Dejá el mínimo en 0 para no exigir nada.
           </p>
+          {!puedeEditarMinimo && (
+            <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
+              Solo un admin puede cambiar la compra mínima.
+            </p>
+          )}
 
           <fieldset className="mt-3">
             <legend className="sr-only">Qué pasa con un pedido bajo el mínimo</legend>
@@ -1084,6 +1102,7 @@ export default function VistaConfiguracion({
                       value={m.value}
                       checked={modo === m.value}
                       onChange={() => { setModo(m.value); setError(null); }}
+                      disabled={!puedeEditarMinimo}
                     />
                     {m.titulo}
                   </span>
@@ -1101,8 +1120,9 @@ export default function VistaConfiguracion({
               inputMode="decimal"
               value={valor}
               onChange={(e) => handleChange(e.target.value)}
+              disabled={!puedeEditarMinimo}
               aria-invalid={!valido}
-              aria-describedby={error ? 'monto-minimo-error' : undefined}
+              aria-describedby={error || !valido ? 'monto-minimo-error' : undefined}
               className="w-48 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
@@ -1121,6 +1141,7 @@ export default function VistaConfiguracion({
                     inputMode="decimal"
                     value={cargo}
                     onChange={(e) => { setCargo(e.target.value); setError(null); }}
+                    disabled={!puedeEditarMinimo}
                     className="w-40 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
@@ -1138,6 +1159,7 @@ export default function VistaConfiguracion({
                       inputMode="decimal"
                       value={gratis}
                       onChange={(e) => { setGratis(e.target.value); setError(null); }}
+                      disabled={!puedeEditarMinimo}
                       className="w-40 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
@@ -1153,9 +1175,9 @@ export default function VistaConfiguracion({
             </p>
           )}
 
-          {error && (
+          {(error || !valido) && (
             <p id="monto-minimo-error" role="alert" className="text-rose-600 text-xs mt-2">
-              {error}
+              {error ?? 'Ingresá un monto válido, de 0 a $ 99.999.999.'}
             </p>
           )}
         </div>
@@ -1191,7 +1213,7 @@ export default function VistaConfiguracion({
             type="submit"
             variant="primary"
             size="md"
-            disabled={guardando || !cambio}
+            disabled={guardando || !cambio || !puedeEditarMinimo}
             loading={guardando}
           >
             Guardar

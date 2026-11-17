@@ -10,7 +10,8 @@
 --   SEG-1 · el alta no nombra a un cliente de otra sucursal
 --   L2 · Un preventista de la sucursal A carga un pedido de A con el id de un cliente de B asignado a otro
 --        preventista, y con el de un cliente reservado de B: los dos responden exactamente lo mismo que un id
---        que no existe (23503, sin el nombre).
+--        que no existe (sin el nombre; desde la ola 2 del plan #1603, «El cliente del pedido no existe en
+--        esta sucursal», antes un 23503).
 --   E2 · Con un cliente de A asignado a otro preventista de A sigue respondiendo 42501 con su nombre, y con uno
 --        reservado de A, 42501 «reservado a administración».
 --
@@ -311,7 +312,11 @@ DECLARE
 BEGIN
   INSERT INTO public.cliente_preventistas (cliente_id, preventista_id) VALUES (v_cb, v_pb);
   v_nada := pg_temp.t6_alta_prev((SELECT COALESCE(max(id), 0) + 1000000 FROM public.clientes), v_p1, v_sa, v_prod);
-  f := pg_temp.t6_si(f, v_nada LIKE '23503|%', format('el id que no existe dio %s', v_nada));
+  -- Cambió de regla en la ola 2 del plan #1603 (B4, 1559-b7): el alta contesta con un rechazo
+  -- claro que no nombra a nadie, en vez del 23503 crudo de la FK. Lo que se prueba sigue igual:
+  -- los dos de abajo responden exactamente lo mismo que un id que no existe.
+  f := pg_temp.t6_si(f, v_nada LIKE 'OK %"success": false%' AND v_nada LIKE '%no existe en esta sucursal%',
+                     format('el id que no existe dio %s', v_nada));
 
   v_r := pg_temp.t6_alta_prev(v_cb, v_p1, v_sa, v_prod);
   f := pg_temp.t6_si(f, v_r = v_nada, format('el cliente asignado de la otra sucursal dio «%s» y no lo mismo que un id que no existe', v_r));
@@ -587,25 +592,25 @@ DECLARE
   x record;
 BEGIN
   FOR r IN SELECT * FROM (VALUES
-    ('public.validar_minimo_venta_item()', '265f7882a641a8475e80a4eee63677aa',
+    -- Antes cada fila traía también el md5 del cuerpo («la migración no tocó estas funciones»). Se sacó (#1603 B13b): se
+    -- ponía rojo con cada migración posterior que las tocó a propósito (la del cierre de #1565, #1592, la de M4 con VTA-1…) sin
+    -- que nada se hubiera roto. Lo que queda es lo que no debe cambiar nunca: SECURITY DEFINER y quién ejecuta.
+    ('public.validar_minimo_venta_item()',
      '{postgres=X/postgres,service_role=X/postgres}'),
-    -- El cuerpo lo cambió después la migración del cierre de #1565 (LV-1); antes, 9bf3c42b9d4447172b9c96999f65ea00.
-    -- Y después la del tope del sustituto (#1592, PRM-1); antes, c15aa49005a602eb48b7d527e698b748.
-    ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)', 'b6e7138c67b92ea84196e0856cf37fca',
+    ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)',
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
-    ('public.pedidos_cliente_asignado()', '84754c312560f862e6f0c53d213b2f21',
+    ('public.pedidos_cliente_asignado()',
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public.pedidos_cliente_reservado()', 'f3f82c5a401e4476b671287f6373bb62',
+    ('public.pedidos_cliente_reservado()',
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public.desafectar_sobrepago_pedido(bigint)', 'b038256f1acf602b0ed20475215a3080',
+    ('public.desafectar_sobrepago_pedido(bigint)',
      '{postgres=X/postgres,service_role=X/postgres}'),
-    -- El cuerpo lo cambió después la migración de M4 (#1603: VTA-1, 1592-b5, 1559-c2); antes, c521503ea76283748fc1addcbc9f8842.
-    ('public.anular_salvedad(bigint,text)', '59aaf9fa97cc0c99ad852a9daeec6270',
+    ('public.anular_salvedad(bigint,text)',
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}')
-  ) AS t(fn, h, acl) LOOP
-    SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS d INTO x FROM pg_proc WHERE oid = r.fn::regprocedure;
-    f := pg_temp.t6_si(f, x.h = r.h AND x.a = r.acl AND x.d,
-                       format('%s tiene md5 %s, EXECUTE %s, definer %s', r.fn, x.h, x.a, x.d));
+  ) AS t(fn, acl) LOOP
+    SELECT proacl::text AS a, prosecdef AS d INTO x FROM pg_proc WHERE oid = r.fn::regprocedure;
+    f := pg_temp.t6_si(f, x.a = r.acl AND x.d,
+                       format('%s tiene EXECUTE %s, definer %s', r.fn, x.a, x.d));
   END LOOP;
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END

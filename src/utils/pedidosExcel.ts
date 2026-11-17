@@ -53,3 +53,23 @@ export function filasPedidosExcel(pedidos: PedidoExcel[]): Record<string, unknow
     }
   })
 }
+
+/**
+ * Hoja 4 del Excel de pedidos ("Resumen Pagos"), 1598-b3. Un vale blanco está saldado por
+ * naturaleza (`estado_pago = 'pagado'`, cero pagos) y su total es a costo: contarlo como
+ * «pagado» inflaba la cobranza. Va en su propia fila, `consumo_interno`, igual que en la hoja 1.
+ */
+export function resumenPagosExcel(pedidos: PedidoExcel[]): { 'Estado Pago': string; Cantidad: number; 'Total $': number }[] {
+  const conteo: Record<string, { cantidad: number; total: number }> = {}
+  for (const p of pedidos) {
+    const clave = esTipoVB(p.tipo_factura) ? 'consumo_interno' : (p.estado_pago || 'pendiente')
+    if (!conteo[clave]) conteo[clave] = { cantidad: 0, total: 0 }
+    conteo[clave].cantidad++
+    conteo[clave].total += p.total
+  }
+  return Object.entries(conteo).map(([estado, info]) => ({
+    'Estado Pago': estado,
+    Cantidad: info.cantidad,
+    'Total $': info.total,
+  }))
+}

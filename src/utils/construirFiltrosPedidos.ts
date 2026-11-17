@@ -96,6 +96,35 @@ export function construirFiltrosPedidos<Q extends QueryFiltrablePedidos>(
 }
 
 /**
+ * Cuántos ids de pedido caben en la URL del filtro (1598-b4). Los ids viajan como `id=in.(…)` o
+ * `id=not.in.(…)`, URL-encodeados (~8 caracteres cada uno: `12345%2C`), y el proxy corta cerca de
+ * 8 KB menos el `select` (~1,5 KB): el límite real anda por los 700 a 750. El tope va en 700 para
+ * no dejar de andar lo que antes andaba. Pasado el tope hace falta resolver el filtro en el
+ * server (una RPC o una vista con la marca «tiene salvedad vigente»), que es lo que cierra el
+ * punto del todo.
+ */
+export const TOPE_IDS_FILTRO_SALVEDAD = 700
+
+/**
+ * El filtro con/sin salvedad no cabe en la URL. Es una clase aparte para que la pantalla muestre
+ * SU motivo (que dice qué hacer) y no el «No se pudo cargar» genérico de cualquier otro error.
+ */
+export class FiltroSalvedadDemasiadoGrandeError extends Error {
+  constructor(cantidad: number) {
+    super(
+      `Hay ${cantidad} pedidos con salvedad: son demasiados para filtrar por salvedad de una sola vez. ` +
+        'Sacá ese filtro y acotá por fecha, estado o cliente.',
+    )
+    this.name = 'FiltroSalvedadDemasiadoGrandeError'
+  }
+}
+
+/** El motivo que se le muestra al usuario si `error` es el del filtro de salvedad; si no, nada. */
+export function motivoDelFiltroSalvedad(error: unknown): string | undefined {
+  return error instanceof FiltroSalvedadDemasiadoGrandeError ? error.message : undefined
+}
+
+/**
  * Filtro "Con salvedad / Sin salvedad". `idsConSalvedad` viene resuelto de
  * afuera (ver `fetchPedidoIdsConSalvedad` en usePedidosQuery.ts): pedirlo acá
  * adentro rompería la pureza de este módulo, porque es un round-trip a
@@ -114,6 +143,11 @@ export function aplicarFiltroConSalvedad<Q extends QueryFiltrablePedidos>(
   if (!conSalvedad || conSalvedad === 'todos') return query
 
   const ids = idsConSalvedad ?? []
+  if (ids.length > TOPE_IDS_FILTRO_SALVEDAD) {
+    // Un error claro y no una URL de 20 KB que el proxy corta con un 414 sin explicación (ni un
+    // filtro que, recortado en silencio, mostraría una lista incompleta como si fuera la completa).
+    throw new FiltroSalvedadDemasiadoGrandeError(ids.length)
+  }
   if (conSalvedad === 'con_salvedad') {
     return query.in('id', ids.length > 0 ? ids : [-1])
   }

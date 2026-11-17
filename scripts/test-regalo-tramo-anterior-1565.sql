@@ -30,7 +30,10 @@
 --   L10 · una salvedad sobre la venta le saca el regalo, y anularla también se
 --        rechaza.
 --   L11 · el cambio de cliente exige el regalo tal cual (con R×8 se rechaza) y
---        el pedido nuevo nace con su foto, sin la marca: entra en la barra viva.
+--        el pedido nuevo hereda la foto CON la marca: no entra en la barra viva
+--        (la barra sigue en 0). Cambió de regla en la ola 2 de #1603 (1556-c1,
+--        decisión del dueño: el cambio de cliente es neto 0); antes nacía sin
+--        la marca y entraba (up=4).
 --   O9 · el cambio de cliente del pedido de otro modo se rechaza (480, PRM-1).
 --   T  · testigo: un pedido cargado después del reinicio entra en la barra, y
 --        editarlo a V×20 + R×8 suma a la barra y consume un contenedor.
@@ -48,6 +51,48 @@
 --   tr -d '\r' < scripts/test-regalo-tramo-anterior-1565.sql | docker exec -i <contenedor> psql -U postgres -d postgres -q
 --
 -- Sin la migración falla en L1, L1e, L2, L3, L7, L8, O1, O3, O7 y O8.
+
+-- Ola 2 de #1603 (B1, 1595-b5; decisión del dueño D23): una salvedad se registra sólo sobre un
+-- pedido en camino o entregado. El ensayo carga pedidos y les registra salvedades enseguida: este
+-- envoltorio pone el pedido en camino (asignado) para la salvedad y lo devuelve al estado que tenía,
+-- así el resto del caso no cambia.
+CREATE OR REPLACE FUNCTION pg_temp.ola2_estado_pedido(p_ped bigint, p_estado text)
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER AS $ola2$
+DECLARE
+  v_prev   text;
+  v_claims text := current_setting('request.jwt.claims', true);
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_ped;
+  IF v_prev IS DISTINCT FROM p_estado THEN
+    PERFORM set_config('request.jwt.claims', '', true);
+    UPDATE public.pedidos SET estado = p_estado WHERE id = p_ped;
+    PERFORM set_config('request.jwt.claims', COALESCE(v_claims, ''), true);
+  END IF;
+  RETURN v_prev;
+END
+$ola2$;
+
+CREATE OR REPLACE FUNCTION pg_temp.salvedad_en_camino(p_pedido_id bigint, p_pedido_item_id bigint,
+  p_cantidad_afectada integer, p_motivo character varying, p_descripcion text DEFAULT NULL,
+  p_foto_url text DEFAULT NULL, p_devolver_stock boolean DEFAULT true, p_client_request_id uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql AS $ola2$
+DECLARE
+  v_prev text;
+  v_res  jsonb;
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_pedido_id;
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, 'asignado');
+  END IF;
+  v_res := public.registrar_salvedad(p_pedido_id, p_pedido_item_id, p_cantidad_afectada, p_motivo,
+                                     p_descripcion, p_foto_url, p_devolver_stock, p_client_request_id);
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, v_prev);
+  END IF;
+  RETURN v_res;
+END
+$ola2$;
+
 
 SET client_min_messages = warning;
 
@@ -352,7 +397,7 @@ BEGIN
       ELSIF v_caso = 'L9' THEN
         -- salvedad sobre el regalo: baja, y anularla no lo repone
         PERFORM pg_temp.l1_claims(v_adm, v_suc);
-        j := public.registrar_salvedad(ped, v_it, 1, 'cliente_rechaza', 'ensayo 1565', NULL, true, NULL);
+        j := pg_temp.salvedad_en_camino(ped, v_it, 1, 'cliente_rechaza', 'ensayo 1565', NULL, true, NULL);
         PERFORM pg_temp.l1_t_reset();
         v_sal := (j->>'salvedad_id')::bigint;
         IF NOT COALESCE((j->>'success')::boolean, false)
@@ -371,7 +416,7 @@ BEGIN
       ELSIF v_caso = 'L10' THEN
         -- salvedad sobre la venta: el regalo cae, y anularla no lo repone
         PERFORM pg_temp.l1_claims(v_adm, v_suc);
-        j := public.registrar_salvedad(ped, (SELECT id FROM pedido_items WHERE pedido_id = ped AND NOT es_bonificacion),
+        j := pg_temp.salvedad_en_camino(ped, (SELECT id FROM pedido_items WHERE pedido_id = ped AND NOT es_bonificacion),
                                        1, 'cliente_rechaza', 'ensayo 1565', NULL, true, NULL);
         PERFORM pg_temp.l1_t_reset();
         v_sal := (j->>'salvedad_id')::bigint;
@@ -411,10 +456,10 @@ BEGIN
         IF NOT COALESCE((j->>'success')::boolean, false)
            OR (SELECT estado FROM pedidos WHERE id = ped) <> 'cancelado'
            OR pg_temp.l1_lineas(ped2) <> 'V×10, R:R×4'
-           OR (SELECT barra_anterior FROM pedido_promo_reglas WHERE pedido_id = ped2 AND promocion_id = p)
-           OR NOT public._regalo_barra_vale(ped2, p, v_suc)
-           OR pg_temp.l1_estado(ids, p) <> 'V=90 R=100 S=100 Cont=100 | up=4 | mermas=0' THEN
-          v_f := v_f || format('L11b el cambio de cliente no dejó el pedido nuevo en el tramo nuevo: %s | %s # %s | marca %s', j,
+           OR NOT (SELECT barra_anterior FROM pedido_promo_reglas WHERE pedido_id = ped2 AND promocion_id = p)
+           OR public._regalo_barra_vale(ped2, p, v_suc)
+           OR pg_temp.l1_estado(ids, p) <> 'V=90 R=100 S=100 Cont=100 | up=0 | mermas=0' THEN
+          v_f := v_f || format('L11b el cambio de cliente no dejó el pedido nuevo en el tramo anterior: %s | %s # %s | marca %s', j,
                                pg_temp.l1_lineas(ped2), pg_temp.l1_estado(ids, p),
                                (SELECT barra_anterior FROM pedido_promo_reglas WHERE pedido_id = ped2 AND promocion_id = p));
         END IF;

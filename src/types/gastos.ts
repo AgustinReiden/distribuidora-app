@@ -77,6 +77,16 @@ export interface Gasto {
   creado_por: string
   anulado_at: string | null
   created_at: string
+  /**
+   * La versión del gasto (1599-b9, #1599): la edición la manda como `updated_at_esperado` y el server
+   * rechaza si otro lo cambió en el medio. La trae `GASTO_COLUMNAS`.
+   */
+  updated_at?: string
+  /**
+   * Los renglones de la factura A o M (1562-c1): el tope del IVA tolera un centavo por renglón. La
+   * lista no la trae (así anda también antes de la migración); el modal la deduce del IVA guardado.
+   */
+  renglones_factura?: number
   /** `pide_litros_km` viaja en el embed: un rubro dado de baja no está en la lista de activos. */
   rubro?: Pick<RubroGasto, 'id' | 'nombre' | 'grupo'> & { pide_litros_km?: boolean }
   vehiculo?: Pick<Vehiculo, 'id' | 'patente' | 'descripcion'> | null
@@ -108,6 +118,16 @@ export interface GuardarGastoPayload {
   rendicion_fecha?: string | null
   empleado_id?: number | null
   observacion?: string | null
+  /**
+   * 1562-c1 (#1562): cuántos renglones tiene la factura A o M. El tope del IVA es el 27 % del neto
+   * más un centavo por renglón. En una edición, la clave ausente conserva lo guardado.
+   */
+  renglones_factura?: number
+  /**
+   * 1599-b9 (#1599): el `updated_at` del gasto que vio quien edita. Si otro lo cambió en el medio,
+   * el server rechaza («Este gasto cambió desde que lo abriste…»). Sin la clave no compara.
+   */
+  updated_at_esperado?: string
 }
 
 /** Un elemento de `obtener_gastos_rendiciones`: siempre trae rubro y vehículo, los km del tablero y `updated_at`. */

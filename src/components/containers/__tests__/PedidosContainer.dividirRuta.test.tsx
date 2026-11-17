@@ -321,7 +321,7 @@ describe('PedidosContainer — dividir ruta cuando falla el 2.º chofer (B9, #15
     await waitFor(() => expect(notify.error).toHaveBeenCalled())
     expect(String(notify.error.mock.calls[0][0])).toMatch(/^Error al guardar las rutas: Acceso denegado/)
     expect(Object.keys(aplicadoPorChofer())).toEqual(['t1', 't2'])
-    for (const clave of ['pedidos', 'recorridos', 'recorrido-activo', 'recorrido-existente', 'rutas-en-curso']) {
+    for (const clave of ['pedidos', 'recorridos-hoja-ruta', 'recorrido-activo', 'recorrido-existente', 'rutas-en-curso']) {
       expect(clavesInvalidadas()).toContain(JSON.stringify([clave]))
     }
   })

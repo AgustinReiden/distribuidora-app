@@ -103,6 +103,15 @@ describe('VistaConfiguracion — días hacia atrás de la fecha del pedido', () 
     expect(onGuardarDiasAtrasFechaPedido).toHaveBeenCalledWith(0)
   })
 
+  it('1543-b5: dice junto al campo que con 0 un pedido sin señal pasada la medianoche se rechaza', () => {
+    render(<VistaConfiguracion {...props()} />)
+    const { input } = formDias()
+    const ayuda = screen.getByText(/Con 0, un pedido tomado sin señal a las 23:50/)
+    expect(ayuda).toHaveTextContent(/se rechaza/)
+    expect(ayuda).toHaveTextContent(/a propósito/)
+    expect(input.getAttribute('aria-describedby')).toContain(ayuda.id)
+  })
+
   it('se resincroniza cuando llega el valor del servidor', () => {
     const { rerender } = render(<VistaConfiguracion {...props()} />)
     rerender(<VistaConfiguracion {...props({ diasAtrasFechaPedido: 1 })} />)

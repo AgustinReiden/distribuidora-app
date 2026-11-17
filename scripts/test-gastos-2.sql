@@ -16,16 +16,19 @@
 --   <este archivo>
 --   ROLLBACK;
 --
--- EL "ANTES": el ensayo corre despues de la migracion, asi que la funcion de
--- antes se reconstruye de la viva deshaciendo los dos parches (cada fragmento
--- tiene que aparecer exactamente una vez) y se crea en pg_temp. Como la
--- migracion solo aplica esos dos reemplazos, eso ES la definicion de antes.
+-- EL "ANTES": el JSON de la posicion fiscal SIN gastos cargados es el de la
+-- funcion viva llamada antes de insertar los gastos del ensayo (el caso I exige
+-- que no haya ninguno en el periodo). Antes se reconstruia la funcion anterior
+-- a la 412 deshaciendo sus parches sobre el cuerpo vivo; posicion_fiscal se
+-- reescribio despues y ese camino ya no existe (#1603 B13b).
 --
 -- posicion_fiscal se llama como servicio (sin auth.uid()), igual que el cron
 -- del reporte: ve todas las sucursales activas. Periodo: el mes en curso.
 --
---   I  sin gastos en el periodo, el JSON de S1, S2 y la Red es identico al de
---      antes salvo la clave 'gastos' (en cero) y meta.generado_at
+--   I  sin gastos en el periodo, la clave 'gastos' de S1, S2 y la Red es cero
+--      (ya no se compara el resto del JSON contra la funcion de antes de la 412:
+--      no se puede reconstruir; lo cubren A y N, que exigen que ventas, compras
+--      y el debito no se muevan por un gasto)
 --   A  factura A en S1: 50000 con IVA 8677,69, percepcion de IVA 1000, de IIBB
 --      300 y otros impuestos 2000 -> gastos.iva_credito 8677,69;
 --      posicion.iva_credito = compras + 8677,69; saldo_tecnico baja 9677,69;
@@ -42,7 +45,6 @@ DO $ensayo$
 DECLARE
   v_fallas  text[] := '{}';
   v_def     text;
-  v_antes   text;
   v_s1      bigint;
   v_s2      bigint;
   v_admin   uuid;
@@ -51,7 +53,6 @@ DECLARE
   v_hasta   date := (date_trunc('month', current_date) + interval '1 month - 1 day')::date;
   v_suc     bigint;
   n         jsonb;
-  a         jsonb;
   b1        jsonb;
   b2        jsonb;
   bred      jsonb;
@@ -80,63 +81,18 @@ BEGIN
   PERFORM set_config('request.jwt.claims', '', true);
   PERFORM set_config('request.headers', '', true);
 
-  -- ------------------------------------------------- la funcion de antes ---
-  CREATE FUNCTION pg_temp.deshacer(p_def text, p_nuevo text, p_viejo text, p_que text)
-  RETURNS text LANGUAGE plpgsql AS $f$
-  BEGIN
-    IF (length(p_def) - length(replace(p_def, p_nuevo, ''))) / length(p_nuevo) <> 1 THEN
-      RAISE EXCEPTION 'ENSAYO FALLÓ · %: el parche no aparece exactamente una vez en la definicion viva', p_que;
-    END IF;
-    RETURN replace(p_def, p_nuevo, p_viejo);
-  END
+  -- ------------------------------------------ el JSON de antes de los gastos ---
+  -- Antes este ensayo reconstruia la posicion_fiscal ANTERIOR a la 412 deshaciendo sus dos parches sobre el cuerpo vivo
+  -- (cada fragmento tenia que aparecer exactamente una vez). posicion_fiscal se reescribio despues (#1257, #1558...) y los
+  -- fragmentos ya no estan: el ensayo cortaba ahi. Lo que la reconstruccion daba es el JSON de la funcion SIN gastos
+  -- cargados, y eso se mide mas simple: la misma funcion viva, llamada ANTES de insertar los gastos del ensayo (el caso I
+  -- exige que no haya ninguno en el periodo). Los casos A, N y C comparan contra eso, igual que antes. Lo unico que se
+  -- pierde es la comparacion de I contra la funcion vieja, que no se puede reconstruir: la regla que protegia (un gasto
+  -- cambia sólo 'gastos' y 'posicion') la sigue cubriendo A, que exige que ventas, compras y el debito no se muevan.
+  CREATE FUNCTION pg_temp.posicion_fiscal_antes(p_suc bigint, p_desde date, p_hasta date)
+  RETURNS jsonb LANGUAGE sql AS $f$
+    SELECT public.posicion_fiscal(p_suc, p_desde, p_hasta);
   $f$;
-
-  v_antes := pg_temp.deshacer(v_def,
-$n$    FROM compras_p
-  ),
-  -- gastos 1/5: credito fiscal de los gastos con factura A o M, por la fecha
-  -- del comprobante. Un compartido cuenta en la sucursal donde se cargo. Los
-  -- otros impuestos (ITC) son costo, no credito.
-  gastos_k AS (
-    SELECT COUNT(*) AS cantidad,
-           COALESCE(SUM(iva), 0) AS iva_credito,
-           COALESCE(SUM(percepcion_iva), 0) AS percepcion_iva,
-           COALESCE(SUM(percepcion_iibb), 0) AS percepcion_iibb
-    FROM gastos
-    WHERE comprobante IN ('factura_a', 'factura_m')
-      AND anulado_at IS NULL
-      AND sucursal_id = ANY(v_sucursales)
-      AND fecha BETWEEN p_desde AND p_hasta
-  )
-  SELECT jsonb_build_object($n$,
-$v$    FROM compras_p
-  )
-  SELECT jsonb_build_object($v$,
-    'CTE gastos_k');
-  v_antes := pg_temp.deshacer(v_antes,
-$n$      FROM compras_k c),
-    'gastos', (SELECT jsonb_build_object(
-        'cantidad', g.cantidad, 'iva_credito', g.iva_credito,
-        'percepcion_iva', g.percepcion_iva, 'percepcion_iibb', g.percepcion_iibb)
-      FROM gastos_k g),
-    'posicion', (SELECT jsonb_build_object(
-        'saldo_tecnico', v.iva_debito - (c.iva_credito + g.iva_credito) - (c.percepcion_iva + g.percepcion_iva),
-        'iva_debito', v.iva_debito,
-        'iva_credito', c.iva_credito + g.iva_credito,
-        'percepciones_a_favor', c.percepcion_iva + c.percepcion_iibb + g.percepcion_iva + g.percepcion_iibb)
-      FROM ventas v, compras_k c, gastos_k g)$n$,
-$v$      FROM compras_k c),
-    'posicion', (SELECT jsonb_build_object(
-        'saldo_tecnico', v.iva_debito - c.iva_credito - c.percepcion_iva,
-        'iva_debito', v.iva_debito,
-        'iva_credito', c.iva_credito,
-        'percepciones_a_favor', c.percepcion_iva + c.percepcion_iibb)
-      FROM ventas v, compras_k c)$v$,
-    'claves gastos y posicion');
-  IF position('gastos' IN replace(v_antes, 'posicion_fiscal', '')) > 0 THEN
-    v_fallas := v_fallas || 'la definicion de antes reconstruida todavia menciona gastos'::text;
-  END IF;
-  EXECUTE replace(v_antes, 'FUNCTION public.posicion_fiscal(', 'FUNCTION pg_temp.posicion_fiscal_antes(');
 
   -- ================================================ I · identico sin gastos ===
   BEGIN
@@ -146,11 +102,6 @@ $v$      FROM compras_k c),
     END IF;
     FOREACH v_suc IN ARRAY ARRAY[v_s1, v_s2, NULL] LOOP
       n := public.posicion_fiscal(v_suc, v_desde, v_hasta);
-      a := pg_temp.posicion_fiscal_antes(v_suc, v_desde, v_hasta);
-      IF (n - 'gastos') #- '{meta,generado_at}' IS DISTINCT FROM a #- '{meta,generado_at}' THEN
-        v_fallas := v_fallas || format('I sucursal %s: el JSON cambio sin gastos. antes %s · ahora %s',
-                                       COALESCE(v_suc::text, 'Red'), a #- '{meta,generado_at}', (n - 'gastos') #- '{meta,generado_at}');
-      END IF;
       IF n->'gastos' IS DISTINCT FROM '{"cantidad": 0, "iva_credito": 0, "percepcion_iva": 0, "percepcion_iibb": 0}'::jsonb THEN
         v_fallas := v_fallas || format('I sucursal %s: la clave gastos sin gastos es %s', COALESCE(v_suc::text, 'Red'), n->'gastos');
       END IF;
@@ -209,7 +160,7 @@ $v$      FROM compras_k c),
       v_fallas := v_fallas || format('C el compartido con factura M no cuenta en S1: gastos %s, saldo %s', n->'gastos', n->'posicion'->>'saldo_tecnico');
     END IF;
     n := public.posicion_fiscal(v_s2, v_desde, v_hasta);
-    IF (n - 'gastos') #- '{meta,generado_at}' IS DISTINCT FROM b2 #- '{meta,generado_at}'
+    IF n #- '{meta,generado_at}' IS DISTINCT FROM b2 #- '{meta,generado_at}'
        OR (n->'gastos'->>'cantidad')::int IS DISTINCT FROM 0 THEN
       v_fallas := v_fallas || format('C el compartido cargado en S1 cuenta en S2: gastos %s', n->'gastos');
     END IF;
@@ -234,7 +185,7 @@ $v$      FROM compras_k c),
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' | ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · posicion fiscal con gastos (S1=%, S2=%, % a %): sin gastos identica a la de antes en S1, S2 y Red; factura A suma 8677,69 de credito, saldo -9677,69 y percepciones +1300 sin los otros impuestos; ticket, anulado y fuera del periodo no cuentan; el compartido con M cuenta en S1 y no en S2; misma firma y permisos',
+  RAISE EXCEPTION 'ENSAYO OK · posicion fiscal con gastos (S1=%, S2=%, % a %): sin gastos la clave gastos es cero en S1, S2 y Red; factura A suma 8677,69 de credito, saldo -9677,69 y percepciones +1300 sin los otros impuestos; ticket, anulado y fuera del periodo no cuentan; el compartido con M cuenta en S1 y no en S2; misma firma y permisos',
     v_s1, v_s2, v_desde, v_hasta;
 END
 $ensayo$;

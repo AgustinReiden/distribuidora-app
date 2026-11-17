@@ -12,7 +12,7 @@
 -- con la violación armada a mano y no moverse con el caso legítimo. Un check que no
 -- sube es un check que no muerde.
 --
---   C1 · la lista: 79 checks, sin ids repetidos, y GASTO-A sigue ahí.
+--   C1 · la lista: total_checks cuadra con ella y es de al menos 86 (los de prod hoy; la cuenta exacta se sacó: crece con cada tanda, pero no baja), sin ids repetidos, y GASTO-A sigue ahí.
 --   C2 · RUTA-A y RUTA-B: una parada 'no_entregado' de un pedido entregado es
 --        historia y no se pone en rojo; una 'pendiente' sí. Con la cuenta vieja los
 --        dos daban rojo en el primer caso.
@@ -86,8 +86,11 @@ BEGIN
 
   -- ================================================================ C1 · lista
   v_a := public.auditoria_integridad();
-  v_fallas := v_fallas || pg_temp.chk((v_a->>'total_checks')::int = 79,
-                format('C1 hay %s checks, no 79', v_a->>'total_checks'));
+  -- Desde #1603 B13b no se fija la cuenta (eran 79 en #1330, en prod hoy son 86 y crece con cada tanda): total_checks tiene que
+  -- cuadrar con la lista, que tiene al menos los 79 de entonces; los 12 checks de esta tarjeta se afirman más abajo.
+  v_fallas := v_fallas || pg_temp.chk((v_a->>'total_checks')::int = jsonb_array_length(v_a->'checks')
+                                      AND (v_a->>'total_checks')::int >= 86,
+                format('C1 total_checks %s, lista de %s (tiene que cuadrar y ser >= 86)', v_a->>'total_checks', jsonb_array_length(v_a->'checks')));
   v_fallas := v_fallas || pg_temp.chk(
     (SELECT count(*) = count(DISTINCT c->>'id') FROM jsonb_array_elements(v_a->'checks') c), 'C1 ids repetidos');
   v_fallas := v_fallas || pg_temp.chk(
@@ -453,6 +456,6 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ (%): %', cardinality(v_fallas), array_to_string(v_fallas, ' | ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · gates de #1330: 79 checks sin ids repetidos; RUTA-A y RUTA-B no se ponen rojos con una parada en historia; ASG-A, ASG-B, EMP-A, EMP-B, EMP-C, COMIS-06, PROMO-C, REPORTE-A y FISCAL-B suben con su violación y no con el caso legítimo; VENTA-E corta en el día argentino; el tipo de una promo no mueve los reportes de un pedido con foto';
+  RAISE EXCEPTION 'ENSAYO OK · gates de #1330: lista de checks coherente y sin ids repetidos; RUTA-A y RUTA-B no se ponen rojos con una parada en historia; ASG-A, ASG-B, EMP-A, EMP-B, EMP-C, COMIS-06, PROMO-C, REPORTE-A y FISCAL-B suben con su violación y no con el caso legítimo; VENTA-E corta en el día argentino; el tipo de una promo no mueve los reportes de un pedido con foto';
 END
 $ensayo$;

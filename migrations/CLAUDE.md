@@ -87,11 +87,15 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
     quedaba +N en cada edición; a nivel pedido, le comía la huella a otra línea del mismo
     producto. El cambio de cliente es otro de esos caminos (#1594, STK-1): la cancelación devuelve
     a su lote, así que `cambiar_cliente_pedido` le saca a cada lote lo que le devolvió (con tope en
-    la foto) antes del alta, y al final rehace la huella sobre el pedido nuevo.
+    la foto) antes del alta, y al final rehace la huella sobre el pedido nuevo. Lo mismo con el fardo
+    del contenedor (M3-1, ola 2 de #1603): lo que la cancelación le devolvió a un lote del contenedor
+    vuelve a la bolsa, y el bloque que cierra el alta hereda esos lotes en sus `lotes_pendientes` (la
+    parte `{"lote_id": null}`); lo que no se vuelve a cerrar vuelve a su lote. La edición
+    (`actualizar_pedido_items`) todavía no lo hace.
   - El gate es el check **STK-F** de `auditoria_integridad()`: falla si una función de `public`
-    sube `productos.stock` de forma incremental sin mencionar `app.stock_origen`. Tiene dos
-    excepciones listadas a propósito (`registrar_compra_completa`, `registrar_ingreso_sucursal`):
-    suben mercadería nueva, que va a la bolsa por diseño. Si agregás una función que sube stock,
+    sube `productos.stock` de forma incremental sin mencionar `app.stock_origen`. **No tiene
+    excepciones** (#1594): `registrar_ingreso_sucursal` ya no existe y `registrar_compra_completa`
+    declara `'compra'`, que va a la bolsa por diseño. Si agregás una función que sube stock,
     etiquetala o el gate se pone rojo.
     Pero STK-F sólo ve **subidas** y sólo mira el código. En runtime, el check **STK-D** cuenta los
     movimientos nuevos con `origen='auto'` sin referencia (mig 336), y es `high` desde la 402
@@ -103,6 +107,10 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
     `auth.uid()` cuando corre como `authenticated` a `pg_trigger_depth() = 1`. Corolario: una
     función que mueve stock **no puede ser `SECURITY INVOKER`**: sin etiqueta se confundiría con
     la ficha y STK-D no la vería.
+    El ledger también tiene lo que el trigger de UPDATE no ve (ola 2 de #1603): el alta de un
+    producto con stock deja `0 → stock` ('alta_producto', `registrar_alta_stock`), y un camino que
+    pasa unidades entre un lote y la bolsa sin mover el stock (`ajustar_lote`) deja su fila con
+    anterior = nuevo y el lote de referencia.
   - **El orden de locks es producto antes que lote, y productos por id ascendente** (#1255): es el
     de la venta, que bloquea los productos y deja que el trigger baje después a sus lotes. Una
     función que toca un lote lee su `producto_id` sin lock, bloquea el producto `FOR UPDATE` y
@@ -174,7 +182,12 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   por `(fecha_compra, created_at, id)` y sin regalos, en los dos lugares que la eligen
   (`_ninguna_compra_mas_nueva` y `_reposicion_desde_ultima_compra`): el clon tiene un id nuevo
   pero la hora del alta original (#1294). Y una B o C deja `ultimo_tipo_compra = 'FC B'` /
-  `'FC C'`, que la ficha costea como lo pagado.
+  `'FC C'`, que la ficha costea como lo pagado. Tampoco cuenta una compra que sus notas vigentes
+  devuelven entera para ese producto (`_compra_producto_devuelto`, #1557 D10, también en el alta):
+  la nota que la deja así, o su anulación, recalcula la reposición (`_reposicion_tras_nota`). Y lo
+  que la recalcula desde una compra le aplica encima el mayor de los envíos aceptados después
+  (`_reposicion_aplicar_envios`, D12), como hizo aceptarlos; un envío sin `origen_costo_real`
+  (anterior a esa migración) no aplica nada, para no dejar la terna mezclada.
 - **Dentro de una compra los renglones que fijan costo van antes que los regalos** (#1593 CMP-A):
   el alta y la edición los recorren e insertan así, y la cadena va por id. Un regalo primero sobre
   un producto agotado no diluía nada y el pagado de después se promediaba con esas unidades al
@@ -197,7 +210,8 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   lo que la bajada del trigger consumiera FEFO lo contaría como vendido (100 corregida a 80
   quedaba 60/80 y bolsa 20) y le comería a lotes de otras compras. Lo que la bolsa no cubre
   sale de los lotes de esa compra, en cantidad y restante a la vez; `cantidad > 0`
-  (CHECK) obliga a dejar 1 en cada lote intacto en una primera pasada. Un camino nuevo que baje
+  (CHECK) obliga a dejar 1 en cada lote intacto en una primera pasada, y el que la segunda saca
+  entero se borra si nada lo referencia (STK-12: en 1/0 era una unidad «vendida» que no salió). Un camino nuevo que baje
   las unidades de una compra con vencimientos hace lo mismo. La nota de crédito no: lo devuelto
   sí salió, y baja sólo el restante de los lotes de su compra (#1079).
 - **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** (#1057). Cada
@@ -223,7 +237,8 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   **La conversión es una** (#1325): `regalo_cantidad_tras_eslabon`, proporcional a su eslabón en
   cualquier categoría, con espejo en `cantidadTrasEslabon` (`conversiones` del fixture). Es la que
   invierte `regalo_usos_de_linea`. Una cuenta nueva sobre el regalo de un pedido se hace en cortes
-  (`regalo_usos_de_linea`, no `SUM(cantidad)`) y vuelve a la unidad de la línea con `_regalo_recorte`:
+  (el guardado, `pedido_items.regalo_corte`, y sin él `regalo_usos_de_linea`; no `SUM(cantidad)`) y
+  vuelve a la unidad de la línea con `_regalo_recorte`:
   una línea cambiada por valor (A×4 → P×19) está en la unidad del sustituto.
   **El sustituto de un regalo tiene tope para quien no es admin** (#1592 PRM-1, decisión del dueño
   del 16/11): entra si es del mismo rubro que el regalo con igual o menor cantidad, o si no vale
@@ -256,18 +271,29 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   (`trg_promo_tipo_reinicia_barra`): el `usos_pendientes` de unidad entera es un contador. Y el
   reinicio marca las fotos de fracción que ya existen (`pedido_promo_reglas.barra_anterior`, #1556):
   un pedido de un tramo anterior entró en la barra que se tiró, así que no le resta ni le suma a la
-  nueva, aunque su foto vuelva a coincidir con la promo. La marca no se borra al editar.
+  nueva, aunque su foto vuelva a coincidir con la promo. La marca no se borra al editar, y el cambio
+  de cliente se la pasa al pedido nuevo y deshace lo que el alta le sumó a la barra viva: neto 0
+  (1556-c1, decisión del dueño: un fardo de más subvalúa el stock).
   A un regalo de fracción en la foto que no entra en la barra viva —foto marcada, o promo que pasó
   a unidad entera— no se le suma (LV-1 de #1565, mig 502; decisión del dueño): la edición, la
   sustitución y el reparto que le dejarían a un producto del regalo más unidades de las que tiene
   se rechazan (`regalo_de_tramo_anterior`); bajarlo o sacarlo sigue. Un camino nuevo que le sume
   regalo a un pedido que ya existe mira `NOT regalo_mueve_stock` de la foto y `_regalo_barra_vale`.
-  La barra deshace sus bloques con la configuración de hoy, así que el factor, el stock por bloque,
-  el contenedor y el ajuste automático de una promo de fracción no cambian mientras haya pedidos sin
+  **Cada bloque de la barra se deshace con la configuración con la que se cerró** (#1592 H6, ola 2
+  de #1603): la fila de `promo_ajustes` que cierra bloques anota su barra (`barra_regalo_id`, el
+  regalo de la barra), sus unidades y su stock por bloque y cuántos siguen cerrados
+  (`bloques_vivos`). Bajar la barra por debajo de 0 los abre del último al primero, el fardo vuelve
+  al contenedor del que salió y lo que queda se vuelve a cerrar con la configuración de hoy (en el
+  mismo contenedor se mueve sólo la diferencia). Una baja de la barra (salvedad, cancelación,
+  edición a la baja) nunca falla por falta de stock: ese recierre se limita a lo que tiene el
+  contenedor de hoy y el resto queda en la barra, aunque pase de N, hasta la próxima venta. Un camino nuevo que cierre bloques los anota igual;
+  abrirlos es sólo de `aplicar_uso_promo_acumulador`, y `_contenedores_de_promos` toma también los
+  contenedores de los bloques vivos. Un bloque sin anotar usa la cuenta de hoy, con el tope de lo
+  que la promo le sacó a ese contenedor (PROMO-A). Aparte, el factor, el stock por bloque, el
+  contenedor y el ajuste automático de una promo de fracción no cambian mientras haya pedidos sin
   entregar ni cancelar que entraron en ella (`trg_promo_config_barra_con_pedidos`, #1592 PRM-2;
   decisión del dueño, como el bulto de un producto). El tipo sí, y el regalo con su contenedor cuando
-  el contenedor era el mismo regalo (la rotación muda la barra). La salvedad sobre un pedido ya
-  entregado sigue deshaciendo con la configuración de hoy (H6, ola 2; la ve PROMO-A). Y sólo una promo de fracción con
+  el contenedor era el mismo regalo (la rotación muda la barra). Y sólo una promo de fracción con
   ajuste automático tiene barra: en la que mueve stock o no tiene ajuste, `usos_pendientes` es un
   contador en la unidad de la línea, que `aplicar_uso_promo_acumulador` no convierte en bloques ni
   la renormalización tampoco (1592-b2), y la sustitución le pasa la diferencia (1592-b3).
@@ -281,7 +307,9 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   `combo_fuera_de_regla` comprueba que sean legítimos (estructura para todo rol; vigencia, tope,
   total y reparto exactos para quien no es admin). Las tres puras que recalcula el server
   (`_combo_total`, `_combo_prorrateo`, `_combo_cantidad`) tienen espejo con gate
-  (`combos.espejo.json`): si cambiás una, cambiá la otra. `precio_fuera_de_politica` valida la
+  (`combos.espejo.json`): si cambiás una, cambiá la otra. El reparto no deja ninguna línea en $0
+  (1592-b4): si el de siempre deja una por debajo de un centavo, cada unidad toma un centavo y el
+  resto se reparte igual sin bajar de 0; si ni así se puede, NULL. `precio_fuera_de_politica` valida la
   línea de combo por su precio **sin** combo, y saca del conteo de escalas las unidades de un
   combo excluyente. La foto del combo de cada pedido es `pedido_combos`: al editar, un combo que
   el pedido ya tenía se mide contra su foto, y en un cambio de cliente, contra la del pedido
@@ -323,8 +351,10 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   a cada parte su cantidad y el cambio de cliente copia el de la línea de X. Sin la marca, lo escrito
   a mano se recalcula, y un UPDATE de la cantidad (la salvedad) le suma lo que cambió medido con
   `regalo_usos_de_linea`. Un camino nuevo que inserte regalos en otra unidad que la de la promo, o
-  que mude líneas entre pedidos, escribe el corte con la marca. `regalo_usos_de_linea` sigue midiendo
-  la línea para la salvedad y las simulaciones. `trg_limite_usos_promo`, constraint trigger diferido sobre `pedido_items`, cuenta
+  que mude líneas entre pedidos, escribe el corte con la marca. La salvedad sobre la venta y las dos
+  simulaciones miden con el corte guardado (sin él, `regalo_usos_de_linea`), y el recorte escribe el
+  corte nuevo con la marca aunque la cantidad de la línea no cambie (1583-a: W×1 sigue W×1 con corte
+  10). Para `anular_salvedad` una baja del corte también es un recorte (1592-b5): se rechaza. `trg_limite_usos_promo`, constraint trigger diferido sobre `pedido_items`, cuenta
   al confirmar en los pedidos no cancelados, con la promo bloqueada, y rechaza si pasa
   `limite_usos`; el admin no está exento. Un camino nuevo que escriba regalos no cuenta nada: lo
   cubre el trigger. El límite no se puede bajar por debajo de lo ya regalado

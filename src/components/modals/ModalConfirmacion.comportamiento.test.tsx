@@ -154,6 +154,37 @@ describe('ModalConfirmacion — qué dispara cada botón', () => {
   })
 })
 
+describe('ModalConfirmacion — campo de fecha con piso y validación (1598)', () => {
+  const CON_PISO: ModalConfirmacionCampoFecha = {
+    ...CAMPO_FECHA,
+    min: '2026-09-10',
+    validar: f => (f < '2026-09-10' ? 'La fecha de entrega no puede ser tan vieja.' : null),
+  }
+
+  it('el input lleva el min', () => {
+    render(<ModalConfirmacion config={config({ campoFecha: CON_PISO })} onClose={vi.fn()} />)
+    expect(screen.getByLabelText('Fecha de entrega')).toHaveAttribute('min', '2026-09-10')
+  })
+
+  it('una fecha que no pasa la validación muestra su motivo y no deja confirmar', async () => {
+    const onConfirm = vi.fn()
+    const user = userEvent.setup()
+    render(<ModalConfirmacion config={config({ campoFecha: CON_PISO, onConfirm })} onClose={vi.fn()} />)
+
+    const campo = screen.getByLabelText('Fecha de entrega')
+    await user.clear(campo)
+    await user.type(campo, '2026-01-01')
+    expect(screen.getByText('La fecha de entrega no puede ser tan vieja.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirmar' })).toBeDisabled()
+
+    await user.clear(campo)
+    await user.type(campo, '2026-09-12')
+    expect(screen.queryByText('La fecha de entrega no puede ser tan vieja.')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+    expect(onConfirm).toHaveBeenCalledWith('2026-09-12')
+  })
+})
+
 describe('ModalConfirmacion — foco', () => {
   it('al abrir, el foco arranca en Cancelar', () => {
     render(<ModalConfirmacion config={config()} onClose={vi.fn()} />)

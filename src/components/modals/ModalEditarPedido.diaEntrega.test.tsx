@@ -51,6 +51,14 @@ vi.mock('../../hooks/queries/usePoliticasComercialesQuery', () => ({
 }))
 
 import ModalEditarPedido from './ModalEditarPedido'
+import { fechaLocalISO } from '../../utils/formatters'
+
+/** Hace `dias` días, en el día argentino. Las fechas que se cambian tienen que caer en el rango de hoy. */
+const atras = (dias: number): string => {
+  const [y, m, d] = fechaLocalISO().split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d - dias)).toISOString().slice(0, 10)
+}
+const NUEVA_ENTREGA = atras(2)
 
 const productos = [
   { id: '1', nombre: 'Producto 1', codigo: 'P001', precio: 250, stock: 100, categoria: 'Snacks' },
@@ -91,6 +99,61 @@ beforeEach(() => {
   rendiciones.controlCerrado.mockResolvedValue(false)
 })
 
+// 1598: el campo no tenía `min`/`max`; la regla es la de `fechaEntrega.ts` (espejo del server):
+// el encargado, de hoy hasta `dias_atras_fecha_pedido` días atrás; el admin, 60; nadie, el futuro.
+describe('ModalEditarPedido — rango de la fecha de entrega', () => {
+  function abrirComo(esAdmin: boolean, onSave = vi.fn().mockResolvedValue(undefined)) {
+    render(
+      <ModalEditarPedido
+        productos={productos}
+        pedido={pedido}
+        isAdmin={esAdmin}
+        canEditFechaEntrega
+        onSave={onSave}
+        onClose={vi.fn()}
+        guardando={false}
+      />,
+    )
+    return onSave
+  }
+
+  it('el admin: de 60 días atrás hasta hoy', async () => {
+    abrirComo(true)
+    await waitFor(() => expect(campoFechaEntrega()).toBeInTheDocument())
+    expect(campoFechaEntrega()).toHaveAttribute('min', atras(60))
+    expect(campoFechaEntrega()).toHaveAttribute('max', fechaLocalISO())
+  })
+
+  it('el encargado: hasta 7 días atrás (la política por defecto)', async () => {
+    abrirComo(false)
+    await waitFor(() => expect(campoFechaEntrega()).toBeInTheDocument())
+    expect(campoFechaEntrega()).toHaveAttribute('min', atras(7))
+    expect(campoFechaEntrega()).toHaveAttribute('max', fechaLocalISO())
+  })
+
+  it('una fecha fuera del rango avisa con el texto del server y no guarda', async () => {
+    const onSave = abrirComo(false)
+    const user = userEvent.setup()
+    await waitFor(() => expect(campoFechaEntrega()).toBeInTheDocument())
+    fireEvent.change(campoFechaEntrega(), { target: { value: atras(8) } })
+    expect(screen.getByRole('alert')).toHaveTextContent('hasta 7 días atrás')
+    await user.click(screen.getByRole('button', { name: 'Guardar' }))
+    expect(onSave).not.toHaveBeenCalled()
+    expect(rendiciones.consultarControl).not.toHaveBeenCalled()
+  })
+
+  it('un pedido con la entrega más vieja que el piso se sigue editando sin tocarla', async () => {
+    const onSave = abrirComo(false)
+    const user = userEvent.setup()
+    await waitFor(() => expect(campoFechaEntrega()).toBeInTheDocument())
+    // La entrega original (02/11) ya está fuera del piso del encargado: no se juzga si no cambia.
+    expect(screen.queryByRole('alert')).toBeNull()
+    await user.type(screen.getByText(/Notas \/ Observaciones/).closest('div')!.querySelector('textarea')!, 'x')
+    await user.click(screen.getByRole('button', { name: 'Guardar' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+  })
+})
+
 describe('ModalEditarPedido — día de la entrega', () => {
   it('una entrega de las 22:30 es del día argentino, no del día UTC', async () => {
     abrir()
@@ -102,12 +165,12 @@ describe('ModalEditarPedido — día de la entrega', () => {
     const onSave = abrir()
     const user = userEvent.setup()
     await waitFor(() => expect(campoFechaEntrega()).toBeInTheDocument())
-    fireEvent.change(campoFechaEntrega(), { target: { value: '2026-11-05' } })
+    fireEvent.change(campoFechaEntrega(), { target: { value: NUEVA_ENTREGA } })
     await user.click(screen.getByRole('button', { name: 'Guardar' }))
 
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     expect(rendiciones.consultarControl).toHaveBeenCalledWith('tr-1', '2026-11-02')
-    expect(rendiciones.consultarControl).toHaveBeenCalledWith('tr-1', '2026-11-05')
+    expect(rendiciones.consultarControl).toHaveBeenCalledWith('tr-1', NUEVA_ENTREGA)
     expect(rendiciones.consultarControl).not.toHaveBeenCalledWith('tr-1', '2026-11-03')
     expect(rendiciones.controlCerrado).toHaveBeenCalledWith('tr-1', '2026-11-02')
   })
@@ -123,7 +186,7 @@ describe('ModalEditarPedido — día de la entrega', () => {
     const onSave = abrir()
     const user = userEvent.setup()
     await waitFor(() => expect(campoFechaEntrega()).toBeInTheDocument())
-    fireEvent.change(campoFechaEntrega(), { target: { value: '2026-11-05' } })
+    fireEvent.change(campoFechaEntrega(), { target: { value: NUEVA_ENTREGA } })
     await user.click(screen.getByRole('button', { name: 'Guardar' }))
 
     expect(await screen.findByText(/primero reabrí ese control desde Rendiciones/)).toBeInTheDocument()
@@ -144,7 +207,7 @@ describe('ModalEditarPedido — día de la entrega', () => {
     const onSave = abrir()
     const user = userEvent.setup()
     await waitFor(() => expect(campoFechaEntrega()).toBeInTheDocument())
-    fireEvent.change(campoFechaEntrega(), { target: { value: '2026-11-05' } })
+    fireEvent.change(campoFechaEntrega(), { target: { value: NUEVA_ENTREGA } })
     await user.click(screen.getByRole('button', { name: 'Guardar' }))
 
     expect(await screen.findByText(/La rendición del 2026-11-02 tiene un control de Ana sin cerrar/)).toBeInTheDocument()

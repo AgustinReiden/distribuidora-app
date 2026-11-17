@@ -115,7 +115,7 @@ BEGIN
   v_compra := pg_temp.compra(v_prod, v_suc);
   v_lote   := pg_temp.nuevo_lote(v_prod, v_suc, v_compra, v_hoy + 60, 100, 100);
 
-  v_res := public.registrar_nota_credito(v_compra, 'ENSAYO-1095', 'ensayo 1095', 0, 0, 0, NULL,
+  v_res := public.registrar_nota_credito(v_compra, 'ENSAYO-1095', 'ensayo 1095', 100, 21, 121, NULL,
              jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 10,
                                                   'costo_unitario', 10, 'subtotal', 100)), NULL);
   IF NOT COALESCE((v_res->>'success')::boolean, false) THEN
@@ -212,7 +212,7 @@ BEGIN
                                    v_foto, pg_temp.estado(v_compra), to_jsonb(v_hist));
   END IF;
 
-  v_res := public.registrar_nota_credito(v_compra, 'ENSAYO-1095', 'ensayo 1095', 0, 0, 0, NULL,
+  v_res := public.registrar_nota_credito(v_compra, 'ENSAYO-1095', 'ensayo 1095', 100, 21, 121, NULL,
              jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 10,
                                                   'costo_unitario', 10, 'subtotal', 100)), NULL);
   IF COALESCE((v_res->>'success')::boolean, false)

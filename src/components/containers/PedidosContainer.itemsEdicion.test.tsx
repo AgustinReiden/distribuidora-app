@@ -204,11 +204,33 @@ describe('PedidosContainer — guardar items de la edición', () => {
     const invalidados = invalidateQueries.mock.calls.map(([arg]) => (arg as { queryKey: string[] }).queryKey[0])
     // Lo que ya estaba, para que el fix no se coma nada.
     expect(invalidados).toContain('pedidos')
-    expect(invalidados).toContain('recorridos')
+    expect(invalidados).toContain('recorridos-hoja-ruta')
     // Lo que faltaba: sin esto el catálogo sirve stock de hasta 10 minutos
     // atrás y la cuenta corriente, el saldo anterior al cambio de total.
     expect(invalidados).toContain('productos')
     expect(invalidados).toContain('clientes')
+  })
+
+  // 1543-b4: editar las líneas mueve el cupo de las promos; sólo crear lo invalidaba.
+  it('invalida los cupos de promo (y sólo ellos, no el resto de promociones)', async () => {
+    const user = userEvent.setup()
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter><PedidosContainer /></MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await user.click(await screen.findByRole('button', { name: 'Editar pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Guardar items' }))
+    await waitFor(() => expect(rpc).toHaveBeenCalledWith('actualizar_pedido_items', expect.anything()))
+
+    const filtros = invalidateQueries.mock.calls
+      .map(([arg]) => arg as { queryKey?: string[]; predicate?: (q: { queryKey: unknown[] }) => boolean })
+      .filter(a => a.queryKey?.[0] === 'promociones')
+    expect(filtros).toHaveLength(1)
+    expect(filtros[0].predicate?.({ queryKey: ['promociones', 1, 'cupos', null] })).toBe(true)
+    expect(filtros[0].predicate?.({ queryKey: ['promociones', 1, 'list'] })).toBe(false)
   })
 })
 

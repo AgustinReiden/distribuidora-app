@@ -2,6 +2,7 @@ import { useState, useMemo, memo, useRef, useEffect } from 'react';
 import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle, UserCheck, Percent, Plus, Layers } from 'lucide-react';
 import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
 import { fechaPedidoFueraDeRango, mensajeFechaAnteriorAlPiso, pisoFechaPedido } from '../../utils/fechaPedido';
+import { techoFechaEntregaProgramada } from '../../utils/fechaEntregaProgramada';
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo';
 import { parsePrecio } from '../../utils/calculations';
 import { motivoPrecioTipeado, numeroConMiles } from '../../utils/normalizarNumero';
@@ -588,7 +589,7 @@ const ModalPedido = memo(function ModalPedido({
     // Bonificaciones NO descuentan stock — solo items comprados
     const stockDisponible = producto.stock - cantidadEnPedido;
     if (stockDisponible < 0) return { tipo: 'error', mensaje: `Sin stock! Disponible: ${producto.stock}` };
-    if (stockBajo(stockDisponible, producto.stock_minimo)) return { tipo: 'warning', mensaje: `Stock bajo: quedaran ${stockDisponible}` };
+    if (stockBajo(stockDisponible, producto.stock_minimo)) return { tipo: 'warning', mensaje: `Stock bajo: quedarán ${stockDisponible}` };
     return null;
   };
 
@@ -1107,6 +1108,8 @@ const ModalPedido = memo(function ModalPedido({
                 })()}
                 onChange={e => onFechaEntregaProgramadaChange && onFechaEntregaProgramadaChange(e.target.value)}
                 min={nuevoPedido.fecha || fechaLocalISO()}
+                // 1559-b6 (D21): hasta 60 días adelante, como el server.
+                max={techoFechaEntregaProgramada()}
                 className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
               />
             </div>
@@ -1816,7 +1819,7 @@ const ModalPedido = memo(function ModalPedido({
                       </select>
                       {isOffline && (
                         <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                          Sin conexión el cobro se registra después, desde la ficha del pedido.
+                          Sin conexión el cobro no se guarda con el pedido: cargalo a mano desde la ficha cuando vuelva la señal.
                         </p>
                       )}
                     </div>

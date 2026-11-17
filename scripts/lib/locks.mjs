@@ -2,8 +2,8 @@
  * El criterio del gate de locks (#1520, gate 4; scripts/check-locks.mjs).
  *
  * auditoria_locks() devuelve cada sentencia de una función de public que toma un lock de fila (FOR UPDATE,
- * FOR NO KEY UPDATE, FOR SHARE, FOR KEY SHARE), sin comentarios y con los literales vacíos. Acá se decide
- * cuál toma varias filas sin ORDER BY.
+ * FOR NO KEY UPDATE, FOR SHARE, FOR KEY SHARE), sin comentarios y con los literales vacíos (cómo los saca:
+ * `sinComentariosNiLiterales`, abajo). Acá se decide cuál toma varias filas sin ORDER BY.
  *
  * Por qué importa: dos transacciones que bloquean el mismo conjunto de filas en órdenes distintos se cruzan
  * (40P01). El orden global es por id ascendente (migrations/CLAUDE.md, "El orden de locks"). Un lock de varias
@@ -20,10 +20,40 @@
  * Lo que no ve (es texto, no ejecución):
  *   · una PK compuesta u otra clave única: la toma por multi-fila, y va a la lista con su motivo;
  *   · un `a.id = b.x` en el WHERE de un join con coma: lo toma por una fila;
- *   · SQL dinámico (EXECUTE), y un `;` dentro de un literal $…$.
+ *   · SQL dinámico (EXECUTE), y un `;` o un `--` dentro de un literal $…$.
  */
 
 const LOCK = /\bFOR\s+(?:NO\s+KEY\s+UPDATE|UPDATE|KEY\s+SHARE|SHARE)\b/gi;
+
+/**
+ * Cómo prepara la base cada cuerpo antes de cortarlo (#1541): espejo de `_sql_sin_comentarios` y
+ * `_sql_sin_comentarios_ni_literales` (la migración de B9 del plan #1603), que usan auditoria_locks() y las
+ * demás auditoria_* que leen código. Una sola pasada de izquierda a derecha: lo que empieza en una comilla
+ * es un literal (con sus `''`) aunque adentro tenga `--` o `/*`, y lo que empieza en `--` o `/*` fuera de
+ * un literal es un comentario. Antes se sacaban primero los comentarios y después los literales: un literal
+ * `' -- '` (el motivo de la merma de cancelar_pedido_con_stock) perdía su comilla de cierre, la paridad
+ * quedaba al revés y el gate no veía los locks que venían después. Los regex son los mismos que en SQL.
+ * Lo que no entiende: un dólar-quote anidado ($q$…$q$) ni un E'…\'…'.
+ */
+const TOKENS_SQL = /('(?:[^']|'')*')|--[^\n]*|\/\*(?:[^*]|\*+[^*/])*\*+\//g;
+
+/** El cuerpo sin comentarios; los literales quedan como están. */
+export function sinComentarios(src) {
+  return src.replace(TOKENS_SQL, (_m, literal) => literal ?? '');
+}
+
+/** El cuerpo sin comentarios y con cada literal vacío (`''`). */
+export function sinComentariosNiLiterales(src) {
+  return sinComentarios(src).replace(/'(?:[^']|'')*'/g, "''");
+}
+
+/** Las sentencias de un cuerpo que toman un lock de fila, como las devuelve auditoria_locks(). */
+export function sentenciasConLock(src) {
+  return sinComentariosNiLiterales(src)
+    .split(';')
+    .filter((s) => new RegExp(LOCK.source, 'i').test(s))
+    .map((s) => s.replace(/\s+/g, ' ').trim());
+}
 
 /** Vacía el contenido de todo paréntesis, del más interno hacia afuera: `f(a, (b))` → `f()`. */
 export function aplanar(texto) {

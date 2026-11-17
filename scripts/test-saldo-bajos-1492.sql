@@ -10,7 +10,7 @@
 --   L2 · El crédito de 30, que cobró el admin, lo absorbe una boleta que reparte un transportista. En
 --        _rendicion_pagos el crédito sigue siendo del admin, y un cobro de 10 que entra en la boleta es del transportista.
 --   E2 · Un crédito suelto (sin boleta que lo absorba) es de quien lo cobró.
---   L3 · Los cuerpos y los EXECUTE de crear_pedido_idempotente y _rendicion_pagos son los de la migración.
+--   L3 · Los EXECUTE y el definer de crear_pedido_idempotente y _rendicion_pagos son los de la migración (el md5 del cuerpo se sacó).
 --   L4 · SEG-A (auditoria_definer_sin_rol) no ve crear_pedido_idempotente: la lista blanca tiene el md5 del
 --        cuerpo nuevo (mig 474). Falla después de la 473 y antes de la 474.
 --   En L1, L2 y E2, clientes.saldo_cuenta = Σ (total − monto_pagado) − Σ créditos (el predicado de CC-A).
@@ -206,13 +206,15 @@ BEGIN
   END;
 
   -- L3 · los cuerpos y los EXECUTE
-  IF (SELECT md5(prosrc) || ' ' || proacl::text || ' ' || prosecdef::text FROM pg_proc
+  -- Antes fijaba también el md5 del cuerpo de las dos (63f07592…, 8f3bf05f…): se pone rojo con cada migración posterior que
+  -- las toca (la 489, la 505…) aunque nada se rompa. Se sacó (#1603 B13b): quedan los EXECUTE y si son DEFINER.
+  IF (SELECT proacl::text || ' ' || prosecdef::text FROM pg_proc
        WHERE oid = 'public.crear_pedido_idempotente(bigint,numeric,uuid,jsonb,text,text,text,date,text,numeric,numeric,date,uuid,text)'::regprocedure)
-     IS DISTINCT FROM '63f0759223a668afdd04ce684aee18ef {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} true'
-     OR (SELECT md5(prosrc) || ' ' || proacl::text || ' ' || prosecdef::text FROM pg_proc
+     IS DISTINCT FROM '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} true'
+     OR (SELECT proacl::text || ' ' || prosecdef::text FROM pg_proc
           WHERE oid = 'public._rendicion_pagos(bigint,date,date,bigint)'::regprocedure)
-     IS DISTINCT FROM '8f3bf05f8fd2690373baeb4915f62a4c {postgres=X/postgres,service_role=X/postgres} false' THEN
-    v_fallas := v_fallas || 'L3 crear_pedido_idempotente o _rendicion_pagos no son los de la migración 473'::text;
+     IS DISTINCT FROM '{postgres=X/postgres,service_role=X/postgres} false' THEN
+    v_fallas := v_fallas || 'L3 crear_pedido_idempotente o _rendicion_pagos cambiaron de EXECUTE o de definer'::text;
   END IF;
 
   -- L4 · SEG-A no ve el replay

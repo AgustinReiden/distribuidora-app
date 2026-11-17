@@ -45,6 +45,48 @@
 --
 --   psql "$DATABASE_URL" -f scripts/test-contenedor-y-canje-a-su-lote-1558.sql
 
+-- Ola 2 de #1603 (B1, 1595-b5; decisión del dueño D23): una salvedad se registra sólo sobre un
+-- pedido en camino o entregado. El ensayo carga pedidos y les registra salvedades enseguida: este
+-- envoltorio pone el pedido en camino (asignado) para la salvedad y lo devuelve al estado que tenía,
+-- así el resto del caso no cambia.
+CREATE OR REPLACE FUNCTION pg_temp.ola2_estado_pedido(p_ped bigint, p_estado text)
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER AS $ola2$
+DECLARE
+  v_prev   text;
+  v_claims text := current_setting('request.jwt.claims', true);
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_ped;
+  IF v_prev IS DISTINCT FROM p_estado THEN
+    PERFORM set_config('request.jwt.claims', '', true);
+    UPDATE public.pedidos SET estado = p_estado WHERE id = p_ped;
+    PERFORM set_config('request.jwt.claims', COALESCE(v_claims, ''), true);
+  END IF;
+  RETURN v_prev;
+END
+$ola2$;
+
+CREATE OR REPLACE FUNCTION pg_temp.salvedad_en_camino(p_pedido_id bigint, p_pedido_item_id bigint,
+  p_cantidad_afectada integer, p_motivo character varying, p_descripcion text DEFAULT NULL,
+  p_foto_url text DEFAULT NULL, p_devolver_stock boolean DEFAULT true, p_client_request_id uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql AS $ola2$
+DECLARE
+  v_prev text;
+  v_res  jsonb;
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_pedido_id;
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, 'asignado');
+  END IF;
+  v_res := public.registrar_salvedad(p_pedido_id, p_pedido_item_id, p_cantidad_afectada, p_motivo,
+                                     p_descripcion, p_foto_url, p_devolver_stock, p_client_request_id);
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, v_prev);
+  END IF;
+  RETURN v_res;
+END
+$ola2$;
+
+
 DO $ensayo$
 DECLARE
   v_suc    bigint;
@@ -193,7 +235,7 @@ BEGIN
       v_t := 'C2 eliminar';
     ELSE
       SELECT id INTO v_reg FROM pedido_items WHERE pedido_id = v_ped AND es_bonificacion;
-      v_j := public.registrar_salvedad(v_ped, v_reg, 2, 'cliente_rechaza', 'ensayo 1558', NULL, true, NULL);
+      v_j := pg_temp.salvedad_en_camino(v_ped, v_reg, 2, 'cliente_rechaza', 'ensayo 1558', NULL, true, NULL);
       v_t := 'C3 salvedad del regalo';
     END IF;
     IF v_j ? 'error' OR v_j->>'success' = 'false' THEN
@@ -325,8 +367,9 @@ BEGIN
   v_fallas := v_fallas || pg_temp.ver('M1 devuelto', p, 'stock=90 lotes=[50] bolsa=40');
   v_fallas := v_fallas || pg_temp.ver('M1 entregado', q, 'stock=87 lotes=[50] bolsa=37');
   -- 1594-b4 (#1594): la bajada es 'merma' de su fila de mermas_stock, como la merma manual.
+  -- Sin la fila del alta del producto del ensayo (0->90 'alta_producto', 1594-b1 de la ola 2 de #1603).
   SELECT string_agg(format('%s->%s %s %s', stock_anterior, stock_nuevo, origen, referencia_tipo), ' | ' ORDER BY id) INTO v_t
-    FROM stock_historico WHERE producto_id = p;
+    FROM stock_historico WHERE producto_id = p AND origen IS DISTINCT FROM 'alta_producto';
   IF v_t IS DISTINCT FROM '90->93 cambio_producto_merma cambios_productos | 93->90 merma mermas_stock' THEN
     v_fallas := v_fallas || format('M1: ledger del devuelto %s', COALESCE(v_t, '(nada)'));
   END IF;
