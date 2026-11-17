@@ -309,6 +309,23 @@ export function hallazgosStorage({ politicas = [], buckets = [] } = {}, excepcio
 // --------------------------------------------------------- rol sin activo ---
 
 /**
+ * Las policies que leen el rol de quien llama sin `activo` (1564-b11 del plan #1603). El RPC ya las
+ * marcó: un SELECT sobre perfiles con `rol` y auth.uid() y sin `activo`, cortando la expresión en
+ * cada SELECT. No tienen lista de permitidas: una policy usa es_admin() / es_encargado_o_admin()
+ * o suma COALESCE(activo, true). Un RPC de antes de esa migración no trae `policies`: no es un
+ * rojo, es que todavía no mira (devuelve null para que el gate lo diga).
+ */
+export function policiesRolSinActivo(auditoria) {
+  if (!Array.isArray(auditoria?.policies)) return null;
+  const porPolicy = new Map();
+  for (const p of auditoria.policies) {
+    if (!porPolicy.has(p.policy)) porPolicy.set(p.policy, []);
+    porPolicy.get(p.policy).push(p.lectura);
+  }
+  return [...porPolicy].map(([policy, lecturas]) => ({ policy, lecturas }));
+}
+
+/**
  * Lo que es rojo en la salida de auditoria_rol_sin_activo() (#1490). El RPC ya
  * marcó las sentencias que leen perfiles.rol de auth.uid() (o de un alias de un
  * salto) sin nombrar `activo`, en funciones ejecutables por authenticated: un

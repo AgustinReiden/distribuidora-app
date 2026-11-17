@@ -157,9 +157,12 @@ function eslabonesVigentes(
  */
 export function cantidadTrasEslabon(
   cantidad: number,
-  s: Pick<SustitucionRegistrada, 'cantidad_original' | 'cantidad_sustituta'>,
+  s: { cantidad_original?: number | string | null; cantidad_sustituta?: number | string | null },
 ): number {
   const original = Number(s.cantidad_original)
+  // Sin cantidad sustituta no convierte, como el server (`p_sustituta IS NULL`):
+  // Number(null) es 0 y daba 0 o 1 (1556-b3).
+  if (s.cantidad_sustituta == null) return cantidad
   const sustituta = Number(s.cantidad_sustituta)
   if (!(original > 0) || !Number.isFinite(sustituta)) return cantidad
   if (cantidad === original) return sustituta

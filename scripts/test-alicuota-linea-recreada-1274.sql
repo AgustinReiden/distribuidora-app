@@ -33,6 +33,48 @@
 --
 --   psql "$DATABASE_URL" -1 -f scripts/test-alicuota-linea-recreada-1274.sql
 
+-- Ola 2 de #1603 (B1, 1595-b5; decisión del dueño D23): una salvedad se registra sólo sobre un
+-- pedido en camino o entregado. El ensayo carga pedidos y les registra salvedades enseguida: este
+-- envoltorio pone el pedido en camino (asignado) para la salvedad y lo devuelve al estado que tenía,
+-- así el resto del caso no cambia.
+CREATE OR REPLACE FUNCTION pg_temp.ola2_estado_pedido(p_ped bigint, p_estado text)
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER AS $ola2$
+DECLARE
+  v_prev   text;
+  v_claims text := current_setting('request.jwt.claims', true);
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_ped;
+  IF v_prev IS DISTINCT FROM p_estado THEN
+    PERFORM set_config('request.jwt.claims', '', true);
+    UPDATE public.pedidos SET estado = p_estado WHERE id = p_ped;
+    PERFORM set_config('request.jwt.claims', COALESCE(v_claims, ''), true);
+  END IF;
+  RETURN v_prev;
+END
+$ola2$;
+
+CREATE OR REPLACE FUNCTION pg_temp.salvedad_en_camino(p_pedido_id bigint, p_pedido_item_id bigint,
+  p_cantidad_afectada integer, p_motivo character varying, p_descripcion text DEFAULT NULL,
+  p_foto_url text DEFAULT NULL, p_devolver_stock boolean DEFAULT true, p_client_request_id uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql AS $ola2$
+DECLARE
+  v_prev text;
+  v_res  jsonb;
+BEGIN
+  SELECT estado INTO v_prev FROM public.pedidos WHERE id = p_pedido_id;
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, 'asignado');
+  END IF;
+  v_res := public.registrar_salvedad(p_pedido_id, p_pedido_item_id, p_cantidad_afectada, p_motivo,
+                                     p_descripcion, p_foto_url, p_devolver_stock, p_client_request_id);
+  IF v_prev IN ('pendiente', 'en_preparacion') THEN
+    PERFORM pg_temp.ola2_estado_pedido(p_pedido_id, v_prev);
+  END IF;
+  RETURN v_res;
+END
+$ola2$;
+
+
 CREATE OR REPLACE FUNCTION pg_temp.t_producto(p_suc bigint, p_condicion text, p_porcentaje numeric)
 RETURNS bigint LANGUAGE sql AS $fn$
   INSERT INTO public.productos (nombre, precio, stock, costo_promedio, condicion_iva, porcentaje_iva,
@@ -64,7 +106,7 @@ DECLARE
   v_item bigint;
 BEGIN
   SELECT id INTO STRICT v_item FROM public.pedido_items WHERE pedido_id = p_ped AND producto_id = p_prod;
-  r := public.registrar_salvedad(p_ped, v_item, 1, 'cliente_rechaza',
+  r := pg_temp.salvedad_en_camino(p_ped, v_item, 1, 'cliente_rechaza',
                                  'ensayo 1274: descripcion del caso', NULL, true, NULL);
   IF NOT COALESCE((r->>'success')::boolean, false) THEN
     RAISE EXCEPTION 'registrar: %', r;
