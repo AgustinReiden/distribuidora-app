@@ -53,12 +53,15 @@ async function fetchNotasCreditoResumen(): Promise<NCResumen[]> {
 }
 
 async function fetchNotasCreditoByCompra(compraId: string): Promise<NotaCreditoDB[]> {
+  // El embed de `perfiles` nombra su relación: la tabla guarda también quién anuló la nota
+  // (`anulada_por`), y si esa columna vuelve a tener FK a `perfiles`, sin el nombre el embed
+  // queda ambiguo y PostgREST rechaza la consulta entera (PGRST201; pasó con la mig 523).
   const { data, error } = await supabase
     .from('notas_credito')
     .select(`
       *,
       items:nota_credito_items(*, producto:productos(${PRODUCTO_COLUMNAS})),
-      usuario:perfiles(id, nombre)
+      usuario:perfiles!notas_credito_usuario_id_fkey(id, nombre)
     `)
     .eq('compra_id', compraId)
     .order('created_at', { ascending: false })

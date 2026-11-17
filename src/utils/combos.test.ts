@@ -176,6 +176,59 @@ describe('prorratearTotal: cierra exacto aunque ningún lugar tenga cantidad 1 (
   })
 })
 
+describe('prorratearTotal: ninguna línea en $0 (1592-b4)', () => {
+  const cobrado = (p: Map<string, number>, lineas: { productoId: string; cantidad: number }[]) =>
+    lineas.reduce((s, l) => s + l.cantidad * Math.round((p.get(l.productoId) as number) * 100), 0)
+
+  it('Fernet $10.000 + caramelo $0,01 a $4.000: el caramelo no sale gratis', () => {
+    const p = prorratearTotal(4000, [
+      { productoId: FERNET, cantidad: 1, ref: 10000 },
+      { productoId: HIELO, cantidad: 1, ref: 0.01 },
+    ])
+    expect(Object.fromEntries(p)).toEqual({ [FERNET]: 3999.99, [HIELO]: 0.01 })
+  })
+
+  it('sin reparto con un centavo por línea, tira en vez de dejar una en $0', () => {
+    expect(() => prorratearTotal(0.06, [
+      { productoId: FERNET, cantidad: 2, ref: 0.01 },
+      { productoId: COCA, cantidad: 3, ref: 0.01 },
+    ])).toThrow()
+    expect(() => prorratearTotal(0.03, [
+      { productoId: FERNET, cantidad: 1, ref: 0.01 },
+      { productoId: COCA, cantidad: 1, ref: 0.01 },
+      { productoId: SPRITE, cantidad: 1, ref: 0.01 },
+      { productoId: HIELO, cantidad: 1, ref: 0.01 },
+    ])).toThrow()
+  })
+
+  it('barrido con referencias de centavos: cierra al centavo y ninguna línea queda por debajo de $0,01', () => {
+    let semilla = 1592
+    const azar = (n: number) => {
+      semilla = (semilla * 1103515245 + 12345) % 2147483648
+      return semilla % n
+    }
+    let repartidos = 0
+    for (let caso = 0; caso < 3000; caso++) {
+      const lineas = Array.from({ length: 1 + azar(3) }, (_, i) => ({
+        productoId: String(i + 1),
+        cantidad: 1 + azar(4),
+        ref: azar(3) === 0 ? (100 + azar(2000000)) / 100 : (1 + azar(9)) / 100,
+      }))
+      const t = 1 + azar(azar(2) ? 300 : 3000000)
+      let p: Map<string, number>
+      try {
+        p = prorratearTotal(t / 100, lineas)
+      } catch {
+        continue
+      }
+      repartidos++
+      expect(cobrado(p, lineas)).toBe(t)
+      for (const l of lineas) expect(p.get(l.productoId) as number).toBeGreaterThanOrEqual(0.01)
+    }
+    expect(repartidos).toBeGreaterThan(2000)
+  })
+})
+
 describe('precioRepartible', () => {
   it('true si el máximo común divisor de las cantidades divide el precio en centavos', () => {
     expect(precioRepartible(999.98, [2])).toBe(true)
@@ -217,6 +270,12 @@ describe('cantidadDeCombos', () => {
 
   it('null si hay un producto que no es del combo', () => {
     expect(cantidadDeCombos(fernetCoca.componentes, new Map([[COCA, 1], [FERNET, 1], [HIELO, 1]]))).toBeNull()
+  })
+
+  it('una cantidad escrita 1.0 es entera, como en _combo_cantidad (1556-b3)', () => {
+    const c = [{ componente: 1, cantidad: 1.0, productos: [FERNET] }, { componente: 2, cantidad: 2.0, productos: [COCA] }]
+    expect(cantidadDeCombos(c, new Map([[FERNET, 2.0], [COCA, 4]]))).toBe(2)
+    expect(cantidadDeCombos(c, new Map([[FERNET, 1.5], [COCA, 3]]))).toBeNull()
   })
 
   it('suma las alternativas de un mismo lugar', () => {
@@ -374,6 +433,23 @@ describe('armarCombos', () => {
     const r = armarCombos(new Map([[FERNET, 2]]), [dosPor], oraculoLista)
     expect(r.aplicados).toHaveLength(0)
     expect(r.sueltas.get(FERNET)).toBe(2)
+  })
+
+  it('no arma un combo de centavos que no deja un centavo en cada línea, y no tira (1592-b4)', () => {
+    // 2 A + 3 B por $0,06: 2a + 3b = 6 no tiene solución con a, b >= 1 centavo.
+    const centavos: OraculoPrecios = { precioLibre: () => 0.02, precioSinEscala: () => 0.02 }
+    const deCentavos = combo({
+      id: '22',
+      precio: 0.06,
+      componentes: [
+        { componente: 1, cantidad: 2, productos: ['5'] },
+        { componente: 2, cantidad: 3, productos: ['6'] },
+      ],
+    })
+    const r = armarCombos(new Map([['5', 2], ['6', 3]]), [deCentavos], centavos)
+    expect(r.aplicados).toHaveLength(0)
+    expect(r.sueltas.get('5')).toBe(2)
+    expect(r.sueltas.get('6')).toBe(3)
   })
 
   it('un lugar con alternativas se llena con las unidades más caras', () => {

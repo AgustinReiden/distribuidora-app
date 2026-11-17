@@ -20,6 +20,8 @@
 --        (B3.1); desasignar una que no es la default no la toca (B3.2).
 --   G  · #1291 sigue: el admin de una sola sucursal no asigna ni desasigna a un usuario que
 --        también es de otra.
+--   B3 y la mitad de G llaman a desasignar_usuario_sucursal. La migración de B9 (ola 2 de #1603,
+--   D48) la borra por no tener llamadores: sin ella esos casos se saltean y lo dice la salida.
 --   V1 · 1596-b10 (D38): una venta de 3 líneas no escribe filas de productos en audit_logs, y sí
 --        las 3 de pedido_items; las 3 bajas están en stock_historico como 'pedido_creado'. Ni la
 --        baja del bot (V1b) ni la de una edición (V1c) se auditan en productos.
@@ -211,6 +213,9 @@ BEGIN
   IF v_t NOT LIKE 'PASA {"error": "Ese usuario no es de tus sucursales%' OR pg_temp.sucs(v_u) IS DISTINCT FROM '1,2*' THEN
     v_fallas := v_fallas || format('G · el admin sólo de la 1 asignó a un usuario de las dos: %s → %s', v_t, pg_temp.sucs(v_u));
   END IF;
+  IF to_regprocedure('public.desasignar_usuario_sucursal(uuid,bigint)') IS NULL THEN
+    v_notas := v_notas || text 'G (desasignar) y B3 salteados: desasignar_usuario_sucursal no existe (la borró B9 por no tener llamadores, D48)';
+  ELSE
   v_t := pg_temp.desasignar(v_a1, v_u, 1);
   IF v_t NOT LIKE 'PASA {"error": "Ese usuario no es de tus sucursales%' OR pg_temp.sucs(v_u) IS DISTINCT FROM '1,2*' THEN
     v_fallas := v_fallas || format('G · el admin sólo de la 1 desasignó a un usuario de las dos: %s → %s', v_t, pg_temp.sucs(v_u));
@@ -247,6 +252,7 @@ BEGIN
   EXCEPTION WHEN SQLSTATE 'P0099' THEN NULL;
     WHEN OTHERS THEN v_fallas := v_fallas || format('B3 · error: %s %s', SQLSTATE, SQLERRM);
   END;
+  END IF;  -- desasignar_usuario_sucursal
 
   -- ------------------------------------------------------------------- V1 ---
   INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)

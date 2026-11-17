@@ -151,4 +151,16 @@ describe('ModalPromocion · cambio del factor de fracción', () => {
     expect(await screen.findByText(/Calculando/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Guardar igual' })).toBeDisabled()
   })
+
+  // L3 de la revisión de la ola 1 (plan #1603): el formulario mandaba siempre 1.
+  it('una promo con otro stock por bloque lo conserva al guardar y en el preview', async () => {
+    const onSave = vi.fn().mockResolvedValue({ success: true })
+    render(
+      <ModalPromocion promocion={{ ...PROMO, stock_por_bloque: 2 }} productos={PRODUCTOS} onSave={onSave} onClose={vi.fn()} />,
+    )
+    await userEvent.click(actualizar())
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave.mock.calls[0][0]).toMatchObject({ unidadesPorBloque: 6, stockPorBloque: 2 })
+    expect(preview).toHaveBeenCalledWith('13', 6, 2, false)
+  })
 })

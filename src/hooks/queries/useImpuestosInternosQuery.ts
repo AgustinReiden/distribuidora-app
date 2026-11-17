@@ -82,6 +82,12 @@ export function useGuardarEncuadreIIMutation() {
       const { data: res, error } = await query
       if (error) {
         if (error.code === '23505') throw new Error(`Ya existe un encuadre llamado "${nombre}"`)
+        // Los encuadres son de todas las sucursales: los edita sólo un admin que esté en todas
+        // (decisión del dueño D49, 1564-b4 del plan #1603). El alta lo frena la policy (42501) y la
+        // edición no encuentra la fila (PGRST116, el .single() sin filas).
+        if (error.code === '42501' || error.code === 'PGRST116') {
+          throw new Error('Los encuadres de impuestos internos los edita sólo un administrador de todas las sucursales.')
+        }
         throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el encuadre se haya guardado. Revisá antes de reintentar.')
       }
       return String(res.id)

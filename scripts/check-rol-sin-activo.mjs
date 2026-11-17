@@ -14,6 +14,11 @@
  * RPCs leían el rol a pelo: un admin dado de baja seguía viendo /reportes y
  * cargando metas.
  *
+ * Desde la migración de B9 del plan #1603 (1564-b11) mira también las policies
+ * (de cualquier esquema): una subconsulta sobre perfiles que lee el rol de
+ * auth.uid() sin `activo` es rojo, sin lista de permitidas. La protección que
+ * tenían (current_sucursal_id() da NULL para un desactivado) era indirecta.
+ *
  * Arreglo: decidir el permiso con los helpers de la 463, o sumar
  * `AND COALESCE(activo, true)` a la lectura. La lista blanca es para las que ya
  * rechazan a un desactivado por otro lado (current_sucursal_id() NULL antes de
@@ -38,7 +43,7 @@
  * Uso local:  SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/check-rol-sin-activo.mjs
  */
 import { readFileSync } from 'node:fs';
-import { hallazgosRolSinActivo } from './lib/acceso.mjs';
+import { hallazgosRolSinActivo, policiesRolSinActivo } from './lib/acceso.mjs';
 import { SQL_ROL_SIN_ACTIVO_SIN_API } from './lib/catalogo.mjs';
 import { consultaJson, destino } from './lib/pg.mjs';
 
@@ -77,6 +82,7 @@ if (!r.funciones || !Array.isArray(r.lecturas)) {
 }
 
 const { sinActivo, sobrantes } = hallazgosRolSinActivo(r, permitidas);
+const policies = policiesRolSinActivo(r);
 const marcadas = new Set(r.lecturas.map((l) => l.firma)).size;
 
 console.log(`Auditoría del rol sin activo @ ${r.generado_at}`);
@@ -111,6 +117,24 @@ if (implSobrantes.length) {
   for (const f of implSobrantes) console.log(`  ${f}  (${permitidasImpl[f]})`);
 }
 
+if (policies === null) {
+  console.log('\nℹ️  El RPC todavía no mira las policies (es de antes de la migración de B9 del plan #1603).');
+} else {
+  console.log(`Policies que leen el rol de quien llama sin activo: ${policies.length}`);
+}
+
+if (policies?.length) {
+  console.error('\n❌ Policies que deciden por el rol de quien llama sin mirar si está activo:');
+  for (const p of policies) {
+    console.error(`  ${p.policy}`);
+    for (const l of p.lecturas) console.error(`      ${l}`);
+  }
+  console.error(
+    '\n   Arreglo: usar es_admin() / es_encargado_o_admin(), o sumar AND COALESCE(activo, true)\n' +
+      '   a la subconsulta sobre perfiles. Las policies no tienen lista de permitidas.',
+  );
+}
+
 if (sinActivo.length || implSinActivo.length) {
   console.error('\n❌ Funciones que deciden por el rol de quien llama sin mirar si está activo:');
   for (const h of [...sinActivo, ...implSinActivo]) {
@@ -122,7 +146,10 @@ if (sinActivo.length || implSinActivo.length) {
       '   sumar AND COALESCE(activo, true) a la lectura. Un desactivado conserva su token\n' +
       '   hasta que vence: el ban de Auth no lo invalida.',
   );
-  process.exit(1);
 }
 
-console.log('\n✅ Ninguna función de la API decide por el rol de quien llama sin mirar activo (salvo las permitidas).');
+if (sinActivo.length || implSinActivo.length || policies?.length) process.exit(1);
+
+console.log(
+  '\n✅ Ninguna función de la API ni sin API (salvo las permitidas) ni ninguna policy decide por el rol de quien llama sin mirar activo.',
+);
