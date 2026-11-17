@@ -41,7 +41,9 @@ import {
   mesSugerido,
   netoDeGasto,
   rangoMesImputado,
+  renglonesParaIva,
   sumarMeses,
+  topeIvaGastoCentavos,
 } from '../../utils/gastos'
 import type {
   ComprobanteGasto,
@@ -104,6 +106,12 @@ export const modalGastoSchema = z
       .optional(),
     empleado_id: z.coerce.number().int().positive().nullable().optional(),
     observacion: z.string().nullable().optional(),
+    // 1562-c1: el rango lo valida errorDeDesglose (con el mensaje del server); acá sólo viaja. El
+    // campo vacío o con letras llega como NaN, que zod rechaza antes del superRefine: con el mismo
+    // mensaje, no el suyo en inglés.
+    renglones_factura: z.number({ error: 'Los renglones de la factura van de 1 a 99' }).optional(),
+    // 1599-b9: la versión que vio quien edita. Sin declararla, zod la sacaría del payload.
+    updated_at_esperado: z.string().optional(),
   })
   .superRefine((g, ctx) => {
     if (g.origen_pago === 'empleado' && !g.empleado_id) {
@@ -175,6 +183,8 @@ interface ValoresIniciales {
   rendicion_transportista_id: string | null
   rendicion_fecha: string | null
   empleado_id: number | null
+  /** `undefined`: no se sabe (la lista y el cierre no los traen). */
+  renglones_factura: number | undefined
 }
 
 function valoresIniciales(gasto: Gasto | null | undefined, borrador: GuardarGastoPayload | null | undefined): ValoresIniciales | null {
@@ -201,6 +211,7 @@ function valoresIniciales(gasto: Gasto | null | undefined, borrador: GuardarGast
       rendicion_transportista_id: borrador.rendicion_transportista_id ?? null,
       rendicion_fecha: borrador.rendicion_fecha ?? null,
       empleado_id: borrador.empleado_id ?? null,
+      renglones_factura: borrador.renglones_factura,
     }
   }
   if (gasto) {
@@ -226,6 +237,7 @@ function valoresIniciales(gasto: Gasto | null | undefined, borrador: GuardarGast
       rendicion_transportista_id: gasto.rendicion_transportista_id,
       rendicion_fecha: gasto.rendicion_fecha,
       empleado_id: gasto.empleado_id,
+      renglones_factura: gasto.renglones_factura,
     }
   }
   return null
@@ -386,6 +398,16 @@ export default function ModalGasto({
   const costo = costoDeGasto(desglose)
   const ivaTxt = desgloseManual?.campo === 'iva' ? desgloseManual.texto : montoATexto(iva)
   const netoTxt = desgloseManual?.campo === 'neto' ? desgloseManual.texto : montoATexto(neto)
+  // 1562-c1 (#1562): los renglones de la factura A o M; el tope del IVA tolera un centavo por
+  // renglón. La lista no trae los guardados: al editar se arranca con los que necesita el IVA que el
+  // server ya aceptó, y viajan sólo si se tocan o se sabían (si no, el server conserva los suyos).
+  // El campo aparece cuando el IVA pasa del 27 % pelado, o si ya dice otra cosa que uno.
+  const [renglonesTxt, setRenglonesTxt] = useState(() => String(
+    ini?.renglones_factura ?? (ini && daCreditoFiscal(ini.comprobante) ? renglonesParaIva(ini) : 1)))
+  const [renglonesTocados, setRenglonesTocados] = useState(false)
+  const renglones = /^\s*\d+\s*$/.test(renglonesTxt) ? Number(renglonesTxt) : Number.NaN
+  const mostrarRenglones = conCredito
+    && (renglonesTocados || renglones !== 1 || Math.round(iva * 100) > topeIvaGastoCentavos(desglose))
 
   // ---- Vehículo, litros y km ----------------------------------------------
   const [vehiculoId, setVehiculoId] = useState(() => {
@@ -573,12 +595,23 @@ export default function ModalGasto({
       rendicion_fecha: origen === 'rendicion' ? (desdeCierre?.fecha ?? (diaRendicion || null)) : null,
       empleado_id: origen === 'empleado' && empleadoId ? (empleadoId as unknown as number) : null,
       observacion: observacion.trim() ? observacion.trim() : null,
+      ...(conCredito ? { renglones_factura: renglones } : {}),
+      // 1599-b9 (#1599): la versión que se abrió. Si otro guardó en el medio, el server rechaza y
+      // este guardado no pisa al otro. Desde el cierre no va: ese modal compara sus propios vistos.
+      ...(gasto?.updated_at && !desdeCierre ? { updated_at_esperado: gasto.updated_at } : {}),
     }
 
     const resultado = modalGastoSchema.safeParse(payload)
     if (!resultado.success) {
       setError(resultado.error.issues[0]?.message ?? 'Revisá los datos del gasto')
       return
+    }
+    // Los renglones se validan siempre (el tope), pero en una edición viajan sólo si se tocaron o se
+    // sabían: los deducidos del IVA no pisan los guardados.
+    const datos = { ...resultado.data } as GuardarGastoPayload
+    const esEdicionGuardada = Boolean(gasto) || borrador?.id != null
+    if (esEdicionGuardada && !renglonesTocados && ini?.renglones_factura === undefined) {
+      delete datos.renglones_factura
     }
     // La fecha no es futura ni anterior al piso (GTO-A, #1545), y el mes imputado cae en el rango
     // del server (GTO-6, #1521). La que el gasto ya tenía no tiene piso, ni el día de la rendición
@@ -597,7 +630,7 @@ export default function ModalGasto({
     setGuardando(true)
     try {
       // El schema coacciona los ids a number: se manda lo validado, no el crudo.
-      await onSave(resultado.data as GuardarGastoPayload)
+      await onSave(datos)
       onClose()
     } catch (err) {
       // getErrorMessage, no `err instanceof Error`: el error de supabase-js es
@@ -764,6 +797,24 @@ export default function ModalGasto({
                   />
                 </label>
               </div>
+              {mostrarRenglones && (
+                <div className="flex items-center gap-2">
+                  <label htmlFor={`${id}-renglones`} className="text-xs text-gray-600 dark:text-gray-400">
+                    Renglones de la factura
+                  </label>
+                  <input
+                    id={`${id}-renglones`}
+                    type="text"
+                    inputMode="numeric"
+                    value={renglonesTxt}
+                    onChange={e => { setRenglonesTxt(e.target.value); setRenglonesTocados(true) }}
+                    className={cn(CLASE_CAMPO_IVA, 'w-20')}
+                  />
+                  <span className="text-xs text-gray-500">
+                    Si la factura redondea el IVA de cada renglón, el IVA puede pasar del 27 % un centavo por renglón.
+                  </span>
+                </div>
+              )}
               <button type="button" className={CLASE_LINK} onClick={() => setMostrarPerc(v => !v)}>
                 + percepciones e impuestos
               </button>

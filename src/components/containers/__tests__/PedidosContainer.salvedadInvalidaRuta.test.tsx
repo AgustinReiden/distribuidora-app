@@ -207,7 +207,7 @@ describe('PedidosContainer — una salvedad refresca la ruta del chofer (#1549)'
 
     expect(screen.getByTestId('resultado').textContent).toBe('OK')
     expect(claves()).toContain(JSON.stringify(['recorrido-activo']))
-    expect(claves()).toContain(JSON.stringify(['recorridos']))
+    expect(claves()).toContain(JSON.stringify(['recorridos-hoja-ruta']))
     // Lo que ya refrescaba, sigue.
     expect(claves()).toContain(JSON.stringify(['pedidos']))
     expect(claves()).toContain(JSON.stringify(['clientes']))

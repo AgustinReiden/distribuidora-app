@@ -44,7 +44,7 @@
 --   J · UPDATE compras SET notas = notas / estado = estado como postgres (lo
 --       que se prueba es la WHEN del trigger, no el grant: desde la 1124 compras
 --       no se escribe por REST), y actualizar_compra_items con los mismos ítems,
---       sobre C (que tiene nota)
+--       sobre C (que tiene nota): desde la 482 se rechaza, con su motivo, sin tocar nada
 --   S · el admin por REST sigue leyendo las notas y sus renglones
 --
 -- Veredicto: NOTICE 'ENSAYO OK (todo revertido)', o el error 'ENSAYO FALLÓ …'
@@ -177,7 +177,7 @@ BEGIN
   v_pC := pg_temp.producto(v_suc, 'ZZ ensayo 1113 C');
   v_C  := pg_temp.compra(v_pC, v_suc);
   v_lC := pg_temp.lote(v_pC, v_suc, v_C, v_hoy + 60);
-  v_res := public.registrar_nota_credito(v_C, 'ENSAYO-1113', 'ensayo 1113', 0, 0, 0, NULL,
+  v_res := public.registrar_nota_credito(v_C, 'ENSAYO-1113', 'ensayo 1113', 100, 21, 121, NULL,
              jsonb_build_array(jsonb_build_object('producto_id', v_pC, 'cantidad', 10,
                                                   'costo_unitario', 10, 'subtotal', 100)), NULL);
   IF NOT COALESCE((v_res->>'success')::boolean, false) THEN
@@ -317,7 +317,7 @@ BEGIN
       v_fallas := v_fallas || format('L · la nota quedó acreditando %s en vez de 10', pg_temp.acreditado(v_nc));
     END IF;
     -- compradas 100, acreditadas 10: 91 no entran
-    v_res := public.registrar_nota_credito(v_C, 'ENSAYO-1113-L', 'ensayo 1113 L', 0, 0, 0, NULL,
+    v_res := public.registrar_nota_credito(v_C, 'ENSAYO-1113-L', 'ensayo 1113 L', 910, 191.1, 1101.1, NULL,
                jsonb_build_array(jsonb_build_object('producto_id', v_pC, 'cantidad', 91,
                                                     'costo_unitario', 10, 'subtotal', 910)), NULL);
     IF COALESCE((v_res->>'success')::boolean, false)
@@ -488,7 +488,7 @@ BEGIN
   -- I · las dos puertas de nota, como admin REST, sobre una compra recibida
   BEGIN
     v_res := pg_temp.rest_json(format(
-      'SELECT public.registrar_nota_credito(%s, %L, %L, 0, 0, 0, NULL, %L::jsonb, NULL)',
+      'SELECT public.registrar_nota_credito(%s, %L, %L, 100, 21, 121, NULL, %L::jsonb, NULL)',
       v_O, 'ENSAYO-1113-I', 'ensayo 1113 I',
       jsonb_build_array(jsonb_build_object('producto_id', v_pO, 'cantidad', 10,
                                            'costo_unitario', 10, 'subtotal', 100))));
@@ -531,11 +531,15 @@ BEGIN
       FROM compra_items ci WHERE ci.compra_id = v_C;
     v_res := public.actualizar_compra_items(v_C, v_items, v_cab.subtotal, v_cab.iva, v_cab.total, v_admin,
       p_renglones_vistos => (SELECT array_agg(id) FROM public.compra_items WHERE compra_id = v_C));
-    IF NOT COALESCE((v_res->>'success')::boolean, false)
+    -- Desde la 482 (#1524, tarjeta 4) una compra con notas de crédito NO se edita: la edición volvía a restar lo
+    -- que la nota ya había bajado (stock y lotes). Antes este caso esperaba success con los mismos ítems; ahora la
+    -- regla vigente es el rechazo con su motivo, y la compra queda como estaba.
+    IF COALESCE((v_res->>'success')::boolean, false)
+       OR COALESCE(v_res->>'error', '') NOT ILIKE '%nota(s) de crédito: no se puede editar%'
        OR pg_temp.estado(v_C) <> 'recibida'
        OR (SELECT row(subtotal, iva, total)::text FROM compras WHERE id = v_C)
           IS DISTINCT FROM row(v_cab.subtotal, v_cab.iva, v_cab.total)::text THEN
-      v_fallas := v_fallas || format('J · actualizar_compra_items con los mismos ítems: %s, estado %s, cabecera antes %s después %s',
+      v_fallas := v_fallas || format('J · actualizar_compra_items sobre una compra con nota tenía que rechazarse (482): %s, estado %s, cabecera antes %s después %s',
                                      v_res, pg_temp.estado(v_C), row(v_cab.subtotal, v_cab.iva, v_cab.total)::text,
                                      (SELECT row(subtotal, iva, total)::text FROM compras WHERE id = v_C));
     END IF;

@@ -11,9 +11,12 @@
  * producto, y guardarla con esos campos vacíos escribe NULL encima de los
  * costos reales. Mejor un catálogo que no carga que uno que borra costos.
  */
+import { useContext } from 'react'
 import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { COLUMNAS_COSTO_PRODUCTO } from '../../lib/productoColumnas'
+import { puedeVerCostoProducto } from '../../lib/permisos'
+import AuthDataContext from '../../contexts/AuthDataContext'
 
 type ColumnaCosto = typeof COLUMNAS_COSTO_PRODUCTO[number]
 export type CostosProducto = Record<ColumnaCosto, number | null>
@@ -56,12 +59,28 @@ export async function fetchCostosProductos(
  */
 export async function conCostos<T extends { id: string | number }>(
   productos: T[],
+  opciones: { puedeVerCostos?: boolean } = {},
 ): Promise<T[]> {
   if (productos.length === 0) return productos
+  // 1599-b6: un rol que no ve costos recibe cero filas de la RPC, pero la
+  // llamaba igual: una por cada 500 productos del catálogo, en cada carga.
+  if (opciones.puedeVerCostos === false) return productos
   const costos = await fetchCostosProductos(productos.map(p => p.id))
   if (costos.size === 0) return productos
   return productos.map(p => {
     const c = costos.get(String(p.id))
     return c ? { ...p, ...c } : p
   })
+}
+
+/**
+ * ¿El usuario de la sesión ve costos? Espejo de la RPC (`es_encargado_o_admin()`
+ * por el rol principal): `puedeVerCostoProducto`. Sin sesión cargada todavía no
+ * se sabe, y se contesta que sí: la RPC es la que manda y a quien no ve le
+ * devuelve cero filas, mientras que un "no" apresurado le sacaría los costos a un
+ * admin y la ficha los guardaría en NULL.
+ */
+export function usePuedeVerCostos(): boolean {
+  const rol = useContext(AuthDataContext)?.perfil?.rol
+  return !rol || puedeVerCostoProducto(rol)
 }

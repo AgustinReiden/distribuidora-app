@@ -102,6 +102,11 @@ export function useRegistrarMermaMutation() {
       queryClient.invalidateQueries({ queryKey: mermasKeys.byProducto(currentSucursalId, variables.productoId) })
       // Invalidar productos (stock actualizado)
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
+      // STK-15: la baja descuenta de los lotes (trigger de stock). Sin esto
+      // Vencimientos ofrecía «dar de baja» un lote que la merma ya había vaciado.
+      // Literal, como `['personal']` abajo: este módulo no depende del de lotes
+      // (que ya importa `mermasKeys` de acá).
+      queryClient.invalidateQueries({ queryKey: ['lotes', currentSucursalId] })
       // Un cargo a empleados le movió la cuenta (y la liquidación) a cada uno. Prefijo de
       // `personalKeys.all`, sin importar la sucursal: este módulo no depende del de personal.
       if (variables.cargos?.length) queryClient.invalidateQueries({ queryKey: ['personal'] })

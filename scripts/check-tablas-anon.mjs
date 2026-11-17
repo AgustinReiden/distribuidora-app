@@ -18,6 +18,9 @@
  * Requiere env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
  * Uso local:  SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/check-tablas-anon.mjs
  */
+import { SQL_TABLAS_ANON_CATALOGO } from './lib/catalogo.mjs';
+import { consultaJson, destino } from './lib/pg.mjs';
+
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -52,6 +55,8 @@ if (legibles.length) {
   for (const t of legibles) console.log(`  ${t.tabla}`);
 }
 
+let falla = false;
+
 if ((r.legibles_anon ?? 0) > 0) {
   console.error(
     `\n❌ ${r.legibles_anon} tabla(s) del schema public devuelven filas con la anon key.\n` +
@@ -59,7 +64,26 @@ if ((r.legibles_anon ?? 0) > 0) {
       '   (REVOKE SELECT ON <tabla> FROM anon) — las DOS mitades, como en las funciones.\n' +
       '   Ver migrations/228 y migrations/README.md § Permisos.',
   );
-  process.exit(1);
+  falla = true;
 }
+
+// Complemento: las que anon podría leer aunque hoy no tengan filas.
+if (destino()) {
+  const abiertas = consultaJson(SQL_TABLAS_ANON_CATALOGO);
+  console.log(`Tablas o vistas que anon puede leer según el catálogo (con o sin filas): ${abiertas.length}`);
+  if (abiertas.length) {
+    console.error('\n❌ Legibles por anon aunque estén vacías (grant de SELECT y nada que las filtre):');
+    for (const t of abiertas) console.error(`  ${t.relacion}: ${t.motivo}`);
+    console.error('\n   Arreglo: REVOKE SELECT ON <tabla> FROM anon, y sacar la policy que le aplica a anon/PUBLIC.');
+    falla = true;
+  }
+} else {
+  console.log(
+    '\nℹ️  Sin GATE_DB_CONTENEDOR / GATE_DB_URL / SUPABASE_DB_URL: se omite el complemento del catálogo ' +
+      '(las tablas vacías legibles por anon sólo las ve check-grants-tablas).',
+  );
+}
+
+if (falla) process.exit(1);
 
 console.log('\n✅ Ninguna tabla de public es legible con la anon key.');

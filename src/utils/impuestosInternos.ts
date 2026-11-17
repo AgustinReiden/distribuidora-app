@@ -109,6 +109,9 @@ export function tasaEfectivaEncuadre(
  */
 export const II_NOMINAL_MAXIMO = 99
 
+/** El techo de `productos.impuestos_internos` (la tasa efectiva, en %): 99 % nominal. */
+export const II_EFECTIVO_MAXIMO = 9900
+
 /**
  * "8" o "8,5" → 0.08 / 0.085: la nominal que se carga en un encuadre. null si no
  * es un porcentaje de 0 a `II_NOMINAL_MAXIMO`.

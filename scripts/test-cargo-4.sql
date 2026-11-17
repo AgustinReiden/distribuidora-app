@@ -70,7 +70,8 @@ CREATE TEMP TABLE _cargo4_foto (
 DROP TABLE IF EXISTS pg_temp._cargo4_ctx;
 CREATE TEMP TABLE _cargo4_ctx (k text PRIMARY KEY, v text);
 
--- Normaliza un jsonb para comparar contenido y no orden (molde de la 318).
+-- Normaliza un jsonb para comparar contenido y no orden (molde de la 318). Descarta `generado_at`: los reportes lo
+-- sellan con el reloj de cada llamada (clock_timestamp) y el de la foto de antes nunca es el de la de despues (#1603 B13b).
 CREATE OR REPLACE FUNCTION pg_temp._cargo4_norm(j jsonb) RETURNS jsonb
 LANGUAGE plpgsql IMMUTABLE AS $f$
 DECLARE
@@ -79,7 +80,7 @@ BEGIN
   CASE jsonb_typeof(j)
     WHEN 'object' THEN
       SELECT COALESCE(jsonb_object_agg(e.k, pg_temp._cargo4_norm(e.v)), '{}'::jsonb)
-        INTO r FROM jsonb_each(j) AS e(k, v);
+        INTO r FROM jsonb_each(j) AS e(k, v) WHERE e.k <> 'generado_at';
     WHEN 'array' THEN
       SELECT COALESCE(jsonb_agg(s.x ORDER BY s.x::text), '[]'::jsonb)
         INTO r FROM (SELECT pg_temp._cargo4_norm(a.v) AS x FROM jsonb_array_elements(j) AS a(v)) s;

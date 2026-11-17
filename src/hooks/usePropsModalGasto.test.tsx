@@ -45,8 +45,16 @@ describe('usePropsModalGasto', () => {
     expect(result.current.usuarioId).toBe('u-1')
   })
 
-  it('un admin crea rubros con el grupo elegido', async () => {
+  // 1597-b5 (#1597): los rubros son de toda la empresa; los crea un admin de todas las sucursales.
+  it('un admin de una sola sucursal no crea rubros', () => {
     estado.isAdmin = true
+    const { result } = renderHook(() => usePropsModalGasto())
+    expect(result.current.onCrearRubro).toBeUndefined()
+  })
+
+  it('un admin de todas las sucursales crea rubros con el grupo elegido', async () => {
+    estado.isAdmin = true
+    estado.sucursales = [{ id: 1, nombre: 'Tucumán' }, { id: 2, nombre: 'Taco Pozo' }]
     mutateAsync.mockResolvedValue({ id: 9 })
     const { result } = renderHook(() => usePropsModalGasto())
     await result.current.onCrearRubro!('Peajes', 'vehiculos')

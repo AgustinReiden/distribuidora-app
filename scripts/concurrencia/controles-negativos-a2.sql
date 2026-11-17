@@ -7,11 +7,14 @@
 --      aplicando el saldo a favor al final) pero no las lockea.
 --   M2 _alta_bloquea_creditos no lockea ni los recorridos de esas boletas ni los créditos.
 -- La venta sigue aplicando el saldo a favor al final (aplicar_credito_cliente), pero toma la boleta y el crédito DESPUÉS
--- del cliente (el INSERT del pedido), al revés que el FIFO y la imputación de un crédito: A2a a A2f vuelven a dar 40P01.
---   Medido (06/11, 100 rondas cada una): A2a (el cliente retenido) da 40P01 en 97 y A2d en 80; A2b (Y retenida) en 6 y
---   A2e (C retenida) en 8. A2c, A2f (sin forzar) y A2g (sólo crédito) dan 0: la ventana es de microsegundos. El estado
---   final es correcto en todas (el deadlock lo resuelve Postgres abortando una). A2h (cambio de cliente contra la
---   venta; A2i no se corrió) no depende de estos dos: sigue en 0 (testigo).
+-- del cliente (el INSERT del pedido), al revés que el FIFO y la imputación de un crédito: A2a, A2c, A2d, A2f y A2g vuelven
+-- a dar 40P01 (A2b y A2e cayeron a 0 desde el 06/11, ver abajo).
+--   Medido (10/11, sobre 65eb311e, 100 rondas cada una; #1539 corrigió los del 06/11): A2a (el cliente retenido) da
+--   40P01 en 91 y A2d en 91; A2b (Y retenida) y A2e (C retenida) en 0; las que arrancan sin forzar dan 15 (A2c), 12 (A2f)
+--   y 17 (A2g, sólo crédito): la ventana es de microsegundos y cae sólo a veces. El control se pone rojo igual, con otros
+--   números que los del 06/11 (97, 80, 6, 8 y tres ceros). El estado final es correcto en todas (el deadlock lo resuelve
+--   Postgres abortando una). A2h (cambio de cliente contra la venta; A2i no se corrió) no depende de estos dos: sigue en
+--   0 (testigo). A2l es el riesgo aceptado de la fase 1 del alta: con la mutación puesta da 0 40P01 y en limpio da 100.
 --
 --   psql -f controles-negativos-a2.sql
 --   node run.mjs a2 --out <dir>   (otra carpeta que la de la corrida limpia)

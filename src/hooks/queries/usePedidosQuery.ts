@@ -2,13 +2,14 @@
  * TanStack Query hooks para Pedidos
  * Reemplaza el hook usePedidos con mejor cache y gestión de estado
  */
-import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { PedidoDB, PedidoItemDB, PerfilDB, FiltrosPedidosState, PedidoSalvedadResumen, TipoComprobanteVenta } from '../../types'
 import { productosKeys } from './useProductosQuery'
 import { clientesKeys } from './useClientesQuery'
 import { promocionesKeys } from './usePromocionesQuery'
+import { invalidarCuposPromo } from './cuposPromoCache'
 import { fechaLocalISO } from '../../utils/formatters'
 import { nuevoRequestId, type VerificacionDeAlta } from '../../utils/idempotencia'
 import { isTransientNetworkError, conPlazoDeRed } from '../../utils/retryWithBackoff'
@@ -20,6 +21,7 @@ import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
 import { camposComboRPC, type CamposCombo } from '../../utils/combosPedido'
 import { mismoTotalDelAlta } from '../../utils/totalDelAlta'
+import { invalidarMora, invalidarNotasCreditoYMora } from './invalidacionesDeuda'
 
 // Query keys
 export const pedidosKeys = {
@@ -773,7 +775,12 @@ export function usePedidosPaginatedQuery(
     queryKey: pedidosKeys.paginated(currentSucursalId, page, pageSize, { ...filters, busqueda: search } as Partial<FiltrosPedidosState>),
     queryFn: () => fetchPedidosPaginated(page, pageSize, filters, search),
     staleTime: 2 * 60 * 1000,
-    placeholderData: keepPreviousData,
+    // Cambiar de página o de filtro conserva lo que había mientras carga lo nuevo (sin
+    // parpadeo); cambiar de SUCURSAL no (1600-b3): la clave empieza `['pedidos', sucursalId,
+    // ...]`, y con `keepPreviousData` a secas se veían unos segundos los pedidos de la
+    // sucursal anterior, con sus botones habilitados, hasta que llegaba la lista nueva.
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[1] === currentSucursalId ? previousData : undefined,
     enabled,
   })
 }
@@ -885,7 +892,7 @@ export function useCambiarEstadoMutation() {
       // La ruta del día del transportista lee pedido.estado vía el recorrido;
       // al marcar entregado hay que refrescarla para que avance la parada.
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
     },
   })
 }
@@ -963,7 +970,6 @@ export function useVolverPedidoAPendienteMutation() {
       // La ruta perdió una parada y el chofer un pedido.
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
     },
   })
@@ -1151,7 +1157,7 @@ export function useEntregasMasivasMutation() {
       // esto la pantalla del chofer, Recorridos y el modal de armar ruta seguían con la
       // foto de antes (#1549).
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+      queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
       queryClient.invalidateQueries({ queryKey: ['rutas-en-curso'] })
     },
   })
@@ -1201,9 +1207,16 @@ export function useCancelarPedidoMutation() {
     onSuccess: (_data, { tipo }) => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })
+      // Cancelar libera el cupo de las promos del pedido (1543-b4).
+      void invalidarCuposPromo(queryClient)
+      // STK-15: cancelar devuelve las unidades a sus lotes (trigger de stock);
+      // Vencimientos y la ficha seguían con los contadores de antes. Literal,
+      // como `['mermas']` abajo: no se importa `useLotesQuery` a este módulo.
+      queryClient.invalidateQueries({ queryKey: ['lotes', currentSucursalId] })
       // FRT-2: cancelar saca la boleta de la deuda y deja lo cobrado como saldo a
       // favor; el saldo cacheado del cliente quedaba viejo hasta 5 minutos.
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
+      invalidarNotasCreditoYMora(queryClient) // 1544-b1: la cancelación aplica el crédito que deja y baja la deuda
       // #827 (mig 269): cancelar por falta de stock deja una merma por producto.
       if (tipo === 'falta_stock') {
         queryClient.invalidateQueries({ queryKey: ['mermas'] })
@@ -1219,7 +1232,6 @@ export function useCancelarPedidoMutation() {
       // independientes. Sin esto, cancelar un pedido ya ruteado le dejaba la
       // parada en el mapa: manejaba hasta la puerta de un cliente sin pedido.
       // Mismo conjunto que invalidan handleGuardarItemsEdicion y aplicarOrden.
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
@@ -1285,9 +1297,11 @@ export function useCambiarClientePedidoMutation() {
     mutationFn: cambiarClientePedido,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
+      // Cancela el pedido viejo y crea el nuevo: libera y consume cupo (1543-b4).
+      void invalidarCuposPromo(queryClient)
       queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+      invalidarNotasCreditoYMora(queryClient) // 1544-b1: la deuda y el crédito de los dos clientes cambian
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
@@ -1408,6 +1422,7 @@ export function usePagosMasivosMutation() {
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       // FRT-2: el cobro masivo baja el saldo de cada cliente cobrado.
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
+      invalidarMora(queryClient) // 1544-b1: y saca a esos clientes de la lista de mora
     },
   })
 }
@@ -1526,7 +1541,7 @@ export function useEntregaYPagoMasivosMutation() {
       // que reflejarse (saldo, stock, la parada cerrada en la ruta activa).
       queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+      invalidarMora(queryClient) // 1544-b1: lo cobrado en el paso baja la deuda
       queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
       // La parada que se cierra está en la ruta del chofer (#1549).
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })

@@ -77,6 +77,8 @@ jobs:
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
+    # La suite entera tarda entre 11 y 15 minutos: con 15 se cancelaba cada tanto sin que fallara
+    # ningún test. Desde #1587 (D60) es el único lugar donde corre entera.
     timeout-minutes: 30
     steps:
       - name: Checkout code
@@ -184,17 +186,31 @@ jobs:
           # que el build de producción (Coolify) ya no tiene (#1264).
           VITE_E2E_BRIDGE: 'true'
 
+      # Un archivo JS o CSS del build de más de 1 MiB es un ERROR (1563-b10, decisión del dueño): antes
+      # sólo emitía un warning que nadie leía. Hoy ninguno lo pasa (el más grande, lib-excel, ronda
+      # los 900 KB). Para subir el límite si algún día hace falta: cambiar LIMITE_BYTES acá abajo
+      # (y decir en el PR por qué); para que un chunk grande deje de serlo, partirlo con
+      # build.rollupOptions.output.manualChunks en vite.config.js o cargarlo con import() dinámico.
       - name: Check bundle size
         run: |
           echo "## Bundle Size Report" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           du -sh dist/ >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          # Fail if any single chunk exceeds 1MB (excluding vendor libs)
-          oversized=$(find dist/assets -name '*.js' -size +1M ! -name 'lib-*' ! -name 'vendor-*' 2>/dev/null)
-          if [ -n "$oversized" ]; then
-            echo "::warning::Oversized chunks detected: $oversized"
+          LIMITE_BYTES=1048576 # 1 MiB
+          excedidos=0
+          while IFS= read -r archivo; do
+            bytes=$(stat -c%s "$archivo")
+            if [ "$bytes" -gt "$LIMITE_BYTES" ]; then
+              echo "::error file=$archivo::$archivo pesa $bytes bytes ($((bytes / 1024)) KiB) y el limite es $LIMITE_BYTES ($((LIMITE_BYTES / 1024)) KiB). Partilo (manualChunks / import dinamico) o subi LIMITE_BYTES en .github/workflows/ci.yml, explicando por que."
+              excedidos=$((excedidos + 1))
+            fi
+          done < <(find dist/assets -type f \( -name '*.js' -o -name '*.css' \))
+          if [ "$excedidos" -gt 0 ]; then
+            echo "$excedidos archivo(s) del build pasan el limite de 1 MiB"
+            exit 1
           fi
+          echo "Ningun archivo JS o CSS del build pasa 1 MiB."
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -316,5 +332,7 @@ jobs:
         # su unico fix es vite@8 (breaking, se evalua por separado).
         run: npm audit --audit-level=high --omit=dev
 
+      # `--all`: en CI el índice está vacío, y sin esto el chequeo (que mira los archivos
+      # staged, pensado para el pre-commit) no revisaba nada y salía verde (#1600, 1600-b2).
       - name: Check for secrets in code
-        run: npm run check-secrets
+        run: npm run check-secrets -- --all

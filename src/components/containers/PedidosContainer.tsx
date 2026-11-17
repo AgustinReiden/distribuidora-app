@@ -13,7 +13,9 @@ import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta'
 import { avisoCobroAltaRecortado, mensajeSaldoAFavorAlta, montoCobroAlta, saldoMostradoAlta } from '../../utils/saldoAFavor'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import AvisosPedidos from '../pedidos/AvisosPedidos'
-import { filasPedidosExcel } from '../../utils/pedidosExcel'
+import { filasPedidosExcel, resumenPagosExcel } from '../../utils/pedidosExcel'
+import { invalidarCuposPromo } from '../../hooks/queries/cuposPromoCache'
+import { campoFechaDeEntrega, type ReglaFechaEntrega } from '../../utils/fechaEntrega'
 import { fechaLocalISO, fechaHaceDias, formatPrecio } from '../../utils/formatters'
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo'
 import { motivoDatosDePrecio } from '../../utils/datosDePrecio'
@@ -89,7 +91,7 @@ import {
   fetchPedidoIdsConSalvedad,
   type RegistrarCambioInput,
 } from '../../hooks/queries'
-import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
+import { construirFiltrosPedidos, aplicarFiltroConSalvedad, motivoDelFiltroSalvedad } from '../../utils/construirFiltrosPedidos'
 import { filtrosParaStats } from '../../utils/kpiFiltroPedidos'
 import { useRecorridoActivoQuery } from '../../hooks/queries/useRecorridoActivoQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
@@ -189,7 +191,7 @@ interface ConfirmConfig {
   titulo?: string
   mensaje?: string
   /** Campo de fecha opcional; su valor llega como argumento de onConfirm. */
-  campoFecha?: { label: string; valorInicial: string; max?: string; ayuda?: string }
+  campoFecha?: { label: string; valorInicial: string; min?: string; max?: string; ayuda?: string; validar?: (fecha: string) => string | null }
   onConfirm?: (fecha?: string) => void
 }
 
@@ -199,12 +201,8 @@ interface ConfirmConfig {
  * Se arma en cada apertura y no como constante de módulo porque `fechaLocalISO()`
  * cambia a medianoche y esta app vive en pestañas abiertas por días.
  */
-const campoFechaEntrega = (): NonNullable<ConfirmConfig['campoFecha']> => ({
-  label: 'Fecha de entrega',
-  valorInicial: fechaLocalISO(),
-  max: fechaLocalISO(),
-  ayuda: 'Si estás cargando la entrega de un día anterior, cambiala: define en qué día se contabiliza.',
-})
+const campoFechaEntrega = (regla: ReglaFechaEntrega): NonNullable<ConfirmConfig['campoFecha']> =>
+  campoFechaDeEntrega(regla)
 
 export default function PedidosContainer(): React.ReactElement {
   const queryClient = useQueryClient()
@@ -268,6 +266,7 @@ export default function PedidosContainer(): React.ReactElement {
     data: paginatedResult,
     isLoading: loadingPedidos,
     isError: errorPedidos,
+    error: errorPedidosDetalle,
     refetch: refetchPedidos,
     dataUpdatedAt: pedidosActualizadosAt,
     isSuccess: pedidosCargados,
@@ -852,7 +851,7 @@ export default function PedidosContainer(): React.ReactElement {
         visible: true, titulo: 'Confirmar cambio/devolución',
         mensaje: `¿Confirmar el cambio/devolución del pedido #${pedido.id}? Se ajustará el stock.`,
         tipo: 'success',
-        campoFecha: campoFechaEntrega(),
+        campoFecha: campoFechaEntrega({ esAdmin: isAdmin, diasAtras: politicas.diasAtrasFechaPedido }),
         onConfirm: async (fechaEntrega?: string) => {
           try {
             await aplicarCambioParadaMut.mutateAsync({
@@ -875,7 +874,7 @@ export default function PedidosContainer(): React.ReactElement {
         // La fecha es editable porque lo habitual es marcar hoy las entregas de
         // ayer: con la fecha fija en hoy, la rendición del día del reparto
         // quedaba vacía y la del día que se cargó, inflada.
-        campoFecha: campoFechaEntrega(),
+        campoFecha: campoFechaEntrega({ esAdmin: isAdmin, diasAtras: politicas.diasAtrasFechaPedido }),
         onConfirm: async (fechaEntrega?: string) => {
           try {
             await cambiarEstado.mutateAsync({ pedidoId: pedido.id, nuevoEstado: 'entregado', fechaEntrega })
@@ -893,7 +892,7 @@ export default function PedidosContainer(): React.ReactElement {
     setPagosPreviosFallaron(false)
     setModalPagoPedidoOpen(true)
     await refreshPagosPedido(String(pedido.id))
-  }, [cambiarEstado, notify, refreshPagosPedido, aplicarCambioParadaMut])
+  }, [cambiarEstado, notify, refreshPagosPedido, aplicarCambioParadaMut, isAdmin, politicas.diasAtrasFechaPedido])
 
   const handleMarcarEntregado = useCallback(async (pedido: PedidoDB) => {
     // Sin chofer y sin cobro de por medio: la confirmación trae el chofer. Con
@@ -1294,19 +1293,8 @@ export default function PedidosContainer(): React.ReactElement {
         Porcentaje: pedidosExport.length > 0 ? cantidad / pedidosExport.length : 0,
       }))
 
-      // Hoja 4: Resumen Pagos
-      const pagosCounts: Record<string, { cantidad: number; total: number }> = {}
-      pedidosExport.forEach(p => {
-        const ep = p.estado_pago || 'pendiente'
-        if (!pagosCounts[ep]) pagosCounts[ep] = { cantidad: 0, total: 0 }
-        pagosCounts[ep].cantidad++
-        pagosCounts[ep].total += p.total
-      })
-      const pagosData = Object.entries(pagosCounts).map(([estado, info]) => ({
-        'Estado Pago': estado,
-        Cantidad: info.cantidad,
-        'Total $': info.total,
-      }))
+      // Hoja 4: Resumen Pagos (el vale blanco va aparte como consumo interno: 1598-b3)
+      const pagosData = resumenPagosExcel(pedidosExport)
 
       const suffix = modo === 'filtro' ? 'completo' : 'pagina'
       await createMultiSheetExcel([
@@ -1375,7 +1363,6 @@ export default function PedidosContainer(): React.ReactElement {
       // familia recorridos* para que la hoja de ruta/comanda re-descargada desde
       // Exportaciones refleje cambios de fecha/notas (sino sirve datos cacheados).
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
@@ -1460,7 +1447,8 @@ export default function PedidosContainer(): React.ReactElement {
     // desde la ruta armada via useRecorridosHojaRutaQuery) reflejen el precio
     // editado y no sirvan paradas cacheadas con el valor viejo.
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
-    queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+    // Editar las líneas libera o consume cupo de promo (1543-b4).
+    void invalidarCuposPromo(queryClient)
     queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
     queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
     queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
@@ -1616,13 +1604,20 @@ export default function PedidosContainer(): React.ReactElement {
       await handleConfirmarPago(payload)
       return
     }
+    // Después del cobro, no antes: el `onSettled` de `cambiarEstado` ya invalidó el recorrido con el
+    // pago todavía sin entrar, y el saldo del cliente nunca se refrescaba (lente B10, H5).
+    const invalidarTrasEntregaConPago = () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['clientes'] }),
+      queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] }),
+      queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] }),
+    ])
     setGuardando(true)
     try {
-      // La entrega pertenece al día que el usuario eligió para el cobro, no a hoy.
+      // La entrega lleva su propia fecha (la que eligió quien entrega); sin ella, la del cobro.
       await cambiarEstado.mutateAsync({
         pedidoId: pedido.id,
         nuevoEstado: 'entregado',
-        fechaEntrega: payload.fechaPago,
+        fechaEntrega: payload.fechaEntrega ?? payload.fechaPago,
         ...datosDeEntrega(payload.eleccionChofer),
       })
       let cobroRepetido = false
@@ -1642,12 +1637,14 @@ export default function PedidosContainer(): React.ReactElement {
       } catch (pagoErr) {
         notify.error(avisoEntregaConPagoFallido(pedido.id, (pagoErr as Error).message), { persist: true })
         queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+        void invalidarTrasEntregaConPago()
         setModalPagoPedidoOpen(false)
         setPedidoPago(null)
         setPedidoEntregaConPago(null)
         return
       }
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+      void invalidarTrasEntregaConPago()
       setModalPagoPedidoOpen(false)
       setPedidoPago(null)
       setPedidoEntregaConPago(null)
@@ -1671,7 +1668,11 @@ export default function PedidosContainer(): React.ReactElement {
       // El saldo del cliente cambia al anular un cobro: la ficha y los selectores lo leen de ahí.
       queryClient.invalidateQueries({ queryKey: ['clientes'] })
       notify.success('Pago anulado')
-    } catch (e) { notify.error((e as Error).message) }
+    } catch (e) {
+      notify.error((e as Error).message)
+      // El pago pudo haber dejado de existir (0 filas, 1559-b13): la lista tiene que mostrarlo.
+      void refreshPagosPedido(String(pedidoPago.id))
+    }
     setGuardando(false)
   }, [pedidoPago, isAdmin, eliminarPago, refreshPagosPedido, queryClient, notify])
 
@@ -1686,10 +1687,15 @@ export default function PedidosContainer(): React.ReactElement {
       await refreshPagosPedido(String(pedidoPago.id))
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       queryClient.invalidateQueries({ queryKey: ['clientes'] })
+      // 1544-b1/b2: si el pago quitado era de una NC, vuelve a figurar con saldo por imputar; y cambia la mora.
+      for (const queryKey of [['notas_credito_venta'], ['deudores-mora']]) queryClient.invalidateQueries({ queryKey })
       notify.success(yaEstabaSuelto
         ? 'Ese pago ya estaba fuera de la boleta.'
         : 'Se quitó de la boleta: vuelve a saldo a favor del cliente.')
-    } catch (e) { notify.error((e as Error).message) }
+    } catch (e) {
+      notify.error((e as Error).message)
+      void refreshPagosPedido(String(pedidoPago.id))
+    }
     setGuardando(false)
   }, [pedidoPago, isAdmin, desimputarPago, refreshPagosPedido, queryClient, notify])
 
@@ -1961,7 +1967,7 @@ export default function PedidosContainer(): React.ReactElement {
         setModalPedidoOpen(false)
         notify.warning(
           'Sin conexión: el pedido quedó guardado en el teléfono y se va a sincronizar solo ' +
-            'cuando vuelva la señal. El cobro se registra después.',
+            'cuando vuelva la señal. El cobro no se guarda con el pedido: cuando vuelva la señal, cargalo a mano desde la ficha del pedido.',
           { persist: true },
         )
         setGuardando(false)
@@ -2278,7 +2284,6 @@ export default function PedidosContainer(): React.ReactElement {
       // la ruta del transportista, la ruta existente (para re-editar) y el
       // resumen para re-descargar la hoja de ruta.
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
       queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
@@ -2537,7 +2542,6 @@ export default function PedidosContainer(): React.ReactElement {
       // Aunque `aplicar_orden_ruta` falle en el 2.º chofer, el 1.º ya quedó armado:
       // sin refrescar, la pantalla seguía con la lista de antes (#1549).
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
-      queryClient.invalidateQueries({ queryKey: ['recorridos'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
       queryClient.invalidateQueries({ queryKey: ['rutas-en-curso'] })
@@ -2664,6 +2668,8 @@ export default function PedidosContainer(): React.ReactElement {
     // Invalidar cache de productos y pedidos para reflejar cambios de stock y totales
     queryClient.invalidateQueries({ queryKey: ['productos'] })
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+    // Una salvedad sobre un regalo libera su cupo de promo (1543-b4).
+    void invalidarCuposPromo(queryClient)
     // FRT-2: una salvedad baja el total de la boleta, y con él el saldo del cliente.
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
     // FRT-01 (#1549): la pantalla del chofer no lee de `['pedidos']` sino de su ruta
@@ -2672,7 +2678,7 @@ export default function PedidosContainer(): React.ReactElement {
     // rechaza, pero el cliente ya había puesto la plata en la mano). Se espera el
     // refetch, como en el cobro: al cerrarse el modal el chofer sigue con el saldo
     // nuevo. `invalidateQueries` no tira si el refetch falla (sin red queda lo que había).
-    queryClient.invalidateQueries({ queryKey: ['recorridos'] })
+    queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
     await queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
     return results
   }, [queryClient])
@@ -2818,6 +2824,7 @@ export default function PedidosContainer(): React.ReactElement {
           usuarios={usuarios}
           loading={loadingPedidos}
           error={errorPedidos}
+          errorMotivo={motivoDelFiltroSalvedad(errorPedidosDetalle)}
           onRetry={refetchPedidos}
           exportando={exportando}
           onBusquedaChange={handleBusquedaChange}
@@ -3080,6 +3087,8 @@ export default function PedidosContainer(): React.ReactElement {
             permitirRetiro={isAdmin || isEncargado}
             onConfirm={(eleccion, fecha) => { void handleConfirmarEntregaConChofer(eleccion, fecha) }}
             onClose={() => setPedidoSinChofer(null)}
+            esAdmin={isAdmin}
+            diasAtrasFechaEntrega={politicas.diasAtrasFechaPedido}
           />
         </Suspense>
       )}

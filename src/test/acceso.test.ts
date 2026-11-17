@@ -480,9 +480,9 @@ describe('scripts/rpcs-definer-permitidas.json', () => {
 
   it('"tablas" son las que ya estaban bien al nacer el gate (#1438), menos las que se acotaron: una nueva se acota, no se suma', () => {
     // cliente_admite_adelanto_sueldo salió en la 486 (#1519): ahora mira la sucursal activa.
+    // guardar_rubro_gasto salió contra producción del 17/11 (el gate la avisaba como sobrante al integrar #1645).
     expect(Object.keys(lista.tablas).sort()).toEqual([
       'bot_admin_guardar_aviso_atrasados(uuid,boolean,integer,integer[])',
-      'guardar_rubro_gasto(jsonb)',
       'marcar_notificacion_leida(bigint)',
       'marcar_todas_notificaciones_leidas()',
       'recalcular_recorrido(bigint)',

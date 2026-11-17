@@ -50,7 +50,7 @@ describe('las entregas masivas invalidan la ruta (#1549)', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(claves()).toEqual(expect.arrayContaining([
       JSON.stringify(['recorrido-activo']),
-      JSON.stringify(['recorridos']),
+      JSON.stringify(['recorridos-hoja-ruta']),
       JSON.stringify(['rutas-en-curso']),
     ]))
   })
@@ -66,7 +66,6 @@ describe('las entregas masivas invalidan la ruta (#1549)', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(claves()).toEqual(expect.arrayContaining([
       JSON.stringify(['recorrido-activo']),
-      JSON.stringify(['recorridos']),
       JSON.stringify(['recorridos-hoja-ruta']),
       JSON.stringify(['rutas-en-curso']),
     ]))

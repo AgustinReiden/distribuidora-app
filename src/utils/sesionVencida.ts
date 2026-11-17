@@ -27,10 +27,35 @@ export const MENSAJE_SESION_RENOVADA =
 export const MENSAJE_SESION_CAIDA =
   'Tu sesión venció. Cerrá sesión y volvé a entrar para seguir cargando pedidos.';
 
+/** Renovamos la sesión y el mismo error volvió: no era el token (1600-b16). */
+export const MENSAJE_SUCURSAL_NO_RESUELTA =
+  'No se pudo determinar tu sucursal activa, y renovar la sesión no lo arregló. Cerrá sesión y volvé a entrar; si sigue igual, avisale al administrador: puede que tu usuario ya no tenga esa sucursal asignada o esté desactivado.';
+
+/** El pedido NO se creó y la sesión no se pudo renovar por falta de señal: no es que haya vencido. */
+export const MENSAJE_SESION_SIN_CONEXION =
+  'No se pudo renovar tu sesión porque no hay conexión. Revisá la señal y tocá Confirmar de nuevo — el pedido no se guardó.';
+
 // Pura y sin supabase: vive aparte para que importarla no cree el cliente
 // (rechazoDeNegocio la usa, y lo importan módulos que se testean sin .env).
 import { pareceSesionVencida } from './pareceSesionVencida';
+import { esFalloDeRed } from './falloDeRed';
 export { pareceSesionVencida };
+
+const ES_ERROR_DE_SUCURSAL = /no se pudo determinar la sucursal activa/i;
+
+/**
+ * Cuándo se renovó la sesión por este error por última vez. «No se pudo determinar la sucursal
+ * activa» sale de `current_sucursal_id()` y casi siempre es el token, pero también sale cuando al
+ * usuario ya no le queda esa sucursal o está desactivado: ahí renovar la sesión no cambia nada, y
+ * el cartel «la renovamos, tocá Confirmar de nuevo» se repetía sin fin (1600-b16).
+ */
+let renovadaPorSucursalEn: number | null = null;
+const VENTANA_DE_RENOVACION_MS = 10 * 60 * 1000;
+
+/** Para los tests: el módulo guarda la última renovación. */
+export function olvidarRenovacionDeSesion(): void {
+  renovadaPorSucursalEn = null;
+}
 
 
 /**
@@ -46,11 +71,25 @@ export { pareceSesionVencida };
  */
 export async function explicarErrorDeSesion(mensaje: string): Promise<string> {
   if (!pareceSesionVencida(mensaje)) return mensaje;
+  const porSucursal = ES_ERROR_DE_SUCURSAL.test(mensaje);
+
+  // Ya se renovó hace un rato por este mismo error y volvió: no es el token.
+  if (porSucursal && renovadaPorSucursalEn !== null && Date.now() - renovadaPorSucursalEn < VENTANA_DE_RENOVACION_MS) {
+    // No se resetea: la ventana se deja vencer sola. Si se reseteara, el siguiente intento
+    // volvería a renovar y el cartel alternaría entre «la renovamos» y «no se resolvió».
+    return MENSAJE_SUCURSAL_NO_RESUELTA;
+  }
+
   try {
     const { data, error } = await supabase.auth.refreshSession();
-    return error || !data.session ? MENSAJE_SESION_CAIDA : MENSAJE_SESION_RENOVADA;
-  } catch {
-    return MENSAJE_SESION_CAIDA;
+    if (error || !data.session) {
+      // Sin señal no se pudo ni preguntar: no es que la sesión haya vencido.
+      return esFalloDeRed(error) ? MENSAJE_SESION_SIN_CONEXION : MENSAJE_SESION_CAIDA;
+    }
+    if (porSucursal) renovadaPorSucursalEn = Date.now();
+    return MENSAJE_SESION_RENOVADA;
+  } catch (err) {
+    return esFalloDeRed(err) ? MENSAJE_SESION_SIN_CONEXION : MENSAJE_SESION_CAIDA;
   }
 }
 

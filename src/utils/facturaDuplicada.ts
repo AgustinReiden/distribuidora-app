@@ -135,8 +135,11 @@ export function comprasMismaFactura<T extends FilaCompraFactura>(
     if (proveedorId) {
       if (String(fila.proveedor_id ?? '') !== proveedorId) return false
     } else {
-      const nombreFila = normalizarNombreProveedor(fila.proveedor_nombre || fila.proveedor?.nombre)
-      if (nombreFila !== nombre) return false
+      // 1557-c2: la compra guarda el nombre que tenía el proveedor cuando se hizo,
+      // y el vinculado trae el de hoy. Si lo renombraron, la misma factura se
+      // reconoce por cualquiera de los dos.
+      const nombresFila = [fila.proveedor_nombre, fila.proveedor?.nombre].map(normalizarNombreProveedor)
+      if (!nombresFila.includes(nombre)) return false
     }
     const numeroFila = normalizarNumeroFactura(fila.numero_factura)
     return numeroFacturaChequeable(numeroFila) && mismoNumeroFactura(buscado, numeroFila)

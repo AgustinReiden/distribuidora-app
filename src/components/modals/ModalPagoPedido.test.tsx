@@ -87,7 +87,7 @@ describe('ModalPagoPedido — botón de entrega del chofer', () => {
     const d = new Date(`${fechaLocalISO()}T12:00:00`)
     d.setDate(d.getDate() - 1)
     const ayer = fechaLocalISO(d)
-    fireEvent.change(screen.getByLabelText(/fecha de entrega y pago/i), { target: { value: ayer } })
+    fireEvent.change(screen.getByLabelText(/fecha de la entrega/i), { target: { value: ayer } })
 
     fireEvent.click(screen.getByRole('button', { name: /^entregar a cuenta corriente$/i }))
 
@@ -325,37 +325,56 @@ describe('ModalPagoPedido — quitar de la boleta el saldo a favor aplicado (COB
     )
     return { onAnularPago, onQuitarDeBoleta }
   }
+  const confirmarQuitar = async (): Promise<void> => {
+    fireEvent.click(await screen.findByRole('button', { name: 'Sí, quitar' }))
+  }
   const aplicado = (extra: Partial<PagoDBWithUsuario>): PagoDBWithUsuario =>
     ({ ...pagoDe(5000, '2026-08-08'), pedido_id: '4625', ...extra }) as PagoDBWithUsuario
 
-  it('un pago de_saldo_a_favor llama a onQuitarDeBoleta y no a onAnularPago', () => {
+  it('un pago de_saldo_a_favor llama a onQuitarDeBoleta y no a onAnularPago', async () => {
     const { onAnularPago, onQuitarDeBoleta } = renderConAcciones(aplicado({ de_saldo_a_favor: true }))
 
     expect(screen.queryByRole('button', { name: /anular pago/i })).toBeNull()
     const boton = screen.getByRole('button', { name: 'Quitar de la boleta' })
     expect(boton.getAttribute('title')).toBe('Quitar de esta boleta: vuelve a saldo a favor del cliente')
-    boton.click()
+    fireEvent.click(boton)
+    await confirmarQuitar()
     expect(onQuitarDeBoleta).toHaveBeenCalledWith('1')
     expect(onAnularPago).not.toHaveBeenCalled()
   })
 
-  it('un pago a cuenta o un pedazo también se quitan, no se anulan', () => {
+  // 1544-b3: en la ficha del cliente el «Quitar» se confirma; acá iba directo.
+  it('«Quitar» pide confirmar y no hace nada hasta que se confirma', async () => {
+    const { onQuitarDeBoleta } = renderConAcciones(aplicado({ de_saldo_a_favor: true }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Quitar de la boleta' }))
+    const dialogo = await screen.findByRole('dialog', { name: /quitar de la boleta/i })
+    expect(onQuitarDeBoleta).not.toHaveBeenCalled()
+    expect(dialogo.textContent).toMatch(/vuelve a saldo a favor del cliente/i)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+    expect(onQuitarDeBoleta).not.toHaveBeenCalled()
+  })
+
+  it('un pago a cuenta o un pedazo también se quitan, no se anulan', async () => {
     for (const marca of [{ a_cuenta: true }, { pago_origen_id: '9' }]) {
       const { onAnularPago, onQuitarDeBoleta } = renderConAcciones(aplicado(marca))
-      screen.getByRole('button', { name: 'Quitar de la boleta' }).click()
+      fireEvent.click(screen.getByRole('button', { name: 'Quitar de la boleta' }))
+      await confirmarQuitar()
       expect(onQuitarDeBoleta).toHaveBeenCalledWith('1')
       expect(onAnularPago).not.toHaveBeenCalled()
       cleanup()
     }
   })
 
-  it('no se apaga con la caja cerrada: quitarlo no mueve plata del día', () => {
+  it('no se apaga con la caja cerrada: quitarlo no mueve plata del día', async () => {
     fechaMinimaMock = '2026-08-10'
     const { onQuitarDeBoleta } = renderConAcciones(aplicado({ de_saldo_a_favor: true }))
 
     const boton = screen.getByRole('button', { name: 'Quitar de la boleta' }) as HTMLButtonElement
     expect(boton.disabled).toBe(false)
-    boton.click()
+    fireEvent.click(boton)
+    await confirmarQuitar()
     expect(onQuitarDeBoleta).toHaveBeenCalledWith('1')
   })
 
@@ -418,12 +437,13 @@ describe('ModalPagoPedido — el crédito de una nota de crédito (#1538)', () =
     expect(screen.getByText(/^Nota de crédito aplicada:/)).toHaveTextContent('3.000')
   })
 
-  it('B2: una NC de antes de la 479, sin marcas, se quita de la boleta y no se anula', () => {
+  it('B2: una NC de antes de la 479, sin marcas, se quita de la boleta y no se anula', async () => {
     const { onAnularPago, onQuitarDeBoleta } = renderCon([
       pagoNC({ de_saldo_a_favor: false, a_cuenta: false, pago_origen_id: null } as Partial<PagoDBWithUsuario>),
     ])
 
-    screen.getByRole('button', { name: 'Quitar de la boleta' }).click()
+    fireEvent.click(screen.getByRole('button', { name: 'Quitar de la boleta' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Sí, quitar' }))
     expect(onQuitarDeBoleta).toHaveBeenCalledWith('1')
     expect(onAnularPago).not.toHaveBeenCalled()
   })
