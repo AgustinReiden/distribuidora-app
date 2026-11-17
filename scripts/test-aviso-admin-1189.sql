@@ -106,7 +106,7 @@ BEGIN
       FROM public.usuario_sucursales us
       JOIN public.perfiles p ON p.id = us.usuario_id
      WHERE us.sucursal_id = p_suc
-       AND (CASE WHEN us.rol = 'mismo' THEN p.rol ELSE us.rol END) IN ('admin', 'encargado')
+       AND p.rol IN ('admin', 'encargado')
        AND p.activo IS NOT FALSE
        AND us.usuario_id <> p_uid
   $f$;
