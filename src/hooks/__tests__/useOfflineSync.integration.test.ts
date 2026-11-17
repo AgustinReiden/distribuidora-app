@@ -41,6 +41,7 @@ vi.mock('../../lib/offlineDb', () => ({
   deletePendingOperations: (...args: unknown[]) => mockDeletePendingOperations(...args),
   getCachedData: () => Promise.resolve(cachePoliticas.valor),
   cacheData: () => Promise.resolve(),
+  contarPendientesDeOtrasSucursales: () => Promise.resolve([]),
 }))
 
 // Mock del cliente Supabase y el contexto de sucursal — necesario porque

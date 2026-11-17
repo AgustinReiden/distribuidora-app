@@ -54,6 +54,11 @@ import {
   mensajeAltaRecuperada,
   mensajeAltaCerradaQueEntro,
   MENSAJE_ALTA_SIN_VERIFICAR,
+  verificacionConfiable,
+  ofrecerColaTrasFallo,
+  huellaDeAlta,
+  MENSAJE_ALTA_EN_DUDA_ENCOLADA,
+  MENSAJE_VB_EN_DUDA_ENCOLADO,
   type ClaveDeAlta,
 } from '../../utils/idempotencia'
 import { verificarClaveDeAlta } from '../../hooks/queries/usePedidosQuery'
@@ -388,7 +393,9 @@ export default function PedidosContainer(): React.ReactElement {
     void verificarClaveDeAlta(propia.id).then(verificacion => {
       // Si mientras tanto se usó en un alta nueva, la respuesta ya no es de ella.
       if (!altasApartadasRef.current.some(a => a.id === propia.id)) return
-      const decision = decidirAltaRecuperada(verificacion)
+      // Un «no entró» recién terminado el intento puede ser de uno que sigue
+      // corriendo en el servidor (M5, #1603): se conserva hasta la próxima vez.
+      const decision = decidirAltaRecuperada(verificacionConfiable(verificacion, propia))
       if (decision.paso === 'conservar') return
       fijarAltas(altaIdRef.current, altasApartadasRef.current.filter(a => a.id !== propia.id))
       if (decision.paso === 'avisar') {
@@ -623,8 +630,21 @@ export default function PedidosContainer(): React.ReactElement {
   const [promosEliminadas, setPromosEliminadas] = useState<Array<{ promoId: string; promoNombre: string }>>([])
   const promosEliminadasSet = useMemo(() => new Set(promosEliminadas.map(p => p.promoId)), [promosEliminadas])
 
+  /**
+   * D56 (1563-b7, #1563): el alta que falló por la red con la clave en duda. La
+   * pantalla ofrece guardarla en la cola con esa misma clave (`ofrecerColaTrasFallo`);
+   * no se encola sola. Guarda el GPS del intento y la huella del contenido: si el
+   * formulario cambia, la oferta deja de valer (sería otro pedido).
+   */
+  const [altaParaCola, setAltaParaCola] = useState<{
+    gps: GpsResult | null
+    motivoOmision?: string
+    huella: string
+  } | null>(null)
+
   /** Deja el formulario del alta en blanco. La clave del alta la maneja quien llama. */
   const limpiarFormularioAlta = useCallback(() => {
+    setAltaParaCola(null)
     setNuevoPedido({
       clienteId: '', items: [], notas: '',
       formaPago: 'efectivo', estadoPago: 'pendiente', montoPagado: 0,
@@ -675,7 +695,11 @@ export default function PedidosContainer(): React.ReactElement {
       fijarAltas(paso.clave, apartadasTrasEnviar(previa, altasApartadasRef.current, paso.clave))
       return paso.clave.id
     }
-    const decision = decidirTrasVerificar(await verificarClaveDeAlta(paso.anterior.id), huella, clienteId)
+    const decision = decidirTrasVerificar(
+      verificacionConfiable(await verificarClaveDeAlta(paso.anterior.id), paso.anterior),
+      huella,
+      clienteId,
+    )
     if (decision.paso === 'esperar_senal') {
       notify.warning(MENSAJE_ALTA_SIN_VERIFICAR, { persist: true })
       return null
@@ -710,14 +734,16 @@ export default function PedidosContainer(): React.ReactElement {
   const mandarAlta = useCallback(async (input: Parameters<typeof crearPedido.mutateAsync>[0]) => {
     const clave = altaIdRef.current
     const enDudaAntes = clave?.enDuda === true
-    if (clave && clave.id === input.offlineId) fijarAltaId({ ...clave, enDuda: true })
+    // `intentoEn` (M5, #1603): mientras el intento pueda seguir corriendo en el
+    // servidor, un «no entró» no se cree (`verificacionConfiable`).
+    if (clave && clave.id === input.offlineId) fijarAltaId({ ...clave, enDuda: true, intentoEn: Date.now() })
     const alta = crearPedido.mutateAsync(input)
     // El fallo sigue su camino al llamador (el `await` de abajo): acá sólo se
     // anota si la clave queda en duda, antes de que el llamador lo vea.
     alta.catch((e: unknown) => {
       const actual = altaIdRef.current
       if (actual && actual.id === input.offlineId) {
-        fijarAltaId({ ...actual, enDuda: enDudaTrasFallo(enDudaAntes, e) })
+        fijarAltaId({ ...actual, enDuda: enDudaTrasFallo(enDudaAntes, e), intentoEn: Date.now() })
       }
     })
     return await alta
@@ -1732,16 +1758,16 @@ export default function PedidosContainer(): React.ReactElement {
   const ejecutarCreacionPedido = useCallback(async (
     gps: GpsResult | null,
     motivoOmision?: string,
+    // D56: quien carga eligió guardar en la cola el alta que quedó en duda por la red.
+    opciones: { aCola?: boolean } = {},
   ) => {
+    // Sin red, o porque quien carga lo eligió con la señal inservible (D56): a la cola.
+    const encolar = !isOnline || opciones.aCola === true
     try {
       // Use promo+wholesale-resolved items and total (includes bonificaciones)
       const tipoFactura = nuevoPedido.tipoFactura || 'ZZ'
-      // Lo que identifica a ESTE pedido para su clave de alta: el formulario y las
-      // líneas finales (con promos, regalos y combos ya resueltos). Ver `altaIdRef`.
-      const huellaDelAlta = JSON.stringify([
-        nuevoPedido,
-        itemsFinales.map(i => [i.productoId, i.cantidad, i.precioUnitario, i.esBonificacion ?? false]),
-      ])
+      // Lo que identifica a ESTE pedido para su clave de alta. Ver `altaIdRef`.
+      const huellaDelAlta = huellaDeAlta(nuevoPedido, itemsFinales)
 
       // VALE BLANCO: el servidor lo precia a costo e ignora total, neto, IVA,
       // forma y estado de pago (el front no ve costos, #974). Van sólo producto
@@ -1756,7 +1782,7 @@ export default function PedidosContainer(): React.ReactElement {
           setGuardando(false)
           return
         }
-        if (!isOnline) {
+        if (encolar) {
           const resultado = await guardarPedidoOffline({
             clienteId: nuevoPedido.clienteId,
             clienteNombre: (clienteNuevoPedido as { nombre_fantasia?: string } | undefined)?.nombre_fantasia,
@@ -1788,7 +1814,8 @@ export default function PedidosContainer(): React.ReactElement {
           }
           resetNuevoPedido()
           setModalPedidoOpen(false)
-          notify.warning(
+          if (isOnline) notify.warning(MENSAJE_VB_EN_DUDA_ENCOLADO, { persist: true })
+          else notify.warning(
             'Sin conexión: el vale blanco quedó guardado en el teléfono y se va a sincronizar solo ' +
               'cuando vuelva la señal. El total a costo lo calcula el servidor al sincronizar.',
           )
@@ -1900,7 +1927,10 @@ export default function PedidosContainer(): React.ReactElement {
       // encolada, que es la de este alta (`altaId`, #1543): si un intento online
       // anterior con el mismo contenido había entrado y se perdió la respuesta,
       // el replay recibe ese pedido en vez de crear otro.
-      if (!isOnline) {
+      //
+      // Con señal inservible (`navigator.onLine` en true) no se llega acá solo: el
+      // alta falla, queda en duda y la pantalla ofrece la cola (D56, ver `altaParaCola`).
+      if (encolar) {
         const resultado = await guardarPedidoOffline({
           clienteId: nuevoPedido.clienteId,
           // El panel de pendientes (OfflineIndicator) no tiene forma de pedir
@@ -1966,8 +1996,10 @@ export default function PedidosContainer(): React.ReactElement {
         resetNuevoPedido()
         setModalPedidoOpen(false)
         notify.warning(
-          'Sin conexión: el pedido quedó guardado en el teléfono y se va a sincronizar solo ' +
-            'cuando vuelva la señal. El cobro no se guarda con el pedido: cuando vuelva la señal, cargalo a mano desde la ficha del pedido.',
+          isOnline
+            ? MENSAJE_ALTA_EN_DUDA_ENCOLADA
+            : 'Sin conexión: el pedido quedó guardado en el teléfono y se va a sincronizar solo ' +
+              'cuando vuelva la señal. El cobro no se guarda con el pedido: cuando vuelva la señal, cargalo a mano desde la ficha del pedido.',
           { persist: true },
         )
         setGuardando(false)
@@ -2128,6 +2160,15 @@ export default function PedidosContainer(): React.ReactElement {
         : null
       if (avisoRecorte) notify.warning(avisoRecorte, { persist: true })
     } catch (e) {
+      // D56 (1563-b7): falló por la red con la clave en duda. No se encola sola ni
+      // se tira: el modal queda abierto con el pedido y ofrece guardarlo en la cola
+      // con esta misma clave. Volver a tocar Confirmar reintenta con la misma.
+      const enDuda = altaIdRef.current
+      if (!encolar && enDuda && ofrecerColaTrasFallo(e, enDuda)) {
+        setAltaParaCola({ gps, motivoOmision, huella: enDuda.huella })
+        setGuardando(false)
+        return
+      }
       // "No se pudo determinar la sucursal activa" casi siempre es el token, no
       // la sucursal: se traduce y se renueva la sesión para que el reintento
       // funcione. Ver src/utils/sesionVencida.ts.
@@ -2140,6 +2181,17 @@ export default function PedidosContainer(): React.ReactElement {
     }
     setGuardando(false)
   }, [nuevoPedido, motivoDatosAlta, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, mandarAlta, user, resetNuevoPedido, acuniarIdDeAlta, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient, politicas, clientesOperativos, perfil?.rol])
+
+  // D56: la oferta vale mientras el formulario sea el del intento que falló.
+  const huellaFormularioAlta = useMemo(() => huellaDeAlta(nuevoPedido, itemsFinales), [nuevoPedido, itemsFinales])
+  const ofrecerColaAlta = altaParaCola !== null && altaParaCola.huella === huellaFormularioAlta
+  const handleGuardarAltaEnCola = useCallback(async () => {
+    const oferta = altaParaCola
+    if (!oferta) return
+    setAltaParaCola(null)
+    setGuardando(true)
+    await ejecutarCreacionPedido(oferta.gps, oferta.motivoOmision, { aCola: true })
+  }, [altaParaCola, ejecutarCreacionPedido])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,
   // pedir motivo, o crear directo.
@@ -2159,6 +2211,8 @@ export default function PedidosContainer(): React.ReactElement {
       notify.warning('Ingresá el monto del pago parcial')
       return
     }
+    // Un intento nuevo: la oferta de la cola (D56) vuelve a salir si éste también falla.
+    setAltaParaCola(null)
     // Un reparto del regalo que no cierra no se aplica (`orquestarPrecios` deja
     // el regalo default): guardarlo así le mandaría al cliente otra cosa que la
     // que eligió el admin. ModalPedido ya bloquea el confirmar; esto es la defensa.
@@ -2959,6 +3013,7 @@ export default function PedidosContainer(): React.ReactElement {
               }
             }}
             onGuardar={handleGuardarPedido}
+            onGuardarEnCola={ofrecerColaAlta ? handleGuardarAltaEnCola : undefined}
             guardando={guardando}
             isAdmin={isAdmin}
             isPreventista={isPreventista}

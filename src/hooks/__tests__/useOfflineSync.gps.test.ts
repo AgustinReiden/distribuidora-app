@@ -22,6 +22,7 @@ vi.mock('../../lib/offlineDb', () => ({
   anotarFalloDeRed: vi.fn().mockResolvedValue(undefined),
   deletePendingOperation: vi.fn().mockResolvedValue(undefined),
   deletePendingOperations: vi.fn().mockResolvedValue(0),
+  contarPendientesDeOtrasSucursales: vi.fn().mockResolvedValue([]),
 }))
 
 vi.mock('../useRegistrarGeolocalizacionPedido', () => ({

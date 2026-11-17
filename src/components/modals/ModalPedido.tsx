@@ -144,6 +144,11 @@ export interface ModalPedidoProps {
   }) => Promise<VeredictoDuplicadoRPC>;
   /** Callback al guardar pedido */
   onGuardar: () => void | Promise<void>;
+  /**
+   * D56 (1563-b7): el alta falló por la red y no se sabe si entró. Si viene, el
+   * modal ofrece guardar el pedido en la cola del teléfono con la misma clave.
+   */
+  onGuardarEnCola?: () => void | Promise<void>;
   /** Indica si está guardando */
   guardando: boolean;
   /** Si es admin */
@@ -230,6 +235,7 @@ const ModalPedido = memo(function ModalPedido({
   onCrearCliente,
   onVerificarDuplicado,
   onGuardar,
+  onGuardarEnCola,
   guardando,
   isAdmin,
   isPreventista,
@@ -1915,6 +1921,28 @@ const ModalPedido = memo(function ModalPedido({
         {faltaHorarioCliente && (
           <div role="alert" className="flex-shrink-0 px-4 py-1.5 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200">
             Falta cargar el horario del cliente — subí para completarlo.
+          </div>
+        )}
+
+        {/* D56 (1563-b7): con señal que no pasa datos el alta falló y no se sabe si
+            entró. No se encola sola: se ofrece, con la misma clave del intento. */}
+        {onGuardarEnCola && !isOffline && (
+          <div role="alert" className="flex-shrink-0 px-4 py-2 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200 flex items-center justify-between gap-3">
+            <span>
+              <strong>No se pudo confirmar si el pedido entró:</strong> la señal no alcanza. Podés guardarlo en el
+              teléfono y se manda solo cuando haya señal; si el intento de recién sí había entrado, no se duplica.
+              El cobro no se guarda con el pedido.
+            </span>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={() => { void onGuardarEnCola() }}
+              disabled={guardando}
+              className="flex-shrink-0"
+            >
+              Guardar en el teléfono
+            </Button>
           </div>
         )}
 

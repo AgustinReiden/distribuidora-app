@@ -15,15 +15,13 @@
  * 2. El service worker, cuando termina de bajar el build nuevo y lo deja
  *    esperando. Es el que avisa aunque el chequeo de arriba no haya corrido.
  *
- * La recarga solo es automatica cuando no hay NADA que perder (ver
- * `puedeAplicarSinPreguntar`): recien abierta la app, o al volver a una pestania
- * que estuvo abandonada un buen rato, sin un modal abierto ni un campo en
- * edicion. En cualquier otro momento decide ella con el cartel, porque un
- * reload sorpresa mientras carga un pedido le borra lo tipeado. Antes el cartel
- * era la unica via y reaparecia en cada apertura de la app mientras hubiera un
- * SW esperando, aunque ya corriera el build nuevo. Y el "Actualizar" pasa por
- * el service worker (ver `aplicarActualizacionSW`): un reload pelado volveria a
- * servir el index.html viejo del precache y el cartel no se iria nunca.
+ * D57 (decision del duenio, 1563-b8 de #1563): la actualizacion es obligatoria.
+ * El cartel avisa y el salto llega solo al volver a la app o al cambiar de
+ * pantalla (ver `saltarAlBuildNuevo`); ya no hay «Mas tarde». Sigue sin saltar
+ * con un modal abierto o un campo en edicion, porque le borraria lo tipeado: lo
+ * hace en el proximo cambio de pantalla o vuelta a la app. Y el "Actualizar"
+ * pasa por el service worker (ver `aplicarActualizacionSW`): un reload pelado
+ * volveria a servir el index.html viejo del precache y el cartel no se iria nunca.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -31,19 +29,15 @@ import {
   hayActualizacionSWEsperando,
   suscribirActualizacionSW,
 } from '../utils/serviceWorker'
+import { saltarAlBuildNuevo, type DisparadorActualizacion } from '../utils/actualizacionObligatoria'
 
 /** Cada cuanto se pregunta, con la pestania visible. */
 const INTERVALO_MS = 15 * 60 * 1000
-/** Cuanto se calla el cartel cuando eligen "Mas tarde". */
-const ESPERA_TRAS_POSPONER_MS = 4 * 60 * 60 * 1000
 /** Ventana tras abrir la app en la que todavia no hay nada que perder. */
 const VENTANA_ARRANQUE_MS = 20 * 1000
-/** Pestania escondida al menos esto = abandonada: al volver se actualiza sola. */
-const AUSENCIA_LARGA_MS = 30 * 60 * 1000
 /** Tope contra un loop de recargas si la actualizacion automatica no prospera. */
 const ENFRIAMIENTO_AUTO_MS = 10 * 60 * 1000
 
-const CLAVE_POSPUESTO = 'actualizacion:pospuesto-hasta'
 const CLAVE_AUTO = 'actualizacion:ultimo-auto'
 
 function leerNumero(clave: string): number {
@@ -72,18 +66,6 @@ function hayTrabajoEnCurso(): boolean {
 }
 
 /**
- * Se puede saltar al build nuevo sin preguntar: nada en curso y, ademas, o la
- * app acaba de abrirse o la pestania estuvo abandonada. Corta con un
- * enfriamiento para que una actualizacion que no prospera no entre en loop.
- */
-function puedeAplicarSinPreguntar(ausenteMs: number): boolean {
-  if (Date.now() - leerNumero(CLAVE_AUTO) < ENFRIAMIENTO_AUTO_MS) return false
-  if (hayTrabajoEnCurso()) return false
-  const recienAbierta = performance.now() < VENTANA_ARRANQUE_MS
-  return recienAbierta || ausenteMs >= AUSENCIA_LARGA_MS
-}
-
-/**
  * Build que corre esta pestania. Se lee como constante (y no llamando al hook)
  * para poder mostrarlo en la UI sin arrancar un segundo ciclo de chequeo.
  */
@@ -99,16 +81,20 @@ export interface ActualizacionDisponible {
   actualizando: boolean
   /** Recarga para tomar el build nuevo. */
   actualizar: () => void
-  /** Esconde el cartel por un rato. */
-  posponer: () => void
+  /**
+   * Esconde el cartel. No pospone nada (D57): el salto llega igual al volver a
+   * la app o al cambiar de pantalla, y el cartel vuelve con el proximo aviso.
+   */
+  ocultar: () => void
 }
 
-export function useActualizacionDisponible(): ActualizacionDisponible {
-  const [disponible, setDisponible] = useState(() => hayActualizacionSWEsperando() && Date.now() >= leerNumero(CLAVE_POSPUESTO))
+/**
+ * `ruta` es la pantalla actual (`location.pathname`): cuando cambia, con un build
+ * nuevo esperando, se salta (D57). Sin ella, sólo al volver a la app.
+ */
+export function useActualizacionDisponible(ruta?: string): ActualizacionDisponible {
+  const [disponible, setDisponible] = useState(() => hayActualizacionSWEsperando())
   const [actualizando, setActualizando] = useState(false)
-  // En sessionStorage para que sobreviva a una recarga: en memoria, el "Mas
-  // tarde" se perdia al recargar y el cartel volvia a saltar enseguida.
-  const pospuestoHasta = useRef(leerNumero(CLAVE_POSPUESTO))
   const hayNuevo = useRef(hayActualizacionSWEsperando())
   const escondidaDesde = useRef<number | null>(null)
   // En dev el bundle lo sirve vite con HMR y no hay version.json que pedir.
@@ -124,21 +110,24 @@ export function useActualizacionDisponible(): ActualizacionDisponible {
     })
   }, [])
 
-  /** Salta solo si no hay nada que perder; si no, queda el cartel. */
-  const intentarAuto = useCallback((ausenteMs: number): boolean => {
+  /** Salta solo si es el momento (D57); si no, queda el cartel. */
+  const intentarAuto = useCallback((disparador: DisparadorActualizacion): boolean => {
     if (!hayNuevo.current) return false
-    // El "Mas tarde" tambien frena el salto automatico.
-    if (Date.now() < pospuestoHasta.current) return false
-    if (!puedeAplicarSinPreguntar(ausenteMs)) return false
+    const salta = saltarAlBuildNuevo({
+      disparador,
+      trabajoEnCurso: hayTrabajoEnCurso(),
+      enEnfriamiento: Date.now() - leerNumero(CLAVE_AUTO) < ENFRIAMIENTO_AUTO_MS,
+      recienAbierta: performance.now() < VENTANA_ARRANQUE_MS,
+    })
+    if (!salta) return false
     guardarNumero(CLAVE_AUTO, Date.now())
     actualizar()
     return true
   }, [actualizar])
 
-  const chequear = useCallback(async () => {
+  const chequear = useCallback(async (disparador: DisparadorActualizacion) => {
     if (!activo) return
     if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
-    if (Date.now() < pospuestoHasta.current) return
 
     try {
       // El query param + no-store evitan depender de los headers del hosting.
@@ -151,7 +140,7 @@ export function useActualizacionDisponible(): ActualizacionDisponible {
       // a un cartel que no se puede sacar.
       if (typeof buildId === 'string' && buildId && buildId !== __APP_BUILD_ID__) {
         hayNuevo.current = true
-        if (!intentarAuto(0)) setDisponible(true)
+        if (!intentarAuto(disparador)) setDisponible(true)
       }
     } catch {
       /* sin conexion: se reintenta en el proximo ciclo */
@@ -161,7 +150,7 @@ export function useActualizacionDisponible(): ActualizacionDisponible {
   useEffect(() => {
     if (!activo) return
 
-    void chequear()
+    void chequear('aviso')
 
     const alVolver = (): void => {
       if (document.visibilityState === 'hidden') {
@@ -169,23 +158,23 @@ export function useActualizacionDisponible(): ActualizacionDisponible {
         return
       }
       if (document.visibilityState !== 'visible') return
-      const ausente = escondidaDesde.current === null ? 0 : Date.now() - escondidaDesde.current
+      // Volvio a la app si estuvo escondida; un `focus` sin eso (otra ventana
+      // encima) sólo pregunta.
+      const disparador: DisparadorActualizacion = escondidaDesde.current === null ? 'aviso' : 'volver'
       escondidaDesde.current = null
       // Si salta sola no hace falta mostrar nada.
-      if (intentarAuto(ausente)) return
-      void chequear()
+      if (intentarAuto(disparador)) return
+      void chequear(disparador)
     }
     document.addEventListener('visibilitychange', alVolver)
     window.addEventListener('focus', alVolver)
 
-    const id = setInterval(() => { void chequear() }, INTERVALO_MS)
+    const id = setInterval(() => { void chequear('aviso') }, INTERVALO_MS)
 
-    // El service worker dejo un build nuevo esperando. Respeta el "Mas tarde"
-    // igual que el chequeo de /version.json.
+    // El service worker dejo un build nuevo esperando.
     const desuscribir = suscribirActualizacionSW(() => {
       hayNuevo.current = true
-      if (Date.now() < pospuestoHasta.current) return
-      if (!intentarAuto(0)) setDisponible(true)
+      if (!intentarAuto('aviso')) setDisponible(true)
     })
 
     return () => {
@@ -196,13 +185,20 @@ export function useActualizacionDisponible(): ActualizacionDisponible {
     }
   }, [activo, chequear, intentarAuto])
 
-  const posponer = useCallback(() => {
-    pospuestoHasta.current = Date.now() + ESPERA_TRAS_POSPONER_MS
-    guardarNumero(CLAVE_POSPUESTO, pospuestoHasta.current)
+  // D57: cambiar de pantalla con un build nuevo esperando lo aplica. La primera
+  // ruta no cuenta: es la de la apertura, que ya miró el chequeo del arranque.
+  const rutaAnterior = useRef(ruta)
+  useEffect(() => {
+    if (!activo || ruta === undefined || ruta === rutaAnterior.current) return
+    rutaAnterior.current = ruta
+    intentarAuto('pantalla')
+  }, [activo, ruta, intentarAuto])
+
+  const ocultar = useCallback(() => {
     setDisponible(false)
   }, [])
 
-  return { disponible, buildActual: BUILD_ACTUAL, actualizando, actualizar, posponer }
+  return { disponible, buildActual: BUILD_ACTUAL, actualizando, actualizar, ocultar }
 }
 
 export default useActualizacionDisponible

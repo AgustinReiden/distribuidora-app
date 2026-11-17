@@ -9,8 +9,10 @@ import {
   cleanupOldSyncEvents,
   deletePendingOperation,
   deletePendingOperations,
+  contarPendientesDeOtrasSucursales,
   type PendingOperation,
-  type OperationType
+  type OperationType,
+  type PendientesDeOtraSucursal
 } from '../lib/offlineDb'
 import { logger } from '../utils/logger'
 import type { ProductoDB, TipoComprobanteVenta } from '../types'
@@ -254,6 +256,12 @@ export interface UseOfflineSyncReturn {
   limpiarPedidosOffline: () => void;
   refreshPendingOperations: () => Promise<void>;
   cantidadPendientes: number;
+  /**
+   * 1600-b8 (D58): pedidos del usuario sin sincronizar en otras sucursales. No
+   * entran en `pedidosPendientes` ni se mandan desde acá: se avisan, y se ofrece
+   * cambiar de sucursal para mandarlos.
+   */
+  pendientesOtrasSucursales: PendientesDeOtraSucursal[];
 }
 
 // ============================================================================
@@ -353,8 +361,11 @@ export function verificarRespuestaIdempotente(
     || Math.abs((r.total - (r.cargoEnvio ?? 0)) - (Number(payload.total) || 0)) < 0.01
   if (mismoCliente && mismoTotal) return null
 
+  // Sin el cliente ni el total del otro pedido (lente de B12b, 1600-b4): el motivo
+  // va al log (consola y Sentry) y al panel, y ninguno de los dos lleva datos de
+  // clientes. Lo de ese pedido se ve en el servidor, con permisos.
   return {
-    motivo: `La clave de sincronización de este pedido ya la tiene otro pedido en el servidor (cliente ${r.clienteId}, total ${r.total}). No se sincronizó para no pisarlo.`,
+    motivo: 'La clave de sincronización de este pedido ya la tiene otro pedido en el servidor, de otro cliente o con otro total. No se sincronizó para no pisarlo.',
     terminal: true
   }
 }
@@ -386,6 +397,7 @@ function hayQueRenovarSesion(error: unknown): boolean {
 export function useOfflineSync(): UseOfflineSyncReturn {
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine)
   const [pedidosPendientes, setPedidosPendientes] = useState<PedidoOffline[]>([])
+  const [pendientesOtrasSucursales, setPendientesOtrasSucursales] = useState<PendientesDeOtraSucursal[]>([])
   const [sincronizando, setSincronizando] = useState<boolean>(false)
 
   // Multi-tenant: track the active sucursal so we can tag queued operations
@@ -434,6 +446,16 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       setPedidosPendientes(pedidos)
     } catch (err) {
       logger.error('[useOfflineSync] Error cargando operaciones pendientes:', err)
+    }
+    // Aparte: si esto falla, la cola de la sucursal activa se ve igual (1600-b8).
+    try {
+      const otras = await contarPendientesDeOtrasSucursales(userId ?? null, currentSucursalId)
+      if (!isMountedRef.current) return
+      setPendientesOtrasSucursales(prev =>
+        JSON.stringify(prev) === JSON.stringify(otras) ? prev : otras
+      )
+    } catch (err) {
+      logger.warn('[useOfflineSync] Error contando pendientes de otras sucursales:', err)
     }
   }, [userId, currentSucursalId])
 
@@ -927,6 +949,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     sincronizarPedidos,
     limpiarPedidosOffline,
     refreshPendingOperations: loadPendingOperations,
-    cantidadPendientes: pedidosPendientes.length
+    cantidadPendientes: pedidosPendientes.length,
+    pendientesOtrasSucursales
   }
 }

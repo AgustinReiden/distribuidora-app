@@ -17,6 +17,11 @@ import {
   decidirAltaRecuperada,
   mensajeAltaRecuperada,
   mensajeAltaCerradaQueEntro,
+  verificacionConfiable,
+  MARGEN_INTENTO_EN_VUELO_MS,
+  clienteDeLaHuella,
+  huellaDeAlta,
+  ofrecerColaTrasFallo,
   type ClaveDeAlta,
 } from './idempotencia'
 
@@ -177,5 +182,67 @@ describe('mensajeAltaQueYaHabiaEntrado', () => {
     expect(m).toMatch(/NO está en ese pedido/)
     expect(m).toMatch(/cobro no quedó registrado/)
     expect(mensajeAltaQueYaHabiaEntrado('501', false)).not.toMatch(/cobro/)
+  })
+})
+
+// M5 (#1603): un «no entró» recién terminado el intento puede ser de un intento
+// que todavía corre en el servidor (la fila sin COMMIT no se ve). Se olvidaba la
+// clave y la próxima alta del cliente acuñaba otra: dos pedidos.
+describe('verificacionConfiable (M5)', () => {
+  const T = Date.parse('2026-11-17T15:00:00Z')
+
+  it('un «no entró» dentro del margen del último intento no vale: es «sin respuesta»', () => {
+    const clave = { intentoEn: T - 5_000 }
+    expect(verificacionConfiable({ resultado: 'no_entro' }, clave, T)).toEqual({ resultado: 'sin_respuesta' })
+    // …y entonces no se olvida la clave ni se acuña otra.
+    expect(decidirAltaRecuperada(verificacionConfiable({ resultado: 'no_entro' }, clave, T))).toEqual({ paso: 'conservar' })
+    expect(decidirTrasVerificar(verificacionConfiable({ resultado: 'no_entro' }, clave, T), 'h2', '9').paso).toBe('esperar_senal')
+  })
+
+  it('pasado el margen, el «no entró» vale', () => {
+    const clave = { intentoEn: T - MARGEN_INTENTO_EN_VUELO_MS }
+    expect(verificacionConfiable({ resultado: 'no_entro' }, clave, T)).toEqual({ resultado: 'no_entro' })
+  })
+
+  it('«entró» vale siempre, y una clave sin hora (de antes) se cree como antes', () => {
+    expect(verificacionConfiable({ resultado: 'entro', pedidoId: '5' }, { intentoEn: T }, T)).toEqual({ resultado: 'entro', pedidoId: '5' })
+    expect(verificacionConfiable({ resultado: 'no_entro' }, {}, T)).toEqual({ resultado: 'no_entro' })
+  })
+})
+
+describe('clienteDeLaHuella (punto de la ola 1: la clave vieja sin cliente)', () => {
+  it('saca el cliente de la huella del alta', () => {
+    expect(clienteDeLaHuella(huellaDeAlta({ clienteId: '42' }, []))).toBe('42')
+    expect(clienteDeLaHuella(huellaDeAlta({ clienteId: 42 }, []))).toBe('42')
+  })
+
+  it('si la huella no lo dice, no inventa: queda sin cliente (de cualquiera, lo seguro)', () => {
+    expect(clienteDeLaHuella('no es json')).toBeUndefined()
+    expect(clienteDeLaHuella(huellaDeAlta({ clienteId: '' }, []))).toBeUndefined()
+    expect(clienteDeLaHuella('["pedido",9]')).toBeUndefined()
+  })
+})
+
+// D56 (1563-b7 de #1563): con señal que no pasa datos el alta queda en duda y la
+// pantalla ofrece la cola; no se encola sola.
+describe('ofrecerColaTrasFallo (D56)', () => {
+  const enDuda: ClaveDeAlta = { id: 'k', huella: 'h', enDuda: true, clienteId: '9' }
+
+  it('se ofrece si falló por la red y la clave quedó en duda, con navigator.onLine en true', () => {
+    expect(navigator.onLine).toBe(true)
+    expect(ofrecerColaTrasFallo(new TypeError('Failed to fetch'), enDuda)).toBe(true)
+    expect(ofrecerColaTrasFallo(errorDeSupabase({ message: 'TypeError: Failed to fetch', code: '' }, 'Sin conexión'), enDuda)).toBe(true)
+    expect(ofrecerColaTrasFallo(new PlazoDeRedVencido(20_000), enDuda)).toBe(true)
+    expect(ofrecerColaTrasFallo(errorDeSupabase({ message: 'gateway', code: 'HTTP_524' }, 'x'), enDuda)).toBe(true)
+  })
+
+  it('un rechazo del servidor no se ofrece: no entró y en la cola se rechazaría igual', () => {
+    expect(ofrecerColaTrasFallo(new RechazoDeNegocioError('Stock insuficiente'), { ...enDuda, enDuda: false })).toBe(false)
+    expect(ofrecerColaTrasFallo(errorDeSupabase({ message: 'permission denied', code: '42501' }, 'x'), enDuda)).toBe(false)
+  })
+
+  it('sin clave en duda no se ofrece', () => {
+    expect(ofrecerColaTrasFallo(new TypeError('Failed to fetch'), null)).toBe(false)
+    expect(ofrecerColaTrasFallo(new TypeError('Failed to fetch'), { ...enDuda, enDuda: false })).toBe(false)
   })
 })

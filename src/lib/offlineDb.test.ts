@@ -24,12 +24,49 @@ import {
   deletePendingOperations,
   cleanupOldSyncEvents,
   pedirAlmacenamientoPersistente,
-  anotarFalloDeRed
+  anotarFalloDeRed,
+  contarPendientesDeOtrasSucursales
 } from './offlineDb'
 
 describe('offlineDb', () => {
   beforeEach(async () => {
     await clearAllData()
+  })
+
+  // ---------------------------------------------------------------------------
+  // 1600-b8 (D58): lo que el usuario dejó sin sincronizar en otras sucursales
+  // ---------------------------------------------------------------------------
+
+  describe('contarPendientesDeOtrasSucursales (1600-b8)', () => {
+    const pedido = { clienteId: '7', items: [], total: 1 }
+
+    it('cuenta por sucursal lo del usuario en las otras, pendiente o fallido, y no lo de la activa', async () => {
+      await queueOperation('CREATE_PEDIDO', { ...pedido, n: 1 }, 'user-A', 5, 1)
+      await queueOperation('CREATE_PEDIDO', { ...pedido, n: 2 }, 'user-A', 5, 2)
+      await queueOperation('CREATE_PEDIDO', { ...pedido, n: 3 }, 'user-A', 5, 2)
+      const fallida = await queueOperation('CREATE_PEDIDO', { ...pedido, n: 4 }, 'user-A', 1, 3)
+      await markAsFailed(fallida, 'rechazo', { terminal: true })
+
+      expect(await contarPendientesDeOtrasSucursales('user-A', 1)).toEqual([
+        { sucursalId: 2, cantidad: 2 },
+        { sucursalId: 3, cantidad: 1 },
+      ])
+    })
+
+    it('no cuenta lo completado, lo de otro usuario ni lo que no tiene sucursal', async () => {
+      const hecha = await queueOperation('CREATE_PEDIDO', { ...pedido, n: 1 }, 'user-A', 5, 2)
+      await markAsCompleted(hecha)
+      await queueOperation('CREATE_PEDIDO', { ...pedido, n: 2 }, 'user-B', 5, 2)
+      await queueOperation('CREATE_PEDIDO', { ...pedido, n: 3 }, 'user-A', 5, undefined)
+
+      expect(await contarPendientesDeOtrasSucursales('user-A', 1)).toEqual([])
+    })
+
+    it('sin usuario o sin sucursal activa no cuenta nada', async () => {
+      await queueOperation('CREATE_PEDIDO', pedido, 'user-A', 5, 2)
+      expect(await contarPendientesDeOtrasSucursales(null, 1)).toEqual([])
+      expect(await contarPendientesDeOtrasSucursales('user-A', null)).toEqual([])
+    })
   })
 
   // ---------------------------------------------------------------------------

@@ -73,16 +73,19 @@ describe('useActualizacionDisponible', () => {
     expect(result.current.disponible).toBe(true)
   })
 
-  it('el aviso del service worker tambien respeta el "Mas tarde"', async () => {
+  // Cambió de regla con D57 (1563-b8): ya no hay «Mas tarde». La X esconde el
+  // cartel y nada más: el próximo aviso lo vuelve a mostrar.
+  it('ocultar esconde el cartel, y el próximo aviso lo vuelve a mostrar', async () => {
     responderVersion({ buildId: 'otro-build-mas-nuevo' })
 
     const { result } = renderHook(() => useActualizacionDisponible())
     await waitFor(() => expect(result.current.disponible).toBe(true))
 
-    act(() => { result.current.posponer() })
+    act(() => { result.current.ocultar() })
+    expect(result.current.disponible).toBe(false)
     act(() => { avisarActualizacionSW?.() })
 
-    expect(result.current.disponible).toBe(false)
+    expect(result.current.disponible).toBe(true)
   })
 
   // Con el service worker controlando la pagina, un location.reload() pelado
@@ -165,22 +168,125 @@ describe('useActualizacionDisponible', () => {
     expect(opciones).toEqual({ cache: 'no-store' })
   })
 
-  it('posponer apaga el cartel y aguanta los chequeos siguientes', async () => {
-    responderVersion({ buildId: 'otro-build-mas-nuevo' })
+  describe('D57 (1563-b8): se actualiza sola al volver a la app o al cambiar de pantalla', () => {
+    /** La pestaña se esconde (otra app, pantalla apagada) y vuelve a verse. */
+    function irseYVolver(visibilidad: { valor: string }): void {
+      act(() => {
+        visibilidad.valor = 'hidden'
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+      act(() => {
+        visibilidad.valor = 'visible'
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+    }
 
-    const { result } = renderHook(() => useActualizacionDisponible())
-    await waitFor(() => expect(result.current.disponible).toBe(true))
+    function visibilidadControlada(): { valor: string } {
+      const visibilidad = { valor: 'visible' }
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => visibilidad.valor,
+      })
+      return visibilidad
+    }
 
-    act(() => { result.current.posponer() })
-    expect(result.current.disponible).toBe(false)
+    it('con el cartel puesto, volver a la app la actualiza aunque haya estado afuera un minuto', async () => {
+      const visibilidad = visibilidadControlada()
+      responderVersion({ buildId: 'otro-build-mas-nuevo' })
 
-    const llamadasPrevias = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.length
-    // Volver a la pestania dispara un chequeo, que debe respetar el "mas tarde".
-    act(() => { window.dispatchEvent(new Event('focus')) })
-    await new Promise(r => setTimeout(r, 0))
+      const { result } = renderHook(() => useActualizacionDisponible())
+      await waitFor(() => expect(result.current.disponible).toBe(true))
+      expect(aplicarActualizacionSWMock).not.toHaveBeenCalled()
 
-    expect((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(llamadasPrevias)
-    expect(result.current.disponible).toBe(false)
+      irseYVolver(visibilidad)
+
+      expect(aplicarActualizacionSWMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('si el build nuevo se descubre al volver a la app, se actualiza en ese momento', async () => {
+      const visibilidad = visibilidadControlada()
+      responderVersion({ buildId: BUILD_DE_ESTA_PESTANIA })
+
+      const { result } = renderHook(() => useActualizacionDisponible())
+      await waitFor(() => expect(fetch).toHaveBeenCalled())
+      await flush()
+      expect(result.current.disponible).toBe(false)
+
+      responderVersion({ buildId: 'otro-build-mas-nuevo' })
+      irseYVolver(visibilidad)
+
+      await waitFor(() => expect(aplicarActualizacionSWMock).toHaveBeenCalledTimes(1))
+    })
+
+    it('un focus sin haberse ido (otra ventana encima) no la actualiza', async () => {
+      responderVersion({ buildId: 'otro-build-mas-nuevo' })
+
+      const { result } = renderHook(() => useActualizacionDisponible())
+      await waitFor(() => expect(result.current.disponible).toBe(true))
+
+      act(() => { window.dispatchEvent(new Event('focus')) })
+      await flush()
+
+      expect(aplicarActualizacionSWMock).not.toHaveBeenCalled()
+    })
+
+    it('cambiar de pantalla con un build nuevo esperando la actualiza', async () => {
+      responderVersion({ buildId: 'otro-build-mas-nuevo' })
+
+      const { result, rerender } = renderHook(({ ruta }) => useActualizacionDisponible(ruta), {
+        initialProps: { ruta: '/pedidos' },
+      })
+      await waitFor(() => expect(result.current.disponible).toBe(true))
+      expect(aplicarActualizacionSWMock).not.toHaveBeenCalled()
+
+      rerender({ ruta: '/clientes' })
+
+      expect(aplicarActualizacionSWMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('cambiar de pantalla sin build nuevo no hace nada', async () => {
+      responderVersion({ buildId: BUILD_DE_ESTA_PESTANIA })
+
+      const { rerender } = renderHook(({ ruta }) => useActualizacionDisponible(ruta), {
+        initialProps: { ruta: '/pedidos' },
+      })
+      await waitFor(() => expect(fetch).toHaveBeenCalled())
+      await flush()
+
+      rerender({ ruta: '/clientes' })
+
+      expect(aplicarActualizacionSWMock).not.toHaveBeenCalled()
+    })
+
+    it('con un modal abierto no se actualiza al cambiar de pantalla: espera a la próxima', async () => {
+      responderVersion({ buildId: 'otro-build-mas-nuevo' })
+      document.body.innerHTML = '<div role="dialog">Nuevo pedido</div>'
+
+      const { result, rerender } = renderHook(({ ruta }) => useActualizacionDisponible(ruta), {
+        initialProps: { ruta: '/pedidos' },
+      })
+      await waitFor(() => expect(result.current.disponible).toBe(true))
+
+      rerender({ ruta: '/clientes' })
+      expect(aplicarActualizacionSWMock).not.toHaveBeenCalled()
+
+      document.body.innerHTML = ''
+      rerender({ ruta: '/productos' })
+      expect(aplicarActualizacionSWMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('después de un salto que no prosperó espera el enfriamiento (no entra en loop)', async () => {
+      const visibilidad = visibilidadControlada()
+      responderVersion({ buildId: 'otro-build-mas-nuevo' })
+
+      const { result } = renderHook(() => useActualizacionDisponible())
+      await waitFor(() => expect(result.current.disponible).toBe(true))
+
+      irseYVolver(visibilidad)
+      irseYVolver(visibilidad)
+
+      expect(aplicarActualizacionSWMock).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe('salto automatico (solo cuando no hay nada que perder)', () => {
@@ -237,17 +343,16 @@ describe('useActualizacionDisponible', () => {
       expect(aplicarActualizacionSWMock).not.toHaveBeenCalled()
     })
 
-    it('el "Mas tarde" sobrevive a una recarga y frena tambien el salto automatico', async () => {
+    // Cambió de regla con D57: un «Mas tarde» que quedó guardado de antes ya no
+    // frena nada.
+    it('un «Mas tarde» guardado por la versión anterior ya no frena el salto', async () => {
       vi.spyOn(performance, 'now').mockReturnValue(2000)
       sessionStorage.setItem('actualizacion:pospuesto-hasta', String(Date.now() + 60_000))
       responderVersion({ buildId: 'otro-build-mas-nuevo' })
 
-      const { result } = renderHook(() => useActualizacionDisponible())
-      await flush()
+      renderHook(() => useActualizacionDisponible())
 
-      expect(fetch).not.toHaveBeenCalled()
-      expect(result.current.disponible).toBe(false)
-      expect(aplicarActualizacionSWMock).not.toHaveBeenCalled()
+      await waitFor(() => expect(aplicarActualizacionSWMock).toHaveBeenCalledTimes(1))
     })
   })
 

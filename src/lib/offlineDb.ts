@@ -300,6 +300,46 @@ export async function getPendingOperations(
     .then(ops => ops.slice(0, limit))
 }
 
+/** Cuántos pedidos sin sincronizar tiene el usuario en una sucursal que no es la activa. */
+export interface PendientesDeOtraSucursal {
+  sucursalId: number
+  cantidad: number
+}
+
+/**
+ * 1600-b8 (decisión D58 del dueño, #1600): los pedidos del usuario que quedaron
+ * sin sincronizar en OTRA sucursal. La cola los manda sólo desde la sucursal en
+ * la que se encolaron (no se envían cruzados), así que trabajando en otra no se
+ * veían ni se reenviaban, y el contador marcaba 0. Esto los cuenta para avisarlo
+ * y ofrecer el cambio de sucursal.
+ *
+ * Cuenta todo lo que no se completó (pendiente, procesando o fallido): al
+ * cambiar, lo pendiente entra al contador y lo fallido al panel de fallidas.
+ * Mismo dueño que la cola de la sesión (`esDelUsuarioActivo`); las que no tienen
+ * sucursal no son de ninguna (el replay las marca fallidas).
+ */
+export async function contarPendientesDeOtrasSucursales(
+  userId: string | null | undefined,
+  sucursalId: number | null | undefined
+): Promise<PendientesDeOtraSucursal[]> {
+  if (!userId || sucursalId == null) return []
+  const ops = await db.pendingOperations
+    .where('status')
+    .anyOf(['pending', 'processing', 'failed'])
+    .and(op => op.type === 'CREATE_PEDIDO')
+    .and(op => op.sucursalId != null && op.sucursalId !== sucursalId)
+    .and(op => esDelUsuarioActivo(op, userId, null))
+    .toArray()
+  const porSucursal = new Map<number, number>()
+  for (const op of ops) {
+    const suc = op.sucursalId as number
+    porSucursal.set(suc, (porSucursal.get(suc) ?? 0) + 1)
+  }
+  return [...porSucursal.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([id, cantidad]) => ({ sucursalId: id, cantidad }))
+}
+
 /**
  * Marcar operación como procesando
  */
