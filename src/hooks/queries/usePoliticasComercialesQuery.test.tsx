@@ -93,13 +93,13 @@ describe('usePoliticasComercialesQuery — lo reservado va por RPC (1564-b6, pla
     expect(result.current.politicas.comisionPctOtros).toBe(POLITICAS_POR_DEFECTO.comisionPctOtros)
   })
 
-  it('antes de la migración (la RPC no existe, PGRST202) lo reservado se lee por REST, como antes', async () => {
-    m.fila = { monto_minimo_pedido: 5000, comision_pct_otros: 4 }
+  it('nunca pide lo reservado por REST: si la RPC falla (también PGRST202) es un error de la carga y manda el caché', async () => {
     m.reservada = { data: null, error: { code: 'PGRST202', message: 'Could not find the function' } }
+    m.cache = { montoMinimoPedido: 7000 }
     const { result } = renderHook(() => usePoliticasComercialesQuery(), { wrapper })
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(m.selects).toEqual([POLITICA_COLUMNAS_PARA_VENDER, POLITICA_COLUMNAS_RESERVADAS])
-    expect(result.current.politicas.comisionPctOtros).toBe(4)
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(m.selects).toEqual([POLITICA_COLUMNAS_PARA_VENDER])
+    expect(result.current.politicas.montoMinimoPedido).toBe(7000)
   })
 
   it('otro error de la RPC es un error de la carga (manda el caché)', async () => {

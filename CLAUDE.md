@@ -105,18 +105,14 @@ suelta en `sucursales`.
   `'mismo'` por un CHECK hasta que #1525 la dropee, y nombrarla en un `select` rompe la consulta
   cuando se vaya. `_rol_en_sucursal(uid, suc)` da `perfiles.rol` si el usuario es de esa sucursal.
 - **El path de un bucket privado empieza por la sucursal** (`<sucursal_id>/…`, #1474). Sus
-  policies comparan `(storage.foldername(name))[1]` con la sucursal **activa**
-  (`current_sucursal_id()`), nunca sólo el rol ni todas las sucursales del usuario: el de dos
-  sucursales ve las facturas de la que está trabajando (decisión del dueño, 1564-b7 de #1603). Lo
-  vigila `scripts/check-storage.mjs`, que además falla ante un bucket público.
-- **La política comercial se lee por columna** (decisión del dueño, 1564-b6 de #1603).
-  `authenticated` lee de `politicas_comerciales` sólo lo de vender (el mínimo y su modo, el envío,
-  mostrar sin stock, los días atrás de la fecha, los de vencimiento y el múltiplo de redondeo); las
-  comisiones, las alertas de combos y la ventana del precio anterior los da
-  `politica_comercial_reservada()` a admin y encargado. Como con `productos`: un `*` sobre la
-  tabla por PostgREST falla la consulta entera, y una columna nueva nace invisible: si la necesita
-  quien vende, su migración la concede (`GRANT SELECT (col) ... TO authenticated`) y se suma a
-  `POLITICA_COLUMNAS_PARA_VENDER`; si no, va a la RPC.
+  policies comparan `(storage.foldername(name))[1]` con las sucursales del usuario, nunca sólo el
+  rol. Lo vigila `scripts/check-storage.mjs`, que además falla ante un bucket público.
+- **Lo reservado de la política comercial se lee por RPC** (decisión del dueño, 1564-b6 de #1603).
+  Las comisiones, las alertas de combos y la ventana del precio anterior las da
+  `politica_comercial_reservada()` a admin y encargado; el front lee por REST sólo lo de vender
+  (`POLITICA_COLUMNAS_PARA_VENDER`). Una columna nueva de `politicas_comerciales` elige: si la
+  necesita quien vende, va a esa lista; si no, a la RPC. El REVOKE de lo reservado para
+  `authenticated` (la parte 2) va después, con su issue.
 - **Una `auditoria_*` que lee código limpia el cuerpo con `_sql_sin_comentarios` o
   `_sql_sin_comentarios_ni_literales`** (#1541): una sola pasada que entiende las comillas. Sacar
   primero los `--` y después los literales rompe la paridad con un literal `' -- '` y esconde lo
@@ -395,12 +391,17 @@ suelta en `sucursales`.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
   **visible para todos los preventistas** (mig 028), o sea lo contrario de reservado. Y
-  `reservado_admin` **no** es "solo lo ve admin": lo ven también el encargado, el chofer que le
-  reparte un pedido y el preventista que ya le vendió —esa excepción es la que evita que sus pedidos
-  viejos pierdan el cliente y desaparezcan por los `!inner` de `usePedidosQuery`—. El depósito no
-  ve ningún cliente. `mt_clientes_select` es una lista positiva (1564-b12 de #1603, decisión del
-  dueño): admin y encargado ven todos; quien actúa como preventista, los libres y los suyos; el
-  chofer, sólo los de sus pedidos; un rol nuevo no hereda nada. Todo
+  `reservado_admin` **no** es "solo lo ve admin": lo ven también el encargado, el que le reparte un
+  pedido y el preventista que ya le vendió —esa excepción es la que evita que sus pedidos
+  viejos pierdan el cliente y desaparezcan por los `!inner` de `usePedidosQuery`—. Quién ve un
+  cliente es **una sola regla, `_cliente_visible`** (1564-b12 de #1603, decisión del dueño), que
+  usan `mt_clientes_select` y `obtener_resumen_cuenta_cliente`: admin y encargado ven todos; quien
+  actúa como preventista, los libres y los suyos; cualquiera, el que le vendió y el de un pedido
+  que reparte (también el depósito con el extra de chofer); el depósito, nada más; un rol nuevo no
+  hereda nada. `verificar_duplicado_cliente` queda afuera a propósito (avisa de un duplicado entre
+  todos), y el bot va aparte. Una lectura nueva de clientes con permisos de server usa esa función,
+  como `EXISTS (SELECT 1 FROM _cliente_visible(...))`: es `SETOF` para que la policy la inlinee (una
+  función SQL escalar con subconsultas se llama fila por fila). Todo
   camino nuevo que ofrezca clientes *para operar* lo excluye; todo camino de *historial* lo
   sigue mostrando.
   Desde la 358 esa excepción de historial vale para **cualquier** cliente, no sólo el
@@ -534,9 +535,8 @@ corregida en la 263: ni `tsc`, ni los tests (que mockean la RPC), ni `deno task 
 y el digest se habría quedado mudo sin que fallara nada.
 
 Y el cuarto: **nada de columnas computadas ni de `*` sobre una tabla que `authenticated` lee
-columna por columna** (hoy `pedido_items`, `productos` y `politicas_comerciales`). A una columna
-computada —una función `f(tabla)` que se pide en el `select`— PostgREST le pasa la fila entera, y
-la fila pide SELECT
+columna por columna** (hoy `pedido_items` y `productos`). A una columna computada —una función
+`f(tabla)` que se pide en el `select`— PostgREST le pasa la fila entera, y la fila pide SELECT
 sobre **todas** las columnas: la consulta entera da `42501` para todos los roles, aunque la
 función tenga `EXECUTE`. Así cayó la lista de Pedidos con `regalo_mueve_stock_foto(pedido_items)`
 (#1416). Un dato derivado de esas tablas va por RPC o por columna real, como

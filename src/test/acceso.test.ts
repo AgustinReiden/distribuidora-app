@@ -504,17 +504,15 @@ describe('scripts/rpcs-definer-permitidas.json', () => {
 })
 
 describe('hallazgosStorage', () => {
-  // El texto como lo devuelve pg_policies después de la mig de #1474: todas las sucursales del usuario.
+  // El texto como lo devuelve pg_policies después de la mig de #1474.
   const MIS_SUCURSALES =
     "((storage.foldername(name))[1] IN ( SELECT (us.sucursal_id)::text AS sucursal_id FROM usuario_sucursales us WHERE (us.usuario_id = auth.uid())))"
-  // Y después de la de B9 del plan #1603 (D51, 1564-b7): la sucursal activa.
-  const SUCURSAL_ACTIVA = '((storage.foldername(name))[1] = (current_sucursal_id())::text)'
   const select = {
     policy: 'facturas_select_encargado_o_admin',
     cmd: 'SELECT',
     permissive: 'PERMISSIVE',
     roles: ['authenticated'],
-    using: `((bucket_id = 'facturas'::text) AND es_encargado_o_admin() AND ${SUCURSAL_ACTIVA})`,
+    using: `((bucket_id = 'facturas'::text) AND es_encargado_o_admin() AND ${MIS_SUCURSALES})`,
     check: null,
   }
   const insert = {
@@ -526,15 +524,8 @@ describe('hallazgosStorage', () => {
   }
   const privado = [{ id: 'facturas', public: false }]
 
-  it('las policies de facturas que comparan el path con la sucursal activa pasan', () => {
+  it('las policies de facturas que miran la sucursal del path pasan', () => {
     expect(hallazgosStorage({ politicas: [select, insert], buckets: privado })).toEqual({ hallazgos: [], sobrantes: [] })
-  })
-
-  it('cambió de regla (D51): comparar el path con todas las sucursales del usuario, la policy de la 463, es rojo', () => {
-    const p = { ...select, using: `((bucket_id = 'facturas'::text) AND es_encargado_o_admin() AND ${MIS_SUCURSALES})` }
-    const { hallazgos } = hallazgosStorage({ politicas: [p], buckets: privado })
-    expect(hallazgos).toHaveLength(1)
-    expect(hallazgos[0].motivos[0]).toMatch(/no con la activa/)
   })
 
   it('la policy de la 239, que mira sólo el rol, es roja', () => {
@@ -550,14 +541,14 @@ describe('hallazgosStorage', () => {
   })
 
   it('un OR que abre un camino sin sucursal es rojo', () => {
-    const p = { ...select, using: `((bucket_id = 'facturas'::text) AND (es_admin() OR ${SUCURSAL_ACTIVA}))` }
+    const p = { ...select, using: `((bucket_id = 'facturas'::text) AND (es_admin() OR ${MIS_SUCURSALES}))` }
     const { hallazgos } = hallazgosStorage({ politicas: [p], buckets: privado })
     expect(hallazgos).toHaveLength(1)
     expect(hallazgos[0].motivos).toHaveLength(1)
   })
 
   it('una policy sin bucket vale para todos y es roja', () => {
-    const p = { ...select, using: `(es_admin() AND ${SUCURSAL_ACTIVA})` }
+    const p = { ...select, using: `(es_admin() AND ${MIS_SUCURSALES})` }
     expect(hallazgosStorage({ politicas: [p], buckets: privado }).hallazgos[0].motivos[0]).toMatch(/no nombra su bucket/)
   })
 

@@ -249,8 +249,6 @@ export function hallazgosSucursalCruzada(pares, permitidas = {}) {
 const BUCKET = /\bbucket_id\s*=\s*'([^']+)'/;
 // El path de un objeto privado empieza por la sucursal (`<sucursal_id>/…`, #1474).
 const PATH = /\bfoldername\s*\(\s*name\s*\)|\bsplit_part\s*\(\s*name\b/i;
-// La sucursal del path se compara con la activa, no con todas las del usuario (D51, 1564-b7 del plan #1603).
-const SUCURSAL_ACTIVA = /\bcurrent_sucursal_id\s*\(\s*\)/i;
 
 /**
  * Lo que es rojo en las policies de storage.objects (#1474). Las facturas
@@ -261,10 +259,7 @@ const SUCURSAL_ACTIVA = /\bcurrent_sucursal_id\s*\(\s*\)/i;
  *    la anon key;
  *  · nombrar su bucket (`bucket_id = '…'`): sin eso vale para todos;
  *  · mirar la sucursal del path: el primer tramo del nombre del objeto
- *    (`storage.foldername(name)`) contra la sucursal activa,
- *    `current_sucursal_id()`. Contra todas las del usuario no alcanza: un
- *    usuario de dos sucursales ve sólo las de la que está trabajando (D51,
- *    1564-b7 del plan #1603).
+ *    (`storage.foldername(name)`) contra las sucursales del usuario.
  * Y ningún bucket es público: un bucket público se lee por URL sin RLS.
  * Excepciones: `{ policy, huella, motivo }` o `{ bucket, motivo }`. La huella es
  * la de huellaPolicy: si la policy cambia, vuelve a salir.
@@ -287,10 +282,6 @@ export function hallazgosStorage({ politicas = [], buckets = [] } = {}, excepcio
         if (!m) motivos.push(`${clausula}: un camino no nombra su bucket (vale para todos): ${rama}`);
         else if (!PATH.test(rama) || !SUCURSAL.test(rama)) {
           motivos.push(`${clausula}: un camino de '${m[1]}' no mira la sucursal del path: ${rama}`);
-        } else if (!SUCURSAL_ACTIVA.test(rama)) {
-          motivos.push(
-            `${clausula}: un camino de '${m[1]}' compara el path con todas las sucursales del usuario, no con la activa (current_sucursal_id()): ${rama}`,
-          );
         }
       }
     }
@@ -318,19 +309,6 @@ export function hallazgosStorage({ politicas = [], buckets = [] } = {}, excepcio
 // --------------------------------------------------------- rol sin activo ---
 
 /**
- * Lo que es rojo en la salida de auditoria_rol_sin_activo() (#1490). El RPC ya
- * marcó las sentencias que leen perfiles.rol de auth.uid() (o de un alias de un
- * salto) sin nombrar `activo`, en funciones ejecutables por authenticated: un
- * desactivado conserva su token hasta que vence, y con el rol leído a pelo
- * seguía entrando a /reportes. Acá sólo se decide.
- *
- *  · sinActivo: las funciones con alguna lectura marcada que no están en
- *    `permitidas` ({ firma: motivo }), con sus lecturas. La lista va por firma:
- *    una sobrecarga nueva no hereda la excepción.
- *  · sobrantes: las permitidas que ya no hacen falta (miran activo, usan un
- *    helper o no existen más). Se avisan para sacarlas; no son rojo.
- */
-/**
  * Las policies que leen el rol de quien llama sin `activo` (1564-b11 del plan #1603). El RPC ya las
  * marcó: un SELECT sobre perfiles con `rol` y auth.uid() y sin `activo`, cortando la expresión en
  * cada SELECT. No tienen lista de permitidas: una policy usa es_admin() / es_encargado_o_admin()
@@ -347,6 +325,19 @@ export function policiesRolSinActivo(auditoria) {
   return [...porPolicy].map(([policy, lecturas]) => ({ policy, lecturas }));
 }
 
+/**
+ * Lo que es rojo en la salida de auditoria_rol_sin_activo() (#1490). El RPC ya
+ * marcó las sentencias que leen perfiles.rol de auth.uid() (o de un alias de un
+ * salto) sin nombrar `activo`, en funciones ejecutables por authenticated: un
+ * desactivado conserva su token hasta que vence, y con el rol leído a pelo
+ * seguía entrando a /reportes. Acá sólo se decide.
+ *
+ *  · sinActivo: las funciones con alguna lectura marcada que no están en
+ *    `permitidas` ({ firma: motivo }), con sus lecturas. La lista va por firma:
+ *    una sobrecarga nueva no hereda la excepción.
+ *  · sobrantes: las permitidas que ya no hacen falta (miran activo, usan un
+ *    helper o no existen más). Se avisan para sacarlas; no son rojo.
+ */
 export function hallazgosRolSinActivo(auditoria, permitidas = {}) {
   const porFirma = new Map();
   for (const l of auditoria?.lecturas ?? []) {

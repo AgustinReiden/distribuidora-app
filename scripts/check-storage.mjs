@@ -12,10 +12,7 @@
  * mira sólo las policies de public, así que no lo veía.
  *
  * La regla: el path de un objeto privado es `<sucursal_id>/…`, y la policy
- * compara `(storage.foldername(name))[1]` con la sucursal activa,
- * `current_sucursal_id()`: un usuario de dos sucursales ve sólo las de la que
- * está trabajando (decisión del dueño, 1564-b7 del plan #1603). Compararlo con
- * todas las sucursales del usuario (lo de la 463) es rojo.
+ * compara `(storage.foldername(name))[1]` con las sucursales del usuario.
  *
  * Requiere env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
  * Uso local:  SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/check-storage.mjs

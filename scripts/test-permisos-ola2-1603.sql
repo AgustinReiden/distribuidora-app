@@ -14,22 +14,25 @@
 --                   las ejecuta authenticated, y el server sí (tablero_cobertura).
 --   P4  · SEG-5     el admin de una sucursal no ve la auditoría de rendicion_faltantes (tiene
 --                   empleado_id) ni la de empleados; ve la de clientes; el admin de las dos ve todo.
---   P5  · SEG-6     _empleado_visible y _guardar_gasto sin CR.
+--   P5  · SEG-6     _empleado_visible sin CR (_guardar_gasto la recrea B8a).
 --   P6  · 1564-b1   un desactivado no cambia de sucursal ni genera el código del bot; uno activo sí.
 --   P7  · 1564-b4   el admin de una sola sucursal no crea ni edita un encuadre de II; el de las dos sí.
 --   P8  · 1564-b5   la vista audit_logs_detallado no existe.
---   P9  · 1564-b6   preventista y chofer no leen la comisión, el margen ni la ventana; leen el mínimo
---                   (el select del front). politica_comercial_reservada() le da la fila a admin y
---                   encargado, y a nadie más (ni al desactivado).
---   P10 · 1564-b7   las policies de facturas comparan el path con current_sucursal_id() (si la base
---                   tiene storage.objects; la copia local no, y lo dice).
+--   P9  · 1564-b6   politica_comercial_reservada() le da la fila a admin y encargado, y a nadie más
+--                   (ni al desactivado). Los grants de lectura no cambian (la parte 2 va después): el
+--                   preventista lee el select del front y, todavía, lo reservado por REST.
+--   P10 · 1564-b7   no se hace (decisión de coordinación): no hay caso.
 --   P11 · 1564-b11  auditoria_rol_sin_activo() devuelve las policies, y ninguna; el depósito sigue
 --                   viendo proveedores y el desactivado no (regresión).
 --   P12 · 1564-b12  el chofer ve sólo el cliente de su pedido; el preventista, los libres y los suyos;
---                   encargado y admin, todos; depósito y desactivado, ninguno.
+--                   encargado y admin, todos; depósito y desactivado, ninguno; el depósito con el
+--                   extra de chofer, el cliente de lo que reparte (H7).
 --   P13 · 1601-b5   el historial de stock lo leen admin, encargado y depósito; preventista y chofer no.
 --   P14 · 1541-1    auditoria_locks() ve el lock de la 447 de cancelar_pedido_con_stock, y los helpers
 --                   de texto entienden un literal con -- adentro.
+--   P15 · 1564-b12  obtener_resumen_cuenta_cliente sigue la misma regla (H4): el chofer recibe la cuenta
+--                   del cliente que reparte y 42501 para cualquier otro (libre o reservado); el
+--                   preventista, 42501 para el cliente de otro; el encargado, la de todos.
 --
 --   docker exec -i <contenedor> psql -U postgres -h localhost -d postgres -f - < scripts/test-permisos-ola2-1603.sql
 
@@ -42,6 +45,7 @@ DECLARE
   v_pre2   uuid;
   v_tra    uuid;
   v_dep    uuid;
+  v_depT   uuid;
   v_des    uuid;
   v_libre  bigint;
   v_mio    bigint;
@@ -49,6 +53,7 @@ DECLARE
   v_res    bigint;
   v_rep    bigint;
   v_com    bigint;
+  v_cdep   bigint;
   v_prod   bigint;
   v_enc_ii bigint;
   v_ids    text;
@@ -102,6 +107,8 @@ BEGIN
   v_pre2 := pg_temp.u('preventista', 1);
   v_tra  := pg_temp.u('transportista', 1);
   v_dep  := pg_temp.u('deposito', 1);
+  v_depT := pg_temp.u('deposito', 1);
+  INSERT INTO perfil_roles (usuario_id, sucursal_id, rol) VALUES (v_depT, 1, 'transportista');
   v_des  := pg_temp.u('encargado', 1);
   -- La copia local tiene un auth.users mínimo, sin la columna que escribe perfiles_sync_acceso_auth
   -- al desactivar: ahí ese trigger se apaga para este UPDATE (el ban de Auth no es lo que se prueba:
@@ -130,7 +137,12 @@ BEGIN
   -- Un pedido de pre2 que reparte el chofer.
   INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, canal, tipo_factura, transportista_id)
   VALUES (v_rep, 1, v_pre2, 0, 'asignado', public._tablero_hoy(), 'app', 'ZZ', v_tra);
-  v_ids := format('(%s,%s,%s,%s,%s,%s)', v_libre, v_mio, v_otro, v_res, v_rep, v_com);
+  -- Un cliente libre con un pedido que reparte el depósito con el extra de chofer.
+  INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
+  VALUES ('B9 reparto dep', 'B9 reparto dep', 'Calle Falsa 6', 1) RETURNING id INTO v_cdep;
+  INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, canal, tipo_factura, transportista_id)
+  VALUES (v_cdep, 1, v_pre2, 0, 'asignado', public._tablero_hoy(), 'app', 'ZZ', v_depT);
+  v_ids := format('(%s,%s,%s,%s,%s,%s,%s)', v_libre, v_mio, v_otro, v_res, v_rep, v_com, v_cdep);
 
   INSERT INTO productos (nombre, precio, stock, sucursal_id) VALUES ('B9 prod ' || gen_random_uuid(), 100, 10, 1)
   RETURNING id INTO v_prod;
@@ -225,7 +237,7 @@ BEGIN
 
   -- ------------------------------------------------------------ P5 · SEG-6 --
   SELECT string_agg(proname, ', ') INTO v_t FROM pg_proc
-   WHERE proname IN ('_empleado_visible', '_guardar_gasto') AND position(E'\r' in prosrc) > 0;
+   WHERE proname IN ('_empleado_visible') AND position(E'\r' in prosrc) > 0;
   IF v_t IS NOT NULL THEN
     v_fallas := v_fallas || ('P5 · con CR: ' || v_t);
   END IF;
@@ -264,19 +276,16 @@ BEGIN
   END IF;
 
   -- ------------------------------------------------------------ P9 · 1564-b6 -
-  FOR v_t IN SELECT x FROM unnest(ARRAY[v_pre, v_tra]) AS u, LATERAL (
-      SELECT pg_temp.intenta(u, 'SELECT comision_pct_otros::text FROM politicas_comerciales') AS x
-      UNION ALL SELECT pg_temp.intenta(u, 'SELECT combo_margen_minimo_pct::text FROM politicas_comerciales')
-      UNION ALL SELECT pg_temp.intenta(u, 'SELECT ventana_precio_anterior_horas::text FROM politicas_comerciales')) s LOOP
-    IF v_t NOT LIKE '42501%' THEN
-      v_fallas := v_fallas || ('P9 · preventista o chofer leen lo reservado: ' || v_t);
-    END IF;
-  END LOOP;
   v_t := pg_temp.intenta(v_pre, 'SELECT count(*) FROM (SELECT monto_minimo_pedido, modo_minimo_pedido, monto_envio_gratis, '
                               || 'cargo_envio_pedido, mostrar_sin_stock, dias_atras_fecha_pedido, dias_alerta_vencimiento, '
                               || 'dias_critico_vencimiento, multiplo_redondeo_precio FROM politicas_comerciales) x');
   IF v_t <> 'PASA 1' THEN
     v_fallas := v_fallas || ('P9 · el preventista no lee lo de vender (regresión): ' || v_t);
+  END IF;
+  -- La parte 1 no toca los grants: un bundle viejo del PWA sigue leyendo lo reservado por REST.
+  v_t := pg_temp.intenta(v_pre, 'SELECT comision_pct_otros::text FROM politicas_comerciales');
+  IF v_t NOT LIKE 'PASA %' THEN
+    v_fallas := v_fallas || ('P9 · la parte 1 no tenía que sacar el SELECT de lo reservado (bundle viejo): ' || v_t);
   END IF;
   IF to_regproc('public.politica_comercial_reservada') IS NULL THEN
     v_fallas := v_fallas || 'P9 · no existe politica_comercial_reservada()'::text;
@@ -295,18 +304,6 @@ BEGIN
         v_fallas := v_fallas || ('P9 · alguien que no es admin ni encargado recibe lo reservado: ' || v_t);
       END IF;
     END LOOP;
-  END IF;
-
-  -- ----------------------------------------------------------- P10 · 1564-b7 -
-  IF to_regclass('storage.objects') IS NULL THEN
-    v_notas := v_notas || 'P10 · sin storage.objects en esta base: las policies de facturas se verifican aparte'::text;
-  ELSE
-    SELECT string_agg(policyname, ', ') INTO v_t FROM pg_policies
-     WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname LIKE 'facturas%'
-       AND coalesce(qual, with_check) !~ 'current_sucursal_id\(\)';
-    IF v_t IS NOT NULL THEN
-      v_fallas := v_fallas || ('P10 · policies de facturas que no miran la sucursal activa: ' || v_t);
-    END IF;
   END IF;
 
   -- ---------------------------------------------------------- P11 · 1564-b11 -
@@ -328,10 +325,11 @@ BEGIN
   FOR v_t IN
     SELECT format('%s:%s', quien, r) FROM (VALUES
         ('chofer', v_tra, format('%s', v_rep)),
-        ('preventista', v_pre, format('%s,%s,%s', v_libre, v_mio, v_com)),
-        ('encargado', v_enc, format('%s,%s,%s,%s,%s,%s', v_libre, v_mio, v_otro, v_res, v_rep, v_com)),
-        ('admin', v_adm1, format('%s,%s,%s,%s,%s,%s', v_libre, v_mio, v_otro, v_res, v_rep, v_com)),
+        ('preventista', v_pre, format('%s,%s,%s,%s', v_libre, v_mio, v_com, v_cdep)),
+        ('encargado', v_enc, format('%s,%s,%s,%s,%s,%s,%s', v_libre, v_mio, v_otro, v_res, v_rep, v_com, v_cdep)),
+        ('admin', v_adm1, format('%s,%s,%s,%s,%s,%s,%s', v_libre, v_mio, v_otro, v_res, v_rep, v_com, v_cdep)),
         ('depósito', v_dep, ''),
+        ('depósito con el extra de chofer', v_depT, format('%s', v_cdep)),
         ('desactivado', v_des, '')
       ) AS t(quien, u, esperado),
       LATERAL (SELECT pg_temp.intenta(u, format('SELECT COALESCE(string_agg(id::text, '','' ORDER BY id), '''') FROM clientes WHERE id IN %s', v_ids)) AS visto) s,
@@ -371,6 +369,21 @@ PERFORM 1 FROM t WHERE x = 'it''s' FOR UPDATE; /* d ' */ y := '/* no */';$x$)$q$
       v_fallas := v_fallas || ('P14 · _sql_sin_comentarios: ' || v_t);
     END IF;
   END IF;
+
+  -- ---------------------------------------------------------- P15 · 1564-b12 -
+  FOR v_t IN
+    SELECT format('%s, cliente %s: %s (esperado %s)', quien, cli, s.visto, esperado) FROM (VALUES
+        ('chofer', v_tra, v_rep, 'PASA'), ('chofer', v_tra, v_libre, '42501'), ('chofer', v_tra, v_res, '42501'),
+        ('preventista', v_pre, v_otro, '42501'), ('preventista', v_pre, v_mio, 'PASA'),
+        ('encargado', v_enc, v_otro, 'PASA'), ('encargado', v_enc, v_res, 'PASA'),
+        ('depósito con el extra de chofer', v_depT, v_cdep, 'PASA'), ('depósito', v_dep, v_cdep, '42501'),
+        ('desactivado', v_des, v_libre, '42501')
+      ) AS t(quien, u, cli, esperado),
+      LATERAL (SELECT pg_temp.intenta(u, format('SELECT (public.obtener_resumen_cuenta_cliente(%s)->>''saldo_actual'') IS NOT NULL', cli)) AS visto) s
+     WHERE s.visto NOT LIKE esperado || '%'
+  LOOP
+    v_fallas := v_fallas || ('P15 · obtener_resumen_cuenta_cliente: ' || v_t);
+  END LOOP;
 
   IF cardinality(v_fallas) = 0 THEN
     RAISE EXCEPTION 'ENSAYO OK%', CASE WHEN cardinality(v_notas) > 0 THEN E'\n  nota: ' || array_to_string(v_notas, E'\n  nota: ') ELSE '' END

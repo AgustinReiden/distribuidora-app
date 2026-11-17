@@ -114,8 +114,9 @@ function modoValido(modo: unknown): ModoMinimoPedido {
 
 /**
  * Lo que `authenticated` lee de `politicas_comerciales` por REST: lo que necesita quien vende
- * (decisión del dueño D50, 1564-b6 del plan #1603). La tabla se concede columna por columna:
- * un `*` o una columna de las reservadas en este select hace fallar la consulta entera.
+ * (decisión del dueño D50, 1564-b6 del plan #1603). Con la parte 2 (el REVOKE de lo reservado)
+ * la tabla pasa a concederse columna por columna: un `*` o una columna reservada en este select
+ * haría fallar la consulta entera.
  */
 export const POLITICA_COLUMNAS_PARA_VENDER =
   'monto_minimo_pedido, modo_minimo_pedido, monto_envio_gratis, cargo_envio_pedido, dias_alerta_vencimiento, dias_critico_vencimiento, mostrar_sin_stock, dias_atras_fecha_pedido, multiplo_redondeo_precio'
@@ -128,22 +129,15 @@ const SIN_CONEXION_POLITICA = 'Sin conexión: no se pudo cargar la política com
 
 /**
  * Las comisiones, las alertas de combos y la ventana del precio anterior, para admin y
- * encargado; para el resto la RPC no devuelve fila (null). Mientras la
- * migración de B9 no esté aplicada la RPC no existe (PGRST202) y esas columnas todavía se leen
- * por REST: así este front anda antes y después de la migración.
+ * encargado; para el resto la RPC no devuelve fila (null). La migración de B9 (que crea la RPC)
+ * se aplica antes del merge de este front, así que no hay respaldo por REST: pedir esas columnas
+ * por REST deja de andar con la parte 2 (el REVOKE).
  */
 async function fetchPoliticaReservada(): Promise<Record<string, unknown> | null> {
   const { data, error } = await supabase.rpc('politica_comercial_reservada')
-  if (!error) {
-    const fila = Array.isArray(data) ? data[0] : data
-    return (fila as Record<string, unknown> | null | undefined) ?? null
-  }
-  if ((error as { code?: string }).code === 'PGRST202') {
-    const previo = await supabase.from('politicas_comerciales').select(POLITICA_COLUMNAS_RESERVADAS).maybeSingle()
-    if (previo.error) throw errorDeSupabase(previo.error, SIN_CONEXION_POLITICA)
-    return (previo.data as Record<string, unknown> | null) ?? null
-  }
-  throw errorDeSupabase(error, SIN_CONEXION_POLITICA)
+  if (error) throw errorDeSupabase(error, SIN_CONEXION_POLITICA)
+  const fila = Array.isArray(data) ? data[0] : data
+  return (fila as Record<string, unknown> | null | undefined) ?? null
 }
 
 async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComerciales> {

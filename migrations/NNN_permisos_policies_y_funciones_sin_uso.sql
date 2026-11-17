@@ -2,21 +2,32 @@
 -- NNN · PERMISOS: QUIÉN VE QUÉ, LAS FUNCIONES QUE NADIE LLAMA Y EL GATE DE
 --       LOCKS QUE SE PERDÍA DETRÁS DE UN LITERAL CON `--`
 --       (plan #1603, ola 2, tarjeta B9: 1558-b3, 1561-b6, SEG-3, SEG-4,
---        SEG-5, SEG-6 de #1545, 1564-b1, b4, b5, b6, b7, b10, b11, b12,
---        1601-b5 (el historial de stock) y 1541-1)
+--        SEG-5, SEG-6 de #1545, 1564-b1, b4, b5, b6, b10, b11, b12,
+--        1601-b5 (el historial de stock) y 1541-1; y la revisión adversarial
+--        de la tarjeta, H4 a H9)
 --
 -- Policies, grants y funciones de permisos. Parcha por ancla, con premisa de
--- md5 sobre el cuerpo vivo del 16/11 (ledger en la 512), nueve auditoria_*,
--- cambiar_sucursal y generar_codigo_vinculacion_bot; crea dos helpers de
--- texto, un helper de policy, un trigger y una RPC; borra trece funciones y
--- una vista que nadie usa. Ensayo: scripts/test-permisos-ola2-1603.sql.
--- Se aplica en LF.
+-- md5 sobre el cuerpo vivo (ledger en la 514), ocho auditoria_*,
+-- cambiar_sucursal, generar_codigo_vinculacion_bot y
+-- obtener_resumen_cuenta_cliente; auditoria_definer_sin_rol, por ancla con
+-- premisa de forma (B4 y B5 le parchan líneas). Crea dos helpers de texto, dos
+-- helpers de policy, un trigger y una RPC; borra trece funciones (catorce con
+-- _tablero_cat_nombre si queda huérfana) y una vista que nadie usa.
+-- Ensayo: scripts/test-permisos-ola2-1603.sql. Se aplica en LF, y no depende
+-- del orden contra B3, B4, B5 y B8a.
 --
--- Bloques que se pueden sacar sin tocar el resto (la coordinadora decide el
--- orden contra las otras tarjetas):
---   · 9b  · las `tablero_*` y obtener_resumen_compras que arregla B8b;
---   · 9c  · desasignar_usuario_sucursal, que arregla B6b;
---   · 10b · _guardar_gasto en LF, que B8a parcha por ancla.
+-- No va acá (decisión de coordinación, después de la revisión):
+--   · 1564-b7 (las facturas por la sucursal activa): no se hace. La sucursal
+--     activa la elige el propio usuario con un header, así que no acota nada,
+--     y haría depender la subida de que Storage reenvíe ese header a Postgres.
+--     Las policies de la 463 (las sucursales del usuario) quedan.
+--   · El REVOKE de las columnas reservadas de politicas_comerciales (la parte
+--     2 de 1564-b6): va días después del deploy del front, fuera de esta
+--     migración, para no dejar sin política a un bundle viejo del PWA.
+--
+-- Bloques que se pueden sacar sin tocar el resto:
+--   · 9b · las `tablero_*` y obtener_resumen_compras que parchó B8b (514);
+--   · 9c · desasignar_usuario_sucursal, que parchó B6b (513).
 --
 -- =========================================================================
 -- 1 · 1541-1 · EL TEXTO DE UN CUERPO SE LIMPIA DE IZQUIERDA A DERECHA
@@ -50,7 +61,11 @@
 -- Quince policies leían perfiles.rol de auth.uid() sin mirar `activo`. Las
 -- protegía current_sucursal_id(), que da NULL para un desactivado: protección
 -- indirecta. Ahora las de admin y encargado usan es_encargado_o_admin(), y las
--- del depósito (no tiene helper) suman COALESCE(activo, true). El gate:
+-- del depósito (no tiene helper) suman COALESCE(activo, true). Los helpers y
+-- current_sucursal_id() van envueltos en (SELECT …): no dependen de la fila y
+-- así se resuelven una vez por consulta (initPlan), no una por fila (H5 de la
+-- revisión: con 3.000 clientes el count(*) del chofer pasaba de 143 a 1.561 ms).
+-- El gate:
 -- auditoria_rol_sin_activo() devuelve también `policies` (las que leen el rol
 -- del que llama sin `activo`) y scripts/check-rol-sin-activo.mjs falla con
 -- cualquiera: no hay lista de permitidas para policies.
@@ -68,10 +83,19 @@
 --   · admin y encargado: todos los de la sucursal;
 --   · quien actúa como preventista (es_preventista(): el rol o el extra): sin
 --     asignar o asignados a él, y no reservados (como antes);
---   · cualquiera: el cliente al que le vendió, y el de un pedido que reparte
---     (sin VB), como antes;
---   · el depósito, ninguno (como antes).
+--   · cualquiera: el cliente al que le vendió, como antes;
+--   · cualquiera, también el depósito con el extra de chofer: el de un pedido
+--     que reparte (sin VB). Antes la exclusión del depósito le ganaba y su ruta
+--     salía sin nombre ni dirección (H7 de la revisión, ya pasaba);
+--   · el depósito, fuera de lo que reparte, ninguno (como antes).
 -- Un rol nuevo (un cajero) no hereda la lectura total.
+-- La regla vive en una sola función, _cliente_visible(id, sucursal, reservado)
+-- (SQL y SETOF, para que se inlinee en la policy: escalar se llamaba fila por
+-- fila), y la usan mt_clientes_select y
+-- obtener_resumen_cuenta_cliente, que le daba a cualquier chofer el saldo y el
+-- límite de cualquier cliente (H4). verificar_duplicado_cliente queda afuera a
+-- propósito: mira todos los clientes de la sucursal para avisar del duplicado
+-- (la reescribe B6a). El bot (ficha_cliente) va a la ola 3.
 --
 -- =========================================================================
 -- 4 · 1601-b5 · EL HISTORIAL DE STOCK, SÓLO ADMIN, ENCARGADO Y DEPÓSITO
@@ -91,19 +115,16 @@
 -- cambio, como reservado_admin y el vale blanco.
 --
 -- =========================================================================
--- 6 · 1564-b6 · LA POLÍTICA COMERCIAL, POR COLUMNA
+-- 6 · 1564-b6 · LA POLÍTICA COMERCIAL RESERVADA, POR RPC (PARTE 1)
 -- =========================================================================
 -- Decisión del dueño (D50, en #1564): el preventista y el chofer ven de la
 -- política comercial sólo lo que necesitan para vender; la comisión y el
--- margen mínimo, sólo admin y encargado. RLS no oculta columnas, así que
--- authenticated pasa a leer politicas_comerciales columna por columna (lo de
--- vender: el mínimo, su modo y el envío, mostrar sin stock, los días atrás de
--- la fecha y los de vencimiento; y el múltiplo de redondeo, que ya leía por
--- CAT-8), y lo demás (las comisiones, las alertas de combos y la ventana del
--- precio anterior) lo da politica_comercial_reservada() a admin y encargado de
--- la sucursal activa.
--- Como con productos: un `*` sobre politicas_comerciales por PostgREST falla
--- la consulta entera, y una columna nueva nace invisible.
+-- margen mínimo, sólo admin y encargado. RLS no oculta columnas: lo reservado
+-- (las comisiones, las alertas de combos y la ventana del precio anterior) lo
+-- da politica_comercial_reservada() a admin y encargado de la sucursal activa,
+-- y el front nuevo lo lee de ahí. Esta migración NO toca los grants: un bundle
+-- viejo del PWA sigue leyendo por REST. El REVOKE de esas columnas (parte 2)
+-- se aplica días después del deploy, con su issue.
 --
 -- =========================================================================
 -- 7 · SEG-5 · EL FILTRO DE PERSONAL DE audit_logs NO VA POR PREFIJO
@@ -122,12 +143,6 @@
 -- =========================================================================
 -- cambiar_sucursal y generar_codigo_vinculacion_bot miran `activo`. Las dos
 -- están en la lista blanca de auditoria_definer_sin_rol por md5: se actualiza.
---
--- 1564-b7 · Decisión del dueño (D51, en #1564): un usuario de dos sucursales
--- ve las facturas escaneadas sólo de la sucursal en la que está trabajando.
--- Las tres policies del bucket `facturas` comparan el path con
--- current_sucursal_id(), no con todas las del usuario. En una base sin
--- storage.objects (la copia local) el bloque se saltea con un aviso.
 --
 -- =========================================================================
 -- 9 · SEG-3, 1564-b10, SEG-4 · LAS FUNCIONES QUE NADIE LLAMA SE BORRAN
@@ -160,14 +175,13 @@
 -- =========================================================================
 -- 10 · SEG-6 · CUERPOS EN LF
 -- =========================================================================
--- _empleado_visible (y, en el bloque 10b, _guardar_gasto) se recrean con LF,
--- sin cambiar una coma: la poscondición compara el md5 con el del cuerpo vivo
--- pasado a LF. auditoria_comision_mes_cerrado queda en LF por el parche del
--- bloque 1.
+-- _empleado_visible se recrea con LF, sin cambiar una coma: la poscondición
+-- compara el md5 con el del cuerpo vivo pasado a LF. auditoria_comision_mes_
+-- cerrado queda en LF por el parche del bloque 1. _guardar_gasto no se toca:
+-- B8a la recrea.
 --
--- Revertir: volver los cuerpos y las policies a los de la premisa, restaurar
--- el GRANT SELECT de tabla de politicas_comerciales, recrear las funciones
--- borradas desde el volcado del 16/11 y borrar los objetos nuevos.
+-- Revertir: volver los cuerpos y las policies a los de la premisa, recrear las
+-- funciones borradas desde el volcado del 16/11 y borrar los objetos nuevos.
 -- =========================================================================
 
 BEGIN;
@@ -212,10 +226,10 @@ BEGIN
 END
 $p9$;
 
--- Todas las tablas cuyas policies, grants, triggers o vistas cambian, de una vez y sin esperar:
--- cada ALTER POLICY, el REVOKE de tabla, el CREATE TRIGGER y el DROP VIEW toman ACCESS EXCLUSIVE
--- hasta el COMMIT, y tomados de a uno, en otro orden que el de la venta o la compra, dan 40P01 a
--- la app. Si alguna está ocupada, la migración falla al instante (55P03) y se reintenta.
+-- Todas las tablas cuyas policies, triggers o vistas cambian, de una vez y sin esperar: cada
+-- ALTER POLICY, el CREATE TRIGGER y el DROP VIEW toman ACCESS EXCLUSIVE hasta el COMMIT, y
+-- tomados de a uno, en otro orden que el de la venta o la compra, dan 40P01 a la app. Si alguna
+-- está ocupada, la migración falla al instante (55P03) y se reintenta.
 LOCK TABLE public.clientes, public.productos, public.politicas_comerciales, public.stock_historico,
            public.grupo_precio_escala_minimos, public.grupo_precio_escalas, public.metas_preventista,
            public.pedido_item_lotes, public.producto_lotes, public.proveedores,
@@ -223,17 +237,10 @@ LOCK TABLE public.clientes, public.productos, public.politicas_comerciales, publ
            public.visitas_cliente, public.ii_encuadres, public.audit_logs, public.audit_logs_detallado
   IN ACCESS EXCLUSIVE MODE NOWAIT;
 
--- storage.objects (las policies de facturas, 1564-b7), en la misma tanda: no existe en la copia local.
-DO $lock_storage$
-BEGIN
-  IF to_regclass('storage.objects') IS NOT NULL THEN
-    EXECUTE 'LOCK TABLE storage.objects IN ACCESS EXCLUSIVE MODE NOWAIT';
-  END IF;
-END
-$lock_storage$;
-
 -- ---------------------------------------------------------------------------
--- Premisas: los cuerpos y las policies vivos del 16/11 (ledger en la 512)
+-- Premisas: los cuerpos y las policies vivos (ledger en la 514). Ninguna de estas funciones la
+-- tocan B3, B4, B5 ni B8a. auditoria_definer_sin_rol no lleva md5 (B4 y B5 le parchan líneas):
+-- su premisa es la forma, cada ancla tiene que aparecer una vez (pg_temp.parche).
 -- ---------------------------------------------------------------------------
 DO $premisas$
 DECLARE
@@ -246,13 +253,13 @@ BEGIN
     ('public.auditoria_pedidos_cliente_activo()',    '5e5969c2660eb2775d54ae6adef9279c'),
     ('public.auditoria_funciones_modo_regalo_vivo()', 'd3ff72dbbd49fdcd112b3a7d015193fe'),
     ('public.auditoria_reportes_join_interno()',     '0bbe945ce0a9f42f094b53e3cb223cfd'),
-    ('public.auditoria_definer_sin_rol()',           'baa75494fe0a36ff59cb3398148f5f84'),
     ('public.auditoria_rpcs_definer()',              'f0d47494b6632bc5eeca699a88c55880'),
     ('public.auditoria_comision_mes_cerrado()',      'da8022e9f4dfb9b5b1d78c42ca241ab2'),
     ('public.auditoria_bot_sin_funcion_canonica()',  '2295b95fe0ce8204711cc9f8dfee3784'),
     ('public.cambiar_sucursal(bigint)',              '86322b98dc0aaef539dabe10e74bbc16'),
     ('public.generar_codigo_vinculacion_bot()',      '6eebcfbefd5390e044ffbca6e40e62fe'),
     ('public._empleado_visible(bigint,boolean)',     'd4c607e38c98b915e8b1259233370f00'),
+    ('public.obtener_resumen_cuenta_cliente(integer)', '8e60a772daa3594038b18e6a22fd294b'),
     -- No cambian, pero las policies nuevas cuentan con ellas como están.
     ('public.es_encargado_o_admin()',                '8dad5014078f931eaad76911c2c171df'),
     ('public.es_preventista()',                      '25bca9777219c7915c0234bb60d4adb1'),
@@ -299,17 +306,10 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- politicas_comerciales: authenticated la lee por el GRANT de tabla, sin grants por columna.
-  IF NOT has_table_privilege('authenticated', 'public.politicas_comerciales', 'SELECT')
-     OR EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.politicas_comerciales'::regclass
-                   AND attnum > 0 AND attacl IS NOT NULL)
-     OR has_table_privilege('authenticated', 'public.politicas_comerciales', 'INSERT, UPDATE, DELETE') THEN
-    RAISE EXCEPTION 'mig NNN · los grants de politicas_comerciales no son los del 16/11: revisar a mano';
-  END IF;
-
   IF to_regproc('public._sql_sin_comentarios') IS NOT NULL
      OR to_regproc('public._sql_sin_comentarios_ni_literales') IS NOT NULL
      OR to_regproc('public._audit_tabla_de_personal') IS NOT NULL
+     OR to_regproc('public._cliente_visible') IS NOT NULL
      OR to_regproc('public.clientes_comodin_solo_admin') IS NOT NULL
      OR to_regproc('public.politica_comercial_reservada') IS NOT NULL
      OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.clientes'::regclass
@@ -483,102 +483,178 @@ $p2$;
 
 -- Las quince policies. Admin y encargado: es_encargado_o_admin(). Depósito: el
 -- rol con COALESCE(activo, true) (no tiene helper; trampa 4: es_preventista()
--- no sirve para preguntar por un rol).
+-- no sirve para preguntar por un rol). Los helpers y current_sucursal_id(), en
+-- (SELECT …): no dependen de la fila y se resuelven una vez (H5).
 ALTER POLICY mt_gpem_select ON public.grupo_precio_escala_minimos
-  USING ((sucursal_id = current_sucursal_id())
+  USING ((sucursal_id = (SELECT current_sucursal_id()))
          AND NOT (EXISTS (SELECT 1 FROM perfiles pd
                            WHERE pd.id = auth.uid() AND pd.rol = 'deposito'::text AND COALESCE(pd.activo, true))));
 
 ALTER POLICY mt_grupo_precio_escalas_select ON public.grupo_precio_escalas
-  USING ((sucursal_id = current_sucursal_id())
+  USING ((sucursal_id = (SELECT current_sucursal_id()))
          AND NOT (EXISTS (SELECT 1 FROM perfiles pd
                            WHERE pd.id = auth.uid() AND pd.rol = 'deposito'::text AND COALESCE(pd.activo, true))));
 
 ALTER POLICY mt_politicas_comerciales_select ON public.politicas_comerciales
-  USING ((sucursal_id = current_sucursal_id())
+  USING ((sucursal_id = (SELECT current_sucursal_id()))
          AND NOT (EXISTS (SELECT 1 FROM perfiles pd
                            WHERE pd.id = auth.uid() AND pd.rol = 'deposito'::text AND COALESCE(pd.activo, true))));
 
 ALTER POLICY mt_productos_select ON public.productos
-  USING ((sucursal_id = current_sucursal_id())
+  USING ((sucursal_id = (SELECT current_sucursal_id()))
          AND NOT (EXISTS (SELECT 1 FROM perfiles pd
                            WHERE pd.id = auth.uid() AND pd.rol = 'deposito'::text AND COALESCE(pd.activo, true))));
 
 -- 1558-b3: sin la rama depósito (letra muerta).
 ALTER POLICY mt_productos_update ON public.productos
-  USING (es_admin() AND (sucursal_id = current_sucursal_id()))
-  WITH CHECK (es_admin() AND (sucursal_id = current_sucursal_id()));
+  USING ((SELECT es_admin()) AND (sucursal_id = (SELECT current_sucursal_id())))
+  WITH CHECK ((SELECT es_admin()) AND (sucursal_id = (SELECT current_sucursal_id())));
 
 ALTER POLICY mt_stock_historico_insert_ficha ON public.stock_historico
   WITH CHECK ((pg_trigger_depth() = 1) AND (origen = 'ajuste_manual'::text) AND (usuario_id = auth.uid())
               AND (referencia_tipo IS NULL) AND (referencia_id IS NULL)
-              AND (sucursal_id = current_sucursal_id()) AND es_admin());
+              AND (sucursal_id = (SELECT current_sucursal_id())) AND (SELECT es_admin()));
 
 ALTER POLICY metas_preventista_admin_select ON public.metas_preventista
-  USING (es_encargado_o_admin()
+  USING ((SELECT es_encargado_o_admin())
          AND (sucursal_id IN (SELECT us.sucursal_id FROM usuario_sucursales us WHERE us.usuario_id = auth.uid())));
 
 ALTER POLICY mt_pedido_item_lotes_select ON public.pedido_item_lotes
-  USING ((es_encargado_o_admin()
+  USING (((SELECT es_encargado_o_admin())
           OR EXISTS (SELECT 1 FROM perfiles pd
                       WHERE pd.id = auth.uid() AND pd.rol = 'deposito'::text AND COALESCE(pd.activo, true)))
-         AND (sucursal_id = current_sucursal_id()));
+         AND (sucursal_id = (SELECT current_sucursal_id())));
 
 ALTER POLICY mt_producto_lotes_select ON public.producto_lotes
-  USING ((es_encargado_o_admin()
+  USING (((SELECT es_encargado_o_admin())
           OR EXISTS (SELECT 1 FROM perfiles pd
                       WHERE pd.id = auth.uid() AND pd.rol = 'deposito'::text AND COALESCE(pd.activo, true)))
-         AND (sucursal_id = current_sucursal_id()));
+         AND (sucursal_id = (SELECT current_sucursal_id())));
 
 ALTER POLICY mt_proveedores_select ON public.proveedores
-  USING ((es_encargado_o_admin()
+  USING (((SELECT es_encargado_o_admin())
           OR EXISTS (SELECT 1 FROM perfiles pd
                       WHERE pd.id = auth.uid() AND pd.rol = 'deposito'::text AND COALESCE(pd.activo, true)))
-         AND (sucursal_id = current_sucursal_id()));
+         AND (sucursal_id = (SELECT current_sucursal_id())));
 
 ALTER POLICY producto_equivalencias_select ON public.producto_equivalencias_proveedor
-  USING ((es_encargado_o_admin()
+  USING (((SELECT es_encargado_o_admin())
           OR EXISTS (SELECT 1 FROM perfiles pd
                       WHERE pd.id = auth.uid() AND pd.rol = 'deposito'::text AND COALESCE(pd.activo, true)))
-         AND (sucursal_id = current_sucursal_id()));
+         AND (sucursal_id = (SELECT current_sucursal_id())));
 
 ALTER POLICY perfil_roles_select_sucursal_activa ON public.perfil_roles
-  USING ((sucursal_id = current_sucursal_id()) AND es_encargado_o_admin());
+  USING ((sucursal_id = (SELECT current_sucursal_id())) AND (SELECT es_encargado_o_admin()));
 
 ALTER POLICY usuario_sucursales_select_sucursal_activa ON public.usuario_sucursales
-  USING ((sucursal_id = current_sucursal_id()) AND es_encargado_o_admin());
+  USING ((sucursal_id = (SELECT current_sucursal_id())) AND (SELECT es_encargado_o_admin()));
 
 ALTER POLICY visitas_cliente_select ON public.visitas_cliente
-  USING ((sucursal_id = current_sucursal_id()) AND ((preventista_id = auth.uid()) OR es_encargado_o_admin()));
+  USING ((sucursal_id = (SELECT current_sucursal_id()))
+         AND ((preventista_id = (SELECT auth.uid())) OR (SELECT es_encargado_o_admin())));
 
 -- =========================================================================
--- 3 · 1564-b12 · mt_clientes_select, por lista positiva
+-- 3 · 1564-b12 · Quién ve un cliente: una sola regla
 -- =========================================================================
+-- La usan mt_clientes_select y obtener_resumen_cuenta_cliente, siempre como
+-- EXISTS (SELECT 1 FROM _cliente_visible(...)): devuelve una fila si el cliente
+-- se ve y ninguna si no. Es SETOF a propósito: una función SQL escalar con
+-- subconsultas no se inlinea nunca, y en la policy se llamaba fila por fila
+-- (3 a 7 veces más lenta que la policy vieja con 3.000 clientes). Como SETOF,
+-- SQL, STABLE, sin STRICT, sin SET ni DEFINER, el planner la inlinea en el FROM
+-- y los (SELECT …) quedan como initPlan. No le agregues STRICT ni SET: deja de
+-- inlinearse y no falla nada.
+-- Las ramas que dependen de la fila comparan contra (SELECT auth.uid()) (#1182,
+-- #1187). Por RLS las subconsultas de pedidos y cliente_preventistas ven lo
+-- mismo que estas condiciones explícitas, así que da igual desde una DEFINER.
+CREATE FUNCTION public._cliente_visible(p_cliente_id bigint, p_sucursal_id bigint, p_reservado boolean)
+RETURNS SETOF boolean
+LANGUAGE sql
+STABLE
+AS $function$
+  SELECT true
+   WHERE p_sucursal_id = (SELECT public.current_sucursal_id())
+     AND (
+           (NOT EXISTS (SELECT 1 FROM public.perfiles pd
+                         WHERE pd.id = auth.uid() AND pd.rol = 'deposito' AND COALESCE(pd.activo, true))
+            AND ((SELECT public.es_encargado_o_admin())
+                 -- Quien actúa como preventista: sin asignar o asignado a él, no reservado.
+                 OR ((SELECT public.es_preventista())
+                     AND NOT p_reservado
+                     AND (NOT EXISTS (SELECT 1 FROM public.cliente_preventistas cp WHERE cp.cliente_id = p_cliente_id)
+                          OR EXISTS (SELECT 1 FROM public.cliente_preventistas cp
+                                      WHERE cp.cliente_id = p_cliente_id AND cp.preventista_id = (SELECT auth.uid()))))
+                 -- Historial (358): le vendió.
+                 OR EXISTS (SELECT 1 FROM public.pedidos pe
+                             WHERE pe.cliente_id = p_cliente_id AND pe.usuario_id = (SELECT auth.uid()))))
+           -- Reparto (#1182): el de un pedido que reparte, sin VB. Vale para todo rol, también el
+           -- depósito con el extra de chofer (H7).
+           OR EXISTS (SELECT 1 FROM public.pedidos pe
+                       WHERE pe.cliente_id = p_cliente_id AND pe.transportista_id = (SELECT auth.uid())
+                         AND pe.tipo_factura IS DISTINCT FROM 'VB')
+         );
+$function$;
+
+-- La policy la evalúa como el usuario: authenticated tiene que ejecutarla (sin EXECUTE el planner
+-- no la inlinea). Dice si se ve un cliente de la propia sucursal activa, lo mismo que la policy ya
+-- muestra.
+REVOKE EXECUTE ON FUNCTION public._cliente_visible(bigint, bigint, boolean) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public._cliente_visible(bigint, bigint, boolean) TO authenticated, service_role;
+
 ALTER POLICY mt_clientes_select ON public.clientes
-  USING ((sucursal_id = current_sucursal_id())
-         AND NOT (EXISTS (SELECT 1 FROM perfiles pd
-                           WHERE pd.id = auth.uid() AND pd.rol = 'deposito'::text AND COALESCE(pd.activo, true)))
-         AND (es_encargado_o_admin()
-              -- Quien actúa como preventista: sin asignar o asignado a él, no reservado.
-              OR (es_preventista()
-                  AND (NOT reservado_admin)
-                  AND ((NOT (EXISTS (SELECT 1 FROM cliente_preventistas cp WHERE cp.cliente_id = clientes.id)))
-                       OR (EXISTS (SELECT 1 FROM cliente_preventistas cp
-                                    WHERE cp.cliente_id = clientes.id AND cp.preventista_id = (SELECT auth.uid())))))
-              -- Historial: le vendió.
-              OR (EXISTS (SELECT 1 FROM pedidos pe
-                           WHERE pe.cliente_id = clientes.id AND pe.usuario_id = (SELECT auth.uid())))
-              -- Reparto (#1182): el de un pedido que reparte, sin VB.
-              OR (EXISTS (SELECT 1 FROM pedidos pe
-                           WHERE pe.cliente_id = clientes.id AND pe.transportista_id = (SELECT auth.uid())
-                             AND (pe.tipo_factura)::text IS DISTINCT FROM 'VB'::text))));
+  USING (EXISTS (SELECT 1 FROM _cliente_visible(id, sucursal_id, reservado_admin)));
+
+COMMENT ON POLICY mt_clientes_select ON public.clientes IS
+'Quién ve un cliente (1564-b12 de #1603, D52): _cliente_visible(id, sucursal, reservado), una lista positiva. Admin y encargado: todos los de la sucursal activa. Quien actúa como preventista (es_preventista(): el rol o el extra): sin asignar o asignados a él, sin reservados. Cualquiera: el que ya le vendió (358) y el de un pedido que reparte sin VB (#1182), también el depósito con el extra de chofer. El depósito, fuera de eso, ninguno. Un rol nuevo no hereda nada. Ver no es operar: lo deciden mt_clientes_update, clientes_proteger_columnas_preventista y los triggers de pedidos. Espejo: obtener_resumen_cuenta_cliente usa la misma función. Quedan afuera a propósito: verificar_duplicado_cliente (mira todos los clientes de la sucursal para avisar de un duplicado; su v_operable decide operar, no ver) y el bot (ficha_cliente, ola 3).';
+
+DO $p3$
+DECLARE
+  v text;
+BEGIN
+  v := pg_temp.parche(pg_temp.def('public.obtener_resumen_cuenta_cliente(integer)'),
+$a$  -- Mismo predicado que la política mt_clientes_select (migs 298 y #999).
+  IF NOT EXISTS (
+    SELECT 1 FROM clientes c
+    WHERE c.id = p_cliente_id
+      AND c.sucursal_id = current_sucursal_id()
+      AND (
+        NOT EXISTS (SELECT 1 FROM perfiles p WHERE p.id = auth.uid() AND p.rol = 'preventista')
+        OR (
+          (
+            NOT EXISTS (SELECT 1 FROM cliente_preventistas cp WHERE cp.cliente_id = c.id)
+            OR EXISTS (SELECT 1 FROM cliente_preventistas cp
+                       WHERE cp.cliente_id = c.id AND cp.preventista_id = auth.uid())
+          )
+          AND NOT c.reservado_admin
+        )
+        -- Historial (mig 358): ya le vendió, aunque hoy lo atienda otro
+        OR EXISTS (SELECT 1 FROM pedidos pe
+                   WHERE pe.cliente_id = c.id AND pe.usuario_id = auth.uid())
+        -- Reparto (#1182): el cliente de un pedido que reparte, sin VB
+        OR EXISTS (SELECT 1 FROM pedidos pe
+                   WHERE pe.cliente_id = c.id AND pe.transportista_id = auth.uid()
+                     AND pe.tipo_factura IS DISTINCT FROM 'VB')
+      )
+      AND NOT EXISTS (SELECT 1 FROM perfiles pd WHERE pd.id = auth.uid() AND pd.rol = 'deposito')
+  ) THEN$a$,
+$b$  -- La misma regla que mt_clientes_select: _cliente_visible (1564-b12 de #1603, H4). Antes le
+  -- daba a cualquier chofer el saldo y el límite de cualquier cliente de la sucursal.
+  IF NOT EXISTS (
+    SELECT 1 FROM clientes c
+    CROSS JOIN LATERAL public._cliente_visible(c.id, c.sucursal_id, c.reservado_admin) v
+    WHERE c.id = p_cliente_id
+  ) THEN$b$,
+         'obtener_resumen_cuenta_cliente');
+  EXECUTE v;
+END
+$p3$;
 
 -- =========================================================================
 -- 4 · 1601-b5 · El historial de stock
 -- =========================================================================
 ALTER POLICY mt_stock_historico_select ON public.stock_historico
-  USING ((sucursal_id = current_sucursal_id())
-         AND (es_encargado_o_admin()
+  USING ((sucursal_id = (SELECT current_sucursal_id()))
+         AND ((SELECT es_encargado_o_admin())
               OR EXISTS (SELECT 1 FROM perfiles pd
                           WHERE pd.id = auth.uid() AND pd.rol = 'deposito'::text AND COALESCE(pd.activo, true))));
 
@@ -586,16 +662,16 @@ ALTER POLICY mt_stock_historico_select ON public.stock_historico
 -- 5 · 1564-b4 · Los encuadres de II, y 1561-b6 · el cliente comodín
 -- =========================================================================
 ALTER POLICY ii_encuadres_insert ON public.ii_encuadres
-  WITH CHECK (es_admin_de_todas_las_sucursales());
+  WITH CHECK ((SELECT es_admin_de_todas_las_sucursales()));
 
 ALTER POLICY ii_encuadres_update ON public.ii_encuadres
-  USING (es_admin_de_todas_las_sucursales())
-  WITH CHECK (es_admin_de_todas_las_sucursales());
+  USING ((SELECT es_admin_de_todas_las_sucursales()))
+  WITH CHECK ((SELECT es_admin_de_todas_las_sucursales()));
 
 ALTER POLICY mt_clientes_insert ON public.clientes
-  WITH CHECK (es_preventista() AND (sucursal_id = current_sucursal_id())
-              AND ((NOT reservado_admin) OR es_admin())
-              AND ((NOT es_comodin) OR es_admin()));
+  WITH CHECK ((SELECT es_preventista()) AND (sucursal_id = (SELECT current_sucursal_id()))
+              AND ((NOT reservado_admin) OR (SELECT es_admin()))
+              AND ((NOT es_comodin) OR (SELECT es_admin())));
 
 -- El cambio de la marca por PATCH (el alta ya la frena la policy). Como
 -- clientes_reservado_solo_admin: el server y las RPC DEFINER no pasan por acá.
@@ -634,18 +710,10 @@ CREATE TRIGGER trg_clientes_comodin_solo_admin
   FOR EACH ROW EXECUTE FUNCTION public.clientes_comodin_solo_admin();
 
 -- =========================================================================
--- 6 · 1564-b6 · La política comercial, por columna
+-- 6 · 1564-b6 · Lo reservado de la política comercial, por RPC (parte 1)
 -- =========================================================================
--- Un REVOKE de tabla borra también los grants por columna del mismo privilegio
--- (CLAUDE.md): acá no había ninguno (premisa).
-REVOKE SELECT ON public.politicas_comerciales FROM authenticated;
--- El múltiplo de redondeo queda legible: no es comisión ni margen, y la regla de CAT-8 (#1561,
--- scripts/test-multiplo-redondeo-1561.sql P4) es que authenticated lo lee.
-GRANT SELECT (sucursal_id, monto_minimo_pedido, modo_minimo_pedido, monto_envio_gratis, cargo_envio_pedido,
-              mostrar_sin_stock, dias_atras_fecha_pedido, dias_alerta_vencimiento, dias_critico_vencimiento,
-              multiplo_redondeo_precio)
-  ON public.politicas_comerciales TO authenticated;
-
+-- Los grants de politicas_comerciales no cambian acá (un bundle viejo del PWA sigue leyendo por
+-- REST). El REVOKE de las columnas reservadas es la parte 2, días después del deploy.
 -- Lo que no es para vender, a admin y encargado de la sucursal activa. Sin
 -- fila para el resto (y para un desactivado: current_sucursal_id() da NULL).
 CREATE FUNCTION public.politica_comercial_reservada()
@@ -689,8 +757,8 @@ REVOKE EXECUTE ON FUNCTION public._audit_tabla_de_personal(text) FROM PUBLIC, an
 GRANT EXECUTE ON FUNCTION public._audit_tabla_de_personal(text) TO authenticated, service_role;
 
 ALTER POLICY mt_audit_logs_select ON public.audit_logs
-  USING (es_admin() AND (sucursal_id = current_sucursal_id())
-         AND ((NOT _audit_tabla_de_personal(tabla)) OR es_admin_de_todas_las_sucursales()));
+  USING ((SELECT es_admin()) AND (sucursal_id = (SELECT current_sucursal_id()))
+         AND ((NOT _audit_tabla_de_personal(tabla)) OR (SELECT es_admin_de_todas_las_sucursales())));
 
 DROP VIEW public.audit_logs_detallado;
 
@@ -746,45 +814,6 @@ $b$,
 END
 $p8$;
 
--- 1564-b7 · Las facturas escaneadas, de la sucursal activa (D51). Mismo molde
--- que la 463: DROP y CREATE (sin storage.objects, la copia local, se saltea).
-DO $p8b$
-BEGIN
-  IF to_regclass('storage.objects') IS NULL THEN
-    RAISE NOTICE 'mig NNN · no hay storage.objects (base local): se saltean las policies de facturas';
-    RETURN;
-  END IF;
-  IF (SELECT count(*) FROM pg_policies
-       WHERE schemaname = 'storage' AND tablename = 'objects'
-         AND policyname IN ('facturas_select_encargado_o_admin', 'facturas_insert_encargado_o_admin',
-                            'facturas_delete_admin')) <> 3 THEN
-    RAISE EXCEPTION 'mig NNN · las tres policies de facturas de la 463 no están: revisar a mano';
-  END IF;
-
-  EXECUTE 'DROP POLICY facturas_select_encargado_o_admin ON storage.objects';
-  EXECUTE 'DROP POLICY facturas_insert_encargado_o_admin ON storage.objects';
-  EXECUTE 'DROP POLICY facturas_delete_admin ON storage.objects';
-
-  -- El path es `<sucursal_id>/<uuid>.<ext>`. Se compara como texto: un path
-  -- viejo (`facturas/…`) no tira error, sólo no matchea. Sin sucursal activa
-  -- (un desactivado) la comparación da NULL y no pasa.
-  EXECUTE $q$
-    CREATE POLICY facturas_select_encargado_o_admin ON storage.objects
-      FOR SELECT TO authenticated
-      USING (bucket_id = 'facturas' AND public.es_encargado_o_admin()
-             AND (storage.foldername(name))[1] = public.current_sucursal_id()::text)$q$;
-  EXECUTE $q$
-    CREATE POLICY facturas_insert_encargado_o_admin ON storage.objects
-      FOR INSERT TO authenticated
-      WITH CHECK (bucket_id = 'facturas' AND public.es_encargado_o_admin()
-                  AND (storage.foldername(name))[1] = public.current_sucursal_id()::text)$q$;
-  EXECUTE $q$
-    CREATE POLICY facturas_delete_admin ON storage.objects
-      FOR DELETE TO authenticated
-      USING (bucket_id = 'facturas' AND public.es_admin()
-             AND (storage.foldername(name))[1] = public.current_sucursal_id()::text)$q$;
-END
-$p8b$;
 
 -- =========================================================================
 -- 9 · SEG-3, 1564-b10, SEG-4 · Las funciones que nadie llama
@@ -850,21 +879,6 @@ BEGIN
 END
 $p10$;
 
--- 10b · _guardar_gasto (B8a la parcha por ancla tolerante a CRLF): un bloque
--- aparte, con su premisa, para poder sacarlo o correrlo después de B8a.
-DO $p10b$
-BEGIN
-  IF (SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public._guardar_gasto(jsonb,boolean)'::regprocedure)
-     IS DISTINCT FROM 'd717ba627ebc1ca023c7200f56fa945a' THEN
-    RAISE EXCEPTION 'mig NNN · _guardar_gasto cambió desde el 16/11: rehacer el paso a LF sobre el cuerpo vigente';
-  END IF;
-  EXECUTE pg_temp.def('public._guardar_gasto(jsonb,boolean)');
-  IF (SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public._guardar_gasto(jsonb,boolean)'::regprocedure)
-     IS DISTINCT FROM 'd0549186969d159b154f4adba99f04fc' THEN
-    RAISE EXCEPTION 'mig NNN · _guardar_gasto no quedó igual en LF';
-  END IF;
-END
-$p10b$;
 
 -- ---------------------------------------------------------------------------
 -- Poscondiciones
@@ -872,6 +886,7 @@ $p10b$;
 DO $post$
 DECLARE
   r record;
+  v_t text;
 BEGIN
   -- 1541-1: las nueve usan los helpers y ninguna conserva la limpieza vieja.
   FOR r IN SELECT p.oid::regprocedure::text AS f, p.prosrc
@@ -911,20 +926,90 @@ BEGIN
     RAISE EXCEPTION 'mig NNN · la lista blanca de auditoria_definer_sin_rol no tiene los md5 nuevos';
   END IF;
 
-  -- 1564-b6: lo reservado no se lee por REST.
-  IF has_column_privilege('authenticated', 'public.politicas_comerciales', 'comision_pct_otros', 'SELECT')
-     OR has_column_privilege('authenticated', 'public.politicas_comerciales', 'combo_margen_minimo_pct', 'SELECT')
-     OR NOT has_column_privilege('authenticated', 'public.politicas_comerciales', 'monto_minimo_pedido', 'SELECT')
-     OR has_column_privilege('anon', 'public.politicas_comerciales', 'monto_minimo_pedido', 'SELECT') THEN
-    RAISE EXCEPTION 'mig NNN · los grants por columna de politicas_comerciales no quedaron como se esperaba';
+  -- 1564-b6 (parte 1): la RPC existe y los grants de lectura siguen como estaban (tabla entera).
+  IF to_regprocedure('public.politica_comercial_reservada()') IS NULL
+     OR NOT has_table_privilege('authenticated', 'public.politicas_comerciales', 'SELECT')
+     OR has_table_privilege('anon', 'public.politicas_comerciales', 'SELECT') THEN
+    RAISE EXCEPTION 'mig NNN · la política comercial no quedó como se esperaba (RPC y grants de hoy)';
   END IF;
 
-  -- SEG-3, 1564-b10, SEG-4.
-  IF to_regproc('public.tablero_kpis') IS NOT NULL OR to_regproc('public.get_audit_history') IS NOT NULL
-     OR to_regproc('public.obtener_sucursales_usuario') IS NOT NULL
-     OR has_function_privilege('authenticated', 'public.tablero_cobertura(bigint,date)', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public.guardar_analisis_mensual(bigint,date,text,jsonb)', 'EXECUTE') THEN
-    RAISE EXCEPTION 'mig NNN · las funciones sin uso no quedaron como se esperaba';
+  -- Cada policy reescrita, con lo que tiene que decir.
+  FOR r IN SELECT * FROM (VALUES
+      ('clientes', 'mt_clientes_select', '_cliente_visible\(', NULL),
+      ('clientes', 'mt_clientes_insert', 'es_comodin', NULL),
+      ('stock_historico', 'mt_stock_historico_select', 'es_encargado_o_admin', NULL),
+      ('stock_historico', 'mt_stock_historico_insert_ficha', 'es_admin', 'deposito'),
+      ('productos', 'mt_productos_update', 'es_admin', 'deposito'),
+      ('productos', 'mt_productos_select', 'activo', NULL),
+      ('ii_encuadres', 'ii_encuadres_insert', 'es_admin_de_todas_las_sucursales', NULL),
+      ('ii_encuadres', 'ii_encuadres_update', 'es_admin_de_todas_las_sucursales', NULL),
+      ('audit_logs', 'mt_audit_logs_select', '_audit_tabla_de_personal', 'empleado%'),
+      ('grupo_precio_escala_minimos', 'mt_gpem_select', 'activo', NULL),
+      ('grupo_precio_escalas', 'mt_grupo_precio_escalas_select', 'activo', NULL),
+      ('politicas_comerciales', 'mt_politicas_comerciales_select', 'activo', NULL),
+      ('metas_preventista', 'metas_preventista_admin_select', 'es_encargado_o_admin', NULL),
+      ('pedido_item_lotes', 'mt_pedido_item_lotes_select', 'activo', NULL),
+      ('producto_lotes', 'mt_producto_lotes_select', 'activo', NULL),
+      ('proveedores', 'mt_proveedores_select', 'activo', NULL),
+      ('producto_equivalencias_proveedor', 'producto_equivalencias_select', 'activo', NULL),
+      ('perfil_roles', 'perfil_roles_select_sucursal_activa', 'es_encargado_o_admin', NULL),
+      ('usuario_sucursales', 'usuario_sucursales_select_sucursal_activa', 'es_encargado_o_admin', NULL),
+      ('visitas_cliente', 'visitas_cliente_select', 'es_encargado_o_admin', NULL)
+    ) AS t(tabla, policy, dice, no_dice) LOOP
+    SELECT coalesce(qual, '') || ' ' || coalesce(with_check, '') INTO v_t
+      FROM pg_policies WHERE schemaname = 'public' AND tablename = r.tabla AND policyname = r.policy;
+    IF v_t IS NULL OR v_t !~ r.dice OR (r.no_dice IS NOT NULL AND position(r.no_dice in v_t) > 0)
+       -- H5: ningún helper de rol ni current_sucursal_id() pelado (fila por fila).
+       OR v_t ~ '(?<!SELECT )\m(es_admin|es_encargado_o_admin|es_preventista|es_admin_de_todas_las_sucursales|current_sucursal_id)\(\)' THEN
+      RAISE EXCEPTION 'mig NNN · la policy % / % no quedó como se esperaba: %', r.tabla, r.policy, v_t;
+    END IF;
+  END LOOP;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.clientes'::regclass
+                  AND tgname = 'trg_clientes_comodin_solo_admin' AND tgenabled = 'O') THEN
+    RAISE EXCEPTION 'mig NNN · falta el trigger trg_clientes_comodin_solo_admin';
+  END IF;
+  IF to_regclass('public.audit_logs_detallado') IS NOT NULL THEN
+    RAISE EXCEPTION 'mig NNN · la vista audit_logs_detallado sigue';
+  END IF;
+
+  -- H4: obtener_resumen_cuenta_cliente decide con la misma regla que la policy.
+  SELECT prosrc INTO v_t FROM pg_proc WHERE oid = 'public.obtener_resumen_cuenta_cliente(integer)'::regprocedure;
+  IF position('_cliente_visible(' in v_t) = 0 OR position('p.rol = ''preventista''' in v_t) > 0 THEN
+    RAISE EXCEPTION 'mig NNN · obtener_resumen_cuenta_cliente no usa _cliente_visible';
+  END IF;
+  -- H5: _cliente_visible se puede inlinear (SETOF, SQL, STABLE, sin STRICT, SET ni DEFINER).
+  IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang
+                  WHERE p.oid = 'public._cliente_visible(bigint,bigint,boolean)'::regprocedure
+                    AND l.lanname = 'sql' AND p.proretset AND p.provolatile = 's'
+                    AND NOT p.proisstrict AND NOT p.prosecdef AND p.proconfig IS NULL) THEN
+    RAISE EXCEPTION 'mig NNN · _cliente_visible no se puede inlinear en la policy';
+  END IF;
+
+  -- SEG-3, 1564-b10, SEG-4: las trece no existen; las cinco de server, sin authenticated.
+  FOR r IN SELECT * FROM unnest(ARRAY[
+      'tablero_buscar_clientes(text,bigint,integer)', 'tablero_clientes_inactivos(bigint,integer,boolean)',
+      'tablero_contexto()', 'tablero_ficha_cliente(bigint)', 'tablero_guardar_meta_cobertura(bigint,date,numeric,integer)',
+      'tablero_kpis(bigint,integer)', 'tablero_productos_categoria(uuid,text,bigint,date,date,bigint)',
+      'guardar_horarios_clientes_masivo(jsonb)', 'obtener_resumen_compras(date,date)', 'obtener_sucursales_usuario()',
+      'desasignar_usuario_sucursal(uuid,bigint)', 'get_audit_history(text,text,integer)',
+      'get_suspicious_activity(integer)']) AS t(f) LOOP
+    IF to_regprocedure('public.' || r.f) IS NOT NULL THEN
+      RAISE EXCEPTION 'mig NNN · % sigue existiendo', r.f;
+    END IF;
+  END LOOP;
+  FOR r IN SELECT * FROM unnest(ARRAY[
+      'tablero_categorias(bigint,date,date,bigint)', 'tablero_facturacion_mensual(bigint,integer)',
+      'tablero_top_clientes_zona(bigint,date,date,integer,integer)', 'tablero_cobertura(bigint,date)',
+      'guardar_analisis_mensual(bigint,date,text,jsonb)']) AS t(f) LOOP
+    IF has_function_privilege('authenticated', 'public.' || r.f, 'EXECUTE')
+       OR NOT has_function_privilege('service_role', 'public.' || r.f, 'EXECUTE') THEN
+      RAISE EXCEPTION 'mig NNN · los permisos de % no quedaron como se esperaba', r.f;
+    END IF;
+  END LOOP;
+  IF to_regprocedure('public._tablero_cat_nombre(text)') IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+                       AND p.proname <> '_tablero_cat_nombre' AND p.prosrc ~ '\m_tablero_cat_nombre\M') THEN
+    RAISE EXCEPTION 'mig NNN · _tablero_cat_nombre quedó huérfana';
   END IF;
 
   -- SEG-6.
@@ -939,6 +1024,7 @@ BEGIN
       ('public._sql_sin_comentarios_ni_literales(text)', false),
       ('public.clientes_comodin_solo_admin()', false),
       ('public._audit_tabla_de_personal(text)', true),
+      ('public._cliente_visible(bigint,bigint,boolean)', true),
       ('public.politica_comercial_reservada()', true)
     ) AS t(f, auth) LOOP
     IF has_function_privilege('anon', r.f, 'EXECUTE')
