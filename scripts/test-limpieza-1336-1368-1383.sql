@@ -133,6 +133,9 @@ DECLARE
   v_z2     text := '';
   v_fallas text[] := '{}';
   F CONSTANT date := DATE '2099-05-11';
+  -- La programada que se edita va dentro del rango (hoy a 60 días, 1559-b6 de la ola 2 del
+  -- plan #1603): con F + 1 (2099) la edición se rechaza. Cambió de regla.
+  P CONSTANT date := public._tablero_hoy() + 5;
 BEGIN
   SELECT s.id, adm.usuario_id, pv.usuario_id, tr.usuario_id
     INTO v_suc, v_adm, v_prev, v_tr
@@ -200,9 +203,9 @@ BEGIN
   -- R1 · el preventista edita su pendiente
   BEGIN
     v_ped := pg_temp.t_venta(v_prev, v_suc, v_cli, v_items);
-    v_j := pg_temp.t_editar(v_prev, v_suc, v_ped, 'ensayo R1', F + 1);
+    v_j := pg_temp.t_editar(v_prev, v_suc, v_ped, 'ensayo R1', P);
     IF v_j ? 'error' OR (v_j->>'vuelto_a_pendiente')::boolean
-       OR pg_temp.t_estado(v_ped, NULL) NOT LIKE format('pendiente|chofer=f|prog=%s|notas=ensayo R1|parada=f', F + 1) THEN
+       OR pg_temp.t_estado(v_ped, NULL) NOT LIKE format('pendiente|chofer=f|prog=%s|notas=ensayo R1|parada=f', P) THEN
       v_fallas := v_fallas || format('R1 dio %s y dejó %s', v_j, pg_temp.t_estado(v_ped, NULL));
     END IF;
     RAISE EXCEPTION 'volver' USING ERRCODE = 'ZZT10';
@@ -219,11 +222,11 @@ BEGIN
     IF v_antes NOT LIKE 'asignado|chofer=t|%|parada=t' THEN
       RAISE EXCEPTION 'R2 el fixture no quedó asignado y en la ruta: %', v_antes;
     END IF;
-    v_j := pg_temp.t_editar(v_prev, v_suc, v_ped, 'ensayo R2', F + 1);
+    v_j := pg_temp.t_editar(v_prev, v_suc, v_ped, 'ensayo R2', P);
     IF public._preventista_en_ventana((SELECT created_at FROM pedidos WHERE id = v_ped)) THEN
       v_r2 := 'en ventana';
       IF v_j ? 'error' OR NOT (v_j->>'vuelto_a_pendiente')::boolean
-         OR pg_temp.t_estado(v_ped, v_r) NOT LIKE format('pendiente|chofer=f|prog=%s|notas=ensayo R2|parada=f', F + 1) THEN
+         OR pg_temp.t_estado(v_ped, v_r) NOT LIKE format('pendiente|chofer=f|prog=%s|notas=ensayo R2|parada=f', P) THEN
         v_fallas := v_fallas || format('R2 (en ventana) dio %s y dejó %s', v_j, pg_temp.t_estado(v_ped, v_r));
       END IF;
     ELSE

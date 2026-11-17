@@ -92,6 +92,20 @@ export function estadoVencimiento(
   return 'ok'
 }
 
+/**
+ * Si dar de baja el lote pide el motivo (#1558, 1558-b6; decisión del dueño).
+ *
+ * Un lote que todavía no venció se puede dar de baja (rotura, pérdida), pero con
+ * el motivo escrito; el vencido no lo pide. Es la regla de `dar_de_baja_lote`:
+ * vencido es una fecha anterior al día argentino de hoy, así que el lote que
+ * vence HOY todavía pide motivo. Una fecha ilegible también lo pide: es el lado
+ * seguro, y el servidor decide igual con la fecha que tiene.
+ */
+export function bajaDeLotePideMotivo(fecha: string, hoy: string = hoyISO()): boolean {
+  const dias = diasHasta(fecha, hoy)
+  return Number.isNaN(dias) || dias >= 0
+}
+
 /** Texto corto para la UI: "vencido hace 3 días", "vence en 12 días", "vence hoy". */
 export function textoVencimiento(fecha: string, hoy: string = hoyISO()): string {
   const dias = diasHasta(fecha, hoy)

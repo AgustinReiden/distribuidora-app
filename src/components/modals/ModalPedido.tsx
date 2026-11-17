@@ -2,6 +2,7 @@ import { useState, useMemo, memo, useRef, useEffect } from 'react';
 import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle, UserCheck, Percent, Plus, Layers } from 'lucide-react';
 import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
 import { fechaPedidoFueraDeRango, mensajeFechaAnteriorAlPiso, pisoFechaPedido } from '../../utils/fechaPedido';
+import { techoFechaEntregaProgramada } from '../../utils/fechaEntregaProgramada';
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo';
 import { numeroEditable, parsePrecio } from '../../utils/calculations';
 import { AddressAutocomplete } from '../AddressAutocomplete';
@@ -1103,6 +1104,8 @@ const ModalPedido = memo(function ModalPedido({
                 })()}
                 onChange={e => onFechaEntregaProgramadaChange && onFechaEntregaProgramadaChange(e.target.value)}
                 min={nuevoPedido.fecha || fechaLocalISO()}
+                // 1559-b6 (D21): hasta 60 días adelante, como el server.
+                max={techoFechaEntregaProgramada()}
                 className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
               />
             </div>
