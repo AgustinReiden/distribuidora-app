@@ -17,8 +17,8 @@
 --        (22023 con el motivo) y por el CHECK de la tabla.
 --   M3 · [F] 1561-b8: el mensaje del mínimo con un total de 1.500 millones no trae
 --        `#`, y la RPC vieja en modo escalas avisa con su motivo en vez del 23514.
---   M4 · [F] 1596-b3: el mínimo de venta masivo va hasta 100.000 (el techo del CHECK de
---        B7, 1596-b1), con su motivo (22023) y no el 23514 del CHECK.
+--   M4 · [F] 1596-b3 (D36): el mínimo de venta masivo va hasta 99.999.999 (el techo del
+--        CHECK de B7, 1596-b1), con su motivo (22023) y no el 23514 del CHECK.
 -- Rubros:
 --   R1 · [F] 1596-b6: dos rubros que difieren sólo en mayúsculas o espacios chocan
 --        (23505), y dos subrubros del mismo rubro también; en rubros distintos, no.
@@ -26,9 +26,19 @@
 --        difiera en mayúsculas y espacios.
 --   R3 · [R] renombrar un rubro sólo en mayúsculas sigue andando.
 -- Duplicado de cliente:
---   D1 · [F] 1596-b7: «Mitre 450, Local 1» y «Mitre 450, Local 2» no chocan.
+--   Regla (1596-b7, de la coordinadora): la misma calle y altura chocan, salvo que las
+--   dos tengan unidad y sean distintas; entonces tampoco bloquean por punto (aviso).
+--   D1 · [F] sin coordenadas: «…, Local 1» y «…, Local 2» no chocan.
 --   D2 · [R] la misma puerta con y sin la ciudad de Google sigue chocando, y un barrio
 --        sin altura no tiene clave.
+--   D3 · [F] con coordenadas (el mismo punto, como las da Google): otra unidad avisa y no
+--        bloquea; la misma unidad o una sin unidad bloquean por dirección; otro cliente
+--        en el mismo punto sigue bloqueando por punto.
+--   D4 · [R] siguen chocando: sin unidad contra «PB»; «PB» contra «Planta Baja»; «Local
+--        1» contra «Loc. 1»; las mismas unidades en otro orden; una localidad que empieza
+--        con una palabra de unidad («Puesto Viejo», «Planta Urbana», «Unidad Turística»).
+--   E1 · [F] espejo: las direcciones y los pares de src/utils/direccionCliente.espejo.json
+--        (los mismos que corre el TS) dan la clave, la unidad y el choque esperados.
 -- Borrar un producto (1561-b2, D32):
 --   B1 · [F] con stock no se borra (23503, con el motivo).
 --   B2 · [F] con un lote (aunque esté agotado) no se borra.
@@ -249,11 +259,11 @@ BEGIN
   INSERT INTO public.categorias (nombre, sucursal_id) VALUES ('ZZ ensayo B6a minimo ' || gen_random_uuid(), p_suc)
   RETURNING id INTO v_cat;
   v_p := pg_temp.t_prod(p_suc, 1210, 0, (SELECT nombre FROM public.categorias WHERE id = v_cat));
-  v_r := pg_temp.t_err(format($q$SELECT public.actualizar_minimo_venta_masivo(%L, 100001)$q$, v_cat));
-  f := pg_temp.t_si(f, v_r LIKE '22023%100.000%', format('el mínimo de venta de 100.001: %s', v_r));
-  v_r := pg_temp.t_err(format($q$SELECT public.actualizar_minimo_venta_masivo(%L, 100000)$q$, v_cat));
+  v_r := pg_temp.t_err(format($q$SELECT public.actualizar_minimo_venta_masivo(%L, 100000000)$q$, v_cat));
+  f := pg_temp.t_si(f, v_r LIKE '22023%99.999.999%', format('el mínimo de venta de 100.000.000: %s', v_r));
+  v_r := pg_temp.t_err(format($q$SELECT public.actualizar_minimo_venta_masivo(%L, 99999999)$q$, v_cat));
   SELECT cantidad_minima_venta INTO v_c FROM public.productos WHERE id = v_p;
-  f := pg_temp.t_si(f, v_r = 'ok' AND v_c = 100000, format('el mínimo de venta en el techo: %s (%s)', v_r, v_c));
+  f := pg_temp.t_si(f, v_r = 'ok' AND v_c = 99999999, format('el mínimo de venta en el techo: %s (%s)', v_r, v_c));
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;
@@ -322,11 +332,67 @@ BEGIN
   v_res := public.verificar_duplicado_cliente(NULL, NULL, 'Calle Ensayo 450, Local 2, T4000 San Miguel de Tucumán, Tucumán');
   f := pg_temp.t_si(f, NOT COALESCE((v_res->>'bloquea')::boolean, false),
                     format('«Local 1» y «Local 2» de la misma altura chocan: %s', v_res));
-  f := pg_temp.t_si(f, public.clave_direccion_cliente('Calle Ensayo 450, Local 1')
-                       IS DISTINCT FROM public.clave_direccion_cliente('Calle Ensayo 450, Local 2'),
-                    'la clave de «Local 1» y «Local 2» es la misma');
-  f := pg_temp.t_si(f, public.clave_direccion_cliente('Calle Ensayo 450, Dpto. 3 B, Tucumán') = 'calle ensayo 450 dpto 3 b',
-                    format('la clave con departamento: %s', public.clave_direccion_cliente('Calle Ensayo 450, Dpto. 3 B, Tucumán')));
+  -- La clave (la del índice) sigue siendo la calle y la altura.
+  f := pg_temp.t_si(f, public.clave_direccion_cliente('Calle Ensayo 450, Local 1') = 'calle ensayo 450',
+                    format('la clave de «…, Local 1» cambió: %s', public.clave_direccion_cliente('Calle Ensayo 450, Local 1')));
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
+-- Con coordenadas: las dos unidades de la puerta en el mismo punto, como las da Google.
+CREATE OR REPLACE FUNCTION pg_temp.caso_d3(p_suc bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v_res jsonb; v_lat numeric := -26.8312345; v_lng numeric := -65.2012345;
+BEGIN
+  INSERT INTO public.clientes (razon_social, nombre_fantasia, direccion, sucursal_id, latitud, longitud)
+  VALUES ('ZZ ensayo B6a local uno', 'ZZ ensayo B6a local uno', 'Calle Ensayo 777, Local 1, T4000 San Miguel de Tucumán, Tucumán', p_suc, v_lat, v_lng);
+  v_res := public.verificar_duplicado_cliente(v_lat, v_lng, 'Calle Ensayo 777, Local 2, T4000 San Miguel de Tucumán, Tucumán');
+  f := pg_temp.t_si(f, NOT COALESCE((v_res->>'bloquea')::boolean, true) AND (v_res->>'avisa')::boolean
+                       AND v_res->>'motivo' = 'distancia',
+                    format('otra unidad en el mismo punto tenía que avisar sin bloquear: %s', v_res));
+  v_res := public.verificar_duplicado_cliente(v_lat, v_lng, 'Calle Ensayo 777, Loc. 1');
+  f := pg_temp.t_si(f, (v_res->>'bloquea')::boolean AND v_res->>'motivo' = 'direccion',
+                    format('la misma unidad («Loc. 1») en el mismo punto: %s', v_res));
+  v_res := public.verificar_duplicado_cliente(v_lat, v_lng, 'Calle Ensayo 777');
+  f := pg_temp.t_si(f, (v_res->>'bloquea')::boolean AND v_res->>'motivo' = 'direccion',
+                    format('sin unidad, en el mismo punto: %s', v_res));
+  -- Otro cliente en el mismo punto, que no es otra unidad de la puerta: bloquea por punto.
+  INSERT INTO public.clientes (razon_social, nombre_fantasia, direccion, sucursal_id, latitud, longitud)
+  VALUES ('ZZ ensayo B6a otro', 'ZZ ensayo B6a otro', 'Otra Ensayo 99', p_suc, v_lat, v_lng);
+  v_res := public.verificar_duplicado_cliente(v_lat, v_lng, 'Calle Ensayo 777, Local 2');
+  f := pg_temp.t_si(f, (v_res->>'bloquea')::boolean AND v_res->>'motivo' = 'punto',
+                    format('otro cliente en el mismo punto tenía que bloquear por punto: %s', v_res));
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
+-- Lo que chocaba antes y tiene que seguir chocando (los falsos negativos de la revisión).
+CREATE OR REPLACE FUNCTION pg_temp.caso_d4(p_suc bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}'; v_res jsonb; r record; v_n int := 0;
+BEGIN
+  FOR r IN SELECT * FROM (VALUES
+    ('Calle Ensayo 888', 'Calle Ensayo 888, PB'),
+    ('Calle Ensayo 888, PB', 'Calle Ensayo 888, Planta Baja'),
+    ('Calle Ensayo 888, Local 1', 'Calle Ensayo 888, Loc. 1'),
+    ('Calle Ensayo 888, Piso 2, Dpto B', 'Calle Ensayo 888, Dpto B, Piso 2'),
+    ('Calle Ensayo 888', 'Calle Ensayo 888, Puesto Viejo'),
+    ('Calle Ensayo 888', 'Calle Ensayo 888, Planta Urbana, Lules'),
+    ('Calle Ensayo 888', 'Calle Ensayo 888, Unidad Turística Lules')
+  ) AS t(existe, nueva) LOOP
+    v_n := v_n + 1;
+    BEGIN
+      INSERT INTO public.clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
+      VALUES ('ZZ ensayo B6a d4', 'ZZ ensayo B6a d4', r.existe, p_suc);
+      v_res := public.verificar_duplicado_cliente(NULL, NULL, r.nueva);
+      f := pg_temp.t_si(f, COALESCE((v_res->>'bloquea')::boolean, false) AND v_res->>'motivo' = 'direccion',
+                        format('«%s» contra «%s» ya no choca: %s', r.nueva, r.existe, v_res));
+      RAISE EXCEPTION USING ERRCODE = 'ZZ002';
+    EXCEPTION WHEN SQLSTATE 'ZZ002' THEN NULL;
+    END;
+  END LOOP;
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;
@@ -347,6 +413,89 @@ BEGIN
                        AND public.clave_direccion_cliente('B° Ensayo, Local 4') IS NULL,
                     'un barrio sin altura tiene clave');
   RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
+-- Espejo: los casos de src/utils/direccionCliente.espejo.json, que corre también el TS.
+-- La consulta la imprime `node scripts/espejo-direccion-cliente.mjs --sql`.
+CREATE OR REPLACE FUNCTION pg_temp.caso_e1(p_suc bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}';
+BEGIN
+  SELECT COALESCE(array_agg(format('%s «%s» no da lo del fixture', q.que, q.entrada)), '{}') INTO f
+    FROM (
+      SELECT 'caso' AS que, d AS entrada, (public.clave_direccion_cliente(d) IS NOT DISTINCT FROM clave
+              AND public.unidad_direccion_cliente(d) IS NOT DISTINCT FROM unidad) AS ok
+        FROM (VALUES
+          ('Mitre 450', 'mitre 450', NULL::text),
+          ('Mitre 450, Local 1', 'mitre 450', 'local 1'),
+          ('Mitre 450 Local 1', 'mitre 450 local 1', NULL::text),
+          ('Mitre 450, Local 2', 'mitre 450', 'local 2'),
+          ('Mitre 450, PB', 'mitre 450', 'pb'),
+          ('Mitre 450, Planta Baja', 'mitre 450', 'pb'),
+          ('Mitre 450, Tucumán', 'mitre 450', NULL::text),
+          ('Mitre 450, 4000', 'mitre 450', NULL::text),
+          ('Mitre 450, T4000 San Miguel de Tucumán, Tucumán, Argentina', 'mitre 450', NULL::text),
+          ('Mitre 450, Local 1, T4000 San Miguel de Tucumán, Tucumán, Argentina', 'mitre 450', 'local 1'),
+          ('Av. Mitre 450 esq. Salta', 'av mitre 450 esq salta', NULL::text),
+          ('Ruta 9 km 12', 'ruta 9 km 12', NULL::text),
+          ('Ruta 9 km 12, Puesto Viejo', 'ruta 9 km 12', NULL::text),
+          ('Mitre', NULL::text, NULL::text),
+          ('Mitre N° 450', 'mitre n 450', NULL::text),
+          ('Mitre Nº 450', 'mitre n 450', NULL::text),
+          ('Mitre nº450, 1º B', 'mitre n 450', NULL::text),
+          ('Mitre 450, Piso 2 Dpto B', 'mitre 450', 'dpto b piso 2'),
+          ('Mitre 450, Piso 2, Dpto B', 'mitre 450', 'dpto b piso 2'),
+          ('Mitre 450, Dpto B, Piso 2', 'mitre 450', 'dpto b piso 2'),
+          ('Mitre 450, 2° B', 'mitre 450', NULL::text),
+          ('Mitre 450, Depto. 3, Tucumán', 'mitre 450', 'dpto 3'),
+          ('Mitre 450, Local, Tucumán', 'mitre 450', NULL::text),
+          ('Mitre 450, Locales 1 y 2', 'mitre 450', NULL::text),
+          ('Mitre 450, Loc. 1', 'mitre 450', 'local 1'),
+          ('B° Ensayo, Mz B Casa 12', NULL::text, NULL::text),
+          ('Mitre 450, Torre 2', 'mitre 450', 'torre 2'),
+          ('Mitre 450, Planta Urbana, Lules', 'mitre 450', NULL::text),
+          ('Mitre 450, Unidad Turística Lules', 'mitre 450', NULL::text),
+          ('Mitre 450,, Local 1', 'mitre 450', 'local 1'),
+          ('Mitre 450, OF 3', 'mitre 450', 'of 3'),
+          ('Mitre 450, ß ø æ Local 1', 'mitre 450', 'local 1'),
+          ('Ñandú 12, Box 3', 'nandu 12', 'box 3'),
+          ('Calle 777, Unidad Funcional 03', 'calle 777', 'uf 3'),
+          ('Calle 777, UF 3', 'calle 777', 'uf 3'),
+          ('Calle 777, Departamento 4A', 'calle 777', 'dpto 4a'),
+          ('Calle 777, Oficina 12, Piso 1', 'calle 777', 'of 12 piso 1'),
+          ('Calle 777, Local 01', 'calle 777', 'local 1'),
+          ('Calle 777, PB, Local 2', 'calle 777', 'local 2 pb'),
+          ('Calle 777, Galpón 5', 'calle 777', 'galpon 5'),
+          ('', NULL::text, NULL::text),
+          (NULL::text, NULL::text, NULL::text)
+        ) AS t(d, clave, unidad)
+      UNION ALL
+      SELECT 'par', a || ' | ' || b,
+             (public.clave_direccion_cliente(a) IS NOT NULL
+              AND public.clave_direccion_cliente(a) = public.clave_direccion_cliente(b)
+              AND NOT public._otra_unidad_misma_puerta(a, b)) = chocan
+             AND public._otra_unidad_misma_puerta(a, b) = public._otra_unidad_misma_puerta(b, a)
+        FROM (VALUES
+          ('Calle 777', 'Calle 777, PB', true),
+          ('Calle 777, PB', 'Calle 777, Planta Baja', true),
+          ('Calle 777, Local 1', 'Calle 777, Loc. 1', true),
+          ('Calle 777, Piso 2, Dpto B', 'Calle 777, Dpto B, Piso 2', true),
+          ('Calle 777', 'Calle 777, Puesto Viejo', true),
+          ('Calle 777', 'Calle 777, Planta Urbana, Lules', true),
+          ('Calle 777', 'Calle 777, Unidad Turística Lules', true),
+          ('Calle 777, Local 1', 'Calle 777, Local 2', false),
+          ('Calle 777, PB', 'Calle 777, Local 2', false),
+          ('Calle 777, Local 1', 'Calle 777', true),
+          ('Calle 777, Local 1', 'Calle 778, Local 2', false),
+          ('Calle 777, UF 3', 'Calle 777, Unidad Funcional 03', true)
+        ) AS p(a, b, chocan)
+    ) q
+   WHERE NOT COALESCE(q.ok, false);
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+EXCEPTION WHEN undefined_function THEN
+  RETURN jsonb_build_object('fallas', jsonb_build_array('unidad_direccion_cliente o _otra_unidad_misma_puerta no existen: ' || SQLERRM));
 END
 $fn$;
 
@@ -494,7 +643,7 @@ BEGIN
   PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc::text)::text, true);
 
   FOREACH v_caso IN ARRAY ARRAY['p1', 'p2', 'p3', 'p4', 'm1', 'm2', 'm3', 'm4', 'r1', 'r2', 'r3',
-                                'd1', 'd2', 'b1', 'b2', 'b3', 'b4', 's1', 'a1'] LOOP
+                                'd1', 'd2', 'd3', 'd4', 'e1', 'b1', 'b2', 'b3', 'b4', 's1', 'a1'] LOOP
     v_out := NULL;
     BEGIN
       PERFORM pg_temp.t_como(v_admin);
@@ -525,11 +674,17 @@ BEGIN
     ('public.renombrar_rubro(uuid,text,text)', false, true),
     ('public.eliminar_rubro(uuid,text,boolean)', false, true),
     ('public.clave_direccion_cliente(text)', false, true),
+    ('public.unidad_direccion_cliente(text)', false, false),
+    ('public._otra_unidad_misma_puerta(text,text)', false, false),
     ('public.verificar_duplicado_cliente(numeric,numeric,text,bigint)', true, true),
     ('public.cambiar_alicuota_ii(bigint,numeric,date)', true, true),
     ('public.bot_metricas_admin_dia(date,bigint)', true, false),
     ('public.productos_rechazar_borrado_con_historial()', true, false)
   ) AS t(fn, def, auth) LOOP
+    IF to_regprocedure(r.fn) IS NULL THEN
+      v_fallas := v_fallas || format('K1 · %s no existe', r.fn);
+      CONTINUE;
+    END IF;
     IF (SELECT prosecdef FROM pg_proc WHERE oid = r.fn::regprocedure) IS DISTINCT FROM r.def
        OR has_function_privilege('anon', r.fn, 'EXECUTE')
        OR has_function_privilege('authenticated', r.fn, 'EXECUTE') IS DISTINCT FROM r.auth THEN
@@ -540,6 +695,6 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION E'ENSAYO FALLÓ (% fallas)\n- %', cardinality(v_fallas), array_to_string(v_fallas, E'\n- ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · aumento masivo (P1-P4), mínimos (M1-M4), rubros (R1-R3), duplicado de cliente (D1-D2), borrar un producto (B1-B4), CAT-13 (S1), alícuota sin fecha (A1) y permisos (K1)';
+  RAISE EXCEPTION 'ENSAYO OK · aumento masivo (P1-P4), mínimos (M1-M4), rubros (R1-R3), duplicado de cliente (D1-D4, E1), borrar un producto (B1-B4), CAT-13 (S1), alícuota sin fecha (A1) y permisos (K1)';
 END
 $ensayo$;

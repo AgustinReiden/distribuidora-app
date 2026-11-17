@@ -8,10 +8,10 @@
 -- la 512) y poscondición de md5, definer y ACL: `actualizar_precios_masivo`,
 -- `actualizar_politica_minimo_pedido`, `actualizar_monto_minimo_pedido`,
 -- `pedido_incumple_minimo`, `actualizar_minimo_venta_masivo`,
--- `sync_producto_categoria_id`, `clave_direccion_cliente` (la usan sólo
--- `verificar_duplicado_cliente` y un índice de clientes, que se reconstruye),
+-- `sync_producto_categoria_id`, `verificar_duplicado_cliente`,
 -- `productos_rechazar_borrado_con_historial`,
--- `bot_metricas_admin_dia` y `cambiar_alicuota_ii`. Suma un CHECK a
+-- `bot_metricas_admin_dia` y `cambiar_alicuota_ii`. Crea dos funciones sólo de
+-- server (`unidad_direccion_cliente`, `_otra_unidad_misma_puerta`). Suma un CHECK a
 -- `politicas_comerciales` y cambia el índice único de `categorias`. No cambia
 -- firmas ni grants, ni la forma del JSON de ninguna función.
 -- Ensayo: scripts/test-catalogo-precios-ola2-1603.sql. Se aplica en LF.
@@ -44,11 +44,10 @@
 -- · CHECK politicas_monto_minimo_pedido_techo: el techo en la columna.
 -- · pedido_incumple_minimo: la máscara de los montos llega a 12 cifras; con un
 --   total de mil millones o más el mensaje mostraba «###».
--- · actualizar_minimo_venta_masivo: el mínimo de venta hasta 100.000 u., con su
---   motivo. Es el techo del CHECK productos_cantidad_minima_venta_check que pone la
---   tarjeta B7 (1596-b1), que se aplica antes que ésta: un techo más alto acá daría
---   el 23514 crudo de ese CHECK. D36 decía 99.999.999 también para el mínimo de
---   venta; la diferencia la decide la coordinadora con el dueño.
+-- · actualizar_minimo_venta_masivo: el mínimo de venta hasta 99.999.999 u. (D36,
+--   confirmado por el dueño el 16/11), con su motivo. Es el mismo techo del CHECK
+--   productos_cantidad_minima_venta_check que pone la tarjeta B7 (1596-b1), así que
+--   nadie ve el 23514 crudo de ese CHECK.
 --
 -- =========================================================================
 -- 3 · 1596-b6 y 1561-b7 (#1596, #1561) · rubros
@@ -66,14 +65,24 @@
 -- =========================================================================
 -- 4 · 1596-b7 (#1596) · el duplicado de cliente y la coma
 -- =========================================================================
--- clave_direccion_cliente tomaba sólo lo anterior a la primera coma: «Mitre 450,
--- Local 1» y «Mitre 450, Local 2» daban la misma clave y el alta se bloqueaba.
--- Ahora suma a la clave los segmentos que nombran una unidad dentro de la misma
--- puerta (local, depto, piso, oficina, puesto, galpón, box, torre…). Lo demás
--- después de la coma (la ciudad y el código postal de Google) sigue afuera, y una
--- dirección cuyo primer segmento no tiene altura sigue sin clave. Espejo en
--- `claveDireccionConAltura` (src/utils/duplicadoCliente.ts). La función es
--- IMMUTABLE y la usa el índice idx_clientes_clave_direccion: se reconstruye.
+-- La clave de dirección (clave_direccion_cliente, la del índice
+-- idx_clientes_clave_direccion) es lo anterior a la primera coma: «Mitre 450, Local
+-- 1» y «Mitre 450, Local 2» chocaban por dirección y, con las coordenadas de Google
+-- (las dos en el mismo punto), también por punto. Regla de la coordinadora, dentro
+-- de la intención del hallazgo: dos direcciones con la misma calle y altura CHOCAN,
+-- salvo que LAS DOS tengan unidad y sean distintas. Entonces no chocan por dirección
+-- y tampoco bloquean por punto (menos de 1 m): pasa a ser el aviso. Todo lo demás
+-- sigue igual, también el bloqueo por punto contra cualquier otro.
+-- · La clave no cambia (ni el índice). La unidad sale aparte, de
+--   unidad_direccion_cliente: los segmentos después de la primera coma, con los
+--   sinónimos al mismo token (loc = local; dpto/depto/dto/departamento; of/oficina;
+--   pb = planta baja; uf = unidad funcional…), y una palabra de unidad cuenta sólo
+--   con un identificador detrás (un número o una letra suelta) o si es PB: «Puesto
+--   Viejo», «Planta Urbana» o «Unidad Turística» son localidades. El orden no importa.
+-- · _otra_unidad_misma_puerta(a, b) es la regla: la usa verificar_duplicado_cliente
+--   en el bloqueo por dirección y en el de punto.
+-- · Espejo: claveDireccionConAltura, unidadDireccion y otraUnidadMismaPuerta
+--   (src/utils/duplicadoCliente.ts), con el fixture src/utils/direccionCliente.espejo.json.
 --
 -- =========================================================================
 -- 5 · 1561-b2 (#1561) · borrar un producto
@@ -103,18 +112,19 @@
 -- Con p_vigente_desde NULL daba el 23502 crudo del INSERT. Ahora, 22023 con su motivo.
 --
 -- Revertir: volver los cuerpos a los de la premisa, borrar el CHECK
--- politicas_monto_minimo_pedido_techo y volver al índice de categorias por nombre.
+-- politicas_monto_minimo_pedido_techo, volver al índice de categorias por nombre y
+-- borrar unidad_direccion_cliente y _otra_unidad_misma_puerta.
 -- =========================================================================
 
 BEGIN;
 
 SET LOCAL lock_timeout = '5s';
 
--- Las tablas que esta migración altera (el CHECK de politicas_comerciales, el índice
--- único de categorias y el REINDEX del índice de clientes), todas juntas y sin
--- esperar: tomadas de a una, en otro orden que el del alta de un pedido, darían un
--- deadlock con la app. Si alguna está tomada, falla al instante y se reintenta.
-LOCK TABLE public.politicas_comerciales, public.categorias, public.clientes
+-- Las tablas que esta migración altera (el CHECK de politicas_comerciales y el índice
+-- único de categorias), juntas y sin esperar: tomadas de a una, en otro orden que el
+-- del alta de un pedido, darían un deadlock con la app. Si alguna está tomada, falla
+-- al instante y se reintenta.
+LOCK TABLE public.politicas_comerciales, public.categorias
   IN ACCESS EXCLUSIVE MODE NOWAIT;
 
 DO $lf$
@@ -140,13 +150,13 @@ BEGIN
     ('public.pedido_incumple_minimo(numeric,bigint)', '6993a5780cb062aa02ef3e2cbf64c65e'),
     ('public.actualizar_minimo_venta_masivo(uuid,integer)', '2362bb2308f60d87ef409b017ebbde9b'),
     ('public.sync_producto_categoria_id()', '732fe79e957e988bf933ffc4d3ea3a76'),
-    ('public.clave_direccion_cliente(text)', '723f836397e4dca8a2c713373d28fab2'),
+    ('public.verificar_duplicado_cliente(numeric,numeric,text,bigint)', 'c431610338f04a2387264ee8638e48d7'),
     ('public.productos_rechazar_borrado_con_historial()', '781025173330d3e58aff853ae8de9855'),
     ('public.bot_metricas_admin_dia(date,bigint)', 'd4a41fccc09211dad035a82200ee3d74'),
     ('public.cambiar_alicuota_ii(bigint,numeric,date)', '8dcbeb41fb5dcb5b505e5a28f8697f8b'),
-    -- No cambian, pero lo de arriba cuenta con ellas como están: la única que llama a
-    -- la clave de dirección, y las RPC de rubros que comparan con upper(btrim()).
-    ('public.verificar_duplicado_cliente(numeric,numeric,text,bigint)', 'c431610338f04a2387264ee8638e48d7'),
+    -- No cambian, pero lo de arriba cuenta con ellas como están: la clave de dirección
+    -- (la del índice de clientes), y las RPC de rubros que comparan con upper(btrim()).
+    ('public.clave_direccion_cliente(text)', '723f836397e4dca8a2c713373d28fab2'),
     ('public.renombrar_rubro(uuid,text,text)', 'b2d1c5d7c645205423f9a71930984295'),
     ('public.eliminar_rubro(uuid,text,boolean)', '7179adade957b3b85f377273ed951820')
   ) AS t(f, h) LOOP
@@ -159,22 +169,10 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- La clave de dirección no la usa nadie más que verificar_duplicado_cliente y su
-  -- índice de clientes, que se reconstruye abajo (la función es IMMUTABLE).
-  IF EXISTS (SELECT 1 FROM pg_proc p
-              WHERE p.pronamespace = 'public'::regnamespace
-                AND p.prosrc LIKE '%clave_direccion_cliente%'
-                AND p.oid <> 'public.verificar_duplicado_cliente(numeric,numeric,text,bigint)'::regprocedure
-                AND p.oid <> 'public.clave_direccion_cliente(text)'::regprocedure)
-     OR EXISTS (SELECT 1 FROM pg_indexes WHERE indexdef LIKE '%clave_direccion_cliente%'
-                   AND indexname <> 'idx_clientes_clave_direccion')
-     OR EXISTS (SELECT 1 FROM pg_constraint WHERE pg_get_constraintdef(oid) LIKE '%clave_direccion_cliente%') THEN
-    RAISE EXCEPTION 'mig NNN · clave_direccion_cliente tiene otro usuario: revisar antes de cambiarla';
-  END IF;
-  SELECT indexdef INTO v FROM pg_indexes
-   WHERE schemaname = 'public' AND indexname = 'idx_clientes_clave_direccion';
-  IF v IS DISTINCT FROM 'CREATE INDEX idx_clientes_clave_direccion ON public.clientes USING btree (sucursal_id, clave_direccion_cliente(direccion)) WHERE (clave_direccion_cliente(direccion) IS NOT NULL)' THEN
-    RAISE EXCEPTION 'mig NNN · el índice idx_clientes_clave_direccion cambió (%): rehacer sobre lo vigente', v;
+  -- Las dos funciones nuevas de la unidad de una dirección.
+  IF to_regproc('public.unidad_direccion_cliente') IS NOT NULL
+     OR to_regproc('public._otra_unidad_misma_puerta') IS NOT NULL THEN
+    RAISE EXCEPTION 'mig NNN · unidad_direccion_cliente o _otra_unidad_misma_puerta ya existen';
   END IF;
 
   -- El índice único de categorias que se reemplaza.
@@ -448,10 +446,11 @@ $a$,
 $r$  IF p_cantidad IS NOT NULL AND p_cantidad <= 0 THEN
     RAISE EXCEPTION 'La cantidad mínima debe ser mayor a 0 (o NULL para quitarla)';
   END IF;
-  -- 1596-b3 (#1596): el techo, contra un error de tipeo. Es el del CHECK
-  -- productos_cantidad_minima_venta_check (1596-b1): con su motivo, no el 23514.
-  IF p_cantidad > 100000 THEN
-    RAISE EXCEPTION 'La cantidad mínima de venta va hasta 100.000.' USING ERRCODE = '22023';
+  -- 1596-b3 (#1596, decision del dueño D36): el techo, contra un error de tipeo. Es
+  -- el del CHECK productos_cantidad_minima_venta_check (1596-b1): con su motivo, no
+  -- el 23514.
+  IF p_cantidad > 99999999 THEN
+    RAISE EXCEPTION 'La cantidad mínima de venta va hasta 99.999.999.' USING ERRCODE = '22023';
   END IF;
 $r$, 'actualizar_minimo_venta_masivo (techo)');
 
@@ -498,52 +497,141 @@ END
 $parche_sync$;
 
 -- =========================================================================
--- 4 · La clave de dirección del duplicado de cliente
+-- 4 · Dos unidades distintas de la misma puerta (duplicado de cliente)
 -- =========================================================================
-DO $parche_clave$
+-- La unidad dentro de la puerta, normalizada: los segmentos después de la primera
+-- coma, con los sinónimos al mismo token, ordenada y sin repetir. NULL si no hay.
+-- Espejo: unidadDireccion (src/utils/duplicadoCliente.ts).
+CREATE FUNCTION public.unidad_direccion_cliente(p_direccion text)
+RETURNS text
+LANGUAGE plpgsql
+IMMUTABLE PARALLEL SAFE
+SET search_path TO 'public', 'pg_temp'
+AS $function$
 DECLARE
-  v_def text := pg_get_functiondef('public.clave_direccion_cliente(text)'::regprocedure);
+  v_seg      text;
+  t          text[];
+  i          int;
+  v_palabra  text;
+  v_salto    int;
+  v_id       text;
+  v_unidades text[] := '{}';
 BEGIN
+  IF p_direccion IS NULL THEN
+    RETURN NULL;
+  END IF;
+  FOR v_seg IN
+    SELECT u.seg FROM unnest(string_to_array(p_direccion, ',')) WITH ORDINALITY AS u(seg, n)
+     WHERE u.n > 1 ORDER BY u.n
+  LOOP
+    -- La misma normalización que la clave: sin acentos, en minúsculas, y lo que no es
+    -- alfanumérico es un espacio.
+    t := array_remove(regexp_split_to_array(
+           trim(regexp_replace(lower(f_unaccent(v_seg)), '[^a-z0-9]+', ' ', 'g')), ' '), '');
+    i := 1;
+    WHILE i <= COALESCE(array_length(t, 1), 0) LOOP
+      IF t[i] = 'pb' THEN
+        v_unidades := v_unidades || 'pb'::text;
+      ELSIF t[i] = 'planta' AND t[i + 1] = 'baja' THEN
+        v_unidades := v_unidades || 'pb'::text;
+        i := i + 1;
+      ELSE
+        v_palabra := CASE t[i]
+          WHEN 'local' THEN 'local' WHEN 'loc' THEN 'local' WHEN 'lc' THEN 'local'
+          WHEN 'dpto' THEN 'dpto' WHEN 'depto' THEN 'dpto' WHEN 'dto' THEN 'dpto'
+          WHEN 'departamento' THEN 'dpto'
+          WHEN 'piso' THEN 'piso'
+          WHEN 'of' THEN 'of' WHEN 'ofic' THEN 'of' WHEN 'oficina' THEN 'of'
+          WHEN 'puesto' THEN 'puesto' WHEN 'galpon' THEN 'galpon' WHEN 'deposito' THEN 'deposito'
+          WHEN 'box' THEN 'box' WHEN 'stand' THEN 'stand'
+          WHEN 'uf' THEN 'uf' WHEN 'unidad' THEN 'uf'
+          WHEN 'torre' THEN 'torre' WHEN 'block' THEN 'block' WHEN 'modulo' THEN 'modulo'
+        END;
+        IF v_palabra IS NOT NULL THEN
+          v_salto := CASE WHEN t[i] = 'unidad' AND t[i + 1] = 'funcional' THEN 2 ELSE 1 END;
+          v_id := t[i + v_salto];
+          -- Sólo con un identificador detrás: un número (con una letra pegada) o una
+          -- letra suelta. «Puesto Viejo» o «Unidad Turística» no son unidades.
+          IF v_id ~ '^([0-9]+[a-z]?|[a-z])$' THEN
+            v_unidades := v_unidades || (v_palabra || ' ' || regexp_replace(v_id, '^0+([0-9])', '\1'));
+            i := i + v_salto;
+          END IF;
+        END IF;
+      END IF;
+      i := i + 1;
+    END LOOP;
+  END LOOP;
+  -- Ordenadas byte a byte (COLLATE "C"), como el sort() del espejo.
+  RETURN NULLIF(array_to_string(ARRAY(SELECT DISTINCT (x COLLATE "C") FROM unnest(v_unidades) x
+                                        ORDER BY 1), ' '), '');
+END
+$function$;
+
+COMMENT ON FUNCTION public.unidad_direccion_cliente(text) IS
+  '1596-b7 (#1596): la unidad dentro de la puerta de una dirección («Local 2», «Dpto. B», «PB»), normalizada y ordenada; NULL si no hay. Espejo: unidadDireccion (src/utils/duplicadoCliente.ts).';
+
+-- La regla: la misma calle y altura, y las dos con una unidad, distinta.
+CREATE FUNCTION public._otra_unidad_misma_puerta(p_a text, p_b text)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE PARALLEL SAFE
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT COALESCE(
+           public.clave_direccion_cliente(p_a) = public.clave_direccion_cliente(p_b)
+           AND public.unidad_direccion_cliente(p_a) <> public.unidad_direccion_cliente(p_b),
+           false);
+$function$;
+
+COMMENT ON FUNCTION public._otra_unidad_misma_puerta(text, text) IS
+  '1596-b7 (#1596): dos direcciones son unidades distintas de la misma puerta si tienen la misma calle y altura y las dos dicen una unidad, distinta. No chocan por dirección y no bloquean por punto: es un aviso. Espejo: otraUnidadMismaPuerta.';
+
+-- Sólo de server: las llama verificar_duplicado_cliente (DEFINER).
+REVOKE ALL ON FUNCTION public.unidad_direccion_cliente(text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._otra_unidad_misma_puerta(text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.unidad_direccion_cliente(text) TO service_role;
+GRANT EXECUTE ON FUNCTION public._otra_unidad_misma_puerta(text, text) TO service_role;
+
+DO $parche_duplicado$
+DECLARE
+  v_def text := pg_get_functiondef('public.verificar_duplicado_cliente(numeric,numeric,text,bigint)'::regprocedure);
+BEGIN
+  -- 4a · por dirección: otra unidad de la misma puerta no choca
   v_def := pg_temp.parche(v_def,
-$a$  SELECT CASE
-           WHEN v.clave = '' OR v.clave !~ '[0-9]' THEN NULL
-           ELSE v.clave
-         END
-  FROM (
-    SELECT trim(regexp_replace(
-             lower(f_unaccent(split_part(COALESCE(p_direccion, ''), ',', 1))),
-             '[^a-z0-9]+', ' ', 'g')) AS clave
-  ) v;
+$a$       AND clave_direccion_cliente(c.direccion) = v_clave
+     ORDER BY c.activo DESC, c.id
 $a$,
-$r$  -- 1596-b7 (#1596): el primer segmento (la calle y la altura) y los segmentos que
-  -- nombran una unidad dentro de la misma puerta («Mitre 450, Local 2»). Lo demas
-  -- (la ciudad y el codigo postal de Google) sigue afuera, y sin altura en el
-  -- primer segmento no hay clave (un barrio entero). Espejo:
-  -- claveDireccionConAltura (src/utils/duplicadoCliente.ts).
-  SELECT CASE
-           WHEN COALESCE(v.primero, '') !~ '[0-9]' THEN NULL
-           ELSE concat_ws(' ', v.primero, v.unidades)
-         END
-  FROM (
-    SELECT min(s.seg) FILTER (WHERE s.n = 1) AS primero,
-           string_agg(s.seg, ' ' ORDER BY s.n) FILTER (
-             WHERE s.n > 1
-               AND s.seg ~ '^(local|loc|dpto|depto|dto|departamento|piso|pb|planta|of|oficina|puesto|galpon|deposito|box|stand|unidad|uf|torre|block|modulo)( |$)'
-           ) AS unidades
-      FROM (
-        SELECT u.n, trim(regexp_replace(lower(f_unaccent(u.seg)), '[^a-z0-9]+', ' ', 'g')) AS seg
-          FROM unnest(string_to_array(COALESCE(p_direccion, ''), ',')) WITH ORDINALITY AS u(seg, n)
-      ) s
-  ) v;
-$r$, 'clave_direccion_cliente (unidades)');
+$r$       AND clave_direccion_cliente(c.direccion) = v_clave
+       -- 1596-b7 (#1596): «Local 1» y «Local 2» de la misma puerta no chocan.
+       AND NOT _otra_unidad_misma_puerta(p_direccion, c.direccion)
+     ORDER BY c.activo DESC, c.id
+$r$, 'verificar_duplicado_cliente (dirección)');
+
+  -- 4b · por punto: primero el que bloquea; otra unidad de la misma puerta, aviso
+  v_def := pg_temp.parche(v_def,
+$a$     ORDER BY haversine_m(p_latitud, p_longitud, c.latitud, c.longitud)
+     LIMIT 1;
+$a$,
+$r$     -- 1596-b7 (#1596): primero el que está a menos de 1 m y no es otra unidad de la
+     -- misma puerta (ése bloquea, aunque haya otra unidad más cerca); después, el más
+     -- cercano, que avisa.
+     ORDER BY (haversine_m(p_latitud, p_longitud, c.latitud, c.longitud) < c_bloqueo_m
+               AND NOT _otra_unidad_misma_puerta(p_direccion, c.direccion)) DESC,
+              haversine_m(p_latitud, p_longitud, c.latitud, c.longitud), c.id
+     LIMIT 1;
+$r$, 'verificar_duplicado_cliente (orden del vecino)');
+
+  v_def := pg_temp.parche(v_def,
+$a$      IF v_dist < c_bloqueo_m THEN
+$a$,
+$r$      -- Google pone las dos unidades de una puerta en el mismo punto: es un aviso.
+      IF v_dist < c_bloqueo_m
+         AND NOT _otra_unidad_misma_puerta(p_direccion, (SELECT c2.direccion FROM clientes c2 WHERE c2.id = t_id)) THEN
+$r$, 'verificar_duplicado_cliente (punto)');
 
   EXECUTE v_def;
 END
-$parche_clave$;
-
--- El índice de clientes por la clave la guarda calculada: con la función nueva se
--- rehace (clientes son unos miles de filas).
-REINDEX INDEX public.idx_clientes_clave_direccion;
+$parche_duplicado$;
 
 -- =========================================================================
 -- 5 · Borrar un producto con stock, lotes o en una promoción
@@ -691,12 +779,18 @@ BEGIN
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.pedido_incumple_minimo(numeric,bigint)', '72288ef55afb37543159d81d0873c727', true,
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public.actualizar_minimo_venta_masivo(uuid,integer)', '619c8a713cf026a674a448c07f5010ba', true,
+    ('public.actualizar_minimo_venta_masivo(uuid,integer)', '629480b92775e38b7b3020be2b87c35d', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.sync_producto_categoria_id()', '08e272b3fcbf50a28aebc4403e3a1ee2', false,
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public.clave_direccion_cliente(text)', '35ff9cf7753dc51375359f9586fc1942', false,
+    ('public.verificar_duplicado_cliente(numeric,numeric,text,bigint)', '3f95ea7d1843c7dade9bbc84baf50dd9', true,
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+    ('public.clave_direccion_cliente(text)', '723f836397e4dca8a2c713373d28fab2', false,
+     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+    ('public.unidad_direccion_cliente(text)', 'c20167f583008713960e01ee5f85e477', false,
+     '{postgres=X/postgres,service_role=X/postgres}'),
+    ('public._otra_unidad_misma_puerta(text,text)', '49f580d52fc6092889813c060799447e', false,
+     '{postgres=X/postgres,service_role=X/postgres}'),
     ('public.productos_rechazar_borrado_con_historial()', '945ad427e04031ac694f0afdc1ffe450', true,
      '{postgres=X/postgres,service_role=X/postgres}'),
     ('public.bot_metricas_admin_dia(date,bigint)', 'e891cbfefb1084c765e7c7d84b389593', true,

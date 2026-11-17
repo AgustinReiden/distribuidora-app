@@ -382,7 +382,7 @@ suelta en `sucursales`.
   (`src/utils/stockMinimo.ts`), su copia del bot (`supabase/functions/_shared/utils/stockMinimo.ts`)
   y `bot_metricas_admin_dia`. Una pantalla o un reporte nuevo de stock bajo usa una de ellas.
 - **La compra mínima del pedido la cambia sólo el admin, hasta $ 99.999.999** (1561-b9 y 1596-b3,
-  decisiones del dueño), y el mínimo de venta, hasta 100.000 u. Los rubros son únicos sin mirar
+  decisiones del dueño), y el mínimo de venta, hasta 99.999.999 u. Los rubros son únicos sin mirar
   mayúsculas ni espacios de los bordes (`upper(btrim(nombre))`, por sucursal y rubro padre).
 - **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** → `migrations/CLAUDE.md`.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /

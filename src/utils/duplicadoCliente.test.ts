@@ -16,8 +16,16 @@ import {
   clasificarDuplicado,
   claveDireccionConAltura,
   mensajeDuplicado,
+  otraUnidadMismaPuerta,
+  unidadDireccion,
   type CandidatoDuplicado,
 } from './duplicadoCliente'
+import espejoJson from './direccionCliente.espejo.json'
+
+const espejo = espejoJson as {
+  casos: { direccion: string | null; clave: string | null; unidad: string | null }[]
+  pares: { a: string; b: string; chocan: boolean }[]
+}
 
 // Los dos clientes del incidente: misma puerta, dos altas, 17,5 m.
 const CLIENTE_382: CandidatoDuplicado = {
@@ -59,26 +67,51 @@ describe('claveDireccionConAltura', () => {
     )
   })
 
-  // 1596-b7 (#1596): cortaba en la primera coma y dos locales de la misma altura
-  // chocaban. Los mismos casos que el ensayo de la migración
-  // (scripts/test-catalogo-precios-ola2-1603.sql, D1 y D2).
-  it('suma el local, el departamento o el piso: dos locales de la misma altura no chocan', () => {
-    expect(claveDireccionConAltura('Calle Ensayo 450, Local 1, T4000 San Miguel de Tucumán, Tucumán'))
-      .toBe('calle ensayo 450 local 1')
-    expect(claveDireccionConAltura('Calle Ensayo 450, Local 1'))
-      .not.toBe(claveDireccionConAltura('Calle Ensayo 450, Local 2'))
-    expect(claveDireccionConAltura('Calle Ensayo 450, Dpto. 3 B, Tucumán')).toBe('calle ensayo 450 dpto 3 b')
-    expect(claveDireccionConAltura('Calle Ensayo 450, Piso 4, Of. 12')).toBe('calle ensayo 450 piso 4 of 12')
+})
+
+// 1596-b7 (#1596): la unidad dentro de la puerta, y la regla de la coordinadora:
+// dos direcciones con la misma calle y altura chocan, salvo que las dos tengan unidad
+// y sean distintas. El fixture lo corre también el SQL (espejo).
+describe('espejo de la dirección (direccionCliente.espejo.json)', () => {
+  it.each(espejo.casos.map(c => [c.direccion, c] as const))('%s', (_d, c) => {
+    expect(claveDireccionConAltura(c.direccion)).toBe(c.clave)
+    expect(unidadDireccion(c.direccion)).toBe(c.unidad)
   })
 
-  it('la ciudad y el código postal siguen afuera: la misma puerta con y sin ciudad choca', () => {
-    expect(claveDireccionConAltura('Pasaje Ensayo 2551, T4002AFE San Miguel de Tucumán, Tucumán, Argentina'))
-      .toBe(claveDireccionConAltura('Pasaje Ensayo 2551'))
+  it.each(espejo.pares.map(p => [`${p.a} | ${p.b}`, p] as const))('chocan por dirección: %s', (_n, p) => {
+    const chocan = claveDireccionConAltura(p.a) != null
+      && claveDireccionConAltura(p.a) === claveDireccionConAltura(p.b)
+      && !otraUnidadMismaPuerta(p.a, p.b)
+    expect(chocan).toBe(p.chocan)
+    expect(otraUnidadMismaPuerta(p.b, p.a)).toBe(otraUnidadMismaPuerta(p.a, p.b))
+  })
+})
+
+describe('clasificarDuplicado — unidades de la misma puerta (1596-b7)', () => {
+  const punto = { latitud: -26.83, longitud: -65.2 }
+  const local1: CandidatoDuplicado = { id: '1', direccion: 'Calle 777, Local 1', ...punto, activo: true }
+
+  it('otra unidad en el mismo punto avisa, no bloquea', () => {
+    const v = clasificarDuplicado({ direccion: 'Calle 777, Local 2', ...punto }, [local1])
+    expect(v).toMatchObject({ bloquea: false, avisa: true, motivo: 'distancia' })
   })
 
-  it('sin altura en el primer segmento no hay clave, aunque una unidad tenga números', () => {
-    expect(claveDireccionConAltura('B° Ensayo, Mz B Casa 12')).toBeNull()
-    expect(claveDireccionConAltura('B° Ensayo, Local 4')).toBeNull()
+  it('la misma unidad, o una sin unidad, en el mismo punto sigue bloqueando por dirección', () => {
+    expect(clasificarDuplicado({ direccion: 'Calle 777, Loc. 1', ...punto }, [local1]))
+      .toMatchObject({ bloquea: true, motivo: 'direccion' })
+    expect(clasificarDuplicado({ direccion: 'Calle 777', ...punto }, [local1]))
+      .toMatchObject({ bloquea: true, motivo: 'direccion' })
+  })
+
+  it('otro cliente a menos de 1 m bloquea por punto aunque otra unidad esté igual de cerca', () => {
+    const otro: CandidatoDuplicado = { id: '2', direccion: 'Otra Calle 99', ...punto, activo: true }
+    expect(clasificarDuplicado({ direccion: 'Calle 777, Local 2', ...punto }, [local1, otro]))
+      .toMatchObject({ bloquea: true, motivo: 'punto', candidato: otro })
+  })
+
+  it('cambiar sólo la unidad cambia la identidad que mira el guard', () => {
+    expect(cambiaIdentidadDuplicado({ direccion: 'Calle 777, Local 1' }, { direccion: 'Calle 777, Local 2' })).toBe(true)
+    expect(cambiaIdentidadDuplicado({ direccion: 'Calle 777, Local 1' }, { direccion: 'Calle 777, Loc. 1, Tucumán' })).toBe(false)
   })
 })
 
