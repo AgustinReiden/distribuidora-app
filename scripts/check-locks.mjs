@@ -9,6 +9,10 @@
  * WHERE x = … FOR UPDATE` toma las filas en el orden del plan, y contra otro camino que las toma por id es un
  * 40P01. Los arreglos de #1255, #1375 y #1460 los encontró el arnés de concurrencia, uno por uno.
  *
+ * El RPC limpia cada cuerpo con _sql_sin_comentarios_ni_literales (#1541): una sola pasada que entiende las
+ * comillas. Antes sacaba los `--` primero y un literal `' -- '` (cancelar_pedido_con_stock) le escondía los
+ * locks que venían después. El espejo de esa limpieza es sinComentariosNiLiterales de scripts/lib/locks.mjs.
+ *
  * El criterio (qué cuenta como una fila, qué consulta lleva cada lock) vive en scripts/lib/locks.mjs, con sus
  * tests en src/test/locks.test.ts. La lista blanca va por firma, con su motivo, y sólo se achica (lo fija el
  * mismo test): una función nueva ordena, no se suma.

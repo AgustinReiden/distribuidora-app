@@ -198,9 +198,8 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'asignar_usuario_sucursal') THEN
     RAISE EXCEPTION '063 FAILED: asignar_usuario_sucursal not found';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'desasignar_usuario_sucursal') THEN
-    RAISE EXCEPTION '063 FAILED: desasignar_usuario_sucursal not found';
-  END IF;
+  -- desasignar_usuario_sucursal se borró en la migración de B9 del plan #1603 (nadie la llamaba,
+  -- decisión del dueño D48): su ausencia ya no es una falla.
   RAISE NOTICE '✓ 063: admin RPCs present';
 END $$;
 
@@ -216,11 +215,12 @@ BEGIN
     RAISE EXCEPTION '063 FAILED: asignar_usuario_sucursal missing es_admin() guard';
   END IF;
 
+  -- Si todavía existe (antes de la migración de B9), se le exigen las mismas guardas.
   SELECT pg_get_functiondef(oid) INTO v_src FROM pg_proc WHERE proname = 'desasignar_usuario_sucursal';
-  IF v_src NOT LIKE '%SECURITY DEFINER%' THEN
+  IF v_src IS NOT NULL AND v_src NOT LIKE '%SECURITY DEFINER%' THEN
     RAISE EXCEPTION '063 FAILED: desasignar_usuario_sucursal is not SECURITY DEFINER';
   END IF;
-  IF v_src NOT LIKE '%es_admin()%' THEN
+  IF v_src IS NOT NULL AND v_src NOT LIKE '%es_admin()%' THEN
     RAISE EXCEPTION '063 FAILED: desasignar_usuario_sucursal missing es_admin() guard';
   END IF;
   RAISE NOTICE '✓ 063: admin RPCs are SECURITY DEFINER and gated by es_admin()';
