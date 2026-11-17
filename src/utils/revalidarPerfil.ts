@@ -8,9 +8,13 @@
  */
 export const EVENTO_REVALIDAR_PERFIL = 'perfil:revalidar'
 
-/** El server dice que el usuario está desactivado (el motivo que mandan las RPC). */
+/**
+ * El server dice que el usuario está desactivado: «Usuario desactivado» (`cambiar_sucursal`),
+ * «Tu usuario está desactivado.» (`generar_codigo_vinculacion_bot`). Sólo dispara la relectura del
+ * propio perfil; quien decide si se cierra la sesión es `useAuth`, con la fila.
+ */
 export function esMotivoDeUsuarioDesactivado(texto: unknown): boolean {
-  return typeof texto === 'string' && /usuario desactivado/i.test(texto)
+  return typeof texto === 'string' && /usuario (est[aá] )?desactivado/i.test(texto)
 }
 
 export function pedirRevalidacionDelPerfil(): void {

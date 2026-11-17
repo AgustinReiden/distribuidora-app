@@ -8,6 +8,7 @@ import { esFalloDeRed } from '../../utils/falloDeRed'
 import { fijarUsuarioRequestIds } from '../../utils/requestIdPersistente'
 import { fijarUsuarioNotificaciones } from '../../utils/notificacionesGuardadas'
 import { limpiarDatosSensiblesLocales } from '../../lib/limpiezaLocal'
+import { queryClient } from '../../lib/queryClient'
 import { guardarAvisoDeCierre } from '../../utils/avisoDeCierreDeSesion'
 import { EVENTO_REVALIDAR_PERFIL } from '../../utils/revalidarPerfil'
 import type { RolUsuario } from '../../types'
@@ -260,7 +261,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         )
 
         if (error) {
-          logger.error('[useAuth] Error fetching perfil:', error)
+          // Sin red no es un error de la app: con señal intermitente la revalidación del perfil
+          // falla una y otra vez y cada una mandaba un evento a Sentry (S1).
+          if (esFalloDeRed(error)) logger.warn('[useAuth] Sin red al leer el perfil:', error)
+          else logger.error('[useAuth] Error fetching perfil:', error)
           return { perfil: null, huboServidor: !esFalloDeRed(error) }
         }
 
@@ -286,14 +290,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (mountedRef.current && userIdRef.current === userId) {
           // Sólo se pisa el estado si algo cambió: la revalidación a mitad de sesión (foco, red,
           // intervalo) no tiene que re-renderizar toda la app cada vez.
+          const anterior = perfilRef.current
           const cambio = perfilDesdeCacheRef.current
-            || JSON.stringify(perfilRef.current) !== JSON.stringify(nextPerfil)
+            || JSON.stringify(anterior) !== JSON.stringify(nextPerfil)
+          // Cambió el rol con la sesión abierta (S2): lo que hay en el caché de TanStack se leyó con
+          // el rol anterior (un admin bajado a preventista seguiría viendo clientes ajenos en los
+          // selectores hasta que venza el staleTime). Se descarta y las pantallas abiertas releen.
+          if (!perfilDesdeCacheRef.current && anterior?.id === nextPerfil.id && anterior.rol !== nextPerfil.rol) {
+            logAuthEvent('cambio-de-rol', { userId: userId })
+            void queryClient.resetQueries()
+          }
           perfilDesdeCacheRef.current = false
           if (cambio) setPerfil(nextPerfil)
         }
         return { perfil: nextPerfil, huboServidor: true }
       } catch (err) {
-        logger.error('[useAuth] Exception fetching perfil:', err)
+        if (esFalloDeRed(err)) logger.warn('[useAuth] Sin red al leer el perfil:', err)
+        else logger.error('[useAuth] Exception fetching perfil:', err)
         // Un timeout tampoco es una respuesta: el servidor no dijo nada.
         return { perfil: null, huboServidor: !esFalloDeRed(err) }
       } finally {

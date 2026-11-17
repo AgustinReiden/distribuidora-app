@@ -9,14 +9,15 @@ import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 
-const { mockSupabase } = vi.hoisted(() => ({
+const { mockSupabase, resetQueries } = vi.hoisted(() => ({
+  resetQueries: vi.fn(),
   mockSupabase: {
     auth: { getSession: vi.fn(), signInWithPassword: vi.fn(), signOut: vi.fn(), refreshSession: vi.fn(), onAuthStateChange: vi.fn() },
     from: vi.fn(),
   },
 }))
 vi.mock('./base', () => ({ supabase: mockSupabase }))
-vi.mock('../../lib/queryClient', () => ({ queryClient: { clear: vi.fn() } }))
+vi.mock('../../lib/queryClient', () => ({ queryClient: { clear: vi.fn(), resetQueries } }))
 vi.mock('../../lib/rutaOfflineCache', () => ({ olvidarRuta: vi.fn(), olvidarTodasLasRutas: vi.fn() }))
 vi.mock('../../lib/offlineDb', () => ({ limpiarCachesDeLectura: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('../../contexts/SucursalContext', () => ({ SUCURSAL_STORAGE_KEY: 'distribuidora_sucursal_activa' }))
@@ -24,9 +25,10 @@ vi.mock('../../contexts/SucursalContext', () => ({ SUCURSAL_STORAGE_KEY: 'distri
 import { AuthProvider, useAuth } from './useAuth'
 import { leerAvisoDeCierre, olvidarAvisoDeCierre, MENSAJES_DE_CIERRE } from '../../utils/avisoDeCierreDeSesion'
 import { pedirRevalidacionDelPerfil } from '../../utils/revalidarPerfil'
+import { logger } from '../../utils/logger'
 
 const USUARIO = { id: 'user-A', email: 'a@x.com' }
-const perfil = (activo: boolean | null) => ({ id: 'user-A', nombre: 'A', email: 'a@x.com', rol: 'preventista', activo })
+const perfil = (activo: boolean | null, rol = 'preventista') => ({ id: 'user-A', nombre: 'A', email: 'a@x.com', rol, activo })
 const SIN_RED = { message: 'TypeError: Failed to fetch', code: '' }
 const SIN_PERMISO = { message: 'permission denied for table perfiles', code: '42501' }
 
@@ -208,5 +210,64 @@ describe('lo que NO es «desactivado» no saca a nadie (1600-b15)', () => {
 
     expect(mockSupabase.from).toHaveBeenCalled()
     expect(result.current.perfil).toBe(antes)
+  })
+})
+
+describe('con señal intermitente la revalidación no llena Sentry (S1)', () => {
+  it('un fallo de red al revalidar es un warn, no un error', async () => {
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => {})
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    await sesionAbierta()
+
+    respuestaPerfil = () => ({ data: null, error: SIN_RED })
+    await volverElFoco()
+    respuestaPerfil = () => { throw new TypeError('Failed to fetch') }
+    await act(async () => { pedirRevalidacionDelPerfil(); await new Promise(r => setTimeout(r, 30)) })
+
+    expect(warn).toHaveBeenCalled()
+    expect(error).not.toHaveBeenCalled()
+    vi.restoreAllMocks()
+  })
+
+  it('un error que no es de red (42501) sigue siendo un error', async () => {
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => {})
+    await sesionAbierta()
+
+    respuestaPerfil = () => ({ data: null, error: SIN_PERMISO })
+    await volverElFoco()
+
+    expect(error).toHaveBeenCalled()
+    vi.restoreAllMocks()
+  })
+})
+
+describe('un cambio de rol a mitad de sesión descarta el caché (S2)', () => {
+  it('si la revalidación trae otro rol, se reinician las consultas y el rol nuevo queda', async () => {
+    respuestaPerfil = () => ({ data: perfil(true, 'admin'), error: null })
+    const { result } = await sesionAbierta()
+    expect(result.current.perfil?.rol).toBe('admin')
+    expect(resetQueries).not.toHaveBeenCalled()
+
+    respuestaPerfil = () => ({ data: perfil(true, 'preventista'), error: null })
+    await volverElFoco()
+
+    await waitFor(() => expect(result.current.perfil?.rol).toBe('preventista'))
+    expect(resetQueries).toHaveBeenCalledTimes(1)
+  })
+
+  it('si el rol es el mismo no se toca el caché', async () => {
+    await sesionAbierta()
+    await volverElFoco()
+
+    expect(mockSupabase.from).toHaveBeenCalled()
+    expect(resetQueries).not.toHaveBeenCalled()
+  })
+
+  it('el primer perfil del arranque no cuenta como cambio', async () => {
+    renderHook(() => useAuth(), { wrapper })
+    await waitFor(() => expect(mockSupabase.from).toHaveBeenCalled())
+    await act(async () => { await new Promise(r => setTimeout(r, 30)) })
+
+    expect(resetQueries).not.toHaveBeenCalled()
   })
 })
