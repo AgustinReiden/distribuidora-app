@@ -167,13 +167,24 @@ suelta en `sucursales`.
   lo hace con `NumberInput` (valor número), `CampoNumero` (valor texto: entero, `sinMiles`,
   `negativo`, `motivo`) o `InputMonto` (gastos y personal, lo lee `parseMonto`), y precarga con
   `numeroConMiles`; lo pegado se lee como se muestra («1.250,50» es 1250,5).
-  Los `sinMiles` (porcentajes, litros) no llevan miles. Lo que no se entiende da `null` y el campo
-  lo marca: nunca se guarda como otro número. Nada de `type="number"`, `parseFloat` ni `Number()`
-  sobre lo tipeado. La tabla de casos es `numeroTipeado.tabla.test.ts`. Un campo que no entiende
-  lo escrito no le manda nada al padre y, al salir, vuelve a su valor con un aviso: lo que se ve
-  es lo que se guarda. Y `redondear` redondea medio hacia afuera, como `round(numeric, n)`: da lo
-  mismo que el server para un número leído de un texto, pero no es espejo de una cuenta con
-  división o de un costo a 4 decimales, donde el double ya puede haber perdido el medio.
+  Los `sinMiles` (porcentajes, litros, coordenadas) no llevan miles. **Un solo lector por campo:**
+  el formulario usa el número del componente, o lee el texto con el MISMO lector que decide el rojo
+  (entero → `leerEntero`; sin miles → `leerDecimalSinMiles`; plata → `leerNumero`/`parsePrecio`/
+  `parseMonto`), nunca con otro (`replace(/\./g, '')`, `parseInt`, `parseFloat`, `Number` sobre lo
+  tipeado: «185,000» se guardaba 185 km). Lo vigila `src/test/lectoresNumero.contract.test.ts`, con
+  su lista de permitidos que sólo se achica. **Lo que está en rojo no se guarda:** ni el valor de
+  antes, ni un pedazo, ni 0, ni `null`. Los tres campos se anotan solos en el registro del
+  formulario (`useRegistroIlegibles`): el formulario pone el `Provider` alrededor de sus campos y
+  frena su Guardar con `ilegibles.hay`. Con `commitOnChange`, mientras lo tipeado no se entiende el
+  padre vuelve al valor de antes de tipear. Sin registro alrededor, al salir el campo vuelve a su
+  valor con un aviso. **En la plata, más de dos decimales tipeados no son un error** (decisión del
+  dueño, 17/11: «Que guarde 1,50 pero salga un aviso en amarillo no grande sobre el campo»): se
+  guarda al centavo y un aviso ámbar (`role="status"`) arriba del campo dice qué se guarda y cómo se
+  escribe lo otro (`avisoPlataDecimalesDeMas`); no sale con lo pegado ni con lo precargado. Nada de
+  `type="number"`. La tabla de casos es `numeroTipeado.tabla.test.ts`. Y `redondear` redondea medio
+  hacia afuera, como `round(numeric, n)`: da lo mismo que el server para un número leído de un
+  texto, pero no es espejo de una cuenta con división o de un costo a 4 decimales, donde el double
+  ya puede haber perdido el medio.
 - **Un NaN pasa toda guarda de piso** (#1468, #1520). `'NaN'::numeric` es mayor que todo número:
   pasa `x < 0`, `x <= 0` y todo CHECK `x >= 0` o `x > 0`, y `LEAST('NaN', x)` da `x`. Llega
   cuando un cliente manda el string `'NaN'`. Toda columna numeric con un CHECK de piso suma
