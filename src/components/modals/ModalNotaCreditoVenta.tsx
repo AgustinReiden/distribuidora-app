@@ -10,11 +10,16 @@
  * modal lo dice al elegirlo (B16, decisiones del dueño del 16/11 y del 17/11).
  *
  * B22 (decisiones del dueño del 17 y 18/11): según el motivo, la mercadería
- * reingresa al stock (a su lote), queda como merma o no se mueve, y el modal lo dice.
+ * reingresa al stock (a su lote), queda como merma o no se mueve. El motivo no viene
+ * elegido (no se emite sin elegirlo), y antes de emitir el modal dice qué va a pasar,
+ * con las unidades: «Vuelven al stock 2 u.», «Van a merma 2 u.» o «No mueve stock».
+ * Con un motivo que mueve, cada renglón le pide al server que la mueva
+ * (`mercaderia: true`); sin eso el server no la mueve (un PWA anterior).
  * Con «descuento comercial» la carga es por MONTO, sin unidades: sobre toda la
- * boleta (en plata o en %, que la pantalla convierte y muestra), prorrateado entre
- * los renglones en proporción a lo que vale hoy cada uno; o, en «avanzado», un
- * monto por producto.
+ * boleta (en plata o en %, con sus números a la vista), repartido entre los renglones
+ * en proporción a lo que le queda a cada uno, sin pasar lo de ninguno; o, en
+ * «avanzado», un monto por producto. Un monto que pasa lo que queda va en rojo con
+ * «Quedan $ X por acreditar» y no se emite.
  *
  * La cuenta es la de `utils/notaCreditoVenta`; el servidor la rehace con el
  * precio del pedido, revalida las cantidades y los topes, y prorratea.
@@ -30,6 +35,7 @@ import { AlertTriangle, CheckCircle, FileText, Info, Loader2 } from 'lucide-reac
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
+import { CampoNumero } from '../ui/CampoNumero'
 import { formatPrecio, formatFecha } from '../../utils/formatters'
 import {
   LEYENDA_NC_COMISION,
@@ -39,6 +45,7 @@ import {
   itemsDescuentoParaRPC,
   leyendaMercaderiaNCVenta,
   leyendaMotivoNCVenta,
+  leyendaPorcentajeNC,
   itemsNotaCreditoParaRPC,
   lineasAcreditables,
   lineasReparticionCreditoNC,
@@ -47,14 +54,23 @@ import {
   montoUnidadesNC,
   reparticionCreditoNC,
   repartoDescuentoNC,
+  resumenMercaderiaNC,
   totalDescuentoNC,
   totalNotaCreditoVenta,
+  unidadesNotaCreditoVenta,
   validarDescuentoNC,
   validarNotaCreditoVenta,
   type CantidadesNC,
   type MontosNC,
   type MotivoNCVenta,
 } from '../../utils/notaCreditoVenta'
+import {
+  leerDecimalSinMiles,
+  leerNumero,
+  motivoPlataTipeada,
+  motivoSinMilesTipeado,
+} from '../../utils/normalizarNumero'
+import { redondearSQL } from '../../utils/calculations'
 import {
   useCrearNotaCreditoVentaMutation,
   useNotasCreditoVentaPedidoQuery,
@@ -98,6 +114,27 @@ export const descuentoNCVentaSchema = z.object({
 
 type ModoDescuento = 'boleta' | 'productos'
 
+/**
+ * El rojo de un monto de plata (H8 de la revisión): lo que no se entiende, o más de lo que queda
+ * por acreditar. No se apoya en el recorte de un `max`: lo que pasa se ve y no se emite.
+ */
+function motivoMontoNC(texto: string, queda: number): string | null {
+  const ilegible = motivoPlataTipeada(texto)
+  if (ilegible) return ilegible
+  const n = leerNumero(texto)
+  if (n != null && redondearSQL(n, 2) > queda + 0.005) return `Quedan ${formatPrecio(queda)} por acreditar`
+  return null
+}
+
+/** El rojo del porcentaje: lo que no se entiende, o más de 100 %. */
+function motivoPorcentajeNC(texto: string): string | null {
+  const ilegible = motivoSinMilesTipeado(texto)
+  if (ilegible) return ilegible
+  const n = leerDecimalSinMiles(texto)
+  if (n != null && n > 100) return 'Hasta 100 %: es un porcentaje de lo que queda por acreditar'
+  return null
+}
+
 export interface ModalNotaCreditoVentaProps {
   pedido: PedidoDB
   onClose: () => void
@@ -112,12 +149,15 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
   const ilegibles = useRegistroIlegibles()
 
   const [cantidades, setCantidades] = useState<CantidadesNC>({})
-  const [motivo, setMotivo] = useState<MotivoNCVenta>('producto_vencido')
-  // B22: el descuento comercial por monto.
+  // B22 (H1 de la revisión): sin motivo elegido de entrada. Lo que hace con la mercadería depende
+  // de él, y un motivo puesto de oficio movía stock sin que nadie lo eligiera.
+  const [motivo, setMotivo] = useState<MotivoNCVenta | ''>('')
+  // B22: el descuento comercial por monto. Los campos guardan el texto tipeado; se lee con el
+  // mismo lector que decide el rojo (leerNumero en la plata, leerDecimalSinMiles en el %).
   const [modoDescuento, setModoDescuento] = useState<ModoDescuento>('boleta')
   const [enPorcentaje, setEnPorcentaje] = useState(false)
-  const [valorDescuento, setValorDescuento] = useState<number | null>(null)
-  const [montos, setMontos] = useState<MontosNC>({})
+  const [valorDescuento, setValorDescuento] = useState('')
+  const [montosTexto, setMontosTexto] = useState<Readonly<Record<string, string>>>({})
   const [observaciones, setObservaciones] = useState('')
   const [error, setError] = useState<string | null>(null)
   // Paso final: la NC ya está emitida. `imputando` muestra la imputación inline.
@@ -130,20 +170,25 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
   )
   const porMonto = esMotivoPorMonto(motivo)
   const quedaBoleta = montoDisponibleBoleta(lineas)
-  const montoBoleta = enPorcentaje ? montoDePorcentaje(lineas, valorDescuento ?? 0) : (valorDescuento ?? 0)
+  const pct = enPorcentaje ? leerDecimalSinMiles(valorDescuento) : null
+  const montoBoleta = enPorcentaje ? montoDePorcentaje(lineas, pct ?? 0) : (leerNumero(valorDescuento) ?? 0)
+  const motivoValor = enPorcentaje ? motivoPorcentajeNC(valorDescuento) : motivoMontoNC(valorDescuento, quedaBoleta)
+  const montos: MontosNC = Object.fromEntries(Object.entries(montosTexto).map(([k, t]) => [k, leerNumero(t) ?? 0]))
   const montosDescuento = modoDescuento === 'productos' ? montos : null
-  const reparto = useMemo(
-    () => (porMonto && modoDescuento === 'boleta' && montoBoleta > 0 && montoBoleta <= quedaBoleta + 0.005
-      ? repartoDescuentoNC(lineas, montoBoleta)
-      : []),
-    [porMonto, modoDescuento, montoBoleta, quedaBoleta, lineas],
-  )
+  const unidades = porMonto ? 0 : unidadesNotaCreditoVenta(cantidades)
+  const reparto = porMonto && modoDescuento === 'boleta' && montoBoleta > 0 && montoBoleta <= quedaBoleta + 0.005
+    ? repartoDescuentoNC(lineas, montoBoleta)
+    : []
   const total = porMonto ? totalDescuentoNC(montoBoleta, montosDescuento) : totalNotaCreditoVenta(lineas, cantidades)
   const notasVigentes = notasPedido.filter(n => !n.anulada)
   const nada = porMonto ? quedaBoleta <= 0 : lineas.every(l => l.disponible <= 0)
 
   const handleConfirmar = async () => {
     if (ilegibles.hay) return
+    if (!motivo) {
+      setError('Elegí el motivo de la nota de crédito')
+      return
+    }
     const parsed = notaCreditoVentaSchema.safeParse({ motivo, observaciones: observaciones || undefined })
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? 'Datos inválidos')
@@ -166,7 +211,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
     setError(null)
     const items = porMonto
       ? itemsDescuentoParaRPC(lineas, montoBoleta, montosDescuento)
-      : itemsNotaCreditoParaRPC(lineas, cantidades)
+      : itemsNotaCreditoParaRPC(lineas, cantidades, motivo)
     // Mismo UUID mientras no cambie lo que se emite: un reintento tras una
     // respuesta perdida no crea una segunda NC (ledger de pagos, mig 167), aunque
     // se cierre el modal o se recargue la app (#1410).
@@ -285,6 +330,26 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
           </p>
         )}
 
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium text-gray-700 dark:text-gray-300">Motivo</span>
+          <select
+            value={motivo}
+            onChange={e => { setMotivo(e.target.value as MotivoNCVenta | ''); setError(null) }}
+            className="w-full rounded-lg border px-3 py-2 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+          >
+            <option value="" disabled>Elegí el motivo</option>
+            {MOTIVOS_NC_VENTA.map(m => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
+          </select>
+          {motivo && (
+            <>
+              <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">{leyendaMotivoNCVenta(motivo)}</span>
+              <span className="mt-0.5 block text-xs text-gray-600 dark:text-gray-400">{leyendaMercaderiaNCVenta(motivo)}</span>
+            </>
+          )}
+        </label>
+
         {isLoading ? (
           <div className="flex justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-teal-600" />
@@ -318,7 +383,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
               </label>
             </fieldset>
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              Queda por acreditar de la boleta: <strong>{formatPrecio(quedaBoleta)}</strong>. Sin unidades: no se mueve mercadería.
+              Queda por acreditar de la boleta: <strong>{formatPrecio(quedaBoleta)}</strong>.
             </p>
 
             {modoDescuento === 'boleta' ? (
@@ -328,29 +393,28 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
                     <legend className="sr-only">En plata o en porcentaje</legend>
                     <label className="flex cursor-pointer items-center gap-1 dark:text-gray-200">
                       <input type="radio" name="unidad-descuento" checked={!enPorcentaje}
-                        onChange={() => { setEnPorcentaje(false); setValorDescuento(null) }} />
+                        onChange={() => { setEnPorcentaje(false); setValorDescuento('') }} />
                       $
                     </label>
                     <label className="flex cursor-pointer items-center gap-1 dark:text-gray-200">
                       <input type="radio" name="unidad-descuento" checked={enPorcentaje}
-                        onChange={() => { setEnPorcentaje(true); setValorDescuento(null) }} />
+                        onChange={() => { setEnPorcentaje(true); setValorDescuento('') }} />
                       %
                     </label>
                   </fieldset>
-                  <NumberInput
-                    min={0}
-                    max={enPorcentaje ? 100 : quedaBoleta}
+                  <CampoNumero
+                    key={enPorcentaje ? 'pct' : 'plata'}
                     sinMiles={enPorcentaje}
                     value={valorDescuento}
-                    commitOnChange
-                    onChange={v => setValorDescuento(v)}
+                    onChange={setValorDescuento}
+                    motivo={motivoValor}
                     aria-label={enPorcentaje ? 'Porcentaje del descuento' : 'Monto del descuento'}
                     className="w-32 rounded border px-2 py-1 text-right dark:border-gray-600 dark:bg-gray-700 dark:text-white"
                   />
-                  {enPorcentaje && montoBoleta > 0 && (
-                    <span className="text-gray-700 dark:text-gray-300">= {formatPrecio(montoBoleta)}</span>
-                  )}
                 </div>
+                {enPorcentaje && pct != null && pct > 0 && !motivoValor && (
+                  <p className="text-sm text-gray-700 dark:text-gray-300">{leyendaPorcentajeNC(lineas, pct)}</p>
+                )}
                 {reparto.length > 0 && (
                   <div className="overflow-x-auto">
                     <p className="mb-1 text-xs font-medium text-gray-600 dark:text-gray-400">Cómo se reparte</p>
@@ -383,13 +447,11 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
                         <td className="px-2 py-1 text-gray-900 dark:text-white">{l.nombre}</td>
                         <td className="px-2 py-1 text-right tabular-nums text-gray-700 dark:text-gray-300">{formatPrecio(l.montoDisponible)}</td>
                         <td className="px-2 py-1 text-right">
-                          <NumberInput
-                            min={0}
-                            max={l.montoDisponible}
-                            value={montos[l.pedidoItemId] ?? 0}
-                            commitOnChange
+                          <CampoNumero
+                            value={montosTexto[l.pedidoItemId] ?? ''}
+                            onChange={t => setMontosTexto(prev => ({ ...prev, [l.pedidoItemId]: t }))}
+                            motivo={motivoMontoNC(montosTexto[l.pedidoItemId] ?? '', l.montoDisponible)}
                             disabled={l.montoDisponible <= 0}
-                            onChange={v => setMontos(prev => ({ ...prev, [l.pedidoItemId]: v }))}
                             aria-label={`Monto a descontar de ${l.nombre}`}
                             className="w-28 rounded border px-2 py-1 text-right dark:border-gray-600 dark:bg-gray-700 dark:text-white"
                           />
@@ -453,21 +515,13 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
           </div>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium text-gray-700 dark:text-gray-300">Motivo</span>
-            <select
-              value={motivo}
-              onChange={e => setMotivo(e.target.value as MotivoNCVenta)}
-              className="w-full rounded-lg border px-3 py-2 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-            >
-              {MOTIVOS_NC_VENTA.map(m => (
-                <option key={m.value} value={m.value}>{m.label}</option>
-              ))}
-            </select>
-            <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">{leyendaMotivoNCVenta(motivo)}</span>
-            <span className="mt-0.5 block text-xs text-gray-600 dark:text-gray-400">{leyendaMercaderiaNCVenta(motivo)}</span>
-          </label>
+        {motivo && !nada && !isLoading && (
+          <p role="status" className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+            {resumenMercaderiaNC(motivo, unidades)}
+          </p>
+        )}
+
+        <div>
           <label className="block text-sm">
             <span className="mb-1 block font-medium text-gray-700 dark:text-gray-300">Observaciones</span>
             <textarea
@@ -500,7 +554,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
             <Button variant="secondary" onClick={onClose} disabled={crear.isPending}>Cancelar</Button>
             <Button
               onClick={() => { void handleConfirmar() }}
-              disabled={crear.isPending || nada || total <= 0 || ilegibles.hay}
+              disabled={crear.isPending || nada || !motivo || total <= 0 || ilegibles.hay}
               className="gap-1"
             >
               {crear.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}

@@ -13,9 +13,12 @@
  *
  * B22 (decisiones del dueño del 17 y 18/11): según el motivo, la mercadería de la nota
  * reingresa al stock (al lote del que salió), queda como merma o no se mueve, y anular la
- * nota lo deshace. Y el descuento comercial se carga por MONTO, sin unidades: sobre toda la
- * boleta (el server lo prorratea en proporción a lo que vale hoy cada línea, al centavo, con
- * `prorratear_cargo`; acá se muestra con su espejo) o sobre uno o más renglones.
+ * nota lo deshace. El server la mueve sólo si cada renglón lo pide (`"mercaderia": true`):
+ * un PWA anterior, que no lo manda, hace una nota sólo de plata, como dice su pantalla. Y el
+ * descuento comercial se carga por MONTO, sin unidades: sobre toda la boleta (el server lo
+ * reparte en proporción a lo que le queda a cada línea, al centavo y sin pasar lo que le
+ * queda a ninguna, con `_nc_venta_repartir`; acá, su espejo `repartirDescuentoNC`) o sobre
+ * uno o más renglones.
  *
  * Decisiones del dueño del 16/11 y del 17/11 (B16 de #1603, en #1545): la nota se
  * imputa al día de su boleta (`fecha` es la de la boleta, la que cuenta para los
@@ -38,7 +41,6 @@
 
 import { diaArgentino, formatFecha, formatPrecio } from './formatters'
 import { redondearSQL } from './calculations'
-import { prorratearCargo } from './prorrateoCompra'
 
 export const LEYENDA_NC_COMISION =
   'Se imputa al mes de la boleta. Según el motivo, le descuenta o no al vendedor'
@@ -121,6 +123,22 @@ export function leyendaMercaderiaNCVenta(motivo: string | null | undefined): str
   return 'No se mueve mercadería.'
 }
 
+/** Si el motivo mueve mercadería (reingresa o merma): sus renglones piden moverla al server. */
+export function motivoMueveMercaderia(motivo: string | null | undefined): boolean {
+  const m = MOTIVOS_NC_VENTA.find(x => x.value === motivo)?.mercaderia
+  return m === 'reingresa' || m === 'merma'
+}
+
+/**
+ * Lo que la nota va a hacer con la mercadería, con las unidades elegidas, ANTES de guardar
+ * (H1 de la revisión): «Vuelven al stock 2 u.», «Van a merma 2 u.» o «No mueve stock».
+ */
+export function resumenMercaderiaNC(motivo: string | null | undefined, unidades: number): string {
+  const m = MOTIVOS_NC_VENTA.find(x => x.value === motivo)?.mercaderia
+  if (!(unidades > 0) || !m || m === 'nada') return 'No mueve stock'
+  return m === 'reingresa' ? `Vuelven al stock ${unidades} u.` : `Van a merma ${unidades} u.`
+}
+
 /** El descuento comercial se carga por monto, sin unidades (B22). Es el único motivo que va así. */
 export function esMotivoPorMonto(motivo: string | null | undefined): boolean {
   return motivo === 'descuento_comercial'
@@ -201,7 +219,7 @@ export function lineasAcreditables(
       return {
         pedidoItemId: key,
         productoId: String(it.producto_id),
-        nombre: it.producto?.nombre || `Producto #${it.producto_id}`,
+        nombre: it.producto?.nombre || 'Producto sin nombre',
         entregada,
         precioUnitario,
         yaAcreditada,
@@ -259,14 +277,28 @@ export function validarNotaCreditoVenta(
   return null
 }
 
-/** Payload de `p_items` para la RPC: sólo las líneas con cantidad. */
+/**
+ * Payload de `p_items` para la RPC: sólo las líneas con cantidad. Con un motivo que mueve
+ * mercadería, cada renglón la pide (`mercaderia: true`): sin la marca, el server no la mueve.
+ */
 export function itemsNotaCreditoParaRPC(
   lineas: ReadonlyArray<LineaAcreditable>,
   cantidades: CantidadesNC,
-): Array<{ pedido_item_id: number; cantidad: number }> {
+  motivo: string | null | undefined,
+): Array<{ pedido_item_id: number; cantidad: number; mercaderia?: true }> {
+  const mueve = motivoMueveMercaderia(motivo)
   return lineas
     .filter(l => (cantidades[l.pedidoItemId] ?? 0) > 0)
-    .map(l => ({ pedido_item_id: Number(l.pedidoItemId), cantidad: cantidades[l.pedidoItemId] }))
+    .map(l => ({
+      pedido_item_id: Number(l.pedidoItemId),
+      cantidad: cantidades[l.pedidoItemId],
+      ...(mueve ? { mercaderia: true as const } : {}),
+    }))
+}
+
+/** Las unidades elegidas, en total (las que cuenta el resumen de la mercadería). */
+export function unidadesNotaCreditoVenta(cantidades: CantidadesNC): number {
+  return Object.values(cantidades).reduce((s, c) => s + (c > 0 ? c : 0), 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -285,21 +317,75 @@ export function montoDePorcentaje(lineas: ReadonlyArray<LineaAcreditable>, pct: 
 }
 
 /**
- * Cómo se reparte un descuento sobre toda la boleta: en proporción a lo que le queda a cada
- * línea, al centavo, y el residuo a la de más peso. Es la cuenta del server
- * (`prorratear_cargo`), con su espejo `prorratearCargo`. Las partes en 0 no aparecen.
+ * El porcentaje con sus números, para que se vea sobre qué se calcula (D6 de la revisión):
+ * «10 % de $ 700 que quedan por acreditar = $ 70».
+ */
+export function leyendaPorcentajeNC(lineas: ReadonlyArray<LineaAcreditable>, pct: number): string {
+  const queda = montoDisponibleBoleta(lineas)
+  const pctTexto = String(pct).replace('.', ',')
+  return `${pctTexto} % de ${formatPrecio(queda)} que quedan por acreditar = ${formatPrecio(montoDePorcentaje(lineas, pct))}`
+}
+
+const aCent = (n: number): bigint => BigInt(Math.round(n * 100))
+const porId = (a: string, b: string): number => {
+  const x = BigInt(a)
+  const y = BigInt(b)
+  return x < y ? -1 : x > y ? 1 : 0
+}
+
+/**
+ * Espejo de `_nc_venta_repartir` (B22, H2 de la revisión): reparte `monto` en proporción a lo
+ * que le queda a cada renglón (`restos`, por id), al centavo, con restos mayores y CON TOPE:
+ * ninguna parte pasa lo que le queda a su renglón, y todo lo que queda entra entero. Cada
+ * renglón recibe el piso de su parte; los centavos que faltan van, de a uno, a los de mayor
+ * resto (empate: el de más peso, después el de menor id). Las partes en 0 no aparecen; `null`
+ * si el monto pasa lo que queda (el server lo rechaza). Va en enteros grandes, como el
+ * `numeric` del server: con montos grandes un double ya perdería centavos. Lo vigilan
+ * `repartoDescuentoNC.espejo.test.ts` y, del lado SQL, `scripts/espejo-reparto-descuento-nc.mjs`,
+ * con los mismos casos.
+ */
+export function repartirDescuentoNC(
+  monto: number,
+  restos: Readonly<Record<string, number>>,
+): Record<string, number> | null {
+  if (!Number.isFinite(monto) || aCent(monto) <= 0n) return {}
+  const t = aCent(monto)
+  const l = Object.entries(restos)
+    .map(([id, r]) => ({ id, w: Number.isFinite(r) ? aCent(r) : 0n }))
+    .filter(x => x.w > 0n)
+  const w = l.reduce((s, x) => s + x.w, 0n)
+  if (w === 0n || t > w) return null
+  const b = l.map(x => ({ ...x, piso: (t * x.w) / w, resto: (t * x.w) % w }))
+  let faltan = t - b.reduce((s, x) => s + x.piso, 0n)
+  const orden = [...b].sort((x, y) => {
+    if (x.resto !== y.resto) return y.resto > x.resto ? 1 : -1
+    if (x.w !== y.w) return y.w > x.w ? 1 : -1
+    return porId(x.id, y.id)
+  })
+  const partes: Record<string, number> = {}
+  for (const x of orden) {
+    const c = x.piso + (faltan > 0n ? 1n : 0n)
+    if (faltan > 0n) faltan -= 1n
+    if (c > 0n) partes[x.id] = Number(c) / 100
+  }
+  return partes
+}
+
+/**
+ * Cómo se reparte un descuento sobre toda la boleta (la cuenta del server, con su espejo
+ * `repartirDescuentoNC`). Las partes en 0 no aparecen; si el monto pasa lo que queda, nada.
  */
 export function repartoDescuentoNC(
   lineas: ReadonlyArray<LineaAcreditable>,
   monto: number,
 ): Array<{ pedidoItemId: string; nombre: string; monto: number }> {
   if (!(monto > 0)) return []
-  const pesos: Record<number, number> = {}
-  for (const l of lineas) if (l.montoDisponible > 0) pesos[Number(l.pedidoItemId)] = l.montoDisponible
-  const partes = prorratearCargo(redondearSQL(monto, 2), pesos)
+  const restos: Record<string, number> = {}
+  for (const l of lineas) if (l.montoDisponible > 0) restos[l.pedidoItemId] = l.montoDisponible
+  const partes = repartirDescuentoNC(monto, restos) ?? {}
   return lineas
-    .filter(l => (partes[Number(l.pedidoItemId)] ?? 0) > 0)
-    .map(l => ({ pedidoItemId: l.pedidoItemId, nombre: l.nombre, monto: partes[Number(l.pedidoItemId)] }))
+    .filter(l => (partes[l.pedidoItemId] ?? 0) > 0)
+    .map(l => ({ pedidoItemId: l.pedidoItemId, nombre: l.nombre, monto: partes[l.pedidoItemId] }))
 }
 
 export type MontosNC = Readonly<Record<string, number>>

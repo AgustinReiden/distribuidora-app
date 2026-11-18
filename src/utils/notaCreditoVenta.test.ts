@@ -10,6 +10,11 @@ import {
   montoDisponibleBoleta,
   montoUnidadesNC,
   repartoDescuentoNC,
+  repartirDescuentoNC,
+  resumenMercaderiaNC,
+  leyendaPorcentajeNC,
+  motivoMueveMercaderia,
+  unidadesNotaCreditoVenta,
   totalDescuentoNC,
   validarDescuentoNC,
   fechasNotaCreditoVenta,
@@ -82,9 +87,24 @@ describe('validarNotaCreditoVenta', () => {
 describe('itemsNotaCreditoParaRPC', () => {
   it('manda sólo las líneas con cantidad, con ids numéricos', () => {
     const lineas = lineasAcreditables(items)
-    expect(itemsNotaCreditoParaRPC(lineas, { '23807': 1, '23808': 0 })).toEqual([
+    expect(itemsNotaCreditoParaRPC(lineas, { '23807': 1, '23808': 0 }, 'otro')).toEqual([
       { pedido_item_id: 23807, cantidad: 1 },
     ])
+  })
+
+  // B22, H1 de la revisión: sin la marca el server no mueve la mercadería.
+  it('con un motivo que mueve mercadería, cada renglón la pide; con uno que no, no', () => {
+    const lineas = lineasAcreditables(items)
+    for (const motivo of ['cliente_rechaza', 'error_pedido', 'error_entrega', 'producto_vencido', 'producto_danado']) {
+      expect(itemsNotaCreditoParaRPC(lineas, { '23807': 1, '23809': 2 }, motivo)).toEqual([
+        { pedido_item_id: 23807, cantidad: 1, mercaderia: true },
+        { pedido_item_id: 23809, cantidad: 2, mercaderia: true },
+      ])
+    }
+    expect(itemsNotaCreditoParaRPC(lineas, { '23807': 1 }, 'descuento_comercial')).toEqual([{ pedido_item_id: 23807, cantidad: 1 }])
+    expect(itemsNotaCreditoParaRPC(lineas, { '23807': 1 }, '')).toEqual([{ pedido_item_id: 23807, cantidad: 1 }])
+    expect(MOTIVOS_NC_VENTA.filter(m => motivoMueveMercaderia(m.value)).map(m => m.mercaderia))
+      .toEqual(['reingresa', 'reingresa', 'reingresa', 'merma', 'merma'])
   })
 })
 
@@ -179,6 +199,17 @@ describe('B22 · la mercadería según el motivo', () => {
     expect(leyendaMercaderiaNCVenta('otro')).toBe('No se mueve mercadería.')
   })
 
+  it('antes de guardar dice qué va a pasar, con las unidades (H1)', () => {
+    expect(resumenMercaderiaNC('cliente_rechaza', 2)).toBe('Vuelven al stock 2 u.')
+    expect(resumenMercaderiaNC('error_entrega', 1)).toBe('Vuelven al stock 1 u.')
+    expect(resumenMercaderiaNC('producto_vencido', 2)).toBe('Van a merma 2 u.')
+    expect(resumenMercaderiaNC('producto_danado', 3)).toBe('Van a merma 3 u.')
+    expect(resumenMercaderiaNC('otro', 2)).toBe('No mueve stock')
+    expect(resumenMercaderiaNC('descuento_comercial', 0)).toBe('No mueve stock')
+    expect(resumenMercaderiaNC('cliente_rechaza', 0)).toBe('No mueve stock')
+    expect(unidadesNotaCreditoVenta({ a: 2, b: 0, c: 3 })).toBe(5)
+  })
+
   it('sólo el descuento comercial va por monto', () => {
     expect(MOTIVOS_NC_VENTA.filter(m => esMotivoPorMonto(m.value)).map(m => m.value)).toEqual(['descuento_comercial'])
   })
@@ -226,9 +257,24 @@ describe('B22 · el descuento comercial por monto', () => {
     expect(repartoDescuentoNC(lineasAcreditables(fc), 0.01)).toEqual([{ pedidoItemId: '1', nombre: 'G21', monto: 0.01 }])
   })
 
-  it('un porcentaje se convierte a plata sobre lo que le queda a la boleta', () => {
+  it('un porcentaje se convierte a plata sobre lo que le queda a la boleta, y lo dice con sus números (D6)', () => {
     expect(montoDePorcentaje(lineasAcreditables(fc), 10)).toBe(68.4)
     expect(montoDePorcentaje(lineasAcreditables(fc), 0)).toBe(0)
+    const setecientos = lineasAcreditables([{ id: 1, producto_id: 1, cantidad: 7, precio_unitario: 100 }])
+    expect(leyendaPorcentajeNC(setecientos, 10)).toMatch(/^10 % de \$\s?700,00 que quedan por acreditar = \$\s?70,00$/)
+    expect(leyendaPorcentajeNC(setecientos, 2.5)).toMatch(/^2,5 % de /)
+  })
+
+  // H2 de la revisión: con tope. El reparto viejo (prorratear_cargo, el residuo a la de más peso)
+  // podía pasar lo que le queda a un renglón; éste no, y todo lo que queda entra.
+  it('el reparto no pasa lo que le queda a ningún renglón y todo lo que queda entra', () => {
+    const treinta = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [String(i + 1), 10]))
+    const p = repartirDescuentoNC(299.84, treinta) ?? {}
+    expect(Object.values(p).every(m => m <= 10)).toBe(true)
+    expect(Object.values(p).reduce((s, m) => s + Math.round(m * 100), 0)).toBe(29984)
+    expect(repartirDescuentoNC(300, treinta)).toEqual(treinta)
+    expect(repartirDescuentoNC(300.01, treinta)).toBeNull()
+    expect(repartirDescuentoNC(0, treinta)).toEqual({})
   })
 
   it('las unidades después de un descuento acreditan lo que le queda a la línea (D6: 103,31 y 206,61)', () => {
