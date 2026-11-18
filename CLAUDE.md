@@ -171,17 +171,25 @@ suelta en `sucursales`.
   el formulario usa el número del componente, o lee el texto con el MISMO lector que decide el rojo
   (entero → `leerEntero`; sin miles → `leerDecimalSinMiles`; plata → `leerNumero`/`parsePrecio`/
   `parseMonto`), nunca con otro (`replace(/\./g, '')`, `parseInt`, `parseFloat`, `Number` sobre lo
-  tipeado: «185,000» se guardaba 185 km). Lo vigila `src/test/lectoresNumero.contract.test.ts`, con
-  su lista de permitidos que sólo se achica. **Lo que está en rojo no se guarda:** ni el valor de
-  antes, ni un pedazo, ni 0, ni `null`. Los tres campos se anotan solos en el registro del
-  formulario (`useRegistroIlegibles`): el formulario pone el `Provider` alrededor de sus campos y
-  frena su Guardar con `ilegibles.hay`. Con `commitOnChange`, mientras lo tipeado no se entiende el
-  padre vuelve al valor de antes de tipear. Sin registro alrededor, al salir el campo vuelve a su
-  valor con un aviso. **En la plata, más de dos decimales tipeados no son un error** (decisión del
-  dueño, 17/11: «Que guarde 1,50 pero salga un aviso en amarillo no grande sobre el campo»): se
-  guarda al centavo y un aviso ámbar (`role="status"`) arriba del campo dice qué se guarda y cómo se
-  escribe lo otro (`avisoPlataDecimalesDeMas`); no sale con lo pegado ni con lo precargado. Nada de
-  `type="number"`. La tabla de casos es `numeroTipeado.tabla.test.ts`. Y `redondear` redondea medio
+  tipeado: «185,000» se guardaba 185 km). Lo vigila `src/test/lectoresNumero.contract.test.ts` en
+  `components`, `hooks` y `utils`, con su lista de permitidos que sólo se achica; un lector bueno en
+  el campo equivocado (`leerNumero` en un entero) no lo ve, y eso lo cubre un test que tipee en el
+  formulario. **Lo que se ve es lo que se guarda:** el formulario no topea, no pone un piso ni un
+  default callado sobre lo tipeado (los meses de un gasto guardaban 2 con «1» a la vista); lo que no
+  vale va en rojo con su motivo (`motivo` de `CampoNumero`). **Lo que está en rojo no se guarda:** ni
+  el valor de antes, ni un pedazo, ni 0, ni `null`. Los tres campos se anotan solos en el registro
+  del formulario (`useRegistroIlegibles`): el formulario pone el `Provider` alrededor de sus campos,
+  frena su Guardar con `ilegibles.hay` y pone `AvisoCamposEnRojo` al lado, que dice cuántos hay y
+  lleva al primero (una sección que se cierra, como el carrito del alta, dice cómo abrirse con
+  `AbrirSeccionContext`). Un subformulario con su propio guardar (los lotes, la escala mayorista)
+  pone su propio registro. Con `commitOnChange`, mientras lo tipeado no se entiende el padre vuelve
+  al valor de antes de tipear (vacío, si estaba vacío). Sin registro alrededor, al salir el campo
+  vuelve a su valor con un aviso. **En la plata, más de dos decimales tipeados no son un error**
+  (decisión del dueño, 17/11: «Que guarde 1,50 pero salga un aviso en amarillo no grande sobre el
+  campo»): se guarda al centavo y un aviso ámbar (`role="status"`) arriba del campo dice qué se
+  guarda, y cómo se escribe lo otro si parece la costumbre de los miles (`avisoPlataDecimalesDeMas`);
+  no sale con lo pegado (lo dice el evento, `esPegado`) ni con lo precargado. Un «$» va con
+  `prefijo`, no puesto por el formulario. Nada de `type="number"`. La tabla de casos es `numeroTipeado.tabla.test.ts`. Y `redondear` redondea medio
   hacia afuera, como `round(numeric, n)`: da lo mismo que el server para un número leído de un
   texto, pero no es espejo de una cuenta con división o de un costo a 4 decimales, donde el double
   ya puede haber perdido el medio.
