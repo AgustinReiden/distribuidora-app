@@ -1,7 +1,7 @@
 -- Ensayo de la tarjeta B16 de la ola 2 del plan #1603 (v5): la nota de crédito de venta se imputa al mes
 -- de su boleta; tiene motivos, y le descuenta al vendedor según el motivo y sin ir hacia atrás
 -- (decisiones del dueño del 16/11 en #1545 y #1551, y del 17/11 en la ficha B16 v3).
--- Migración: NNN_nc_mes_de_la_boleta.
+-- Migración: 529_nc_mes_de_la_boleta (aplicada en producción el 18/11).
 --
 -- Un único DO con datos propios (una sucursal nueva, sus vendedores, clientes, productos, boletas y notas)
 -- que termina SIEMPRE en una excepción: no deja rastro (salvo valores de secuencia).
