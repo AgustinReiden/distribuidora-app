@@ -379,12 +379,12 @@ suelta en `sucursales`.
   restan `_ventas_nc`, que es la séptima parte: la nota vigente cuya boleta es venta, por la fecha
   **de la nota**, al cliente de la nota y al vendedor de la boleta. Resta plata, no pedidos ni
   clientes, y resta toda nota, sea cual sea su motivo: es la venta de la empresa; si la nota devolvió
-  mercadería (reingresó o fue a merma: `cantidad_mercaderia` de `_ventas_nc`), el gerencial le resta
-  además sus unidades y su costo, al costo con que la venta lo contó (B22 v3, decisiones del dueño del
-  18/11: con 10 fardos a $ 1.000 de costo $ 700 y 2 devueltos, 8 unidades, CMV $ 5.600 y margen
-  $ 2.400). Un descuento, un motivo que no mueve nada y una nota anterior a B22 no restan unidades ni
-  costo. Los otros lectores de `_ventas_nc` que muestran unidades (los rubros del tablero y el top del
-  bot) siguen con las de la boleta. El bot también (`bot_ventas_periodo`, `bot_mis_ventas` y el resumen del preventista); las jornadas
+  mercadería (reingresó o fue a merma: `cantidad_mercaderia` de `_ventas_nc`), el gerencial, los rubros
+  del tablero y el bot le restan además sus unidades, y el gerencial su costo, al costo con que la venta
+  lo contó (B22, decisiones del dueño del 18/11: con 10 fardos a $ 1.000 de costo $ 700 y 2 devueltos,
+  8 unidades en los tres, CMV $ 5.600 y margen $ 2.400). Un descuento, un motivo que no mueve nada y una
+  nota anterior a B22 no restan unidades ni costo. Un reporte nuevo que muestre unidades de venta resta
+  `cantidad_mercaderia` igual. El bot también (`bot_ventas_periodo`, `bot_mis_ventas` y el resumen del preventista); las jornadas
   y Rentabilidad siguen por boleta. Lo que le toca al VENDEDOR resta sólo las notas cuyo motivo le
   descuenta (ver «Los motivos de una nota de crédito de venta»): la comisión, las metas y Rendimiento,
   cada uno con su foto. Un ranking nuevo de venta resta `_ventas_nc` igual.

@@ -67,6 +67,10 @@
 --       costo de la venta) y su procedencia es la nota; C3 un descuento de 500 → 9.500 / 7.000 / 2.500 y 10 u.;
 --       C4 la nota anulada no resta; C5 sin costo queda fuera del margen; C6 sin la marca no se movió nada y no
 --       resta ni costo ni unidades. Los pedidos no cambian.
+--       U · LAS UNIDADES EN LOS TRES REPORTES («Sí, también», el dueño el 18/11): el gerencial (top de
+--       productos), los rubros del tablero y el top del bot dan lo mismo para el mismo producto y día: 8 en
+--       el ejemplo, 5 con 5 a merma, y 10 con un descuento, una nota anulada, sin la marca, un motivo que no
+--       mueve y una nota anterior a la migración.
 --       Rendimiento (rendimiento_preventistas, 'venta|unidades|margen'): C8 un rechazo emitido en el mes de su
 --       boleta → 8000|8|2400; C9 un vencido (no le descuenta al vendedor) no lo toca; C10 una nota fuera del mes
 --       de su boleta no lo toca; C11 una congelada (resta_rendimiento) sigue en 8000|8|2400 anulada.
@@ -315,6 +319,21 @@ BEGIN
                     (SELECT sucursal_id FROM pedidos WHERE id = p_ped), (SELECT fecha FROM pedidos WHERE id = p_ped)))::jsonb
            -> 'preventistas') x
      WHERE x->>'preventista_id' = (SELECT usuario_id::text FROM pedidos WHERE id = p_ped)
+  $f$;
+  -- Las unidades del producto de la boleta (caso_m: uno solo, en un solo rubro) hoy, en los tres reportes
+  -- que las muestran: 'gerencial (top de productos)|rubros del tablero|top del bot'.
+  CREATE FUNCTION pg_temp.u3(p_ped bigint) RETURNS text LANGUAGE sql AS $f$
+    SELECT format('%s|%s|%s',
+      public.reporte_gerencial(x.suc, public._tablero_hoy(), public._tablero_hoy())#>>'{top_productos,0,unidades}',
+      (SELECT sum((c->>'unidades')::numeric)
+         FROM jsonb_array_elements(public.tablero_categorias(x.suc, public._tablero_hoy(), public._tablero_hoy(), NULL)
+                                   -> 'categorias') c),
+      public.bot_ventas_periodo(public._tablero_hoy(), public._tablero_hoy(), x.suc, 10)::jsonb#>>'{top_productos,0,unidades}')
+      FROM (SELECT sucursal_id AS suc FROM pedidos WHERE id = p_ped) x
+  $f$;
+  CREATE FUNCTION pg_temp.ver3(p_caso text, p_ped bigint, p_espera text) RETURNS text[] LANGUAGE sql AS $f$
+    SELECT CASE WHEN pg_temp.u3(p_ped) = p_espera THEN '{}'::text[]
+                ELSE ARRAY[format('%s · unidades gerencial|tablero|bot = %s (esperado %s)', p_caso, pg_temp.u3(p_ped), p_espera)] END
   $f$;
   -- Lo que muestra el gerencial de hoy de la sucursal de la boleta: 'venta|cmv|margen|unidades|pedidos'.
   CREATE FUNCTION pg_temp.g(p_ped bigint) RETURNS text LANGUAGE sql AS $f$
@@ -969,6 +988,8 @@ BEGIN
   IF v_t <> 'cat 8000/2400 · vend 2400 · top 2400/8 u. · mes 5600/2400 · Σcat 8000' THEN
     v_fallas := v_fallas || ('C1 el detalle cierra con el total: ' || v_t);
   END IF;
+  -- U1 («Sí, también», el dueño el 18/11): los rubros del tablero y el top del bot dicen 8, como el gerencial.
+  v_fallas := v_fallas || pg_temp.ver3('U1 devuelve 2 que reingresan', v_p, '8|8|8');
   -- C2 el caso de la revisión: 10 × 100 a costo 60, 5 vencidos → venta 500, CMV 300, margen 200 y la merma 300
   -- (antes: margen −100 Y mermas 300, el costo dos veces).
   v_p := pg_temp.caso_m(100, 60, 10);
@@ -977,6 +998,7 @@ BEGIN
   IF pg_temp.g(v_p) <> '500|300|200|5|1' OR round((v_j->>'mermas')::numeric) <> 300 THEN
     v_fallas := v_fallas || format('C2 cinco vencidos: %s, mermas %s (esperado 500|300|200|5|1 y 300)', pg_temp.g(v_p), v_j->>'mermas');
   END IF;
+  v_fallas := v_fallas || pg_temp.ver3('U2 cinco a merma', v_p, '5|5|5');
   -- Rendimiento: el vencido no le descuenta al vendedor (B16): ni plata, ni unidades, ni costo.
   IF pg_temp.rend(v_p) IS DISTINCT FROM '1000|10|400' THEN
     v_fallas := v_fallas || format('C9 Rendimiento con una nota que no le descuenta al vendedor: %s (esperado 1000|10|400)', pg_temp.rend(v_p));
@@ -1000,6 +1022,7 @@ BEGIN
   IF pg_temp.g(v_p) <> '9500|7000|2500|10|1' THEN
     v_fallas := v_fallas || ('C3 descuento de 500: ' || pg_temp.g(v_p) || ' (esperado 9500|7000|2500|10|1)');
   END IF;
+  v_fallas := v_fallas || pg_temp.ver3('U3 un descuento por monto no resta unidades', v_p, '10|10|10');
   -- C4 la nota anulada no resta nada.
   v_p := pg_temp.caso_m(1000, 700, 10);
   v_nc := (pg_temp.nc(v_p, pg_temp.u1(pg_temp.linea(v_p), 2), 'cliente_rechaza')->>'nota_credito_id')::bigint;
@@ -1007,6 +1030,7 @@ BEGIN
   IF pg_temp.g(v_p) <> '10000|7000|3000|10|1' THEN
     v_fallas := v_fallas || ('C4 anulada: ' || pg_temp.g(v_p) || ' (esperado 10000|7000|3000|10|1)');
   END IF;
+  v_fallas := v_fallas || pg_temp.ver3('U4 la nota anulada no resta unidades', v_p, '10|10|10');
   -- C5 una línea sin costo: su devolución tampoco entra al margen.
   v_p := pg_temp.caso_m(1000, NULL, 10);
   PERFORM pg_temp.nc(v_p, pg_temp.u1(pg_temp.linea(v_p), 2), 'cliente_rechaza');
@@ -1020,6 +1044,21 @@ BEGIN
   IF pg_temp.g(v_p) <> '8000|7000|1000|10|1' THEN
     v_fallas := v_fallas || ('C6 sin mover mercadería: ' || pg_temp.g(v_p) || ' (esperado 8000|7000|1000|10|1)');
   END IF;
+  v_fallas := v_fallas || pg_temp.ver3('U6 sin la marca no resta unidades', v_p, '10|10|10');
+  -- U7 un motivo que no mueve mercadería (otro, por unidades) no resta unidades.
+  v_p := pg_temp.caso_m(1000, 700, 10);
+  PERFORM pg_temp.nc(v_p, pg_temp.u1(pg_temp.linea(v_p), 2), 'otro');
+  v_fallas := v_fallas || pg_temp.ver3('U7 motivo que no mueve', v_p, '10|10|10');
+  -- U8 una nota anterior a la migración (un rechazo cargado como entonces, sin anotación) no resta unidades.
+  v_p := pg_temp.caso_m(1000, 700, 10);
+  INSERT INTO notas_credito_venta (sucursal_id, cliente_id, pedido_id, fecha, motivo, total, usuario_id, neto, iva)
+    SELECT sucursal_id, cliente_id, id, fecha, 'cliente_rechaza', 2000, v_adm, 2000, 0 FROM pedidos WHERE id = v_p
+    RETURNING id INTO v_nc;
+  INSERT INTO nota_credito_venta_items (nota_credito_id, sucursal_id, pedido_item_id, producto_id, cantidad, precio_unitario, subtotal)
+    SELECT v_nc, pi.sucursal_id, pi.id, pi.producto_id, 2, 1000, 2000 FROM pedido_items pi WHERE pi.pedido_id = v_p;
+  INSERT INTO pagos (cliente_id, pedido_id, sucursal_id, monto, forma_pago, fecha, usuario_id, nota_credito_id)
+    SELECT cliente_id, NULL, sucursal_id, 2000, 'nota_credito', v_hoy, v_adm, v_nc FROM pedidos WHERE id = v_p;
+  v_fallas := v_fallas || pg_temp.ver3('U8 nota anterior a la migración', v_p, '10|10|10');
   -- C8 Rendimiento («Sí, las dos», el dueño el 18/11): el rechazo le descuenta al vendedor y se emitió en
   -- el mes de su boleta (resta_rendimiento): resta 2.000 de plata, 2 u. (B16) y el costo de las 2 (1.400).
   v_p := pg_temp.caso_m(1000, 700, 10);

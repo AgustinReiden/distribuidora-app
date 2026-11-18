@@ -111,6 +111,11 @@
 --     (antes, 0): resta de las unidades (KPI y top de productos) y, a su costo,
 --     de todo CMV y margen. Los pedidos y los clientes no cambian («Sí, las dos»,
 --     el dueño el 18/11: con 10 vendidos y 2 devueltos, 8 unidades).
+--   · Los rubros del tablero (tablero_categorias) y el top de productos del bot
+--     (bot_ventas_periodo) restan las mismas unidades («Sí, también», el dueño el
+--     18/11): los tres reportes dan las mismas unidades para el mismo producto y
+--     período. Su plata, sus pedidos y sus clientes no cambian. Ningún otro lector
+--     de _ventas_nc muestra unidades.
 --   · Con merma, el costo sale del CMV y lo cuenta la merma (que vale ese mismo
 --     costo, sección 1): una sola vez. Con 10 × 100 a 60 y 5 vencidos: venta
 --     500, CMV 300, margen 200, mermas 300 (antes margen −100 y mermas 300).
@@ -187,6 +192,8 @@ BEGIN
     ('public.merma_procedencia(bigint,text,text)', '5c41746599b2d510cbab7166c0ff7ab4'),
     ('public._nc_rendimiento(bigint[],date,date)', '95f66e3844872148502ce0e0e310fcab'),
     ('public.rendimiento_preventistas(bigint,date)', 'f65e37477ab363bf9fd985874385fea0'),
+    ('public.tablero_categorias(bigint,date,date,bigint)', 'ff95226d41f6cb1cbc12aaf6c506e204'),
+    ('public.bot_ventas_periodo(date,date,bigint,integer)', '2cf619cf1b77c4527dd2b2f092f6c4f4'),
     -- reporte_gerencial va sin md5 (otras tarjetas le parchan el tramo de
     -- compras): se exige que sus anclas aparezcan una vez.
     ('public.reporte_gerencial(bigint,date,date,boolean,boolean)', NULL),
@@ -1663,6 +1670,61 @@ END
 $rg$;
 
 -- =========================================================================
+-- tablero_categorias y bot_ventas_periodo: las unidades devueltas (sección 4)
+-- =========================================================================
+-- «Sí, también» (el dueño, 18/11): los rubros del tablero y el top de productos
+-- del bot restan lo que la nota devolvió de verdad, como el gerencial, por la
+-- fecha de la nota. La plata, los pedidos y los clientes no cambian. En el bot
+-- el JOIN interno a productos del top queda como está (PAT-5-1 de #1522, ola 3).
+DO $tc$
+DECLARE
+  v_def text := pg_get_functiondef('public.tablero_categorias(bigint,date,date,bigint)'::regprocedure);
+BEGIN
+  v_def := pg_temp.parche(v_def,
+    $a$    -- REP-D (#1545, D44): la nota de crédito resta del rubro, por la fecha de la
+    -- nota. No suma unidades ni compradores.
+    SELECT NULL::bigint, 0, -n.monto, false,$a$,
+    $n$    -- REP-D (#1545, D44): la nota de crédito resta del rubro, por la fecha de la
+    -- nota. No suma compradores. B22 (el dueño, 18/11): resta las unidades que
+    -- devolvió de verdad, como el gerencial y el bot.
+    SELECT NULL::bigint, -n.cantidad_mercaderia, -n.monto, false,$n$,
+    'tablero_categorias');
+  EXECUTE v_def;
+END
+$tc$;
+
+DO $bv$
+DECLARE
+  v_def text := pg_get_functiondef('public.bot_ventas_periodo(date,date,bigint,integer)'::regprocedure);
+BEGIN
+  v_def := pg_temp.parche(v_def,
+    $a$    -- venta, del top de clientes y de lo facturado por producto. No de las
+    -- unidades. Agregadas una vez y unidas por boleta y por producto: un
+    -- recorrido de las notas por boleta crecía con la cantidad de notas.
+    SELECT n.pedido_id, n.producto_id, n.monto
+      FROM public._ventas_nc(ARRAY[p_sucursal_id], p_desde, p_hasta) n$a$,
+    $n$    -- venta, del top de clientes y de lo facturado por producto; de las
+    -- unidades, sólo lo que la nota devolvió de verdad (B22, el dueño, 18/11:
+    -- como el gerencial y los rubros del tablero). Agregadas una vez y unidas por
+    -- boleta y por producto: un recorrido de las notas por boleta crecía con la
+    -- cantidad de notas.
+    SELECT n.pedido_id, n.producto_id, n.monto, n.cantidad_mercaderia
+      FROM public._ventas_nc(ARRAY[p_sucursal_id], p_desde, p_hasta) n$n$,
+    'bot_ventas_periodo (nc)');
+  v_def := pg_temp.parche(v_def,
+    $a$    SELECT nc.producto_id, SUM(nc.monto) AS monto FROM nc GROUP BY nc.producto_id$a$,
+    $n$    SELECT nc.producto_id, SUM(nc.monto) AS monto, SUM(nc.cantidad_mercaderia) AS cantidad
+      FROM nc GROUP BY nc.producto_id$n$,
+    'bot_ventas_periodo (nc_prod)');
+  v_def := pg_temp.parche(v_def,
+    $a$    SELECT p.id, p.codigo, p.nombre, SUM(pi.cantidad) AS unidades,$a$,
+    $n$    SELECT p.id, p.codigo, p.nombre, SUM(pi.cantidad) - COALESCE(MAX(npr.cantidad), 0) AS unidades,$n$,
+    'bot_ventas_periodo (top_productos)');
+  EXECUTE v_def;
+END
+$bv$;
+
+-- =========================================================================
 -- Poscondiciones
 -- =========================================================================
 DO $post$
@@ -1684,7 +1746,9 @@ BEGIN
     ('public._nc_venta_deshacer_mercaderia(bigint,uuid)', '''nota_credito_venta_anulada''', true),
     ('public.merma_procedencia(bigint,text,text)', 'THEN ''nota_credito_venta''', false),
     ('public.reporte_gerencial(bigint,date,date,boolean,boolean)', '-n.cantidad_mercaderia, -n.monto, false,', true),
-    ('public.rendimiento_preventistas(bigint,date)', '-n.cantidad_mercaderia * public.costo_valuacion(', true)
+    ('public.rendimiento_preventistas(bigint,date)', '-n.cantidad_mercaderia * public.costo_valuacion(', true),
+    ('public.tablero_categorias(bigint,date,date,bigint)', 'SELECT NULL::bigint, -n.cantidad_mercaderia, -n.monto, false,', true),
+    ('public.bot_ventas_periodo(date,date,bigint,integer)', 'SUM(pi.cantidad) - COALESCE(MAX(npr.cantidad), 0) AS unidades', true)
   ) AS t(f, marca, definer) LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = r.f::regprocedure
                     AND position(r.marca in prosrc) > 0 AND prosecdef = r.definer) THEN
