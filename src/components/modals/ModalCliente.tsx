@@ -804,7 +804,9 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
               className={`${inputClass('numero_documento')} ${errorDocumento ? 'border-red-500 bg-red-50 dark:bg-red-900/20' : ''} disabled:opacity-60 disabled:cursor-not-allowed`}
               placeholder={form.tipo_documento === 'CUIT' ? 'XX-XXXXXXXX-X' : '12345678'}
               maxLength={form.tipo_documento === 'CUIT' ? 13 : 8}
-              {...getAriaProps('numero_documento', true)}
+              /* El documento no es obligatorio (B17, #1561): cuando lo era, se inventaba
+                 un número para poder dar de alta al cliente. */
+              {...getAriaProps('numero_documento', false)}
             />
             {errores.numero_documento && <p {...getErrorMessageProps('numero_documento')} className="text-red-500 text-xs mt-1">{errores.numero_documento}</p>}
             {!errores.numero_documento && errorDocumento && <p role="alert" className="text-red-500 text-xs mt-1">{errorDocumento}</p>}

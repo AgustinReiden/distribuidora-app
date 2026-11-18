@@ -1,49 +1,46 @@
 -- =========================================================================
--- NNN · LOS DNI DE CLIENTES CARGADOS COMO CUIT
---       (tarjeta B17 de la ola 2 del plan #1603; punto 1561-b11 de #1561,
---        decisión del dueño del 16/11: «Sí, corregilos» y «Sí, sin documento»)
+-- NNN · LIMPIEZA DEL DOCUMENTO DE LOS CLIENTES: LOS NÚMEROS INVENTADOS SE
+--       VACÍAN, LOS DNI QUEDAN CON SU TIPO, Y EL FRENO
+--       (tarjeta B17 de la ola 2 del plan #1603; punto 1561-b11 de #1561)
 --
 -- Migración de DATOS sobre `clientes`, con su freno. Se aplica sólo con el OK
 -- explícito del dueño, después de medir prod con las consultas de sólo lectura de
--- la tarjeta. Ensayo: scripts/test-clientes-dni-ola2-1603.sql. Se aplica en LF.
+-- la tarjeta. Ensayo: scripts/test-clientes-documento-ola2-1603.sql. Se aplica en LF.
 --
--- Qué pasó. `clientes.cuit` guarda el CUIT (`XX-XXXXXXXX-X`) o un DNI en el
--- formato de almacenamiento de la app (`00-XXXXXXXX-0`, `dniToStorageFormat`), y
--- `clientes.tipo_documento` dice cuál es. Dos defectos del front:
---   · el tipo nunca llegó a la base: ni el alta (`createCliente` nombra sus
---     columnas una por una) ni la edición (el patch de ClientesContainer) lo
---     mandaban, así que todo cliente quedó con el default 'CUIT';
---   · el campo nace en CUIT y hasta el 16/11 exigía 11 dígitos: un DNI se cargaba
---     rellenado con ceros a la izquierda (`000` + el DNI de 8, `0000` + el de 7) y
---     el campo lo partía como CUIT: `00-0NNNNNNN-D`, el DNI en los últimos 8.
---     Y elegir DNI y dejarlo vacío guardaba el relleno `00-00000000-0`.
+-- Qué pasó (lo contó el dueño el 17/11). El CUIT empezó siendo la validación para
+-- no repetir un cliente, y era un campo obligatorio: hasta el 19/02/2026 el modal
+-- no guardaba un cliente sin 11 dígitos en el campo CUIT. Como casi ningún
+-- cliente tiene CUIT, se inventaba un número corto (un código propio) y el campo
+-- lo completaba con ceros: `00-00000123-4`. No son documentos y no identifican a
+-- nadie. Además, el front nunca le mandó a la base el tipo de documento (ni el
+-- alta ni la edición lo nombraban), así que los dos DNI cargados con el selector
+-- quedaron con tipo 'CUIT', y elegir DNI y dejarlo vacío guardaba el relleno
+-- `00-00000000-0`.
 --
--- Los grupos (por los dígitos del valor; medidos en prod el 16/11):
---   dni_relleno_11          `00-0NNNNNNN-D`, D ≠ 0     118 · DNI = los últimos 8 dígitos
---   ambiguo                 `00-0NNNNNNN-0`             14 · ver la regla abajo
---   formato_almacenamiento  `00-NNNNNNNN-0`, N1 ≠ 0      2 · ya es el formato: sólo el tipo
---   relleno_ceros           `00-00000000-0`             18 · sin documento: `cuit` NULL
---   cuit                    11 dígitos, no empieza con 00  2 · no se toca
--- Los corregidos quedan con `tipo_documento = 'DNI'` y `cuit = '00-' || DNI de 8 || '-0'`
--- (el relleno, con `cuit` NULL y el tipo en su default). Activos e inactivos por
--- igual: el historial los sigue mostrando, y el CHECK de abajo vale para todos.
---
--- Los 14 ambiguos. `00-0NNNNNNN-0` es a la vez un DNI de 8 que termina en 0 con el
--- relleno de arriba y el formato de almacenamiento de un DNI de 7. La regla es
--- 'ultimos_8' (el DNI son los últimos 8 dígitos, como los 118): los 118 tienen el
--- último dígito del 1 al 9, así que con la misma carga se esperan 118/9 ≈ 13 que
--- terminen en 0, y son 14; por el selector de DNI entraron sólo 2 DNI de 8 (el
--- tercer grupo), y uno de 7 es mucho menos común que uno de 8. Además, un DNI de 7
--- cargado con el relleno de 11 también termina en los últimos 8, así que esta regla
--- lo lee bien en los dos casos. La otra lectura ('almacenamiento': el valor ya es el
--- formato de un DNI de 7, sólo cambia el tipo) queda en el parámetro de la corrección
--- (`v_regla` de la sección 3), para el caso de que el dueño la elija.
+-- Los grupos, por lo que el valor ES (sobre sus dígitos; medidos en prod el 17/11,
+-- 815 clientes, 661 sin documento):
+--   cuit_valido            11 dígitos, no empieza con 00, dígito verificador bien  ·  2 · no se toca
+--   cuit_verificador_malo  11 dígitos, no empieza con 00, verificador mal          ·  0 · no se toca
+--   dni_almacenamiento     `00-XXXXXXXX-0` con 7 u 8 cifras en el tramo del medio   ·  2 · tipo DNI
+--   relleno_ceros          sólo ceros (`00-00000000-0`)                             · 18 · cuit NULL
+--   inventado              11 dígitos, empieza con 00 y, sin los ceros de adelante,
+--                          le quedan de 1 a 6 cifras                                 · 132 · cuit NULL
+--   vacio                  sin dígitos ('' o espacios)                              · no se toca
+--   otro_00 / otro         cualquier otra cosa: la migración ABORTA (corregir a mano)
+-- La frontera entre «DNI» e «inventado» es la cantidad de cifras: un DNI son 7 u 8
+-- (sin ceros de adelante) en el tramo del medio de `00-XXXXXXXX-0`, así que el valor
+-- entero, sin los ceros de adelante, tiene 8 o 9; un inventado tiene 6 o menos. Un
+-- valor que empieza con 00 y le quedan 7 cifras, o 8 o más sin la forma de un DNI,
+-- no es ninguno de los dos: otro_00, aborta, no se adivina.
+-- Los vaciados quedan con `tipo_documento` en su default ('CUIT'). Activos e
+-- inactivos por igual (131 de los inventados tienen pedidos: el UPDATE no toca
+-- pedidos, sólo `cuit` y `tipo_documento`).
 --
 -- Qué dispara el UPDATE de `clientes` (SET cuit, tipo_documento, como postgres):
 --   · audit_clientes (AFTER, cada fila): una fila en audit_logs por cliente
---     corregido, con campos_modificados {cuit, tipo_documento} y usuario NULL. Se deja
---     a propósito: es el rastro del cambio en el historial del cliente (audit_logs es
---     evidencia), y son ~150 filas;
+--     corregido, con campos_modificados {cuit} o {cuit, tipo_documento} y usuario
+--     NULL. Se deja a propósito: es el rastro del cambio en el historial del cliente
+--     (audit_logs es evidencia), y son ~152 filas;
 --   · trg_clientes_proteger_columnas, _reservado_solo_admin, _saldo_y_credito_solo_admin
 --     y _vb_solo_admin (BEFORE): salen al instante, porque current_user no es
 --     authenticated;
@@ -55,14 +52,15 @@
 --
 -- El freno:
 --   · `trg_clientes_tipo_documento_del_valor` (BEFORE INSERT OR UPDATE OF cuit,
---     tipo_documento): el tipo sale del valor. `00-XXXXXXXX-0` es DNI y lo demás es
---     CUIT (ningún CUIT empieza con 00), y el relleno `00-00000000-0` queda NULL. Así
---     un bundle viejo del PWA, que no manda el tipo, guarda bien y no recibe un error;
---   · el CHECK `clientes_documento_con_su_tipo`: un valor cuyos dígitos empiezan con
---     00 es el formato de almacenamiento de un DNI, distinto del relleno, y va con tipo
---     DNI; cualquier otro valor no va con tipo DNI. Lo único que todavía lo puede
---     violar es un valor con forma rara que empiece con 00 (un DNI rellenado a 11 que
---     el front viejo dejara pasar): el front lo traduce (`errorDeSupabase`).
+--     tipo_documento): el tipo sale del valor. `00-XXXXXXXX-0` con un DNI de 7 u 8
+--     cifras es DNI y lo que no empieza con 00 es CUIT (ningún CUIT empieza con 00);
+--     un valor de sólo ceros queda NULL. Así un bundle viejo del PWA, que no manda el
+--     tipo, guarda bien un DNI;
+--   · el CHECK `clientes_documento_con_su_tipo`: un valor que empieza con 00 sólo
+--     puede ser un DNI en el formato de almacenamiento, con tipo DNI; cualquier otro
+--     no va con tipo DNI. Un número inventado que mande un bundle viejo lo viola, y el
+--     front lo traduce: «Ese número no es un CUIT ni un DNI. Si el cliente no tiene
+--     documento, dejá el campo vacío.» (`errorDeSupabase`).
 --   Espejo en el front: `tipoDocumentoDelValor` (src/utils/documentoCliente.ts).
 --
 -- Respaldo: `clientes_documento_respaldo` (sólo de server: RLS sin policies y sin
@@ -103,9 +101,9 @@ BEGIN
     RAISE EXCEPTION 'mig NNN · clientes_documento_con_su_tipo ya existe: revisar a mano';
   END IF;
   IF to_regprocedure('public.clientes_tipo_documento_del_valor()') IS NOT NULL
-     OR to_regprocedure('public._clientes_dni_como_cuit_corregir(text, jsonb)') IS NOT NULL
-     OR to_regprocedure('public._clientes_documento_grupos(text)') IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · las funciones de la corrección ya existen: revisar a mano';
+     OR to_regprocedure('public._clientes_documento_limpiar(jsonb)') IS NOT NULL
+     OR to_regprocedure('public._clientes_documento_grupos()') IS NOT NULL THEN
+    RAISE EXCEPTION 'mig NNN · las funciones de la limpieza ya existen: revisar a mano';
   END IF;
 
   IF (SELECT format_type(atttypid, atttypmod) FROM pg_attribute
@@ -144,11 +142,7 @@ CREATE TABLE public.clientes_documento_respaldo (
   sucursal_id             bigint       NOT NULL,
   grupo                   text         NOT NULL
     CONSTRAINT clientes_documento_respaldo_grupo_check
-    CHECK (grupo IN ('dni_relleno_11', 'ambiguo', 'formato_almacenamiento', 'relleno_ceros')),
-  -- La lectura de los ambiguos con la que se corrigió (NULL en los otros grupos).
-  regla_ambiguos          text
-    CONSTRAINT clientes_documento_respaldo_regla_check
-    CHECK (regla_ambiguos IN ('ultimos_8', 'almacenamiento')),
+    CHECK (grupo IN ('inventado', 'dni_almacenamiento', 'relleno_ceros')),
   activo                  boolean      NOT NULL,
   cuit_anterior           varchar(13),
   tipo_documento_anterior varchar(4),
@@ -158,24 +152,18 @@ CREATE TABLE public.clientes_documento_respaldo (
 );
 
 COMMENT ON TABLE public.clientes_documento_respaldo IS
-  'B17 (#1561, 1561-b11): el documento de cada cliente que corrigió la migración de los DNI cargados como CUIT, antes y después, para poder deshacerla. Sólo de server: RLS sin policies y sin grants (es dato de clientes). La escribe _clientes_dni_como_cuit_corregir.';
+  'B17 (#1561, 1561-b11): el documento de cada cliente que tocó la limpieza (números inventados y rellenos vaciados, DNI con su tipo), antes y después, para poder deshacerla. Sólo de server: RLS sin policies y sin grants (es dato de clientes). La escribe _clientes_documento_limpiar.';
 
 ALTER TABLE public.clientes_documento_respaldo ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.clientes_documento_respaldo FROM PUBLIC, anon, authenticated;
 
-
 -- =========================================================================
--- 2 · La corrección
+-- 2 · La limpieza
 -- =========================================================================
 -- Cada cliente con documento, con su grupo y, si se corrige, el valor y el tipo
 -- nuevos. Por los dígitos del valor, así un guion o un espacio de más no lo saca de
 -- su grupo. Lee activos e inactivos a propósito. Sólo de server.
---   'ultimos_8': el DNI son los últimos 8 de los 11 dígitos (el relleno con ceros a
---   la izquierda); 'almacenamiento': los 8 del medio de 00-XXXXXXXX-0.
--- Un `00-XXXXXXXX-0` que ya tiene tipo DNI no es ambiguo: el tipo lo puso alguien
--- (el front nuevo, el trigger o esta misma corrección), y se lee como está. Por eso
--- volver a correrla no toca nada.
-CREATE FUNCTION public._clientes_documento_grupos(p_regla_ambiguos text)
+CREATE FUNCTION public._clientes_documento_grupos()
  RETURNS TABLE (id bigint, sucursal_id bigint, activo boolean, cuit varchar(13), tipo_documento varchar(4),
                 grupo text, cuit_nuevo varchar(13), tipo_nuevo varchar(4))
  LANGUAGE sql
@@ -183,51 +171,52 @@ CREATE FUNCTION public._clientes_documento_grupos(p_regla_ambiguos text)
  SET search_path TO 'public'
 AS $function$
   SELECT y.id, y.sucursal_id, y.activo, y.cuit, y.tipo_documento, y.grupo,
-         ('00-' || CASE y.grupo
-                     WHEN 'dni_relleno_11' THEN y.ult8
-                     WHEN 'ambiguo' THEN CASE WHEN p_regla_ambiguos = 'ultimos_8' THEN y.ult8 ELSE y.alm8 END
-                     WHEN 'formato_almacenamiento' THEN y.alm8
-                   END || '-0')::varchar(13),
-         CASE WHEN y.grupo = 'relleno_ceros' THEN 'CUIT'
-              WHEN y.grupo IN ('dni_relleno_11', 'ambiguo', 'formato_almacenamiento') THEN 'DNI'
+         CASE WHEN y.grupo = 'dni_almacenamiento' THEN ('00-' || y.medio || '-0')::varchar(13) END,
+         CASE WHEN y.grupo = 'dni_almacenamiento' THEN 'DNI'
+              WHEN y.grupo IN ('inventado', 'relleno_ceros') THEN 'CUIT'
          END::varchar(4)
     FROM (
       SELECT z.*,
              CASE
                WHEN z.d = '' THEN 'vacio'
-               WHEN z.d ~ '^0{11}$' THEN 'relleno_ceros'
-               -- Un DNI tiene al menos 7 cifras: un número más chico es otra cosa y va
-               -- a mano (cae en otro_00, que aborta).
-               WHEN z.d ~ '^000[0-9]{7}[1-9]$' AND ltrim(z.ult8, '0') ~ '^[0-9]{7,8}$' THEN 'dni_relleno_11'
-               WHEN z.d ~ '^00[0-9]{8}0$' AND z.tipo_documento = 'DNI' AND ltrim(z.alm8, '0') ~ '^[0-9]{7,8}$'
-                 THEN 'formato_almacenamiento'
-               WHEN z.d ~ '^000[0-9]{7}0$'
-                    AND ltrim(CASE WHEN p_regla_ambiguos = 'ultimos_8' THEN z.ult8 ELSE z.alm8 END, '0')
-                        ~ '^[0-9]{7,8}$' THEN 'ambiguo'
-               WHEN z.d ~ '^00[1-9][0-9]{7}0$' THEN 'formato_almacenamiento'
+               WHEN z.d ~ '^0+$' THEN 'relleno_ceros'
+               -- `00-XXXXXXXX-0` con un DNI de 7 u 8 cifras en el medio.
+               WHEN z.d ~ '^00[0-9]{8}0$' AND ltrim(z.medio, '0') ~ '^[0-9]{7,8}$' THEN 'dni_almacenamiento'
+               -- Un número corto rellenado con ceros a 11 dígitos.
+               WHEN z.d ~ '^00[0-9]{9}$' AND length(ltrim(z.d, '0')) BETWEEN 1 AND 6 THEN 'inventado'
                WHEN z.d LIKE '00%' THEN 'otro_00'
-               WHEN z.d ~ '^[0-9]{11}$' THEN 'cuit'
+               WHEN z.d ~ '^[0-9]{11}$' AND z.verificador_ok THEN 'cuit_valido'
+               WHEN z.d ~ '^[0-9]{11}$' THEN 'cuit_verificador_malo'
                ELSE 'otro'
              END AS grupo
         FROM (SELECT c.id, c.sucursal_id, c.activo, c.cuit, c.tipo_documento, d.d,
-                     substr(d.d, 4, 8) AS ult8, substr(d.d, 3, 8) AS alm8
+                     substr(d.d, 3, 8) AS medio,
+                     -- Dígito verificador del CUIT (módulo 11; resto 1 no existe), como
+                     -- validarCuit del front.
+                     CASE WHEN d.d ~ '^[0-9]{11}$' THEN
+                       (SELECT CASE WHEN s.r = 1 THEN false
+                                    ELSE (CASE WHEN s.r = 0 THEN 0 ELSE 11 - s.r END) = substr(d.d, 11, 1)::int
+                               END
+                          FROM (SELECT (SELECT sum(substr(d.d, i, 1)::int * (ARRAY[5,4,3,2,7,6,5,4,3,2])[i])
+                                          FROM generate_series(1, 10) i) % 11 AS r) s)
+                     END AS verificador_ok
                 FROM public.clientes c
                CROSS JOIN LATERAL (SELECT regexp_replace(c.cuit, '[^0-9]', '', 'g') AS d) d
                WHERE c.cuit IS NOT NULL) z
     ) y;
 $function$;
 
-REVOKE ALL ON FUNCTION public._clientes_documento_grupos(text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._clientes_documento_grupos() FROM PUBLIC, anon, authenticated;
 
-COMMENT ON FUNCTION public._clientes_documento_grupos(text) IS
-  'B17 (#1561, 1561-b11): el grupo del documento de cada cliente (dni_relleno_11, ambiguo, formato_almacenamiento, relleno_ceros, cuit, otro, otro_00, vacio) y el valor y el tipo con que lo deja la corrección. Sólo de server.';
+COMMENT ON FUNCTION public._clientes_documento_grupos() IS
+  'B17 (#1561, 1561-b11): el grupo del documento de cada cliente (cuit_valido, cuit_verificador_malo, dni_almacenamiento, relleno_ceros, inventado, vacio, otro_00, otro) y el valor y el tipo con que lo deja la limpieza. Sólo de server.';
 
 -- Cuenta los grupos, aborta si alguno se sale de su rango (`p_rangos`:
--- {"grupo": [mínimo, máximo]}), guarda el respaldo, corrige y comprueba. Si no hay
--- nada que corregir (la foto del CI, una base de ensayo, o prod ya corregida) no
--- mira los rangos y no toca nada. Devuelve los conteos. La llaman esta migración y
--- el ensayo; nadie más (sin EXECUTE).
-CREATE FUNCTION public._clientes_dni_como_cuit_corregir(p_regla_ambiguos text, p_rangos jsonb)
+-- {"grupo": [mínimo, máximo]}) o si hay un valor que no es de ningún grupo, guarda
+-- el respaldo, corrige y comprueba. Si no hay nada que corregir (la foto del CI, una
+-- base de ensayo, o prod ya limpia) no mira los rangos y no toca nada. Devuelve los
+-- conteos. La llaman esta migración y el ensayo; nadie más (sin EXECUTE).
+CREATE FUNCTION public._clientes_documento_limpiar(p_rangos jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
  SET search_path TO 'public'
@@ -239,33 +228,27 @@ DECLARE
   v_ids         bigint[];
   v_n           int;
   v_inactivos   int;
-  v_duplicados  int;
   v_mal         int;
 BEGIN
-  IF p_regla_ambiguos IS NULL OR p_regla_ambiguos NOT IN ('ultimos_8', 'almacenamiento') THEN
-    RAISE EXCEPTION 'La regla de los ambiguos es ''ultimos_8'' o ''almacenamiento'', no %', p_regla_ambiguos;
-  END IF;
-
-  SELECT jsonb_object_agg(k.grupo, (SELECT count(*) FROM public._clientes_documento_grupos(p_regla_ambiguos) g
+  SELECT jsonb_object_agg(k.grupo, (SELECT count(*) FROM public._clientes_documento_grupos() g
                                      WHERE g.grupo = k.grupo))
     INTO v_conteo
-    FROM unnest(ARRAY['dni_relleno_11', 'ambiguo', 'formato_almacenamiento', 'relleno_ceros',
-                      'cuit', 'otro', 'otro_00', 'vacio']) AS k(grupo);
+    FROM unnest(ARRAY['cuit_valido', 'cuit_verificador_malo', 'dni_almacenamiento', 'relleno_ceros',
+                      'inventado', 'vacio', 'otro_00', 'otro']) AS k(grupo);
 
-  SELECT count(*) INTO v_a_corregir
-    FROM public._clientes_documento_grupos(p_regla_ambiguos) g
-   WHERE g.cuit_nuevo IS DISTINCT FROM g.cuit AND g.tipo_nuevo IS NOT NULL
-      OR g.tipo_nuevo IS DISTINCT FROM g.tipo_documento AND g.tipo_nuevo IS NOT NULL;
-
-  -- Un valor que empieza con 00 y no es de ningún grupo dejaría inválido el CHECK: a mano.
-  IF (v_conteo->>'otro_00')::int > 0 THEN
-    RAISE EXCEPTION 'B17 · % clientes tienen un documento que empieza con 00 y no es un DNI reconocible (conteo: %): corregirlos a mano antes',
-      v_conteo->>'otro_00', v_conteo;
+  -- Lo que no es de ningún grupo no se adivina: a mano.
+  IF (v_conteo->>'otro_00')::int > 0 OR (v_conteo->>'otro')::int > 0 THEN
+    RAISE EXCEPTION 'B17 · % clientes tienen un documento que no es un CUIT, ni un DNI, ni un número inventado reconocible (conteo: %): corregirlos a mano antes',
+      (v_conteo->>'otro_00')::int + (v_conteo->>'otro')::int, v_conteo;
   END IF;
 
+  SELECT count(*) INTO v_a_corregir
+    FROM public._clientes_documento_grupos() g
+   WHERE g.tipo_nuevo IS NOT NULL
+     AND (g.cuit_nuevo IS DISTINCT FROM g.cuit OR g.tipo_nuevo IS DISTINCT FROM g.tipo_documento);
+
   IF v_a_corregir = 0 THEN
-    RETURN v_conteo || jsonb_build_object('actualizados', 0, 'inactivos_actualizados', 0,
-                                          'duplicados_dni', 0, 'regla_ambiguos', p_regla_ambiguos);
+    RETURN v_conteo || jsonb_build_object('actualizados', 0, 'vaciados', 0, 'inactivos_actualizados', 0);
   END IF;
 
   -- Premisa de datos: cada grupo en su rango.
@@ -282,15 +265,14 @@ BEGIN
 
   -- Respaldo y corrección, sólo de las filas que cambian.
   WITH g AS (
-    SELECT * FROM public._clientes_documento_grupos(p_regla_ambiguos) g
+    SELECT * FROM public._clientes_documento_grupos() g
      WHERE g.tipo_nuevo IS NOT NULL
        AND (g.cuit_nuevo IS DISTINCT FROM g.cuit OR g.tipo_nuevo IS DISTINCT FROM g.tipo_documento)
   ), ins AS (
     INSERT INTO public.clientes_documento_respaldo
-      (cliente_id, sucursal_id, grupo, regla_ambiguos, activo,
+      (cliente_id, sucursal_id, grupo, activo,
        cuit_anterior, tipo_documento_anterior, cuit_nuevo, tipo_documento_nuevo)
-    SELECT g.id, g.sucursal_id, g.grupo, CASE WHEN g.grupo = 'ambiguo' THEN p_regla_ambiguos END, g.activo,
-           g.cuit, g.tipo_documento, g.cuit_nuevo, g.tipo_nuevo
+    SELECT g.id, g.sucursal_id, g.grupo, g.activo, g.cuit, g.tipo_documento, g.cuit_nuevo, g.tipo_nuevo
       FROM g
     RETURNING cliente_id, cuit_nuevo, tipo_documento_nuevo
   ), upd AS (
@@ -317,65 +299,56 @@ BEGIN
     RAISE EXCEPTION 'B17 · % clientes no quedaron como dice el respaldo', v_mal;
   END IF;
 
-  IF EXISTS (SELECT 1 FROM public.clientes c
-              WHERE c.cuit IS NOT NULL
-                AND regexp_replace(c.cuit, '[^0-9]', '', 'g') LIKE '00%'
-                AND (c.cuit !~ '^00-[0-9]{8}-0$' OR c.cuit = '00-00000000-0'
-                     OR c.tipo_documento IS DISTINCT FROM 'DNI')) THEN
-    RAISE EXCEPTION 'B17 · quedan documentos que empiezan con 00 sin el formato de un DNI o sin tipo DNI';
+  IF EXISTS (SELECT 1 FROM public._clientes_documento_grupos() g
+              WHERE g.grupo IN ('inventado', 'relleno_ceros', 'otro_00', 'otro')
+                 OR g.grupo = 'dni_almacenamiento'
+                    AND (g.cuit IS DISTINCT FROM g.cuit_nuevo OR g.tipo_documento IS DISTINCT FROM 'DNI')) THEN
+    RAISE EXCEPTION 'B17 · después de la limpieza quedan números inventados, rellenos o DNI sin su tipo';
   END IF;
 
   SELECT count(*) FILTER (WHERE NOT r.activo) INTO v_inactivos
     FROM public.clientes_documento_respaldo r
    WHERE r.cliente_id = ANY (v_ids);
 
-  -- Informativo: cuántos DNI de una sucursal quedan en más de un cliente, con alguno
-  -- de los corregidos (no hay UNIQUE sobre el documento, y el control de duplicados
-  -- del alta no lo mira).
-  SELECT count(*) INTO v_duplicados
-    FROM (SELECT 1
-            FROM public.clientes c
-           WHERE c.tipo_documento = 'DNI' AND c.cuit IS NOT NULL
-           GROUP BY c.sucursal_id, c.cuit
-          HAVING count(*) > 1 AND bool_or(c.id = ANY (v_ids))) dup;
-
-  RETURN v_conteo || jsonb_build_object('actualizados', v_n, 'inactivos_actualizados', v_inactivos,
-                                        'duplicados_dni', v_duplicados, 'regla_ambiguos', p_regla_ambiguos);
+  RETURN v_conteo || jsonb_build_object(
+    'actualizados', v_n,
+    'vaciados', (SELECT count(*) FROM public.clientes_documento_respaldo r
+                  WHERE r.cliente_id = ANY (v_ids) AND r.cuit_nuevo IS NULL),
+    'inactivos_actualizados', v_inactivos);
 END
 $function$;
 
-REVOKE ALL ON FUNCTION public._clientes_dni_como_cuit_corregir(text, jsonb) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._clientes_documento_limpiar(jsonb) FROM PUBLIC, anon, authenticated;
 
-COMMENT ON FUNCTION public._clientes_dni_como_cuit_corregir(text, jsonb) IS
-  'B17 (#1561, 1561-b11): corrige los DNI de clientes cargados como CUIT (tipo DNI y formato 00-XXXXXXXX-0; el relleno 00-00000000-0 queda NULL) y guarda el antes y el después en clientes_documento_respaldo. Sólo de server: la llaman su migración y su ensayo.';
+COMMENT ON FUNCTION public._clientes_documento_limpiar(jsonb) IS
+  'B17 (#1561, 1561-b11): vacía los números inventados y los rellenos del documento de los clientes y le pone el tipo DNI a los DNI, guardando el antes y el después en clientes_documento_respaldo. Sólo de server: la llaman su migración y su ensayo.';
 
 -- =========================================================================
--- 3 · Se corrige prod
+-- 3 · Se limpia prod
 -- =========================================================================
--- Los rangos, sobre lo medido el 16/11 (118 / 14 / 2 / 18 / 2, y nada más):
---   · dni_relleno_11 y ambiguo nacen del campo CUIT que exigía 11 dígitos; desde el
---     16/11 (B11b) el dígito verificador rechaza 10 de cada 11 de esos rellenos, así
---     que no crecen: +2 de tolerancia, y −5 por ediciones;
---   · formato_almacenamiento y relleno_ceros crecen con cada alta con DNI hasta que
---     llegue el front de esta tarjeta: hasta +10 y +12;
---   · cuit crece con las altas con CUIT: hasta 20; otro (no empieza con 00 y no
---     tiene 11 dígitos) hasta 5. otro_00 aborta siempre (adentro de la función).
-DO $correccion$
+-- Los rangos, sobre lo medido el 17/11 (132 inventados, 2 DNI, 18 rellenos, 2 CUIT):
+--   · inventado: el campo dejó de ser obligatorio el 19/02 (115 de los 132 son de
+--     febrero) y desde el 16/11 el front exige el dígito verificador, que deja pasar
+--     uno de cada once de esos números: casi no crece. +3 de tolerancia, y −5 por
+--     ediciones;
+--   · dni_almacenamiento y relleno_ceros crecen con cada alta con DNI hasta que llegue
+--     el front de esta tarjeta: hasta +10 y +12;
+--   · cuit_valido crece con las altas con CUIT: hasta 20; cuit_verificador_malo, hasta
+--     2 (los dos medidos, si alguno no pasa el verificador: desde B11b no entran nuevos).
+--   otro_00 y otro abortan siempre (adentro de la función).
+DO $limpieza$
 DECLARE
-  -- La lectura de los 14 ambiguos: 'ultimos_8' (la recomendada) o 'almacenamiento'.
-  v_regla text := 'ultimos_8';
-  v_r     jsonb;
+  v_r jsonb;
 BEGIN
-  v_r := public._clientes_dni_como_cuit_corregir(v_regla, jsonb_build_object(
-    'dni_relleno_11',         jsonb_build_array(113, 120),
-    'ambiguo',                jsonb_build_array(9, 16),
-    'formato_almacenamiento', jsonb_build_array(0, 12),
-    'relleno_ceros',          jsonb_build_array(13, 30),
-    'cuit',                   jsonb_build_array(0, 20),
-    'otro',                   jsonb_build_array(0, 5)));
+  v_r := public._clientes_documento_limpiar(jsonb_build_object(
+    'inventado',             jsonb_build_array(127, 135),
+    'dni_almacenamiento',    jsonb_build_array(0, 12),
+    'relleno_ceros',         jsonb_build_array(13, 30),
+    'cuit_valido',           jsonb_build_array(0, 20),
+    'cuit_verificador_malo', jsonb_build_array(0, 2)));
   RAISE NOTICE 'mig NNN · documentos de clientes: %', v_r;
 END
-$correccion$;
+$limpieza$;
 
 -- =========================================================================
 -- 4 · El freno
@@ -385,22 +358,25 @@ CREATE FUNCTION public.clientes_tipo_documento_del_valor()
  LANGUAGE plpgsql
  SET search_path TO 'public'
 AS $function$
+DECLARE
+  v_d text;
 BEGIN
   -- B17 (#1561): el tipo de documento sale del valor. Un DNI se guarda en el formato
-  -- `00-XXXXXXXX-0` y ningún CUIT empieza con 00. Así un bundle viejo del PWA, que
-  -- nunca mandó el tipo, guarda bien. Espejo: tipoDocumentoDelValor (front).
+  -- `00-XXXXXXXX-0` (7 u 8 cifras) y ningún CUIT empieza con 00. Así un bundle viejo
+  -- del PWA, que nunca mandó el tipo, guarda bien. Espejo: tipoDocumentoDelValor (front).
   IF NEW.cuit IS NULL THEN
     RETURN NEW;
   END IF;
-  IF NEW.cuit = '00-00000000-0' THEN
-    -- El relleno de un DNI vacío: el cliente no tiene documento.
+  v_d := regexp_replace(NEW.cuit, '[^0-9]', '', 'g');
+  IF v_d ~ '^0+$' THEN
+    -- El relleno de un documento vacío: el cliente no tiene documento.
     NEW.cuit := NULL;
-  ELSIF NEW.cuit ~ '^00-[0-9]{8}-0$' THEN
+  ELSIF NEW.cuit ~ '^00-[0-9]{8}-0$' AND ltrim(substr(NEW.cuit, 4, 8), '0') ~ '^[0-9]{7,8}$' THEN
     NEW.tipo_documento := 'DNI';
-  ELSIF regexp_replace(NEW.cuit, '[^0-9]', '', 'g') NOT LIKE '00%' THEN
+  ELSIF v_d NOT LIKE '00%' THEN
     NEW.tipo_documento := 'CUIT';
   END IF;
-  -- Lo que empieza con 00 con otra forma lo rechaza clientes_documento_con_su_tipo.
+  -- Lo demás que empieza con 00 (un número inventado) lo rechaza clientes_documento_con_su_tipo.
   RETURN NEW;
 END
 $function$;
@@ -417,14 +393,14 @@ CREATE TRIGGER trg_clientes_tipo_documento_del_valor
 ALTER TABLE public.clientes ADD CONSTRAINT clientes_documento_con_su_tipo CHECK (
   cuit IS NULL
   OR CASE WHEN regexp_replace(cuit, '[^0-9]', '', 'g') LIKE '00%'
-          THEN cuit ~ '^00-[0-9]{8}-0$' AND cuit <> '00-00000000-0'
+          THEN cuit ~ '^00-[0-9]{8}-0$' AND ltrim(substr(cuit, 4, 8), '0') ~ '^[0-9]{7,8}$'
                AND tipo_documento IS NOT DISTINCT FROM 'DNI'
           ELSE tipo_documento IS DISTINCT FROM 'DNI'
      END
 );
 
 COMMENT ON CONSTRAINT clientes_documento_con_su_tipo ON public.clientes IS
-  'B17 (#1561): un documento que empieza con 00 es un DNI en el formato 00-XXXXXXXX-0 (no el relleno 00-00000000-0) y va con tipo DNI; cualquier otro no va con tipo DNI. El tipo lo pone trg_clientes_tipo_documento_del_valor.';
+  'B17 (#1561): un documento que empieza con 00 sólo puede ser un DNI de 7 u 8 cifras en el formato 00-XXXXXXXX-0, con tipo DNI (un número inventado rellenado con ceros no entra); cualquier otro no va con tipo DNI. El tipo lo pone trg_clientes_tipo_documento_del_valor.';
 COMMENT ON COLUMN public.clientes.tipo_documento IS
   'Tipo de documento: CUIT (XX-XXXXXXXX-X) o DNI (guardado como 00-XXXXXXXX-0). Sale del valor de cuit: lo pone trg_clientes_tipo_documento_del_valor (B17, #1561).';
 
@@ -450,10 +426,10 @@ BEGIN
 
   IF has_function_privilege('authenticated', 'public.clientes_tipo_documento_del_valor()', 'EXECUTE')
      OR has_function_privilege('anon', 'public.clientes_tipo_documento_del_valor()', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public._clientes_dni_como_cuit_corregir(text, jsonb)', 'EXECUTE')
-     OR has_function_privilege('anon', 'public._clientes_dni_como_cuit_corregir(text, jsonb)', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public._clientes_documento_grupos(text)', 'EXECUTE')
-     OR has_function_privilege('anon', 'public._clientes_documento_grupos(text)', 'EXECUTE') THEN
+     OR has_function_privilege('authenticated', 'public._clientes_documento_limpiar(jsonb)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public._clientes_documento_limpiar(jsonb)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._clientes_documento_grupos()', 'EXECUTE')
+     OR has_function_privilege('anon', 'public._clientes_documento_grupos()', 'EXECUTE') THEN
     v_mal := v_mal || 'las funciones nuevas quedaron con EXECUTE para anon o authenticated'::text;
   END IF;
 
@@ -467,13 +443,9 @@ BEGIN
     v_mal := v_mal || 'clientes_documento_respaldo no quedó sólo de server (RLS sin policies y sin grants)'::text;
   END IF;
 
-  IF EXISTS (SELECT 1 FROM public.clientes c
-              WHERE c.cuit IS NOT NULL
-                AND regexp_replace(c.cuit, '[^0-9]', '', 'g') ~ '^000[0-9]{7}[1-9]$') THEN
-    v_mal := v_mal || 'quedan DNI rellenados a 11 dígitos'::text;
-  END IF;
-  IF EXISTS (SELECT 1 FROM public.clientes c WHERE c.cuit = '00-00000000-0') THEN
-    v_mal := v_mal || 'quedan clientes con el relleno 00-00000000-0'::text;
+  IF EXISTS (SELECT 1 FROM public._clientes_documento_grupos() g
+              WHERE g.grupo IN ('inventado', 'relleno_ceros', 'otro_00', 'otro')) THEN
+    v_mal := v_mal || 'quedan números inventados, rellenos o documentos irreconocibles'::text;
   END IF;
 
   IF array_length(v_mal, 1) > 0 THEN

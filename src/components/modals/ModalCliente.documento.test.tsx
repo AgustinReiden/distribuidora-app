@@ -134,6 +134,26 @@ describe('ModalCliente — DNI (B17, #1561)', () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 
+  // El campo era obligatorio y se inventaba un número para poder dar de alta al cliente.
+  it('el documento no es obligatorio: se guarda sin él y el campo no se anuncia como requerido', async () => {
+    renderModal()
+    expect(screen.getByLabelText('CUIT')).not.toHaveAttribute('aria-required')
+    completar({ cuit: '' })
+    guardar()
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled(), ESPERA)
+    expect(onSave.mock.calls[0][0]).toMatchObject({ cuit: '' })
+  })
+
+  it('un número inventado rellenado con ceros en el campo CUIT no guarda y dice que se puede dejar vacío', async () => {
+    renderModal()
+    completar({ cuit: '00000001234' })
+    guardar()
+
+    expect(await screen.findByText(/dejá el campo vacío/i, {}, ESPERA)).toBeVisible()
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
   it('un cliente con DNI se abre como DNI, con el número limpio', () => {
     const existente = {
       id: '8', razon_social: 'Almacén Inventado', nombre_fantasia: 'Almacén Inventado', direccion: 'Berutti 399',
