@@ -12,6 +12,7 @@ import { armarCargos } from '../../utils/personal'
 import type { Producto } from '../../types'
 import type { CargoRotura, LineaCargo } from '../../types/personal'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
 // para el incidente de chunk desincronizado que motivó la regla.
@@ -268,6 +269,8 @@ export default function ModalMermaStock({
         )}
 
         {/* Botones */}
+        {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+        <AvisoCamposEnRojo className="mb-2" />
         <div className="flex gap-3 pt-2">
           <Button type="button" variant="secondary" size="md" onClick={onClose} className="flex-1">
             Cancelar

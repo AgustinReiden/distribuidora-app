@@ -20,6 +20,7 @@ import {
 } from '../../utils/comboSalvedad'
 import type { PedidoItemDB, MotivoSalvedad, RegistrarSalvedadResult } from '../../types'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 
 interface MotivoOption {
   value: MotivoSalvedad;
@@ -535,6 +536,8 @@ export default function ModalSalvedadItem({
           )}
 
           {/* Botones touch-friendly */}
+          {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+          <AvisoCamposEnRojo className="mb-2" />
           <div className="flex gap-3 pt-2">
             {/* size="touch" (48px) no llega a los 56px del submit de al lado:
                 min-h-[56px] en el className gana y empareja el footer. */}

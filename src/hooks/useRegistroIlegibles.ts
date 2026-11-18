@@ -73,6 +73,9 @@ function crearRegistro(): RegistroIlegibles {
       c.abrir?.()
       // Después de abrir la sección (un render), el campo ya se ve: se lo trae a la vista y se enfoca.
       setTimeout(() => {
+        // Un `<details>` cerrado (las opciones avanzadas del grupo de precio) esconde el campo y no
+        // lo deja tomar el foco: se abre (T5 de la tercera pasada).
+        for (let d = el.closest('details'); d; d = d.parentElement?.closest('details') ?? null) d.open = true
         el.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
         el.focus({ preventScroll: true })
       }, 0)

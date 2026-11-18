@@ -16,6 +16,7 @@ import { cobroPudoHaberEntrado } from '../../utils/requestIdPersistente'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
 import type { ClienteDB, Pedido, Pago, FormaPago, RegistrarPagoFifoInput, RegistrarPagoCombinadoFifoInput, RegistrarPagoFifoResult, PagoFifoAplicacion } from '../../types'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
 // para el incidente de chunk desincronizado que motivó la regla.
@@ -1100,6 +1101,8 @@ export default function ModalRegistrarPago({
               Entregar a cuenta corriente (sin cobrar)
             </button>
           )}
+          {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+          <AvisoCamposEnRojo className="mb-2" />
           <div className="flex gap-3">
             {/* size="touch" (48px), no "lg": iguala al botón ámbar crudo de
                 arriba (py-3 = 48px) para no desnivelar el footer. */}

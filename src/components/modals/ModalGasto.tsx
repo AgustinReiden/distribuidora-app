@@ -57,6 +57,7 @@ import type {
 } from '../../types/gastos'
 import type { EmpleadoParaElegir } from '../../types/personal'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 
 const MENSAJE_SIN_EMPLEADO = 'Elegí qué empleado pagó el gasto'
 const MENSAJE_SIN_RENDICION = 'Elegí de qué rendición salió la plata: el transportista y el día'
@@ -1189,6 +1190,8 @@ export default function ModalGasto({
           </div>
         )}
 
+        {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+        <AvisoCamposEnRojo className="mb-2" />
         <div className="flex gap-3 pt-2">
           <Button type="button" variant="secondary" size="md" onClick={onClose} className="flex-1">
             Cancelar

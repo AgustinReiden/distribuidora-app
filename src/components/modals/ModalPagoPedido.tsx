@@ -46,6 +46,7 @@ import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirma
 import type { EleccionChofer } from '../../utils/choferDeEntrega'
 import type { PedidoDB, PagoDBWithUsuario, PerfilDB } from '../../types'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 
 export interface PagoPedidoPayload {
   pedidoId: string
@@ -816,6 +817,8 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
         </div>
       )}
 
+      {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+      <AvisoCamposEnRojo className="mb-2" />
       <div className="flex flex-wrap justify-end gap-2 p-4 border-t bg-gray-50 dark:bg-gray-800">
         <Button variant="ghost" size="md" onClick={onClose}>
           Cancelar

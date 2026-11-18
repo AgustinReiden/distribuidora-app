@@ -32,6 +32,7 @@ import { bolsaSinVencimiento, formatearFechaVencimiento } from '../../utils/venc
 import BadgeVencimiento from '../vencimientos/BadgeVencimiento'
 import { Button } from '../ui/Button'
 import { CampoNumero } from '../ui/CampoNumero'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 import { leerEntero, numeroConMiles } from '../../utils/normalizarNumero'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 
@@ -168,10 +169,12 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
               className="w-24 px-2 py-1 border rounded text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white"
             />
           </div>
+          {/* T2: lo que frena este Guardar, y «Ir al campo». */}
+          <AvisoCamposEnRojo className="w-full basis-full" />
           <Button
             type="button"
-            onClick={() => void guardarLoteNuevo()}
-            disabled={crearLote.isPending}
+            onClick={() => { if (!ilegibles.hay) void guardarLoteNuevo() }}
+            disabled={crearLote.isPending || ilegibles.hay}
             loading={crearLote.isPending}
             variant="primary"
             size="sm"
@@ -224,8 +227,8 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
                   />
                   <button
                     type="button"
-                    onClick={() => void guardarAjuste(lote.id)}
-                    disabled={ajustarLote.isPending}
+                    onClick={() => { if (!ilegibles.hay) void guardarAjuste(lote.id) }}
+                    disabled={ajustarLote.isPending || ilegibles.hay}
                     aria-label="Guardar corrección"
                     className="p-1 text-green-600 hover:text-green-700 disabled:opacity-50"
                   >

@@ -94,6 +94,8 @@ import type { OpcionCatalogo } from '../productos/SelectorConAlta'
 import type { CategoriaDB } from '../../hooks/queries/useCategoriasQuery'
 import type { MarcaDB } from '../../hooks/queries/useMarcasQuery'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
+import { RegistroPropio } from '../ui/RegistroPropio'
 
 
 const ModalProveedor = lazyWithReload(() => import('./ModalProveedor'))
@@ -1318,6 +1320,8 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
               {textoPendientesRevision(pendientesRevision)}
             </p>
           )}
+          {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+          <AvisoCamposEnRojo className="mb-2" />
           <div className="flex gap-3">
             <Button
               type="button"
@@ -1866,6 +1870,8 @@ function ModalCompraEditar({
               <p className="text-sm text-red-600 dark:text-red-400">{state.error}</p>
             </div>
           )}
+          {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+          <AvisoCamposEnRojo className="mb-2" />
           <div className="flex gap-3">
             <Button type="button" onClick={onClose} disabled={state.guardando} variant="secondary" size="md" className="flex-1">
               Cancelar
@@ -2785,6 +2791,10 @@ function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster
 
       {/* Formulario de item rapido */}
       {!ver && state.modoItemRapido && onCrearProductoRapido && (
+        // Su propio registro (T1 de la tercera pasada): el costo en rojo frena «Crear y Agregar»
+        // (si no, creaba el producto con el costo de antes) y no el Guardar de la compra.
+        <RegistroPropio>
+        {({ hay, aviso }) => (
         <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 space-y-2">
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-blue-800 dark:text-blue-300">Crear producto rapido</p>
@@ -2833,10 +2843,11 @@ function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster
             </div>
           </div>
           <CamposClasificacion catalogo={catalogo} valor={clasificacion} onChange={setClasificacion} />
+          {aviso}
           <Button
             type="button"
-            onClick={handleCrearProductoRapido}
-            disabled={!itemRapido.nombre.trim() || creandoItem}
+            onClick={() => { if (!hay) void handleCrearProductoRapido() }}
+            disabled={!itemRapido.nombre.trim() || creandoItem || hay}
             loading={creandoItem}
             variant="primary"
             size="sm"
@@ -2846,6 +2857,8 @@ function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster
             {creandoItem ? 'Creando...' : 'Crear y Agregar'}
           </Button>
         </div>
+        )}
+        </RegistroPropio>
       )}
 
       {/* Lista de items */}
@@ -3313,7 +3326,11 @@ function CrearProductoDesdeLinea({ linea, catalogo, onCrear, onCancelar }: {
     }
   }
 
+  // Su propio registro (T1 de la tercera pasada): el costo en rojo frena «Crear y vincular» (si no,
+  // creaba el producto con el costo de antes) y no el Guardar de la compra.
   return (
+    <RegistroPropio>
+    {({ hay, aviso }) => (
     <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-2 space-y-2">
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
         <div className="sm:col-span-2">
@@ -3352,11 +3369,12 @@ function CrearProductoDesdeLinea({ linea, catalogo, onCrear, onCancelar }: {
         </div>
       </div>
       <CamposClasificacion catalogo={catalogo} valor={clasificacion} onChange={setClasificacion} />
+      {aviso}
       <div className="flex gap-2 pt-1">
         <Button
           type="button"
-          onClick={handleCrear}
-          disabled={!nombreNuevo.trim() || creando}
+          onClick={() => { if (!hay) void handleCrear() }}
+          disabled={!nombreNuevo.trim() || creando || hay}
           loading={creando}
           variant="success"
           size="sm"
@@ -3370,6 +3388,8 @@ function CrearProductoDesdeLinea({ linea, catalogo, onCrear, onCancelar }: {
         </Button>
       </div>
     </div>
+    )}
+    </RegistroPropio>
   )
 }
 

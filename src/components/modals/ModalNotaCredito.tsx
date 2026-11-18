@@ -17,6 +17,7 @@ import {
   totalesAjusteNotaCredito,
 } from '../../utils/notaCredito'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 
 interface CompraItem {
   /** `compra_items.id`: la clave de la línea. Ver `LineaCompraNC`. */
@@ -467,6 +468,8 @@ export default function ModalNotaCredito({
         </div>
 
         {/* Footer */}
+        {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+        <AvisoCamposEnRojo className="mb-2" />
         <div className="flex gap-3 p-4 border-t dark:border-gray-700">
           <Button variant="secondary" size="md" onClick={onClose} className="flex-1">
             Cancelar

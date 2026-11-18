@@ -7,11 +7,13 @@
  */
 import { describe, it, expect } from 'vitest'
 import { useState } from 'react'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom/vitest'
 import { NumberInput } from './NumberInput'
 import { CampoNumero } from './CampoNumero'
+import { AvisoCamposEnRojo } from './AvisoCamposEnRojo'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 
 function Coordenada() {
   const [t, setT] = useState('')
@@ -23,7 +25,36 @@ function Porcentaje() {
   return <NumberInput aria-label="p" sinMiles commitOnChange value={n} onChange={setN} />
 }
 
-const insertarComoTexto = (campo: HTMLElement, texto: string) =>
+// T5: «Ir al campo» abre el `<details>` cerrado que tiene el campo en rojo (las opciones avanzadas
+// del grupo de precio): en un navegador, adentro de uno cerrado el campo no se ve ni toma el foco.
+describe('T5: «Ir al campo» abre un <details> cerrado', () => {
+  it('lo abre y le pone el foco al campo', async () => {
+    const user = userEvent.setup()
+    function Form() {
+      const ilegibles = useRegistroIlegibles()
+      const [t, setT] = useState('')
+      return (
+        <RegistroIlegiblesContext.Provider value={ilegibles.registro}>
+          <details data-testid="avanzadas">
+            <summary>Opciones avanzadas</summary>
+            <CampoNumero aria-label="precio" value={t} onChange={setT} />
+          </details>
+          <AvisoCamposEnRojo />
+        </RegistroIlegiblesContext.Provider>
+      )
+    }
+    render(<Form />)
+    const detalles = screen.getByTestId('avanzadas') as HTMLDetailsElement
+    detalles.open = true
+    await user.type(screen.getByLabelText('precio'), '1..5')
+    detalles.open = false
+    await user.click(screen.getByRole('button', { name: 'Ir al campo' }))
+    await waitFor(() => expect(screen.getByLabelText('precio')).toHaveFocus())
+    expect(detalles.open).toBe(true)
+  })
+})
+
+const insertarComoTexto =(campo: HTMLElement, texto: string) =>
   fireEvent.input(campo, { target: { value: texto }, inputType: 'insertText' })
 
 describe('T3: lo insertado de una vez en un campo sin miles no se recorta callado', () => {

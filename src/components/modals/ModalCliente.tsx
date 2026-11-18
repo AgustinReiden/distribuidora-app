@@ -40,6 +40,7 @@ import {
 import type { FranjaHoraria } from '../../utils/horariosCliente';
 import type { ClienteDB, TipoComprobanteVenta } from '../../types';
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles';
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo';
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): si viviera en ese chunk
 // compartido, un deploy podía dejar la versión vieja cacheada en el PWA y
@@ -1343,6 +1344,8 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
           )
         )}
       </div>
+      {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+      <AvisoCamposEnRojo className="mb-2" />
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50 dark:bg-gray-800">
         <Button variant="ghost" size="md" onClick={onClose}>Cancelar</Button>
         <Button

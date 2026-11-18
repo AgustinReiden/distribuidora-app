@@ -20,6 +20,7 @@ import type { CategoriaDB } from '../../hooks/queries/useCategoriasQuery'
 import type { ProductoDB } from '../../types'
 import { errorDeMinimoVenta } from '../../utils/minimoVenta'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 
 const PREVIEW_LIMIT = 8
 
@@ -199,6 +200,8 @@ export default function ModalMinimoVentaMasivo({
         )}
       </div>
 
+      {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+      <AvisoCamposEnRojo className="mb-2" />
       <div className="flex justify-end gap-2 p-4 border-t dark:border-gray-700">
         <Button type="button" variant="secondary" size="md" onClick={onClose}>
           Cancelar

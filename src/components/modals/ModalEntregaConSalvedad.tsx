@@ -17,6 +17,7 @@ import NumberInput from '../ui/NumberInput'
 import { Button } from '../ui/Button'
 import type { PedidoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 
 interface MotivoOption {
   value: MotivoSalvedad;
@@ -589,6 +590,8 @@ export default function ModalEntregaConSalvedad({
         </div>
 
         {/* Footer: fijo abajo, fuera del scroll */}
+        {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+        <AvisoCamposEnRojo className="mb-2" />
         <div className="p-4 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex gap-3 flex-shrink-0">
           {paso === 'seleccion' ? (
             <>

@@ -30,6 +30,7 @@ import { tipoParaCostoDeProducto } from '../../utils/letraComprobante';
 import { lazyWithReload } from '../../utils/lazyWithReload';
 import { soloLoCambiado } from '../../utils/fichaProductoCambios';
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles';
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo';
 
 // Lazy: solo hace falta al editar, y arrastra la query de grupos de precio.
 const ProductoCondicionesMayoristas = lazyWithReload(() => import('../productos/ProductoCondicionesMayoristas'));
@@ -1222,6 +1223,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
           </Suspense>
         )}
       </div>
+      {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+      <AvisoCamposEnRojo className="mb-2" />
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50">
         {/* El footer (bg-gray-50) no tiene dark:bg, así que sigue claro en modo
             oscuro: el className pisa también dark:text/dark:hover para que

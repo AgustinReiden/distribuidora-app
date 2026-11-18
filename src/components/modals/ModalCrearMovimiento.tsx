@@ -14,6 +14,7 @@ import { stockDisponibleParaEnvio } from '../../utils/movimientos'
 import type { MovimientoSucursalDB, MovimientoItemDB } from '../../hooks/queries'
 import type { ProductoDB, SucursalDB } from '../../types'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 
 interface LineaItem {
   productoId: string
@@ -246,6 +247,8 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
         )}
       </div>
 
+      {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+      <AvisoCamposEnRojo className="mb-2" />
       <div className="flex justify-end gap-2 p-4 border-t bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
         <Button onClick={onClose} variant="ghost" size="md">
           Cancelar

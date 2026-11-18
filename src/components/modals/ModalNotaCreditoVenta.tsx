@@ -45,6 +45,7 @@ import { lazyWithReload } from '../../utils/lazyWithReload'
 import type { CrearNotaCreditoVentaResult } from '../../hooks/queries/useNotasCreditoVentaQuery'
 import type { PedidoDB } from '../../types'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 
 const ModalImputarCredito = lazyWithReload(() => import('./ModalImputarCredito'))
 
@@ -319,6 +320,8 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
               Pedido de origen #{pedido.id} · el crédito se aplica a las boletas abiertas del cliente
             </p>
           </div>
+          {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+          <AvisoCamposEnRojo className="w-full basis-full" />
           <div className="flex gap-2">
             <Button variant="secondary" onClick={onClose} disabled={crear.isPending}>Cancelar</Button>
             <Button
