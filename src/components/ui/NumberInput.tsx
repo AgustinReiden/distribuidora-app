@@ -36,6 +36,11 @@
  * límite) y no se le manda al padre. Nada se recorta ni se completa en silencio. Un campo con un
  * `min` mayor que 0 y sin `emptyValue` es obligatorio; con `emptyValue` es opcional, y vacío vale
  * eso, que el campo muestra en gris si no tiene otro `placeholder`.
+ *
+ * Si el límite se vuelve más estricto DESPUÉS de confirmar (en la edición de un pedido el stock cambia
+ * de fondo: H5 de la revisión de B23) y el valor ya cargado deja de cumplirlo, el campo también se pone
+ * en rojo, con el mismo motivo y sin recortar nada. No pasa con un valor que ya estaba fuera del límite
+ * al abrir (un pedido viejo se sigue editando) ni con un límite que recién aparece.
  */
 import {
   useState,
@@ -214,9 +219,27 @@ export function NumberInput({
       if (integer && leido !== null) return MENSAJE_ENTERO_CON_COMA
       return NUMERO_ILEGIBLE
     }
+    return fueraDelLimite(n)
+  }
+
+  /** El motivo de un número que ya se entendió y queda bajo `min` o sobre `max`, o null si cumple. */
+  function fueraDelLimite(n: number): string | null {
     if (typeof min === 'number' && n < min) return motivoMin ?? `El mínimo es ${mostrar(min)}`
     if (typeof max === 'number' && n > max) return motivoMax ?? `No puede pasar de ${mostrar(max)}`
     return null
+  }
+
+  // El límite que cambia con el valor ya confirmado (H5): se anota cuando un límite que el campo ya tenía
+  // se vuelve más estricto y deja afuera el valor que cumplía. Es estado derivado de las props, por eso
+  // se resuelve durante el render y no en un efecto (que mostraría un cuadro con el valor en limpio).
+  const [limitesVistos, setLimitesVistos] = useState({ min, max })
+  const [limiteVencido, setLimiteVencido] = useState(false)
+  if (limitesVistos.min !== min || limitesVistos.max !== max) {
+    const antes = limitesVistos
+    setLimitesVistos({ min, max })
+    const sobra = value !== null && typeof max === 'number' && value > max && typeof antes.max === 'number' && value <= antes.max
+    const falta = value !== null && typeof min === 'number' && value < min && typeof antes.min === 'number' && value >= antes.min
+    setLimiteVencido(prev => value !== null && fueraDelLimite(value) !== null && (prev || sobra || falta))
   }
 
   // El último número que este campo le mandó al padre: si el `value` cambia a otra cosa, lo cambió
@@ -344,7 +367,8 @@ export function NumberInput({
     return avisoPlataDecimalesDeMas(raw, decimales)
   }
   const avisoDecimales = draft !== null ? avisoDeDecimales(draft) : avisoGuardado
-  const error = motivo(draft)
+  // Sin borrador, el valor confirmado también se mira si el límite lo dejó afuera (H5).
+  const error = motivo(draft) ?? (draft === null && limiteVencido && value !== null ? fueraDelLimite(value) : null)
   const invalido = error !== null
   // En el registro del formulario: no se guarda mientras esté en rojo.
   const conRegistro = useAnotarIlegible(error, inputRef)
