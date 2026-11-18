@@ -475,5 +475,57 @@ describe('serviceWorker', () => {
       expect(falso.reg.update).toHaveBeenCalledTimes(1)
       expect(reloadMock).toHaveBeenCalledTimes(1)
     })
+
+    // H1 de la revisión de B12a: bajar e instalar el build tarda hasta ~45 s. Lo
+    // que había en pantalla al dispararse no alcanza: se pregunta justo antes.
+    describe('el salto automático vuelve a mirar justo antes de recargar (H1)', () => {
+      it('si se abrió un formulario mientras se instalaba, no activa: queda esperando', async () => {
+        const falso = registroFalso()
+        const activar = registrarCon(falso.reg)
+        falso.reg.update = vi.fn().mockImplementation(async () => { falso.empezarInstalacion() })
+        let formularioAbierto = false
+
+        const promesa = aplicarActualizacionSW({ puedeRecargar: () => !formularioAbierto })
+        await vi.waitFor(() => expect(falso.reg.update).toHaveBeenCalled())
+        // El preventista abre «Nuevo pedido» mientras baja el build.
+        formularioAbierto = true
+        falso.terminarInstalacion()
+
+        await expect(promesa).resolves.toBe('pospuesto')
+        expect(activar).not.toHaveBeenCalled()
+        expect(reloadMock).not.toHaveBeenCalled()
+        expect(falso.reg.unregister).not.toHaveBeenCalled()
+        expect(hayActualizacionSWEsperando()).toBe(true)
+      })
+
+      it('el próximo salto, ya sin el formulario, activa el que quedó esperando sin volver a bajar nada', async () => {
+        const falso = registroFalso({ waiting: { postMessage: vi.fn() } as unknown as ServiceWorker })
+        const activar = registrarCon(falso.reg)
+
+        await expect(aplicarActualizacionSW({ puedeRecargar: () => false })).resolves.toBe('pospuesto')
+        expect(activar).not.toHaveBeenCalled()
+
+        await expect(aplicarActualizacionSW({ puedeRecargar: () => true })).resolves.toBe('recargando')
+        expect(activar).toHaveBeenCalledWith(true)
+        expect(falso.reg.update).not.toHaveBeenCalled()
+      })
+
+      it('tampoco recarga a ciegas (sin build nuevo instalándose) con algo en curso', async () => {
+        const falso = registroFalso()
+        registrarCon(falso.reg)
+
+        await expect(aplicarActualizacionSW({ puedeRecargar: () => false })).resolves.toBe('pospuesto')
+        expect(reloadMock).not.toHaveBeenCalled()
+        expect(falso.reg.unregister).not.toHaveBeenCalled()
+      })
+
+      it('el botón «Actualizar» no pasa la pregunta: recarga como siempre', async () => {
+        const falso = registroFalso({ waiting: { postMessage: vi.fn() } as unknown as ServiceWorker })
+        const activar = registrarCon(falso.reg)
+
+        await expect(aplicarActualizacionSW()).resolves.toBe('recargando')
+        expect(activar).toHaveBeenCalledWith(true)
+      })
+    })
   })
 })

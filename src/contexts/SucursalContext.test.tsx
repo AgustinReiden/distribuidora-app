@@ -254,4 +254,27 @@ describe('SucursalContext.switchSucursal', () => {
     expect(result.current.currentSucursalId).toBe(3)
     expect(notifyErrorMock).toHaveBeenCalledTimes(1)
   })
+
+  // N1 de la revisión de B12a: quien llama tiene que distinguir un «no» del servidor de una falla
+  // de red (el aviso de la cola de otra sucursal deja de ofrecer el cambio sólo ante el «no»).
+  it('dice cómo terminó: ok, rechazado (el servidor dijo que no) o fallo (sin respuesta)', async () => {
+    const { result } = await montar()
+    let resultado: string | undefined
+
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: null, error: { message: 'Failed to fetch', code: '' } } as never)
+    await act(async () => { resultado = await result.current.switchSucursal(4) })
+    expect(resultado).toBe('fallo')
+
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: { success: false, error: 'No autorizado para esta sucursal' }, error: null } as never)
+    await act(async () => { resultado = await result.current.switchSucursal(4) })
+    expect(resultado).toBe('rechazado')
+
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: null, error: { message: 'permission denied', code: '42501' } } as never)
+    await act(async () => { resultado = await result.current.switchSucursal(4) })
+    expect(resultado).toBe('rechazado')
+
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: { success: true, sucursal_id: 4 }, error: null } as never)
+    await act(async () => { resultado = await result.current.switchSucursal(4) })
+    expect(resultado).toBe('ok')
+  })
 })

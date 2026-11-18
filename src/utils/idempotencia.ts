@@ -8,7 +8,7 @@
  * de eso se encarga `useRequestIdEstable`.
  */
 import { esRechazoDeNegocio, esRechazoDeOtraSucursal } from './rechazoDeNegocio'
-import { esGatewayCaido } from './falloDeRed'
+import { esFalloDeRed, esGatewayCaido } from './falloDeRed'
 
 /**
  * `crypto.randomUUID` necesita contexto seguro y no existe en iOS Safari < 15.4.
@@ -48,9 +48,52 @@ export interface ClaveDeAlta {
   /**
    * El cliente del pedido con el que se acuñó (L2, #1603). Un alta de otro
    * cliente no puede ser un duplicado de ésta, así que no la espera. Una clave
-   * sin cliente (guardada antes de esto) se trata como si pudiera ser de cualquiera.
+   * sin cliente (guardada antes de esto) toma el de su huella (`clienteDeLaHuella`);
+   * si tampoco ahí lo tiene, se trata como si pudiera ser de cualquiera.
    */
   clienteId?: string
+  /**
+   * Cuándo salió o terminó (lo último) el último intento con esta clave, en ms
+   * (M5, #1603). Mientras no pase `MARGEN_INTENTO_EN_VUELO_MS`, un «no entró» del
+   * servidor no prueba nada: ver `verificacionConfiable`.
+   */
+  intentoEn?: number
+}
+
+/**
+ * El cliente de un alta según su huella (`huellaDeAlta`): `[nuevoPedido, líneas]`.
+ * Sirve para las claves guardadas antes de que la clave llevara su cliente (L2,
+ * #1603): sin esto, una sola de ésas hacía esperar a las altas de TODOS los
+ * clientes hasta resolverse o vencer (24 h). Si la huella no se puede leer, no
+ * hay cliente: se sigue tratando como de cualquiera, que es lo seguro.
+ */
+export function clienteDeLaHuella(huella: string): string | undefined {
+  try {
+    const valor: unknown = JSON.parse(huella)
+    const pedido = Array.isArray(valor) ? valor[0] : null
+    const cliente = (pedido as { clienteId?: unknown } | null)?.clienteId
+    if ((typeof cliente === 'string' && cliente !== '') || (typeof cliente === 'number' && Number.isFinite(cliente))) {
+      return String(cliente)
+    }
+  } catch {
+    // Una huella que no es JSON: no se puede decir de quién es.
+  }
+  return undefined
+}
+
+/**
+ * Lo que identifica a ESTE pedido para su clave de alta: el formulario y las
+ * líneas finales (con promos, regalos y combos ya resueltos). Un cambio en
+ * cualquiera de las dos es otro pedido (ver `claveDeAlta`).
+ */
+export function huellaDeAlta(
+  formulario: unknown,
+  lineas: ReadonlyArray<{ productoId: unknown; cantidad: unknown; precioUnitario: unknown; esBonificacion?: unknown }>,
+): string {
+  return JSON.stringify([
+    formulario,
+    lineas.map(i => [i.productoId, i.cantidad, i.precioUnitario, i.esBonificacion ?? false]),
+  ])
 }
 
 /**
@@ -234,6 +277,98 @@ export function decidirAltaRecuperada(verificacion: VerificacionDeAlta): Decisio
       return { paso: 'conservar' }
   }
 }
+
+/**
+ * Cuánto después del último intento con una clave un «no entró» del servidor
+ * empieza a valer (M5, #1603). Un intento que el teléfono dio por perdido (sin
+ * señal, plazo) puede seguir corriendo en el servidor: la consulta por
+ * `offline_id` no ve una fila que todavía no hizo COMMIT, y contesta «no entró»
+ * de un pedido que está por entrar. Con eso se olvidaba la clave y la próxima
+ * alta del mismo cliente acuñaba otra: dos pedidos. La base corta una sentencia
+ * a los 8 s (`statement_timeout` de `authenticated`, y el alta es una sola
+ * llamada); medio minuto cubre además la espera de una conexión en PostgREST y
+ * el viaje.
+ */
+export const MARGEN_INTENTO_EN_VUELO_MS = 30_000
+
+/**
+ * Plazo del alta directa (H3 de la revisión de B12a). Con señal que no pasa datos
+ * el `fetch` queda colgado sin fallar, y sin plazo la oferta de la cola (D56) no
+ * aparecía. 20 s, como cada intento del replay (`PLAZO_INTENTO_REPLAY_MS`): sobra
+ * para una respuesta real, porque la base corta el alta a los 8 s.
+ *
+ * Relación con `MARGEN_INTENTO_EN_VUELO_MS`: el corte vuelve a fechar `intentoEn`
+ * (la clave queda en duda en ese momento), así que el margen de 30 s corre DESPUÉS
+ * del corte, no desde el envío. Un intento cortado a los 20 s que todavía estuviera
+ * en el servidor terminó (8 s de sentencia más la espera de conexión) mucho antes
+ * de que un «no entró» vuelva a valer, a los 50 s del envío.
+ */
+export const PLAZO_ALTA_DIRECTA_MS = 20_000
+
+/**
+ * La respuesta del servidor sobre `clave`, tal como se la puede creer: un «no
+ * entró» dentro del margen del último intento vale como «sin respuesta» (no se
+ * olvida la clave ni se acuña otra). «Entró» vale siempre.
+ */
+export function verificacionConfiable(
+  verificacion: VerificacionDeAlta,
+  clave: Pick<ClaveDeAlta, 'intentoEn'>,
+  ahora: number = Date.now(),
+): VerificacionDeAlta {
+  if (verificacion.resultado !== 'no_entro' || clave.intentoEn == null) return verificacion
+  // H6 e I3 (revisión de B12a): el reloj puede moverse (lo corrige la red). Un
+  // salto grande para atrás no es un intento en vuelo: vale como margen vencido;
+  // sin esto la clave quedaba «sin respuesta» hasta que el reloj la alcanzaba. Uno
+  // chico, justo después de un corte, conserva el margen: se mide en valor absoluto.
+  const transcurrido = ahora - clave.intentoEn
+  return Math.abs(transcurrido) < MARGEN_INTENTO_EN_VUELO_MS ? { resultado: 'sin_respuesta' } : verificacion
+}
+
+/**
+ * La huella con la que se compara la oferta de la cola (H4 y N3 de la revisión de
+ * B12a): la del alta sin el cobro (estado, monto y forma de pago). El estado y el
+ * monto la cola los descarta (el pedido encolado nunca declara cobro); la forma de
+ * pago sí viaja (`pedidos.forma_pago`), y se encola la NUEVA con la misma clave: la
+ * RPC del alta no compara el contenido, así que la clave garantiza lo mismo (si el
+ * intento había entrado, el replay recibe ese pedido; si no, se crea con la forma
+ * nueva). Tocar el cobro después del fallo no hace otro pedido y la oferta no se
+ * va. La clave del alta se sigue acuñando con `huellaDeAlta` entera.
+ */
+export function huellaDeOfertaCola(
+  formulario: Record<string, unknown> | object,
+  lineas: Parameters<typeof huellaDeAlta>[1],
+): string {
+  return huellaDeAlta({ ...formulario, estadoPago: undefined, montoPagado: undefined, formaPago: undefined }, lineas)
+}
+
+/**
+ * D56 (decisión del dueño, 1563-b7 de #1563): ¿se ofrece guardar en la cola el
+ * alta que acaba de fallar? Sí cuando falló por la red —la señal está pero no
+ * pasa datos, con `navigator.onLine` en true— y su clave quedó en duda. No se
+ * encola sola: la pantalla lo ofrece y decide quien carga.
+ *
+ * Se encola con la MISMA clave (`offline_id`), así que no duplica: si el intento
+ * de recién sí había entrado, el replay recibe ese pedido de la rama idempotente
+ * de `crear_pedido_idempotente` (que además toma un lock por la clave, así que
+ * tampoco duplica si el intento todavía está corriendo) y `verificarRespuestaIdempotente`
+ * comprueba que sea el mismo cliente y el mismo total. Un rechazo del servidor
+ * no se ofrece: el pedido no entró y encolarlo lo haría rechazar de nuevo.
+ */
+export function ofrecerColaTrasFallo(error: unknown, clave: ClaveDeAlta | null): boolean {
+  return clave?.enDuda === true && esFalloDeRed(error)
+}
+
+/** Lo que se le dice a quien carga cuando el alta en duda quedó en la cola (D56). */
+export const MENSAJE_ALTA_EN_DUDA_ENCOLADA =
+  'La señal no alcanzó para confirmar el pedido: quedó guardado en el teléfono y se manda solo cuando haya señal. ' +
+  'Si el intento anterior sí había entrado, no se duplica: se reconoce por su clave. ' +
+  'El cobro no se guarda con el pedido: cuando vuelva la señal, cargalo a mano desde la ficha del pedido.'
+
+/** Lo mismo para un vale blanco, que no lleva cobro y lo precia el servidor. */
+export const MENSAJE_VB_EN_DUDA_ENCOLADO =
+  'La señal no alcanzó para confirmar el vale blanco: quedó guardado en el teléfono y se manda solo cuando haya señal. ' +
+  'Si el intento anterior sí había entrado, no se duplica: se reconoce por su clave. ' +
+  'El total a costo lo calcula el servidor al sincronizar.'
 
 /** El aviso cuando el alta que quedó en duda antes de recargar sí había entrado. */
 export function mensajeAltaRecuperada(pedidoId: string): string {

@@ -39,8 +39,15 @@ export interface SucursalContextValue {
   sucursales: SucursalInfo[]
   loading: boolean
   hasMultipleSucursales: boolean
-  switchSucursal: (sucursalId: number) => Promise<void>
+  /**
+   * Cambia de sucursal y dice cómo terminó (N1 de la revisión de B12a): `ok`, `rechazado` (el
+   * servidor dijo que no) o `fallo` (no hubo respuesta: red). Quien sólo cambia puede ignorarlo.
+   */
+  switchSucursal: (sucursalId: number) => Promise<ResultadoCambioSucursal>
 }
+
+/** Cómo terminó `switchSucursal`. */
+export type ResultadoCambioSucursal = 'ok' | 'rechazado' | 'fallo'
 
 /**
  * Últimas sucursales que el servidor confirmó para este usuario.
@@ -235,9 +242,9 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
     }
   }, [userId, globalRol])
 
-  const switchSucursal = useCallback(async (sucursalId: number) => {
-    if (sucursalId === currentSucursalId) return
-    if (!userId) return
+  const switchSucursal = useCallback(async (sucursalId: number): Promise<ResultadoCambioSucursal> => {
+    if (sucursalId === currentSucursalId) return 'ok'
+    if (!userId) return 'fallo'
 
     try {
       // Call RPC to update es_default in DB
@@ -245,7 +252,8 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
       if (error) {
         logger.error('[SucursalContext] Error switching sucursal:', error)
         notifyError(MENSAJE_CAMBIO_SUCURSAL_FALLO)
-        return
+        // Sin respuesta (red) no es un «no» del servidor (N1).
+        return esFalloDeRed(error) ? 'fallo' : 'rechazado'
       }
       // 1563-b3: `cambiar_sucursal` NO lanza cuando rechaza: contesta
       // `{ success: false, error }` con status 200 ("No autorizado para esta
@@ -256,7 +264,7 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
         notifyError(mensajeDeCambioRechazado(data))
         // «Usuario desactivado»: que `useAuth` lo confirme con el perfil y lo saque.
         if (esMotivoDeUsuarioDesactivado((data as { error?: unknown }).error)) pedirRevalidacionDelPerfil()
-        return
+        return 'rechazado'
       }
 
       setCurrentSucursalId(sucursalId)
@@ -265,9 +273,11 @@ export function SucursalProvider({ children, userId, globalRol }: SucursalProvid
 
       // Invalidate ALL queries so data refetches for new sucursal
       await queryClient.invalidateQueries()
+      return 'ok'
     } catch (err) {
       logger.error('[SucursalContext] Exception switching sucursal:', err)
       notifyError(MENSAJE_CAMBIO_SUCURSAL_FALLO)
+      return esFalloDeRed(err) ? 'fallo' : 'rechazado'
     }
   }, [currentSucursalId, userId, queryClient])
 

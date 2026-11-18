@@ -195,6 +195,7 @@ vi.mock('../modals/ModalPedido', () => ({
 
 import PedidosContainer from './PedidosContainer'
 import { guardarClaveDeAlta } from '../../utils/requestIdPersistente'
+import { MARGEN_INTENTO_EN_VUELO_MS } from '../../utils/idempotencia'
 
 function montar() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -245,9 +246,13 @@ describe('PedidosContainer — la clave del alta sigue al contenido', () => {
 
     await user.click(screen.getByRole('button', { name: 'Confirmar' }))
     await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(1))
+    // M5 (#1603): un «no entró» vale pasado el margen del último intento; antes,
+    // el intento podía seguir corriendo en el servidor. Se corre el reloj.
+    const reloj = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + MARGEN_INTENTO_EN_VUELO_MS)
     await user.click(screen.getByRole('button', { name: 'Editar carrito' }))
     await user.click(screen.getByRole('button', { name: 'Confirmar' }))
     await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(2))
+    reloj.mockRestore()
 
     const [a, b] = mutateAlta.mock.calls.map(c => c[0].offlineId)
     expect(a).toBeTruthy()

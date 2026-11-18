@@ -25,6 +25,7 @@ import SinSucursalScreen from './components/SinSucursalScreen'
 import ErrorBoundary from './components/ErrorBoundary'
 import TopNavigation from './components/layout/TopNavigation'
 import OfflineIndicator from './components/layout/OfflineIndicator'
+import AvisoColaOtraSucursal from './components/layout/AvisoColaOtraSucursal'
 import SyncStatusBanner from './components/SyncStatusBanner'
 import BannerActualizacion from './components/BannerActualizacion'
 import SkipLinks from './components/a11y/SkipLinks'
@@ -488,7 +489,9 @@ function MainAppInner({ user, perfil, logout, authReady }: {
         )}
 
         <SyncStatusBanner onRetrySync={handleRetrySync} />
-        <BannerActualizacion />
+        <AvisoColaOtraSucursal pendientes={offlineSync.pendientesOtrasSucursales} />
+        {/* D57: con la ruta, para actualizar al cambiar de pantalla. */}
+        <BannerActualizacion ruta={location.pathname} />
       </div>
     </AuthDataProvider>
   )
