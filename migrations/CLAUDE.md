@@ -230,7 +230,10 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   sale de los lotes de esa compra, en cantidad y restante a la vez; `cantidad > 0`
   (CHECK) obliga a dejar 1 en cada lote intacto en una primera pasada, y el que la segunda saca
   entero se borra si nada lo referencia (STK-12: en 1/0 era una unidad «vendida» que no salió). Un camino nuevo que baje
-  las unidades de una compra con vencimientos hace lo mismo. La nota de crédito no: lo devuelto
+  las unidades de una compra con vencimientos hace lo mismo. La edición recibe la foto de los vencimientos
+  (`p_lotes` de `actualizar_compra_items`) y llama a `sincronizar_lotes_compra` en su transacción, con las
+  salvedades que anotaron lotes de la compra tomadas antes que los productos: o se guarda todo o nada (STK-13).
+  Sin `p_lotes` (un PWA de antes) no toca los lotes y esa app los manda después por separado. La nota de crédito no: lo devuelto
   sí salió, y baja sólo el restante de los lotes de su compra (#1079).
 - **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** (#1057). Cada
   línea de regalo tiene `pedido_items.regalo_cadena_id` y cada eslabón de
