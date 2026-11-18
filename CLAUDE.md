@@ -561,7 +561,11 @@ suelta en `sucursales`.
   `scripts/check-fechas-utc.mjs` contra `scripts/fechas-utc-permitidas.json`, que sólo se achica.
   Desde #1298 mira también vistas, policies y CHECKs, y `CAST`, `date_trunc`, `to_char` y
   `extract` sobre `now()` o una columna timestamptz; las funciones van por **firma**, así que
-  cambiarle los parámetros a una de la lista obliga a actualizarla en el mismo PR.
+  cambiarle los parámetros a una de la lista obliga a actualizarla en el mismo PR. Los ensayos
+  `scripts/test-*.sql` también usan el día argentino (`public._tablero_hoy()`), no `CURRENT_DATE`:
+  de noche el job de CI les mandaba una fecha futura (B13d). Lo vigila
+  `src/test/ensayosDiaArgentino.contract.test.ts`, y un ensayo se prueba con el día corrido con
+  `node scripts/ci/ensayos-sql.mjs --tz Pacific/Kiritimati --solo <ensayo>`.
 - **Un reporte cierra contra su propio total** (#1262, mig 410). Toda lectura de `pedido_items`
   para un reporte va con **LEFT JOIN a `productos`**: hay líneas de productos borrados
   (`producto_id` NULL, de antes de que la FK pasara a RESTRICT) y con JOIN se caen de la venta
