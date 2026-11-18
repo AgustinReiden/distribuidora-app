@@ -179,7 +179,11 @@ BEGIN
     'SELECT public.actualizar_politica_minimo_pedido(''cargo'', 0, 0, ''NaN'')',
     'SELECT public.actualizar_politica_minimo_pedido(''escalas'', 0, ''NaN'', 0)',
     'SELECT public.actualizar_monto_minimo_pedido(''NaN'')'] LOOP
-    f := pg_temp.r9_si(f, pg_temp.r9_cae(v_sql, 'politicas_comerciales_montos_no_nan'),
+    -- Con el mínimo en 'NaN' la función lo frena antes del CHECK, con el tope de la compra mínima
+    -- (1561-b9: 22023, «La compra mínima va hasta $ 99.999.999»): el NaN sigue sin entrar, por otra puerta.
+    f := pg_temp.r9_si(f, pg_temp.r9_cae(v_sql, 'politicas_comerciales_montos_no_nan')
+                          OR (pg_temp.r9_err(v_sql) LIKE '22023 - La compra mínima va hasta%'
+                              AND (v_sql LIKE '%(''bloquear'', ''NaN''%' OR v_sql LIKE '%actualizar_monto_minimo_pedido(''NaN'')%')),
                        format('%s: %s', v_sql, pg_temp.r9_err(v_sql)));
   END LOOP;
   RETURN jsonb_build_object('fallas', to_jsonb(f));

@@ -48,6 +48,7 @@ vi.mock('./components/ErrorBoundary', () => ({ default: ({ children }: { childre
 vi.mock('./components/layout/TopNavigation', () => ({ default: () => null }))
 vi.mock('./components/SyncStatusBanner', () => ({ default: () => null }))
 vi.mock('./components/BannerActualizacion', () => ({ default: () => null }))
+vi.mock('./components/layout/AvisoColaOtraSucursal', () => ({ default: () => null }))
 vi.mock('./components/a11y/SkipLinks', () => ({ default: () => null }))
 vi.mock('./components/containers/ClientesContainer', () => ({ default: () => null }))
 vi.mock('./components/containers/ComprasContainer', () => ({ default: () => null }))

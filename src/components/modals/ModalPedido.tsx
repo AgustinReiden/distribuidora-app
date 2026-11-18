@@ -147,6 +147,11 @@ export interface ModalPedidoProps {
   }) => Promise<VeredictoDuplicadoRPC>;
   /** Callback al guardar pedido */
   onGuardar: () => void | Promise<void>;
+  /**
+   * D56 (1563-b7): el alta falló por la red y no se sabe si entró. Si viene, el
+   * modal ofrece guardar el pedido en la cola del teléfono con la misma clave.
+   */
+  onGuardarEnCola?: () => void | Promise<void>;
   /** Indica si está guardando */
   guardando: boolean;
   /** Si es admin */
@@ -233,6 +238,7 @@ const ModalPedido = memo(function ModalPedido({
   onCrearCliente,
   onVerificarDuplicado,
   onGuardar,
+  onGuardarEnCola,
   guardando,
   isAdmin,
   isPreventista,
@@ -620,6 +626,30 @@ const ModalPedido = memo(function ModalPedido({
   // afuera queda detrás del overlay y es inalcanzable → la quita fallaba en
   // silencio. Mismo patrón que ModalEditarPedido.
   const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null);
+
+  // I1 de la revisión de B12a (decisión de pantalla a confirmar por el dueño): con
+  // la oferta de la cola en pantalla (D56) el pedido no se guardó en ningún lado;
+  // cerrar con la X o con Escape pide confirmación, DENTRO del modal como la de
+  // quitar una promo. Sin la oferta, cierra como siempre. El «atrás» del teléfono
+  // NO pasa por acá: navega (no hay `popstate`) y desmonta la pantalla; va aparte.
+  const cerrarAlta = (): void => {
+    if (!onGuardarEnCola) {
+      onClose();
+      return;
+    }
+    setConfirmConfig({
+      visible: true,
+      tipo: 'warning',
+      titulo: 'Salir sin guardar',
+      mensaje: 'El pedido no se guardó. ¿Salir igual?',
+      textoConfirmar: 'Salir igual',
+      textoCancelar: 'Seguir con el pedido',
+      onConfirm: () => {
+        setConfirmConfig(null);
+        onClose();
+      },
+    });
+  };
 
   // Promos quitadas a mano → se excluyen de la resolución (display y submit).
   const promosEliminadasSet = useMemo(
@@ -1940,6 +1970,28 @@ const ModalPedido = memo(function ModalPedido({
           </div>
         )}
 
+        {/* D56 (1563-b7): con señal que no pasa datos el alta falló y no se sabe si
+            entró. No se encola sola: se ofrece, con la misma clave del intento. */}
+        {onGuardarEnCola && !isOffline && (
+          <div role="alert" className="flex-shrink-0 px-4 py-2 bg-amber-100 dark:bg-amber-900/40 border-t border-amber-300 dark:border-amber-700 text-xs text-amber-900 dark:text-amber-200 flex items-center justify-between gap-3">
+            <span>
+              <strong>No se pudo confirmar si el pedido entró:</strong> la señal no alcanza. Podés guardarlo en el
+              teléfono y se manda solo cuando haya señal; si el intento de recién sí había entrado, no se duplica.
+              El cobro no se guarda con el pedido.
+            </span>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={() => { void onGuardarEnCola() }}
+              disabled={guardando}
+              className="flex-shrink-0"
+            >
+              Guardar en el teléfono
+            </Button>
+          </div>
+        )}
+
         {/* Sin conexión: se dice antes de cargar, no al confirmar. El pedido NO
             se pierde — se guarda en el teléfono y sincroniza solo. */}
         {isOffline && (
@@ -2063,7 +2115,7 @@ const ModalPedido = memo(function ModalPedido({
     return (
       <BottomSheet
         open
-        onClose={onClose}
+        onClose={cerrarAlta}
         title="Nuevo Pedido"
         headerExtra={tipoFacturaToggle}
         // Igual que ModalBase: un toque al costado no tira el pedido a medio
@@ -2093,7 +2145,7 @@ const ModalPedido = memo(function ModalPedido({
   }
 
   return (
-    <ModalBase title="Nuevo Pedido" onClose={onClose} maxWidth="max-w-2xl" headerExtra={tipoFacturaToggle}>
+    <ModalBase title="Nuevo Pedido" onClose={cerrarAlta} maxWidth="max-w-2xl" headerExtra={tipoFacturaToggle}>
       <RegistroIlegiblesContext.Provider value={ilegibles.registro}>
         {cuerpo}
       </RegistroIlegiblesContext.Provider>

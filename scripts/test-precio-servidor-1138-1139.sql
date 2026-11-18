@@ -869,6 +869,8 @@ BEGIN
 
   -- salvedad sobre el regalo y su anulacion
   v_ped := pg_temp.pp_pedido(pg_temp.pp_alta((c->>'cli')::bigint, a, v_items), 'el alta de C2 salvedad');
+  -- Una salvedad va sólo sobre un pedido en camino o entregado (1595-b5): el pedido sale a reparto antes.
+  UPDATE public.pedidos SET estado = 'asignado' WHERE id = v_ped;
   PERFORM pg_temp.pp_como(a);
   v_res := public.registrar_salvedad(v_ped, pg_temp.pp_item(v_ped, x, true), 1, 'producto_danado',
                                      'ensayo 1139: salvedad sobre el regalo', NULL, true, NULL);

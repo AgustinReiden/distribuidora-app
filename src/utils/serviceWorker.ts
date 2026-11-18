@@ -21,9 +21,12 @@
  *   curso: la pestania abierta sigue sirviendose del precache viejo, completo
  *   y consistente. Justo lo contrario de marzo, cuando el SW nuevo tomaba
  *   control a mitad de sesion y los `import()` del bundle viejo se iban a 404.
- * - El salto al build nuevo lo decide la usuaria con el cartel
- *   (`BannerActualizacion`), nunca la app sola: un reload sorpresa mientras
- *   carga un pedido le borra lo tipeado.
+ * - D57 (1563-b8 de #1563): el salto al build nuevo es obligatorio. El cartel
+ *   (`BannerActualizacion`) avisa y la app salta sola al volver a ella o al
+ *   cambiar de pantalla (`useActualizacionDisponible`). Nunca encima de trabajo
+ *   a medio cargar: bajar e instalar el build puede tardar ~45 s, así que justo
+ *   antes de recargar se vuelve a preguntar (`puedeRecargar`); si en ese momento
+ *   hay algo en curso, el SW queda esperando y el próximo disparo lo activa.
  * - `aplicarActualizacionSW()` es lo que ejecuta ese salto, y tiene que pasar
  *   SI o SI por el service worker: un `location.reload()` pelado no activa al
  *   que espera, asi que el viejo sigue al mando y el cartel queda para siempre.
@@ -57,7 +60,7 @@ type Escucha = () => void
 let registro: ServiceWorkerRegistration | null = null
 let activarSwEnEspera: ((recargarPagina?: boolean) => Promise<void>) | null = null
 let hayVersionEsperando = false
-let aplicando: Promise<void> | null = null
+let aplicando: Promise<ResultadoSalto> | null = null
 const escuchas = new Set<Escucha>()
 
 function avisar(): void {
@@ -169,7 +172,30 @@ function actualizarConPlazo(reg: ServiceWorkerRegistration): Promise<void> {
 }
 
 /**
- * Salta al build nuevo. Es lo que ejecuta el boton "Actualizar" del cartel.
+ * Cómo terminó un salto:
+ * - `recargando`: se activó el SW en espera (la recarga la dispara el plugin) o
+ *   se recargó a la antigua;
+ * - `pospuesto`: estaba todo listo pero `puedeRecargar` dijo que no (hay algo a
+ *   medio cargar). El SW nuevo queda esperando y el próximo salto lo activa sin
+ *   tocar la red (H1 de la revisión de B12a);
+ * - `sin-red`: no se pudo bajar el build (sin red, `update()` que falla o no
+ *   responde, instalación que no termina). Ver `reintentarAlVolverLaRed`.
+ */
+export type ResultadoSalto = 'recargando' | 'pospuesto' | 'sin-red'
+
+export interface OpcionesSalto {
+  /**
+   * Se pregunta JUSTO antes de recargar, no al empezar: bajar e instalar el
+   * build puede tardar ~45 s y en ese rato se pudo abrir un formulario. Sin
+   * esto, el salto automático de D57 recargaba encima de un pedido a medio
+   * cargar. El botón "Actualizar" no lo pasa: ahí la decisión es de quien toca.
+   */
+  puedeRecargar?: () => boolean
+}
+
+/**
+ * Salta al build nuevo. Lo ejecutan el boton "Actualizar" del cartel y el salto
+ * automático de D57.
  *
  * Si hay un service worker esperando, lo activa y la recarga la dispara el
  * propio plugin cuando cambia el controlador; sin eso, la recarga volveria a
@@ -178,11 +204,11 @@ function actualizarConPlazo(reg: ServiceWorkerRegistration): Promise<void> {
  * a la antigua. Sin red, o si el `update()` falla, no hace nada de eso: ver
  * `reintentarAlVolverLaRed`.
  */
-export function aplicarActualizacionSW(): Promise<void> {
+export function aplicarActualizacionSW(opciones: OpcionesSalto = {}): Promise<ResultadoSalto> {
   // Un solo salto a la vez: un segundo toque mientras el primero espera la
   // instalacion no tiene que lanzar otro update ni otro reload.
   if (!aplicando) {
-    aplicando = ejecutarActualizacion().finally(() => { aplicando = null })
+    aplicando = ejecutarActualizacion(opciones.puedeRecargar ?? (() => true)).finally(() => { aplicando = null })
   }
   return aplicando
 }
@@ -194,8 +220,9 @@ export function aplicarActualizacionSW(): Promise<void> {
  * del navegador y el preventista no ve ni sus pedidos encolados. El cartel
  * sigue en pantalla (nadie lo baja) y, cuando vuelve la conexion, se va a
  * buscar el sw.js nuevo en silencio: al quedar esperando, el plugin avisa por
- * `onNeedRefresh` y el proximo "Actualizar" activa sin tocar la red. La recarga
- * sigue siendo decision de la usuaria, nunca una sorpresa al volver la senal.
+ * `onNeedRefresh` y el proximo salto activa sin tocar la red. Volver la senal no
+ * recarga: el salto llega con el proximo cambio de pantalla o vuelta a la app
+ * (D57), o con el boton.
  */
 let reintentoAlVolverLaRed: (() => void) | null = null
 
@@ -222,7 +249,7 @@ function sinRed(): boolean {
   return typeof navigator !== 'undefined' && navigator.onLine === false
 }
 
-async function ejecutarActualizacion(): Promise<void> {
+async function ejecutarActualizacion(puedeRecargar: () => boolean): Promise<ResultadoSalto> {
   const reg = registro
 
   if (reg && activarSwEnEspera) {
@@ -233,7 +260,7 @@ async function ejecutarActualizacion(): Promise<void> {
         if (sinRed()) {
           logger.warn('[sw] Sin conexion: se mantiene el service worker y el cartel')
           reintentarAlVolverLaRed()
-          return
+          return 'sin-red'
         }
 
         // El cartel puede venir de /version.json, que se entera antes que el
@@ -245,7 +272,7 @@ async function ejecutarActualizacion(): Promise<void> {
           // aunque `navigator.onLine` diga que si (senal mala, portal cautivo).
           logger.warn('[sw] No se pudo buscar el build nuevo, se mantiene el service worker', err)
           reintentarAlVolverLaRed()
-          return
+          return 'sin-red'
         }
         const instalacion = await esperarSwEnEspera(reg)
         if (instalacion === 'fallo') {
@@ -255,13 +282,19 @@ async function ejecutarActualizacion(): Promise<void> {
           // despues, `onNeedRefresh` avisa y el proximo toque activa.
           logger.warn('[sw] El build nuevo no termino de instalarse, se mantiene el service worker')
           reintentarAlVolverLaRed()
-          return
+          return 'sin-red'
         }
       }
 
       if (reg.waiting) {
+        // Recién ahora, con el build bajado, se mira si se puede recargar (H1).
+        if (!puedeRecargar()) {
+          logger.info('[sw] Build nuevo listo; se activa en el proximo salto (hay trabajo en curso)')
+          hayVersionEsperando = true
+          return 'pospuesto'
+        }
         await activarSwEnEspera(true)
-        return
+        return 'recargando'
       }
     } catch (err) {
       logger.warn('[sw] Fallo la activacion del build nuevo, se recarga igual', err)
@@ -270,8 +303,10 @@ async function ejecutarActualizacion(): Promise<void> {
     // Se fue la red mientras esperaba la instalacion: mismo criterio.
     if (sinRed()) {
       reintentarAlVolverLaRed()
-      return
+      return 'sin-red'
     }
+
+    if (!puedeRecargar()) return 'pospuesto'
 
     // El `update()` respondio y no hay build nuevo instalandose (el sw.js es el
     // mismo): la red anduvo. Un reload con el SW viejo al mando devolveria el
@@ -282,9 +317,12 @@ async function ejecutarActualizacion(): Promise<void> {
     } catch (err) {
       logger.warn('[sw] No se pudo dar de baja el service worker viejo', err)
     }
+  } else if (!puedeRecargar()) {
+    return 'pospuesto'
   }
 
   window.location.reload()
+  return 'recargando'
 }
 
 /** Solo para tests: vuelve el modulo a cero. */

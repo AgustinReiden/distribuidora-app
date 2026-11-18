@@ -271,6 +271,8 @@ const TOTAL_SEIS_UNIDADES = '$ 7.500,00'
 interface HarnessProps {
   onGuardarSpy: (payload: NuevoPedidoState) => void
   onCloseSpy?: () => void
+  /** D56: si viene, el modal muestra la oferta de la cola. */
+  onGuardarEnColaSpy?: () => void
   onEliminarPromoSpy?: (promoId: string, promoNombre: string) => void
   onRestaurarPromoSpy?: (promoId: string) => void
   onActualizarPrecioSpy?: (productoId: string, precio: number) => void
@@ -308,6 +310,7 @@ interface HarnessProps {
 function Harness({
   onGuardarSpy,
   onCloseSpy,
+  onGuardarEnColaSpy,
   onEliminarPromoSpy,
   onRestaurarPromoSpy,
   onActualizarPrecioSpy,
@@ -346,6 +349,7 @@ function Harness({
       promosEliminadas={promosEliminadas}
       onClose={() => onCloseSpy?.()}
       onGuardar={() => onGuardarSpy(pedido)}
+      onGuardarEnCola={onGuardarEnColaSpy}
       onClienteChange={(clienteId) =>
         setPedido(prev => ({
           ...prev,
@@ -787,6 +791,46 @@ describe('ModalPedido — camino feliz', () => {
 
     expect(onCloseSpy).toHaveBeenCalledTimes(1)
     expect(onGuardarSpy).not.toHaveBeenCalled()
+  })
+
+  // I1 de la revisión de B12a (decisión de pantalla a confirmar por el dueño):
+  // con la oferta de la cola (D56) en pantalla, el pedido no se guardó en ningún
+  // lado. Cerrar pide confirmación, dentro del modal.
+  describe('cerrar con la oferta de la cola en pantalla (I1)', () => {
+    it('la X pide confirmación y no cierra hasta confirmar', async () => {
+      const onGuardarEnColaSpy = vi.fn()
+      const { user, onCloseSpy } = montar({ onGuardarEnColaSpy })
+
+      expect(screen.getByRole('button', { name: 'Guardar en el teléfono' })).toBeTruthy()
+      await user.click(screen.getByRole('button', { name: 'Cerrar' }))
+
+      expect(onCloseSpy).not.toHaveBeenCalled()
+      expect(await screen.findByText('El pedido no se guardó. ¿Salir igual?')).toBeTruthy()
+      await user.click(screen.getByRole('button', { name: 'Salir igual' }))
+      expect(onCloseSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('«Seguir con el pedido» no cierra y la oferta sigue', async () => {
+      const onGuardarEnColaSpy = vi.fn()
+      const { user, onCloseSpy } = montar({ onGuardarEnColaSpy })
+
+      await user.click(screen.getByRole('button', { name: 'Cerrar' }))
+      await user.click(await screen.findByRole('button', { name: 'Seguir con el pedido' }))
+
+      expect(onCloseSpy).not.toHaveBeenCalled()
+      await user.click(screen.getByRole('button', { name: 'Guardar en el teléfono' }))
+      expect(onGuardarEnColaSpy).toHaveBeenCalledTimes(1)
+    })
+
+    // El «atrás» del teléfono no está cubierto (N2): navega sin pasar por el modal.
+    it('Escape también pide confirmación', async () => {
+      const { user, onCloseSpy } = montar({ onGuardarEnColaSpy: vi.fn() })
+
+      await user.keyboard('{Escape}')
+
+      expect(onCloseSpy).not.toHaveBeenCalled()
+      expect(await screen.findByText('El pedido no se guardó. ¿Salir igual?')).toBeTruthy()
+    })
   })
 
   it('el click afuera NO cierra: el carrito armado no se tira por un toque al costado', async () => {

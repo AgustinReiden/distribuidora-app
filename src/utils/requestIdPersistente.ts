@@ -23,7 +23,7 @@
  * Si `localStorage` tira (Safari privado, cuota), todo sigue en memoria: se
  * pierde la recarga, pero no cerrar y reabrir el modal.
  */
-import { nuevoRequestId, type ClaveDeAlta } from './idempotencia'
+import { nuevoRequestId, clienteDeLaHuella, type ClaveDeAlta } from './idempotencia'
 import { redondear } from './calculations'
 import { ErrorDeSupabase, esErrorReintentable } from './errorDeSupabase'
 
@@ -232,6 +232,8 @@ export const VIGENCIA_ALTA_EN_DUDA_MS = 24 * 60 * 60 * 1000
 interface EntradaAlta extends Entrada {
   huella: string
   clienteId?: string
+  /** `ClaveDeAlta.intentoEn`: cuándo fue el último intento (M5, #1603). */
+  u?: number
 }
 
 function entradasDeAlta(): EntradaAlta[] {
@@ -241,7 +243,8 @@ function entradasDeAlta(): EntradaAlta[] {
   return crudas.filter((e): e is EntradaAlta => {
     const x = e as Partial<EntradaAlta> | null
     return !!x && typeof x.id === 'string' && !!x.id && typeof x.t === 'number' && typeof x.huella === 'string' &&
-      (x.clienteId === undefined || typeof x.clienteId === 'string')
+      (x.clienteId === undefined || typeof x.clienteId === 'string') &&
+      (x.u === undefined || typeof x.u === 'number')
   })
 }
 
@@ -261,15 +264,30 @@ export function guardarClavesDeAlta(claves: ReadonlyArray<ClaveDeAlta | null>, a
       t: horas.get(c.id) ?? ahora,
       huella: c.huella,
       ...(c.clienteId != null ? { clienteId: c.clienteId } : {}),
+      ...(c.intentoEn != null ? { u: c.intentoEn } : {}),
     })
   }
   escribir(PREFIJO_ALTA_EN_DUDA, altas.length > 0 ? { altas } : {})
 }
 
+/**
+ * Las claves en duda vigentes. Una guardada sin cliente (antes de L2, #1603) toma
+ * el de su huella: si no, hacía esperar a las altas de todos los clientes hasta
+ * vencer (`clienteDeLaHuella`).
+ */
 export function leerClavesDeAlta(ahora: number = Date.now()): ClaveDeAlta[] {
   return entradasDeAlta()
     .filter(e => ahora - e.t < VIGENCIA_ALTA_EN_DUDA_MS)
-    .map(e => ({ id: e.id, huella: e.huella, enDuda: true, ...(e.clienteId != null ? { clienteId: e.clienteId } : {}) }))
+    .map(e => {
+      const clienteId = e.clienteId ?? clienteDeLaHuella(e.huella)
+      return {
+        id: e.id,
+        huella: e.huella,
+        enDuda: true,
+        ...(clienteId != null ? { clienteId } : {}),
+        ...(e.u != null ? { intentoEn: e.u } : {}),
+      }
+    })
 }
 
 /** Una sola clave (la del formulario): reemplaza todo lo guardado. */
