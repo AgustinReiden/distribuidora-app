@@ -59,7 +59,8 @@ import { Badge } from '../ui/Badge'
 import { toneDeEstadoCompra, ETIQUETA_ESTADO_COMPRA } from '../../lib/estadoTones'
 import { formatearFechaVencimiento } from '../../utils/vencimientos'
 import { hidratarCompraGuardada } from '../../utils/hidratarCompra'
-import { costoEfectivoCompra } from '../../utils/notaCredito'
+import { costoEfectivoCompra, esNotaVigente, motivoNotaNoAnulable, notasVigentes } from '../../utils/notaCredito'
+import { getErrorMessage } from '../../utils/errorHandling'
 import { pesosDesactualizados } from '../../utils/pesosDesactualizados'
 import {
   armarEdicionCompra, cargosLeidos, edicionCompraTieneCambios, totalesDeEdicion,
@@ -176,6 +177,12 @@ export interface ModalCompraProps {
   onAnular?: (compraId: string) => Promise<void>;
   /** 'ver': abre la nota de crédito (el container cierra este modal antes). */
   onNotaCredito?: (compra: CompraDBExtended) => void;
+  /**
+   * 'ver': anula una nota de crédito de la compra (mig 523). Sólo lo pasa quien
+   * puede (admin o encargado: la RPC lo vuelve a validar). Rechaza con el motivo
+   * del server, que el modal muestra adentro.
+   */
+  onAnularNotaCredito?: (notaId: string, motivo: string) => Promise<void>;
 }
 
 export type ModoModalCompra = 'nueva' | 'ver' | 'editar'
@@ -198,6 +205,13 @@ interface NotaCreditoDeLaCompra {
   tipo?: 'devolucion' | 'ajuste' | null;
   /** II que acredita la nota (mig 280). */
   impuestos_internos?: number | null;
+  /** mig 523: anulada (queda en el historial, no cuenta). */
+  anulada?: boolean | null;
+  anulada_at?: string | null;
+  anulada_por_nombre?: string | null;
+  motivo_anulacion?: string | null;
+  /** Cuándo se cargó: una devolución anterior a la 483 no se anula (`motivoNotaNoAnulable`). */
+  created_at?: string | null;
   items?: Array<{
     producto_id: string;
     cantidad: number;
@@ -1395,10 +1409,12 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
  * forma de pago, notas, totales GUARDADOS de la cabecera, notas de crédito, y
  * los botones de nota de crédito y anular.
  */
-function ModalCompraVer({ compra, proveedores, onClose, lotes = [], notasCredito = [], onAnular, onNotaCredito }: ModalCompraProps & { compra: CompraDBExtended }) {
+function ModalCompraVer({ compra, proveedores, onClose, lotes = [], notasCredito = [], onAnular, onNotaCredito, onAnularNotaCredito }: ModalCompraProps & { compra: CompraDBExtended }) {
   const hidratada = useMemo(() => hidratarCompraGuardada(compra), [compra])
   const { estado: state } = hidratada
   const [confirmarAnular, setConfirmarAnular] = useState(false)
+  // Una nota anulada no bloquea anular la compra (mig 526, H13): sólo las vigentes.
+  const hayNotasVigentes = notasVigentes(notasCredito).length > 0
 
   const vencimientosPorProducto = useMemo(() => {
     // Los lotes son del PRODUCTO, no de la línea (UNIQUE de la mig 223).
@@ -1485,7 +1501,16 @@ function ModalCompraVer({ compra, proveedores, onClose, lotes = [], notasCredito
                   </>
                 )}
                 <TotalesGuardados compra={compra} />
-                {notasCredito.length > 0 && <NotasCreditoDeLaCompra notas={notasCredito} totalCompra={Number(compra.total ?? 0)} />}
+              </fieldset>
+              {/* Fuera del fieldset deshabilitado: cada nota vigente ofrece «Anular». */}
+              <div className="px-3 pb-3 sm:px-4 sm:pb-4 space-y-4">
+                {notasCredito.length > 0 && (
+                  <NotasCreditoDeLaCompra
+                    notas={notasCredito}
+                    totalCompra={Number(compra.total ?? 0)}
+                    onAnular={cancelada ? undefined : onAnularNotaCredito}
+                  />
+                )}
                 {compra.notas && (
                   <div>
                     <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -1495,7 +1520,7 @@ function ModalCompraVer({ compra, proveedores, onClose, lotes = [], notasCredito
                     <p className="px-4 py-2 rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-white whitespace-pre-wrap">{compra.notas}</p>
                   </div>
                 )}
-              </fieldset>
+              </div>
             </CompactErrorBoundary>
           </div>
 
@@ -1512,8 +1537,8 @@ function ModalCompraVer({ compra, proveedores, onClose, lotes = [], notasCredito
                 Nota de Credito
               </Button>
             )}
-            {/* #1095: una compra con notas de crédito no se anula (lo rechaza el server). */}
-            {!cancelada && onAnular && notasCredito.length === 0 && (
+            {/* #1095: una compra con notas de crédito vigentes no se anula (lo rechaza el server). */}
+            {!cancelada && onAnular && !hayNotasVigentes && (
               <Button
                 type="button"
                 onClick={() => setConfirmarAnular(true)}
@@ -1524,7 +1549,7 @@ function ModalCompraVer({ compra, proveedores, onClose, lotes = [], notasCredito
                 Anular Compra
               </Button>
             )}
-            {!cancelada && onAnular && notasCredito.length > 0 && (
+            {!cancelada && onAnular && hayNotasVigentes && (
               <p className="self-center text-sm text-gray-600 dark:text-gray-400">
                 Tiene notas de crédito: no se puede anular
               </p>
@@ -1891,11 +1916,45 @@ function TotalesGuardados({ compra }: { compra: CompraDBExtended }) {
   )
 }
 
-function NotasCreditoDeLaCompra({ notas, totalCompra }: { notas: NotaCreditoDeLaCompra[]; totalCompra: number }) {
+function NotasCreditoDeLaCompra({ notas, totalCompra, onAnular }: {
+  notas: NotaCreditoDeLaCompra[];
+  totalCompra: number;
+  /** Anula una nota vigente: pide motivo y confirmación acá adentro (regla de Radix). */
+  onAnular?: (notaId: string, motivo: string) => Promise<void>;
+}) {
   // Los ajustes sin mercadería (mig 280) abaratan lo que quedó de la compra;
-  // una devolución no: lo devuelto deja de ser de esta compra.
-  const hayAjustes = notas.some(nc => nc.tipo === 'ajuste')
+  // una devolución no: lo devuelto deja de ser de esta compra. Una nota anulada
+  // se sigue mostrando (es historia), marcada, pero no cuenta.
+  const hayAjustes = notas.some(nc => nc.tipo === 'ajuste' && esNotaVigente(nc))
   const costoEfectivo = costoEfectivoCompra(totalCompra, notas)
+  const [anulandoId, setAnulandoId] = useState<string | null>(null)
+  const [motivoAnulacion, setMotivoAnulacion] = useState('')
+  const [errorAnulacion, setErrorAnulacion] = useState('')
+  const [anulando, setAnulando] = useState(false)
+  const cerrarAnulacion = () => {
+    setAnulandoId(null)
+    setMotivoAnulacion('')
+    setErrorAnulacion('')
+  }
+  const confirmarAnulacion = async () => {
+    if (!onAnular || anulandoId === null) return
+    const motivo = motivoAnulacion.trim()
+    if (!motivo) {
+      setErrorAnulacion('Escribí por qué se anula la nota')
+      return
+    }
+    setErrorAnulacion('')
+    setAnulando(true)
+    try {
+      await onAnular(anulandoId, motivo)
+    } catch (err) {
+      setErrorAnulacion(getErrorMessage(err))
+      return
+    } finally {
+      setAnulando(false)
+    }
+    cerrarAnulacion()
+  }
   return (
     <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
       <div className="flex items-center gap-2 mb-3">
@@ -1909,8 +1968,13 @@ function NotasCreditoDeLaCompra({ notas, totalCompra }: { notas: NotaCreditoDeLa
         </div>
       )}
       <div className="space-y-3">
-        {notas.map(nc => (
-          <div key={nc.id} className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-blue-200 dark:border-blue-800">
+        {notas.map(nc => {
+          const anulada = !esNotaVigente(nc)
+          // Una devolución que el server siempre rechaza (anterior a la 483) se ofrece
+          // deshabilitada, con su motivo a la vista (decisión del dueño del 17/11).
+          const noAnulable = motivoNotaNoAnulable(nc)
+          return (
+          <div key={nc.id} className={`bg-white dark:bg-gray-800 rounded-lg p-3 border border-blue-200 dark:border-blue-800 ${anulada ? 'opacity-70' : ''}`}>
             <div className="flex justify-between items-start mb-2">
               <div>
                 <span className="text-sm font-medium text-gray-800 dark:text-white">{nc.numero_nota || `NC #${nc.id}`}</span>
@@ -1918,9 +1982,22 @@ function NotasCreditoDeLaCompra({ notas, totalCompra }: { notas: NotaCreditoDeLa
                 {nc.tipo === 'ajuste' && (
                   <Badge tone="brand" className="ml-2 text-[11px]">Ajuste sin mercadería</Badge>
                 )}
+                {anulada && (
+                  <Badge tone="neutral" className="ml-2 text-[11px]">Anulada</Badge>
+                )}
               </div>
-              <span className="text-sm font-bold text-blue-600">-{formatPrecio(nc.total)}</span>
+              <span className={`text-sm font-bold ${anulada ? 'text-gray-500 line-through' : 'text-blue-600'}`}>-{formatPrecio(nc.total)}</span>
             </div>
+            {anulada && (
+              <p className="text-xs text-gray-600 dark:text-gray-300 mb-2" data-testid="nc-anulada">
+                {[
+                  'Anulada',
+                  nc.anulada_at && `el ${new Date(nc.anulada_at).toLocaleDateString('es-AR')}`,
+                  nc.anulada_por_nombre && `por ${nc.anulada_por_nombre}`,
+                ].filter(Boolean).join(' ')}
+                {nc.motivo_anulacion ? `: ${nc.motivo_anulacion}` : ''}
+              </p>
+            )}
             {nc.motivo && <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">{nc.motivo}</p>}
             {Number(nc.impuestos_internos) > 0 && (
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">Impuestos internos: {formatPrecio(Number(nc.impuestos_internos))}</p>
@@ -1935,8 +2012,57 @@ function NotasCreditoDeLaCompra({ notas, totalCompra }: { notas: NotaCreditoDeLa
                 ))}
               </div>
             )}
+            {!anulada && onAnular && anulandoId !== nc.id && (
+              <div className="mt-2 flex flex-col items-end gap-1">
+                <button
+                  type="button"
+                  onClick={() => { setAnulandoId(nc.id); setMotivoAnulacion(''); setErrorAnulacion('') }}
+                  disabled={noAnulable !== null}
+                  aria-label={`Anular la nota ${nc.numero_nota || `NC #${nc.id}`}`}
+                  aria-describedby={noAnulable ? `no-anulable-${nc.id}` : undefined}
+                  className="text-xs text-rose-700 dark:text-rose-300 font-medium hover:underline disabled:text-gray-400 disabled:no-underline disabled:cursor-not-allowed"
+                >
+                  Anular
+                </button>
+                {noAnulable && (
+                  <p id={`no-anulable-${nc.id}`} className="text-xs text-gray-500 dark:text-gray-400 text-right">{noAnulable}</p>
+                )}
+              </div>
+            )}
+            {!anulada && onAnular && anulandoId === nc.id && (
+              <div className="mt-3 rounded-lg bg-gray-50 dark:bg-gray-900 p-3 space-y-2" role="group" aria-label="Anular nota de crédito">
+                <p className="text-xs text-gray-600 dark:text-gray-300">
+                  {nc.tipo === 'ajuste'
+                    ? 'El ajuste deja de contar: la compra vuelve a tener disponible lo que acreditaba. La nota queda en el historial como anulada.'
+                    : 'La mercadería vuelve al stock (y a sus lotes), y el costo vuelve a ser el de antes de la nota. La nota queda en el historial como anulada.'}
+                </p>
+                <label htmlFor={`anular-nc-${nc.id}`} className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Por qué se anula <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id={`anular-nc-${nc.id}`}
+                  type="text"
+                  autoComplete="off"
+                  value={motivoAnulacion}
+                  onChange={ev => setMotivoAnulacion(ev.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+                {errorAnulacion && (
+                  <p role="alert" className="text-sm text-red-600 dark:text-red-400">{errorAnulacion}</p>
+                )}
+                <div className="flex gap-2">
+                  <Button type="button" variant="danger" size="sm" loading={anulando} disabled={anulando} onClick={() => { void confirmarAnulacion() }}>
+                    Anular nota de crédito
+                  </Button>
+                  <Button type="button" variant="secondary" size="sm" onClick={cerrarAnulacion}>
+                    Cancelar
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

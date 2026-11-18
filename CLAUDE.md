@@ -444,7 +444,10 @@ suelta en `sucursales`.
   `anulada` con su motivo, y deshace el stock, los lotes que tomó (`notas_credito.lotes_tomados`), el
   promedio y la reposición. Una devolución anterior a la 483 (10/11/2026) no se anula: no corrigió el
   promedio ni sus lotes. Toda suma de las notas de una compra filtra `NOT anulada`; un camino nuevo
-  que baje lotes por una nota los anota ahí.
+  que baje lotes por una nota los anota ahí. También la posición fiscal, el gerencial, el bot y el
+  front (`esNotaVigente`, B18 de #1603): la anulada no resta en ningún período. Y sólo una nota
+  vigente deja la compra sin editar, anular ni cambiar de proveedor; la anulada ya devolvió lo suyo.
+  El detalle de la compra (historial) la sigue mostrando, marcada, con quién, cuándo y por qué.
 - **Un envío a un producto desactivado lo reactiva sólo con la confirmación** (#1558 D7): el renglón
   trae `"reactivar": true`; sin la marca, `aceptar_movimiento_sucursal` rechaza.
 - **El total de una ZZ lo pone el server** (#1603): el subtotal, los otros impuestos y los cargos
@@ -575,7 +578,11 @@ suelta en `sucursales`.
   `scripts/check-fechas-utc.mjs` contra `scripts/fechas-utc-permitidas.json`, que sólo se achica.
   Desde #1298 mira también vistas, policies y CHECKs, y `CAST`, `date_trunc`, `to_char` y
   `extract` sobre `now()` o una columna timestamptz; las funciones van por **firma**, así que
-  cambiarle los parámetros a una de la lista obliga a actualizarla en el mismo PR.
+  cambiarle los parámetros a una de la lista obliga a actualizarla en el mismo PR. Los ensayos
+  `scripts/test-*.sql` también usan el día argentino (`public._tablero_hoy()`), no `CURRENT_DATE`:
+  de noche el job de CI les mandaba una fecha futura (B13d). Lo vigila
+  `src/test/ensayosDiaArgentino.contract.test.ts`, y un ensayo se prueba con el día corrido con
+  `node scripts/ci/ensayos-sql.mjs --tz Pacific/Kiritimati --solo <ensayo>`.
 - **Un reporte cierra contra su propio total** (#1262, mig 410). Toda lectura de `pedido_items`
   para un reporte va con **LEFT JOIN a `productos`**: hay líneas de productos borrados
   (`producto_id` NULL, de antes de que la FK pasara a RESTRICT) y con JOIN se caen de la venta

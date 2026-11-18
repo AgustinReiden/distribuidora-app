@@ -57,10 +57,6 @@
       "firma": "el ensayo necesita un preventista base sin extra (PB <uuid>), uno con el extra transportista (PXT <NULL>), otro preventista (O <NULL>), un admin de la sucursal de PB (ADM <uuid>), un encargado de alguna de las dos sucursales (ENC <uuid>) y uno para medir (M <uuid>)",
       "motivo": "falla al nacer el gate, sobre la base de CI"
     },
-    "test-edicion-regalos-salvedades-1323-1327.sql": {
-      "firma": "ENSAYO FALLO (N fallas): | - LN · public.dividir_regalo_pedido(bigint,jsonb,text,uuid) no bloquea los contenedores antes del motor de promos",
-      "motivo": "falla al nacer el gate, sobre la base de CI"
-    },
     "test-gastos-4.sql": {
       "firma": "ENSAYO FALLÓ · Nb no se armo la familia: S N, Z N, W | Nb EN -N.N (vivo en CN N.N) y EN -N.N (vivo en CN N.N) | N · error: El cliente tiene que ser de la sucursal del empleado",
       "motivo": "falla al nacer el gate, sobre la base de CI"
@@ -183,10 +179,6 @@
     },
     "test-stock-integridad-1254-1255-1256.sql": {
       "firma": "ENSAYO FALLÓ · CC-B = N después del caso nuevo (tenía que dar N) | CC-C = N después del caso nuevo (tenía que dar N) | FISCAL-A = N después del caso nuevo (tenía que dar N) | VENTA-N = N después del caso nuevo (tenía que dar N) | saltados: sincronizar_lotes_compra: no hay compra con lotes (o su sucu",
-      "motivo": "falla al nacer el gate, sobre la base de CI"
-    },
-    "test-stock-promos-orden-1460.sql": {
-      "firma": "ENSAYO FALLÓ · LN actualizar_pedido_items no bloquea las promos entre los productos y el motor",
       "motivo": "falla al nacer el gate, sobre la base de CI"
     },
     "test-triggers-y-deposito-1245.sql": {
