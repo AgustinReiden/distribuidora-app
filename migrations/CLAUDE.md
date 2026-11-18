@@ -144,6 +144,12 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   predicado `sin_costo`** — no mires `costo_sin_iva` por tu cuenta, que fue justo el bug de
   #511. Un reporte nuevo que valorice mermas o decida "sin costo" llama a estas dos; si
   reescribís el criterio, el gate `scripts/check-integridad.mjs` se pone rojo.
+  Una merma vale el costo de hoy (el que se guarda en `mermas_stock.costo_unitario` al cargarla,
+  y que `mermas_valorizadas` toma primero), **salvo la de una nota de crédito de venta** (B22 v3,
+  decisión del dueño del 18/11): vale el costo con que la venta contó esas unidades
+  (`costo_valuacion` con la foto de la línea), porque ese mismo costo es el que la nota le resta
+  al CMV del gerencial. Con el de hoy, el costo de lo vencido se contaba dos veces distinto: 10 × 100
+  a costo 60, 5 vencidos y el promedio de hoy en 75 restaban 300 del CMV y sumaban 375 de merma.
   **Y no son sólo los reportes: el que ESCRIBE `pedido_items.costo_unitario_al_crear` también
   la llama** (migs 257/258, #673). Eran seis caminos con seis copias inline —y una,
   `sustituir_regalo_pedido`, con `costo_real` pelado, que es un número distinto: 80 de 295

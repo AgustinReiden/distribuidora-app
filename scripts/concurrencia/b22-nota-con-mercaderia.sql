@@ -73,12 +73,12 @@ BEGIN
   END IF;
 END $f$;
 
--- La nota de rechazo (A×p) sobre P1, por la RPC.
+-- La nota de rechazo (A×p) sobre P1, por la RPC, como el front nuevo: el renglón pide mover la mercadería.
 CREATE FUNCTION b22c.nc(p int) RETURNS jsonb LANGUAGE sql AS $f$
   SELECT b22c.como(b22c.adm(), b22c.fx('s')::bigint, format(
     'SELECT public.crear_nota_credito_venta(%s, %s, %L::jsonb, %L, %L, %L::uuid)::text',
     b22c.fx('p1'), b22c.fx('c'),
-    jsonb_build_array(jsonb_build_object('pedido_item_id', b22c.fx('i1')::bigint, 'cantidad', p)),
+    jsonb_build_array(jsonb_build_object('pedido_item_id', b22c.fx('i1')::bigint, 'cantidad', p, 'mercaderia', true)),
     'cliente_rechaza', 'conc B22', gen_random_uuid()))::jsonb;
 $f$;
 

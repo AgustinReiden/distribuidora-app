@@ -210,6 +210,9 @@ const CASOS_PROCEDENCIA = [
   [[1, 'error_inventario', 'Salvedad pedido #1: faltante_stock'], 'entrega_salvedad'],
   [[1, 'rotura', null], 'entrega_salvedad'],
   [[null, 'error_inventario', 'Cancelacion por falta de stock, pedido #7'], 'cancelacion_falta_stock'],
+  // B22 (#1603): el texto lo escribe _nc_venta_mover_mercaderia (vencido → vencimiento, dañado → rotura).
+  [[null, 'vencimiento', 'Nota de crédito de venta #12 (pedido #7)'], 'nota_credito_venta'],
+  [[null, 'rotura', 'Nota de crédito de venta #12 (pedido #7)'], 'nota_credito_venta'],
   [[null, 'error_inventario', 'conteo de fin de mes'], 'carga_directa'],
   [[null, 'rotura', null], 'carga_directa'],
   [[null, 'promociones', null], 'promocion'],
@@ -233,7 +236,7 @@ const hasta = diaArgentino;
 const desde = `${diaArgentino.slice(0, 7)}-01`;
 const ORIGENES = new Set(['congelado', 'estimado', 'sin_costo']);
 const CLASIFICACIONES = new Set(['perdida', 'ajuste', 'muestra', 'promocion']);
-const PROCEDENCIAS = new Set(['entrega_salvedad', 'cancelacion_falta_stock', 'carga_directa', 'promocion']);
+const PROCEDENCIAS = new Set(['entrega_salvedad', 'cancelacion_falta_stock', 'nota_credito_venta', 'carga_directa', 'promocion']);
 
 const filas = await rpc('mermas_valorizadas', {
   p_desde: desde,

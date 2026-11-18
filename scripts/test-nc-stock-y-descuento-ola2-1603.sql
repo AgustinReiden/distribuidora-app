@@ -51,6 +51,25 @@
 --     D9 un monto con otro motivo, mezclado con unidades, inválido, 0, NaN o dos montos sobre toda la
 --        boleta se rechazan. D10 el reintento con la misma clave es la misma nota; con otro monto, 22023.
 --     D11 anular un descuento no mueve stock y devuelve la comisión.
+--   H · EL RENGLÓN PIDE LA MERCADERÍA (H1 de la revisión): el payload de un PWA anterior (sin "mercaderia")
+--       hace una nota sólo de plata: rechazo ×3 y vencido ×2 no tocan stock, lotes, huella ni mermas_stock.
+--       Con la marca, mueve. La misma clave con y sin la marca es otro contenido (22023). La marca con un
+--       motivo que no mueve, en un renglón por monto o que no es sí/no, se rechaza.
+--   P · EL REPARTO CON TOPE (H2): 30 renglones de $ 10. P1 299,84 entra y ninguna parte pasa 10; P2 0,15 →
+--       15 de 0,01; P3 300 (todo lo que queda) entra; P4 100 → 10 de 3,34 y 20 de 3,33.
+--   H4 una línea a la que un descuento le acreditó toda su plata: devolver unidades se rechaza con el motivo.
+--   D7 (de la revisión) 3 × 100, descuento 30, una unidad → 90; anular el descuento, la otra → 100 (no 105).
+--   H6 una FC de 30 renglones con tres alícuotas: el ingreso real de la nota (_ventas_nc) suma su neto.
+--   C · EL MARGEN Y LAS UNIDADES (decisiones del dueño del 18/11), cada caso en su sucursal: C1 10 × 1.000 a
+--       costo 700, devuelve 2 que reingresan → venta 8.000, CMV 5.600, margen 2.400 y 8 unidades (y categorías,
+--       vendedor, top —8 u.— y mensual cierran); C2 10 × 100 a costo 60, 5 vencidos → 500 / 300 / 200, 5 u. y
+--       mermas 300 (antes −100 y 300: el costo dos veces); C2b con el promedio de hoy en 75, la merma vale 60 (el
+--       costo de la venta) y su procedencia es la nota; C3 un descuento de 500 → 9.500 / 7.000 / 2.500 y 10 u.;
+--       C4 la nota anulada no resta; C5 sin costo queda fuera del margen; C6 sin la marca no se movió nada y no
+--       resta ni costo ni unidades. Los pedidos no cambian.
+--       Rendimiento (rendimiento_preventistas, 'venta|unidades|margen'): C8 un rechazo emitido en el mes de su
+--       boleta → 8000|8|2400; C9 un vencido (no le descuenta al vendedor) no lo toca; C10 una nota fuera del mes
+--       de su boleta no lo toca; C11 una congelada (resta_rendimiento) sigue en 8000|8|2400 anulada.
 --   X · LO QUE DEJA CADA NOTA: una nota anulada no deja una merma viva ni unidades reingresadas en el stock
 --       (su ledger suma 0), y una vigente deja exactamente las que reingresó.
 --   (S2 es la regla en serie de la salvedad: con una nota vigente, la salvedad se rechaza. La carrera
@@ -85,6 +104,9 @@ DECLARE
   ex        bigint;
   z1        bigint;
   z2        bigint;
+  hg        bigint;
+  h4        bigint;
+  rp        bigint;
   v_promo   bigint;
   v_combo   bigint;
   v_p       bigint;
@@ -98,6 +120,8 @@ DECLARE
   v_r       jsonb;
   v_j       jsonb;
   v_t       text;
+  v_t2      text;
+  v_k       int;
   v_n       numeric;
   v_m       numeric;
   v_rid     uuid;
@@ -216,13 +240,28 @@ BEGIN
   CREATE FUNCTION pg_temp.linea(p_ped bigint, p_n int DEFAULT 1) RETURNS bigint LANGUAGE sql AS $f$
     SELECT id FROM pedido_items WHERE pedido_id = p_ped ORDER BY id OFFSET p_n - 1 LIMIT 1
   $f$;
-  -- La nota por la RPC, como el front (el admin parado en la sucursal de la boleta).
-  CREATE FUNCTION pg_temp.nc(p_ped bigint, p_items jsonb, p_motivo text, p_rid uuid DEFAULT NULL) RETURNS jsonb
+  -- Lo que manda el front nuevo (H1 de la revisión): con un motivo que mueve mercadería, cada renglón
+  -- por unidades pide moverla ("mercaderia": true). Un renglón que ya dice algo queda como está.
+  CREATE FUNCTION pg_temp.marcar(p_items jsonb, p_motivo text) RETURNS jsonb LANGUAGE sql AS $f$
+    SELECT CASE WHEN (SELECT m.mercaderia FROM public.nc_venta_motivos() m WHERE m.motivo = p_motivo) IN ('reingresa', 'merma')
+                     AND jsonb_typeof(p_items) = 'array'
+                THEN (SELECT jsonb_agg(CASE WHEN e ? 'cantidad' AND NOT e ? 'mercaderia'
+                                            THEN e || '{"mercaderia": true}'::jsonb ELSE e END ORDER BY o)
+                        FROM jsonb_array_elements(p_items) WITH ORDINALITY AS t(e, o))
+                ELSE p_items END
+  $f$;
+  -- La nota por la RPC con el payload tal cual (el de un PWA anterior, o uno armado a mano).
+  CREATE FUNCTION pg_temp.nc_crudo(p_ped bigint, p_items jsonb, p_motivo text, p_rid uuid DEFAULT NULL) RETURNS jsonb
   LANGUAGE sql AS $f$
     SELECT pg_temp.como('00000000-0000-0000-0000-0000000004e7', (SELECT sucursal_id FROM pedidos WHERE id = p_ped), format(
       'SELECT public.crear_nota_credito_venta(%s, %s, %L::jsonb, %L, %L, %L::uuid)::text',
       p_ped, (SELECT cliente_id FROM pedidos WHERE id = p_ped), p_items, p_motivo, 'ensayo B22',
       COALESCE(p_rid, gen_random_uuid())))::jsonb;
+  $f$;
+  -- La nota por la RPC, como el front nuevo (el admin parado en la sucursal de la boleta).
+  CREATE FUNCTION pg_temp.nc(p_ped bigint, p_items jsonb, p_motivo text, p_rid uuid DEFAULT NULL) RETURNS jsonb
+  LANGUAGE sql AS $f$
+    SELECT pg_temp.nc_crudo(p_ped, pg_temp.marcar(p_items, p_motivo), p_motivo, p_rid)
   $f$;
   -- Lo mismo, y devuelve el error (o 'OK').
   CREATE FUNCTION pg_temp.nc_err(p_ped bigint, p_items jsonb, p_motivo text, p_rid uuid DEFAULT NULL) RETURNS text
@@ -233,6 +272,57 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     RETURN SQLSTATE || ' ' || SQLERRM;
   END $f$;
+  CREATE FUNCTION pg_temp.nc_crudo_err(p_ped bigint, p_items jsonb, p_motivo text, p_rid uuid DEFAULT NULL) RETURNS text
+  LANGUAGE plpgsql AS $f$
+  BEGIN
+    PERFORM pg_temp.nc_crudo(p_ped, p_items, p_motivo, p_rid);
+    RETURN 'OK';
+  EXCEPTION WHEN OTHERS THEN
+    RETURN SQLSTATE || ' ' || SQLERRM;
+  END $f$;
+  -- C: una sucursal propia con su producto (precio y costo, o sin costo) y una boleta entregada de hoy
+  -- de p_cant unidades, vendida como el alta (bolsa 0, un lote de 100). Devuelve la boleta.
+  CREATE FUNCTION pg_temp.caso_m(p_precio numeric, p_costo numeric, p_cant int,
+                               p_fecha date DEFAULT public._tablero_hoy()) RETURNS bigint LANGUAGE plpgsql AS $f$
+  DECLARE v_s bigint; v_c bigint; v_f bigint; v_p bigint; v_it bigint;
+  BEGIN
+    INSERT INTO sucursales (nombre) VALUES ('B22 margen ' || left(gen_random_uuid()::text, 8)) RETURNING id INTO v_s;
+    INSERT INTO usuario_sucursales (usuario_id, sucursal_id) VALUES ('00000000-0000-0000-0000-0000000004e7', v_s) ON CONFLICT DO NOTHING;
+    INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id) VALUES ('B22m', 'B22m', 'x', v_s) RETURNING id INTO v_c;
+    INSERT INTO productos (nombre, precio, stock, costo_promedio, costo_real, costo_sin_iva, costo_con_iva, sucursal_id, categoria)
+      VALUES ('B22m fardo', p_precio, 100, p_costo, p_costo, p_costo, p_costo, v_s, 'B22m rubro') RETURNING id INTO v_f;
+    INSERT INTO producto_lotes (producto_id, sucursal_id, fecha_vencimiento, cantidad, cantidad_restante, origen)
+      VALUES (v_f, v_s, public._tablero_hoy() + 30, 100, 100, 'manual');
+    INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, creado_por, total, estado, fecha, fecha_entrega, canal,
+                         retiro_deposito, tipo_factura)
+      VALUES (v_c, v_s, pg_temp.u('preventista', v_s), '00000000-0000-0000-0000-0000000004e7', p_precio * p_cant, 'entregado',
+              p_fecha, now(), 'app', true, 'ZZ') RETURNING id INTO v_p;
+    INSERT INTO pedido_items (pedido_id, producto_id, cantidad, precio_unitario, subtotal, sucursal_id, costo_unitario_al_crear)
+      VALUES (v_p, v_f, p_cant, p_precio, p_precio * p_cant, v_s, p_costo) RETURNING id INTO v_it;
+    PERFORM set_config('app.stock_origen', 'pedido_creado', true);
+    PERFORM set_config('app.stock_pedido_item_id', v_it::text, true);
+    UPDATE productos SET stock = stock - p_cant WHERE id = v_f;
+    PERFORM pg_temp.limpiar();
+    RETURN v_p;
+  END $f$;
+  -- El Rendimiento del vendedor de la boleta en el mes de la boleta: 'venta|unidades|margen'.
+  CREATE FUNCTION pg_temp.rend(p_ped bigint) RETURNS text LANGUAGE sql AS $f$
+    SELECT format('%s|%s|%s', round((x->>'venta')::numeric), round((x->>'unidades')::numeric),
+                  round((x->>'margen_comercial')::numeric))
+      FROM jsonb_array_elements(pg_temp.como('00000000-0000-0000-0000-0000000004e7',
+             (SELECT sucursal_id FROM pedidos WHERE id = p_ped),
+             format('SELECT public.rendimiento_preventistas(%s, %L::date)::text',
+                    (SELECT sucursal_id FROM pedidos WHERE id = p_ped), (SELECT fecha FROM pedidos WHERE id = p_ped)))::jsonb
+           -> 'preventistas') x
+     WHERE x->>'preventista_id' = (SELECT usuario_id::text FROM pedidos WHERE id = p_ped)
+  $f$;
+  -- Lo que muestra el gerencial de hoy de la sucursal de la boleta: 'venta|cmv|margen|unidades|pedidos'.
+  CREATE FUNCTION pg_temp.g(p_ped bigint) RETURNS text LANGUAGE sql AS $f$
+    SELECT format('%s|%s|%s|%s|%s', round((k->>'venta')::numeric), round((k->>'cmv')::numeric),
+                  round((k->>'margen_comercial')::numeric), k->>'unidades', k->>'pedidos')
+      FROM (SELECT public.reporte_gerencial((SELECT sucursal_id FROM pedidos WHERE id = p_ped),
+                                            public._tablero_hoy(), public._tablero_hoy())->'kpis' AS k) x
+  $f$;
   CREATE FUNCTION pg_temp.u1(p_item bigint, p_cant int) RETURNS jsonb LANGUAGE sql AS $f$
     SELECT jsonb_build_array(jsonb_build_object('pedido_item_id', p_item, 'cantidad', p_cant))
   $f$;
@@ -346,6 +436,9 @@ BEGIN
   ex  := pg_temp.prod(v_s, 'EX',  100, '[]', 100, 'exento', 0);
   z1  := pg_temp.prod(v_s, 'Z1',  50,  '[]', 100);
   z2  := pg_temp.prod(v_s, 'Z2',  100, '[]', 100);
+  hg  := pg_temp.prod(v_s, 'Hg',  100, '[{"dias":30,"cantidad":10,"restante":10}]', 0);
+  h4  := pg_temp.prod(v_s, 'H4',  100, '[]', 100);
+  rp  := pg_temp.prod(v_s, 'Rp',  10,  '[]', 200);
 
   -- ============================================================ R · reingresa
   v_p := pg_temp.bol(v_c1, v_ven, 'ZZ', jsonb_build_array(jsonb_build_object('p', a, 'c', 10, 'pr', 100)));
@@ -644,7 +737,8 @@ BEGIN
     v_fallas := v_fallas || format('D1b la comisión por clave baja cada parte y suma 100: %s', v_j);
   END IF;
   v_m := (SELECT COALESCE(sum(ingreso_real), 0) FROM public._ventas_nc(ARRAY[v_s], v_hoy, v_hoy) x WHERE x.pedido_id = v_p);
-  IF NOT (abs(v_m - v_n - 87.72) < 0.01) THEN
+  -- H6 de la revisión: al centavo, la suma del ingreso real de la nota es su neto.
+  IF v_m - v_n IS DISTINCT FROM 87.72 THEN
     v_fallas := v_fallas || format('D1b el ingreso real de la nota (%s) es su neto (87.72)', v_m - v_n);
   END IF;
   -- Hasta acá, la única nota de una FC de la sucursal es ésta.
@@ -703,14 +797,16 @@ BEGIN
     v_fallas := v_fallas || text 'D7 cada nota de la FC con neto + iva = total';
   END IF;
 
-  v_p2 := pg_temp.bol(v_c1, v_ven, 'ZZ', jsonb_build_array(jsonb_build_object('p', z1, 'c', 2, 'pr', 50),
-                                                           jsonb_build_object('p', z2, 'c', 1, 'pr', 100)));
+  -- H9 de la revisión: líneas ZZ como las que escribe el alta (neto = precio / 1,21, IVA 0).
+  v_p2 := pg_temp.bol(v_c1, v_ven, 'ZZ', jsonb_build_array(jsonb_build_object('p', z1, 'c', 2, 'pr', 50, 'n', 41.32, 'i', 0),
+                                                           jsonb_build_object('p', z2, 'c', 1, 'pr', 100, 'n', 82.64, 'i', 0)));
   v_r := pg_temp.nc(v_p2, '[{"monto": 30}]', 'descuento_comercial');
   IF (SELECT string_agg(subtotal::text, ',' ORDER BY id) FROM nota_credito_venta_items
        WHERE nota_credito_id = (v_r->>'nota_credito_id')::bigint) IS DISTINCT FROM '15.00,15.00'
-     OR (SELECT format('%s|%s', neto, iva) FROM notas_credito_venta WHERE id = (v_r->>'nota_credito_id')::bigint)
-        IS DISTINCT FROM '30.00|0.00' THEN
-    v_fallas := v_fallas || format('D8 ZZ: %s', v_r);
+     OR (SELECT format('%s|%s|%s', total, neto, iva) FROM notas_credito_venta WHERE id = (v_r->>'nota_credito_id')::bigint)
+        IS DISTINCT FROM '30.00|24.80|0.00' THEN
+    v_fallas := v_fallas || format('D8 ZZ con líneas del alta: %s / %s', v_r,
+      (SELECT format('%s|%s|%s', total, neto, iva) FROM notas_credito_venta WHERE id = (v_r->>'nota_credito_id')::bigint));
   END IF;
 
   FOR v_t IN SELECT x FROM unnest(ARRAY[
@@ -748,6 +844,208 @@ BEGIN
     v_fallas := v_fallas || format('D11 anular un descuento: %s', v_r);
   END IF;
   v_fallas := v_fallas || pg_temp.ver('D11', z1, 'stock=98 lotes=[] bolsa=98');
+
+  -- ========================================== H · el renglón pide la mercadería (H1)
+  -- Un PWA anterior manda el payload de siempre (sin "mercaderia"): su nota es sólo plata, como dice
+  -- su pantalla. hg: L1 10, venta de 6 (L1 4).
+  v_p := pg_temp.bol(v_c1, v_ven, 'ZZ', jsonb_build_array(jsonb_build_object('p', hg, 'c', 6, 'pr', 100)));
+  v_i := pg_temp.linea(v_p);
+  v_r := pg_temp.nc_crudo(v_p, pg_temp.u1(v_i, 3), 'cliente_rechaza');
+  PERFORM pg_temp.nc_crudo(v_p, pg_temp.u1(v_i, 2), 'producto_vencido');
+  v_fallas := v_fallas || pg_temp.ver('H1 sin marca no mueve nada', hg, 'stock=4 lotes=[4] bolsa=0')
+                       || pg_temp.verh('H1', v_i, 'L1:6');
+  IF EXISTS (SELECT 1 FROM mermas_stock WHERE producto_id = hg)
+     OR EXISTS (SELECT 1 FROM nota_credito_venta_items i JOIN notas_credito_venta n ON n.id = i.nota_credito_id
+                 WHERE n.pedido_id = v_p AND (i.lotes_devueltos IS NOT NULL OR i.merma_id IS NOT NULL))
+     OR v_r->>'mercaderia' IS DISTINCT FROM 'nada' THEN
+    v_fallas := v_fallas || format('H1 sin marca: ni merma ni anotación (%s)', v_r);
+  END IF;
+  PERFORM pg_temp.nc(v_p, pg_temp.u1(v_i, 1), 'cliente_rechaza');
+  v_fallas := v_fallas || pg_temp.ver('H1 con marca, mueve', hg, 'stock=5 lotes=[5] bolsa=0');
+  v_rid := gen_random_uuid();
+  v_p2 := pg_temp.bol(v_c1, v_ven, 'ZZ', jsonb_build_array(jsonb_build_object('p', hg, 'c', 2, 'pr', 100)));
+  PERFORM pg_temp.nc_crudo(v_p2, pg_temp.u1(pg_temp.linea(v_p2), 1), 'cliente_rechaza', v_rid);
+  v_t := pg_temp.nc_crudo_err(v_p2, pg_temp.marcar(pg_temp.u1(pg_temp.linea(v_p2), 1), 'cliente_rechaza'),
+                              'cliente_rechaza', v_rid);
+  IF v_t NOT LIKE '22023%' THEN
+    v_fallas := v_fallas || format('H1 reintentar con la marca es otro contenido: %s', v_t);
+  END IF;
+  FOR v_t IN SELECT x FROM unnest(ARRAY[
+      pg_temp.nc_crudo_err(v_p2, jsonb_build_array(jsonb_build_object('pedido_item_id', pg_temp.linea(v_p2), 'cantidad', 1,
+                                                                      'mercaderia', true)), 'otro')
+        || ' :: no mueve mercadería',
+      pg_temp.nc_crudo_err(v_p2, '[{"monto": 10, "mercaderia": true}]', 'descuento_comercial') || ' :: por monto no mueve',
+      pg_temp.nc_crudo_err(v_p2, jsonb_build_array(jsonb_build_object('pedido_item_id', pg_temp.linea(v_p2), 'cantidad', 1,
+                                                                      'mercaderia', 'si')), 'cliente_rechaza')
+        || ' :: sí o no']) x
+  LOOP
+    IF split_part(v_t, ' :: ', 1) NOT LIKE '%' || split_part(v_t, ' :: ', 2) || '%' THEN
+      v_fallas := v_fallas || ('H1 ' || v_t);
+    END IF;
+  END LOOP;
+
+  -- ============================== P · el reparto con tope (H2): 30 renglones de $ 10
+  FOR v_k IN 1..4 LOOP
+    v_j := '[]'::jsonb;
+    FOR v_n IN 1..30 LOOP
+      v_j := v_j || jsonb_build_array(jsonb_build_object('p', rp, 'c', 1, 'pr', 10));
+    END LOOP;
+    v_p := pg_temp.bol(v_c1, v_ven, 'ZZ', v_j);
+    v_m := (ARRAY[299.84, 0.15, 300, 100])[v_k];
+    v_t := pg_temp.nc_err(v_p, jsonb_build_array(jsonb_build_object('monto', v_m)), 'descuento_comercial');
+    SELECT format('%s renglones, Σ %s, de %s a %s, %s de 0,01 y %s de 3,34', count(*), sum(i.subtotal), min(i.subtotal),
+                  max(i.subtotal), count(*) FILTER (WHERE i.subtotal = 0.01), count(*) FILTER (WHERE i.subtotal = 3.34))
+      INTO v_t2
+      FROM nota_credito_venta_items i JOIN notas_credito_venta n ON n.id = i.nota_credito_id WHERE n.pedido_id = v_p;
+    IF v_t <> 'OK' OR v_t2 IS DISTINCT FROM (ARRAY[
+         '30 renglones, Σ 299.84, de 9.99 a 10.00, 0 de 0,01 y 0 de 3,34',
+         '15 renglones, Σ 0.15, de 0.01 a 0.01, 15 de 0,01 y 0 de 3,34',
+         '30 renglones, Σ 300.00, de 10.00 a 10.00, 0 de 0,01 y 0 de 3,34',
+         '30 renglones, Σ 100.00, de 3.33 a 3.34, 0 de 0,01 y 10 de 3,34'])[v_k] THEN
+      v_fallas := v_fallas || format('P%s descuento de %s sobre 30 × 10: %s · %s', v_k, v_m, v_t, v_t2);
+    END IF;
+  END LOOP;
+
+  -- ===================================== H4 y D7 · unidades después de un descuento
+  v_p := pg_temp.bol(v_c1, v_ven, 'ZZ', jsonb_build_array(jsonb_build_object('p', h4, 'c', 5, 'pr', 100)));
+  v_i := pg_temp.linea(v_p);
+  PERFORM pg_temp.nc(v_p, pg_temp.u1(v_i, 3), 'otro');
+  PERFORM pg_temp.nc(v_p, jsonb_build_array(jsonb_build_object('pedido_item_id', v_i, 'monto', 200)), 'descuento_comercial');
+  v_t := pg_temp.nc_err(v_p, pg_temp.u1(v_i, 1), 'cliente_rechaza');
+  IF v_t NOT LIKE '%ya se le acreditó toda su plata con un descuento. Para devolver la mercadería, anulá primero ese descuento.%' THEN
+    v_fallas := v_fallas || format('H4 sin plata en la línea: %s', v_t);
+  END IF;
+  v_p := pg_temp.bol(v_c1, v_ven, 'ZZ', jsonb_build_array(jsonb_build_object('p', h4, 'c', 3, 'pr', 100)));
+  v_i := pg_temp.linea(v_p);
+  v_nc := (pg_temp.nc(v_p, jsonb_build_array(jsonb_build_object('pedido_item_id', v_i, 'monto', 30)), 'descuento_comercial')
+           ->>'nota_credito_id')::bigint;
+  v_nc2 := (pg_temp.nc(v_p, pg_temp.u1(v_i, 1), 'cliente_rechaza')->>'nota_credito_id')::bigint;
+  PERFORM pg_temp.anular(v_nc);
+  v_nc3 := (pg_temp.nc(v_p, pg_temp.u1(v_i, 1), 'cliente_rechaza')->>'nota_credito_id')::bigint;
+  IF (SELECT string_agg(i.subtotal::text, ',' ORDER BY i.id) FROM nota_credito_venta_items i
+       WHERE i.nota_credito_id IN (v_nc2, v_nc3)) IS DISTINCT FROM '90.00,100.00' THEN
+    v_fallas := v_fallas || format('D7 una unidad nunca acredita más que su precio: %s',
+      (SELECT string_agg(i.subtotal::text, ',' ORDER BY i.id) FROM nota_credito_venta_items i WHERE i.nota_credito_id IN (v_nc2, v_nc3)));
+  END IF;
+
+  -- ============================ H6 · 30 renglones FC: el ingreso real suma el neto
+  v_j := '[]'::jsonb;
+  FOR v_n IN 1..30 LOOP
+    v_j := v_j || jsonb_build_array(jsonb_build_object('p', CASE WHEN v_n % 3 = 0 THEN g105 WHEN v_n % 3 = 1 THEN g21 ELSE ex END,
+      'c', 1, 'pr', (ARRAY[33.33, 47.17, 21.11])[1 + v_n % 3],
+      'n', (ARRAY[30.16, 38.98, 21.11])[1 + v_n % 3], 'i', (ARRAY[3.17, 8.19, 0])[1 + v_n % 3]));
+  END LOOP;
+  v_p := pg_temp.bol(v_c1, v_ven, 'FC', v_j);
+  v_nc := (pg_temp.nc(v_p, '[{"monto": 777.77}]', 'descuento_comercial')->>'nota_credito_id')::bigint;
+  SELECT sum(x.ingreso_real) INTO v_m FROM public._ventas_nc(ARRAY[v_s], v_hoy, v_hoy) x WHERE x.nota_credito_id = v_nc;
+  IF v_m IS DISTINCT FROM (SELECT neto FROM notas_credito_venta WHERE id = v_nc)
+     OR (SELECT total FROM notas_credito_venta WHERE id = v_nc) <> 777.77
+     OR (SELECT abs(neto + iva - total) FROM notas_credito_venta WHERE id = v_nc) > 0.005 THEN
+    v_fallas := v_fallas || format('H6 Σ ingreso real %s y el neto de la nota %s', v_m,
+                                   (SELECT format('%s|%s|%s', total, neto, iva) FROM notas_credito_venta WHERE id = v_nc));
+  END IF;
+
+  -- =================================================== C · el margen (B22 v3)
+  -- Decisión del dueño del 18/11: el gerencial resta del CMV el costo de lo que la nota devuelve de verdad.
+  -- C1 su ejemplo: 10 fardos a 1.000 con costo 700, devuelve 2 que reingresan → 8.000 / 5.600 / 2.400.
+  v_p := pg_temp.caso_m(1000, 700, 10);
+  IF pg_temp.g(v_p) <> '10000|7000|3000|10|1' THEN
+    v_fallas := v_fallas || ('C0 antes de la nota: ' || pg_temp.g(v_p));
+  END IF;
+  PERFORM pg_temp.nc(v_p, pg_temp.u1(pg_temp.linea(v_p), 2), 'cliente_rechaza');
+  IF pg_temp.g(v_p) <> '8000|5600|2400|8|1' THEN
+    v_fallas := v_fallas || ('C1 devuelve 2 que reingresan: venta|cmv|margen|unidades|pedidos = ' || pg_temp.g(v_p)
+                             || ' (esperado 8000|5600|2400|8|1)');
+  END IF;
+  v_j := public.reporte_gerencial((SELECT sucursal_id FROM pedidos WHERE id = v_p), v_hoy, v_hoy);
+  SELECT format('cat %s/%s · vend %s · top %s/%s u. · mes %s/%s · Σcat %s',
+                round((v_j#>>'{categorias,0,venta}')::numeric), round((v_j#>>'{categorias,0,margen_comercial}')::numeric),
+                round((v_j#>>'{vendedores,0,margen_comercial}')::numeric), round((v_j#>>'{top_productos,0,margen}')::numeric),
+                v_j#>>'{top_productos,0,unidades}',
+                round((SELECT sum((m->>'cmv')::numeric) FROM jsonb_array_elements(v_j->'mensual') m)),
+                round((SELECT sum((m->>'margen_real')::numeric) FROM jsonb_array_elements(v_j->'mensual') m)),
+                round((SELECT sum((c->>'venta')::numeric) FROM jsonb_array_elements(v_j->'categorias') c)))
+    INTO v_t;
+  IF v_t <> 'cat 8000/2400 · vend 2400 · top 2400/8 u. · mes 5600/2400 · Σcat 8000' THEN
+    v_fallas := v_fallas || ('C1 el detalle cierra con el total: ' || v_t);
+  END IF;
+  -- C2 el caso de la revisión: 10 × 100 a costo 60, 5 vencidos → venta 500, CMV 300, margen 200 y la merma 300
+  -- (antes: margen −100 Y mermas 300, el costo dos veces).
+  v_p := pg_temp.caso_m(100, 60, 10);
+  PERFORM pg_temp.nc(v_p, pg_temp.u1(pg_temp.linea(v_p), 5), 'producto_vencido');
+  v_j := public.reporte_gerencial((SELECT sucursal_id FROM pedidos WHERE id = v_p), v_hoy, v_hoy)->'kpis';
+  IF pg_temp.g(v_p) <> '500|300|200|5|1' OR round((v_j->>'mermas')::numeric) <> 300 THEN
+    v_fallas := v_fallas || format('C2 cinco vencidos: %s, mermas %s (esperado 500|300|200|5|1 y 300)', pg_temp.g(v_p), v_j->>'mermas');
+  END IF;
+  -- Rendimiento: el vencido no le descuenta al vendedor (B16): ni plata, ni unidades, ni costo.
+  IF pg_temp.rend(v_p) IS DISTINCT FROM '1000|10|400' THEN
+    v_fallas := v_fallas || format('C9 Rendimiento con una nota que no le descuenta al vendedor: %s (esperado 1000|10|400)', pg_temp.rend(v_p));
+  END IF;
+  -- C2b con el promedio de hoy en 75 (el de la venta, 60): la merma vale 60 la unidad, lo que salió del CMV.
+  v_p := pg_temp.caso_m(100, 60, 10);
+  UPDATE productos SET costo_promedio = 75 WHERE id = (SELECT producto_id FROM pedido_items WHERE pedido_id = v_p);
+  PERFORM pg_temp.nc(v_p, pg_temp.u1(pg_temp.linea(v_p), 5), 'producto_danado');
+  v_j := public.reporte_gerencial((SELECT sucursal_id FROM pedidos WHERE id = v_p), v_hoy, v_hoy)->'kpis';
+  IF pg_temp.g(v_p) <> '500|300|200|5|1' OR round((v_j->>'mermas')::numeric) <> 300
+     OR (SELECT string_agg(mv.procedencia || '·' || round(mv.costo_unitario), ',')
+           FROM public.mermas_valorizadas(v_hoy, v_hoy, ARRAY[(SELECT sucursal_id FROM pedidos WHERE id = v_p)]) mv)
+        IS DISTINCT FROM 'nota_credito_venta·60' THEN
+    v_fallas := v_fallas || format('C2b merma al costo de la venta: %s, mermas %s, %s', pg_temp.g(v_p), v_j->>'mermas',
+      (SELECT string_agg(mv.procedencia || '·' || round(mv.costo_unitario), ',')
+         FROM public.mermas_valorizadas(v_hoy, v_hoy, ARRAY[(SELECT sucursal_id FROM pedidos WHERE id = v_p)]) mv));
+  END IF;
+  -- C3 descuento por monto: 9.500 / 7.000 / 2.500 (no hay mercadería).
+  v_p := pg_temp.caso_m(1000, 700, 10);
+  PERFORM pg_temp.nc(v_p, '[{"monto": 500}]', 'descuento_comercial');
+  IF pg_temp.g(v_p) <> '9500|7000|2500|10|1' THEN
+    v_fallas := v_fallas || ('C3 descuento de 500: ' || pg_temp.g(v_p) || ' (esperado 9500|7000|2500|10|1)');
+  END IF;
+  -- C4 la nota anulada no resta nada.
+  v_p := pg_temp.caso_m(1000, 700, 10);
+  v_nc := (pg_temp.nc(v_p, pg_temp.u1(pg_temp.linea(v_p), 2), 'cliente_rechaza')->>'nota_credito_id')::bigint;
+  PERFORM pg_temp.anular(v_nc);
+  IF pg_temp.g(v_p) <> '10000|7000|3000|10|1' THEN
+    v_fallas := v_fallas || ('C4 anulada: ' || pg_temp.g(v_p) || ' (esperado 10000|7000|3000|10|1)');
+  END IF;
+  -- C5 una línea sin costo: su devolución tampoco entra al margen.
+  v_p := pg_temp.caso_m(1000, NULL, 10);
+  PERFORM pg_temp.nc(v_p, pg_temp.u1(pg_temp.linea(v_p), 2), 'cliente_rechaza');
+  v_j := public.reporte_gerencial((SELECT sucursal_id FROM pedidos WHERE id = v_p), v_hoy, v_hoy)->'kpis';
+  IF pg_temp.g(v_p) <> '8000|0|0|8|1' OR round((v_j->>'ingreso_sin_costo')::numeric) <> 8000 THEN
+    v_fallas := v_fallas || format('C5 sin costo: %s, sin costo %s', pg_temp.g(v_p), v_j->>'ingreso_sin_costo');
+  END IF;
+  -- C6 sin la marca (un PWA anterior) no se movió nada: no resta costo.
+  v_p := pg_temp.caso_m(1000, 700, 10);
+  PERFORM pg_temp.nc_crudo(v_p, pg_temp.u1(pg_temp.linea(v_p), 2), 'cliente_rechaza');
+  IF pg_temp.g(v_p) <> '8000|7000|1000|10|1' THEN
+    v_fallas := v_fallas || ('C6 sin mover mercadería: ' || pg_temp.g(v_p) || ' (esperado 8000|7000|1000|10|1)');
+  END IF;
+  -- C8 Rendimiento («Sí, las dos», el dueño el 18/11): el rechazo le descuenta al vendedor y se emitió en
+  -- el mes de su boleta (resta_rendimiento): resta 2.000 de plata, 2 u. (B16) y el costo de las 2 (1.400).
+  v_p := pg_temp.caso_m(1000, 700, 10);
+  PERFORM pg_temp.nc(v_p, pg_temp.u1(pg_temp.linea(v_p), 2), 'cliente_rechaza');
+  IF pg_temp.rend(v_p) IS DISTINCT FROM '8000|8|2400'
+     OR NOT (SELECT resta_rendimiento FROM notas_credito_venta WHERE pedido_id = v_p) THEN
+    v_fallas := v_fallas || format('C8 Rendimiento con una nota que descuenta: %s (esperado 8000|8|2400)', pg_temp.rend(v_p));
+  END IF;
+  -- C10 fuera del mes: una boleta del mes pasado y la nota de hoy no tocan el Rendimiento de aquel mes.
+  v_p := pg_temp.caso_m(1000, 700, 10, (date_trunc('month', v_hoy) - interval '1 month')::date);
+  PERFORM pg_temp.nc(v_p, pg_temp.u1(pg_temp.linea(v_p), 2), 'cliente_rechaza');
+  IF pg_temp.rend(v_p) IS DISTINCT FROM '10000|10|3000'
+     OR (SELECT resta_rendimiento FROM notas_credito_venta WHERE pedido_id = v_p) THEN
+    v_fallas := v_fallas || format('C10 Rendimiento con una nota fuera del mes: %s (esperado 10000|10|3000)', pg_temp.rend(v_p));
+  END IF;
+  -- C11 congelada: la misma nota, como emitida en el mes de su boleta (resta_rendimiento, como T4b de B16),
+  -- resta 8000|8|2400; anularla con ese mes cerrado no lo mueve, y sigue restando también el costo.
+  v_p := pg_temp.caso_m(1000, 700, 10, (date_trunc('month', v_hoy) - interval '1 month')::date);
+  v_nc := (pg_temp.nc(v_p, pg_temp.u1(pg_temp.linea(v_p), 2), 'cliente_rechaza')->>'nota_credito_id')::bigint;
+  UPDATE notas_credito_venta SET resta_rendimiento = true WHERE id = v_nc;
+  v_t := pg_temp.rend(v_p);
+  PERFORM pg_temp.anular(v_nc);
+  IF v_t IS DISTINCT FROM '8000|8|2400' OR pg_temp.rend(v_p) IS DISTINCT FROM '8000|8|2400'
+     OR NOT (SELECT resta_rendimiento FROM notas_credito_venta WHERE id = v_nc) THEN
+    v_fallas := v_fallas || format('C11 Rendimiento congelado: %s y anulada %s (esperado 8000|8|2400 las dos)', v_t, pg_temp.rend(v_p));
+  END IF;
 
   -- ================================== X · lo que deja cada nota de la sucursal
   -- (no es un check de auditoria_integridad: lo mira el ensayo sobre todas las notas que armó)

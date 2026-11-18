@@ -89,7 +89,8 @@ BEGIN
   PERFORM set_config('app.stock_pedido_item_id', '', true);
 
   INSERT INTO b22t VALUES ('suc', v_s), ('cli', v_c), ('ped', v_bol),
-    ('items_u', (SELECT jsonb_agg(jsonb_build_object('pedido_item_id', id, 'cantidad', 5) ORDER BY id)::text
+    -- Como el front nuevo: cada renglón pide mover la mercadería (sin la marca, el server no la mueve).
+    ('items_u', (SELECT jsonb_agg(jsonb_build_object('pedido_item_id', id, 'cantidad', 5, 'mercaderia', true) ORDER BY id)::text
                    FROM pedido_items WHERE pedido_id = v_bol)),
     ('items_m', '[{"monto": 1234.56}]');
 END

@@ -24,9 +24,17 @@
 --     cambian (la nota es un documento aparte).
 --   · merma (producto_vencido, producto_danado): devolver y mermar en el mismo
 --     movimiento, como la salvedad (234/#1127): neto 0 en stock y lotes, una
---     fila de mermas_stock (vencimiento / rotura, valuada como toda merma por
---     su trigger y por mermas_valorizadas) y la huella de la línea baja.
+--     fila de mermas_stock (vencimiento / rotura) y la huella de la línea baja.
+--     La merma vale el costo con que la venta contó esas unidades (la foto de
+--     la línea, por costo_valuacion), no el de hoy: es lo que sale del CMV del
+--     gerencial (sección 4). mermas_valorizadas toma el costo guardado.
 --   · nada (descuento_comercial, otro).
+--   · El renglón lo PIDE (H1 de la revisión): mueve mercadería sólo si trae
+--     "mercaderia": true. Un PWA de antes de esta migración no lo manda (y su
+--     pantalla dice que la nota no mueve stock): su nota queda como siempre,
+--     sólo plata. La marca va dentro de p_items, así que entra en p_contenido y
+--     un reintento con y sin marca es otro contenido (22023). Una marca con un
+--     motivo que no mueve nada, o en un renglón por monto, se rechaza.
 --   Lo que se hizo queda anotado en el renglón, como en la salvedad:
 --   nota_credito_venta_items.lotes_devueltos (a qué lote volvió cada unidad y
 --   cuánta huella perdió la línea) y nota_credito_venta_items.merma_id. NULL en
@@ -55,25 +63,67 @@
 --       [{monto}]                      toda la boleta, prorrateado;
 --       [{pedido_item_id, monto}, …]   uno o más renglones, cada uno con su monto.
 --     Por monto sólo con descuento_comercial.
---   · El prorrateo es prorratear_cargo (el de los cargos de compra: partes al
---     centavo y el residuo a la de mayor peso), con el peso de lo que cada
---     línea de venta vale hoy: su subtotal (ya neto de salvedades) menos los
---     renglones de las notas vigentes sobre ella. Los regalos (precio 0) y una
---     línea sin producto no reciben nada; ninguna parte pasa lo que le queda a
---     su línea.
+--   · El prorrateo es _nc_venta_repartir: restos mayores con tope (H2 de la
+--     revisión). Cada parte es el piso al centavo de monto × peso / total, y
+--     los centavos que faltan van de a uno a las de mayor resto, sin pasar lo
+--     que le queda a cada línea ni dar negativo; el peso es lo que cada línea
+--     de venta vale hoy: su subtotal (ya neto de salvedades) menos los
+--     renglones de las notas vigentes sobre ella. Un descuento de todo lo que
+--     queda entra. prorratear_cargo (el del envío y las compras) no cambia.
+--     Espejo en el front (repartirDescuentoNC) con gate: los mismos casos dan
+--     los mismos centavos. Los regalos (precio 0) y una línea sin producto no
+--     reciben nada.
 --   · El neto y el IVA de cada parte salen de la foto de su línea
 --     (_nc_venta_desglose): la nota guarda la suma, y una FC queda con
 --     neto + iva = total al centavo.
 --   · Una nota por unidades sobre una línea que ya tiene un descuento acredita
---     lo que le queda a la línea por unidad (la última unidad, lo que quede):
---     sin descuento en la línea es cantidad × precio, como siempre.
+--     lo que le queda a la línea por unidad (la última unidad, lo que quede),
+--     nunca más que su precio (D7 de la revisión: 3 × 100, descuento 30, una
+--     unidad a 90; anulado el descuento, la siguiente acredita 100, no 105). Sin
+--     descuento en la línea es cantidad × precio, como siempre. Si un descuento
+--     ya acreditó toda la plata de la línea, se rechaza con qué hacer: anular
+--     primero ese descuento (H4; no hay notas de total 0).
 --   · Tope de toda nota: esta más las vigentes no pasa lo vendido en la boleta
 --     (Σ de sus líneas de venta, sin el envío).
 --   · Lo del vendedor no cambia de regla: cada parte resta de la clave de su
 --     línea (_nc_resta_comision), así que lo que baja la comisión suma el monto.
 --   · _ventas_nc: el ingreso real de un renglón cuyo subtotal no es
---     cantidad × precio (por monto, o con descuento previo) es proporcional a su
---     subtotal; con cantidad 0 daba 0.
+--     cantidad × precio (por monto, o con descuento previo) es su plata menos lo
+--     que no es ingreso real, al centavo (con cantidad 0 daba 0). En una FC es
+--     el neto de la parte (_nc_venta_desglose), así que la suma de la nota da su
+--     neto (H6 de la revisión).
+--
+-- =========================================================================
+-- 4 · EL MARGEN RESTA EL COSTO DE LO QUE LA NOTA DEVUELVE (decisión del dueño
+--     del 18/11: «Sí, corregilo»)
+-- =========================================================================
+-- Se venden 10 fardos a $ 1.000 que costaron $ 700 y el cliente devuelve 2 que
+-- vuelven al stock: antes el gerencial restaba los $ 2.000 de venta y seguía
+-- contando el costo de los 10 ($ 7.000): ganancia $ 1.000. Ahora resta también
+-- el de los 2 ($ 1.400): CMV $ 5.600, ganancia $ 2.400.
+--   · Sólo el renglón de una nota vigente que movió mercadería (reingresó o fue
+--     a merma: lotes_devueltos / merma_id, no el motivo). _ventas_nc lo da en
+--     cantidad_mercaderia; un descuento, un motivo que no mueve y las notas
+--     anteriores dan 0.
+--   · Al costo con que la venta lo contó (costo_valuacion con la foto de la
+--     línea), por la fecha de la nota. Una línea sin costo sigue fuera del margen.
+--   · En reporte_gerencial el renglón de la nota en `it` lleva menos lo devuelto
+--     (antes, 0): resta de las unidades (KPI y top de productos) y, a su costo,
+--     de todo CMV y margen. Los pedidos y los clientes no cambian («Sí, las dos»,
+--     el dueño el 18/11: con 10 vendidos y 2 devueltos, 8 unidades).
+--   · Con merma, el costo sale del CMV y lo cuenta la merma (que vale ese mismo
+--     costo, sección 1): una sola vez. Con 10 × 100 a 60 y 5 vencidos: venta
+--     500, CMV 300, margen 200, mermas 300 (antes margen −100 y mermas 300).
+--   · Rendimiento del preventista («Sí, las dos»): su margen resta también el
+--     costo de lo devuelto, sólo de las notas con resta_rendimiento (la foto de
+--     B16), y lo congelado sigue congelado aunque la nota se anule. Las unidades
+--     de Rendimiento no cambian: ya restan por motivo desde B16.
+--
+-- =========================================================================
+-- 5 · LA PROCEDENCIA DE LA MERMA DE UNA NOTA (H3 de la revisión)
+-- =========================================================================
+-- merma_procedencia reconoce la merma de una nota ('nota_credito_venta') por el
+-- texto que le escribe _nc_venta_mover_mercaderia; antes salía «Carga directa».
 --
 -- =========================================================================
 -- 3 · LA SALVEDAD MIRA LA NOTA VIGENTE CON LA BOLETA TOMADA (bug anterior)
@@ -134,6 +184,13 @@ BEGIN
     ('public.nc_venta_motivos()', 'ff6636880e4c0573e957cc9e0f8fc648'),
     ('public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)', 'a8232d05d0fc8f1124b7974f490db222'),
     ('public.nota_credito_vigente_de_pedido(bigint)', NULL),
+    ('public.merma_procedencia(bigint,text,text)', '5c41746599b2d510cbab7166c0ff7ab4'),
+    ('public._nc_rendimiento(bigint[],date,date)', '95f66e3844872148502ce0e0e310fcab'),
+    ('public.rendimiento_preventistas(bigint,date)', 'f65e37477ab363bf9fd985874385fea0'),
+    -- reporte_gerencial va sin md5 (otras tarjetas le parchan el tramo de
+    -- compras): se exige que sus anclas aparezcan una vez.
+    ('public.reporte_gerencial(bigint,date,date,boolean,boolean)', NULL),
+    ('public.costo_valuacion(numeric,numeric,numeric,numeric,numeric)', NULL),
     ('public._credito_bloquea_boletas(bigint,bigint,bigint,numeric)', NULL),
     ('public._credito_bloquea_rutas_y_creditos(bigint[],bigint,bigint,bigint)', NULL),
     ('public._aplicar_credito_pagos(bigint,bigint,bigint[])', NULL)
@@ -148,6 +205,7 @@ BEGIN
     END IF;
   END LOOP;
   IF to_regproc('public._nc_venta_desglose') IS NOT NULL
+     OR to_regproc('public._nc_venta_repartir') IS NOT NULL
      OR to_regproc('public._nc_venta_mover_mercaderia') IS NOT NULL
      OR to_regproc('public._nc_venta_deshacer_mercaderia') IS NOT NULL THEN
     RAISE EXCEPTION 'mig NNN · algo de esta migración ya existe: revisar a mano';
@@ -221,16 +279,73 @@ AS $function$
 $function$;
 
 -- =========================================================================
+-- El reparto de un descuento sobre toda la boleta (restos mayores con tope)
+-- =========================================================================
+CREATE FUNCTION public._nc_venta_repartir(p_monto numeric, p_restos jsonb)
+RETURNS TABLE(item_id bigint, monto numeric)
+LANGUAGE plpgsql
+IMMUTABLE
+SET search_path TO 'public'
+AS $function$
+-- B22 (H2 de la revisión): reparte p_monto entre las líneas de p_restos
+-- ({id: lo que le queda}) en proporción a lo que le queda a cada una. En
+-- centavos: cada parte es el piso de monto × peso / total, y los centavos que
+-- faltan van de a uno a las de mayor resto de esa división (a igual resto, la
+-- de más peso, y después el id menor). Ninguna parte pasa lo que le queda a su
+-- línea ni es negativa: con monto <= total, el piso de cada una ya es menor que
+-- su peso, y faltan menos centavos que líneas. Un monto mayor que el total se
+-- rechaza (lo mira antes quien llama, con su mensaje). Las partes en 0 no salen.
+-- Espejo: repartirDescuentoNC (src/utils/notaCreditoVenta.ts), con gate
+-- (scripts/espejo-reparto-descuento-nc.mjs y src/constants/repartoDescuentoNC.espejo.json).
+DECLARE
+  v_t numeric := round(p_monto * 100);
+  v_w numeric;
+BEGIN
+  IF p_monto IS NULL OR p_monto = 'NaN'::numeric OR p_restos IS NULL OR jsonb_typeof(p_restos) <> 'object'
+     OR v_t <= 0 THEN
+    RETURN;
+  END IF;
+  SELECT sum(round(e.value::numeric * 100)) INTO v_w
+    FROM jsonb_each_text(p_restos) e
+   WHERE round(e.value::numeric * 100) > 0;
+  IF v_w IS NULL OR v_t > v_w THEN
+    RAISE EXCEPTION 'El descuento (%) pasa lo que le queda a la boleta (%)',
+      to_char(v_t / 100, 'FM999999999990.00'), to_char(COALESCE(v_w, 0) / 100, 'FM999999999990.00')
+      USING ERRCODE = '22023';
+  END IF;
+  RETURN QUERY
+  WITH l AS (
+    SELECT e.key::bigint AS id, round(e.value::numeric * 100) AS w
+      FROM jsonb_each_text(p_restos) e
+     WHERE round(e.value::numeric * 100) > 0
+  ), b AS (
+    SELECT l.id, l.w, div(v_t * l.w, v_w) AS piso, mod(v_t * l.w, v_w) AS resto FROM l
+  ), f AS (
+    SELECT v_t - sum(b.piso) AS faltan FROM b
+  ), o AS (
+    SELECT b.*, row_number() OVER (ORDER BY b.resto DESC, b.w DESC, b.id) AS k FROM b
+  )
+  SELECT o.id, round((o.piso + CASE WHEN o.k <= f.faltan THEN 1 ELSE 0 END) / 100, 2)
+    FROM o, f
+   WHERE o.piso + CASE WHEN o.k <= f.faltan THEN 1 ELSE 0 END > 0
+   ORDER BY o.id;
+END;
+$function$;
+
+-- =========================================================================
 -- Mover la mercadería de una nota recién creada
 -- =========================================================================
-CREATE FUNCTION public._nc_venta_mover_mercaderia(p_nota_credito_id bigint, p_usuario uuid)
+CREATE FUNCTION public._nc_venta_mover_mercaderia(p_nota_credito_id bigint, p_usuario uuid,
+                                                  p_pedido_item_ids bigint[])
 RETURNS integer
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path TO 'public'
 AS $function$
 -- B22 (#1603): lo que la nota hace con la mercadería según su motivo
--- (nc_venta_motivos().mercaderia), renglón por renglón con unidades. Son las
+-- (nc_venta_motivos().mercaderia), en los renglones con unidades que lo
+-- pidieron (p_pedido_item_ids: sus líneas, las que traían "mercaderia": true;
+-- H1 de la revisión). Son las
 -- piezas de registrar_salvedad, sin cambiarle nada a ella:
 --   · reingresa: la subida con un origen de la lista blanca y la línea en
 --     app.stock_pedido_item_id, así _restaurar_lotes_fefo la devuelve al lote de
@@ -268,14 +383,16 @@ BEGIN
     FROM notas_credito_venta n
     JOIN public.nc_venta_motivos() m ON m.motivo = n.motivo
    WHERE n.id = p_nota_credito_id;
-  IF NOT FOUND OR v_nc.mercaderia NOT IN ('reingresa', 'merma') THEN
+  IF NOT FOUND OR v_nc.mercaderia NOT IN ('reingresa', 'merma')
+     OR COALESCE(cardinality(p_pedido_item_ids), 0) = 0 THEN
     RETURN 0;
   END IF;
 
   PERFORM 1 FROM productos
    WHERE sucursal_id = v_nc.sucursal_id
      AND id IN (SELECT i.producto_id FROM nota_credito_venta_items i
-                 WHERE i.nota_credito_id = p_nota_credito_id AND i.cantidad > 0)
+                 WHERE i.nota_credito_id = p_nota_credito_id AND i.cantidad > 0
+                   AND i.pedido_item_id = ANY(p_pedido_item_ids))
    ORDER BY id
      FOR UPDATE;
 
@@ -288,6 +405,7 @@ BEGIN
       FROM nota_credito_venta_items i
      WHERE i.nota_credito_id = p_nota_credito_id
        AND i.cantidad > 0
+       AND i.pedido_item_id = ANY(p_pedido_item_ids)
        AND i.lotes_devueltos IS NULL AND i.merma_id IS NULL
      ORDER BY i.id
   LOOP
@@ -345,14 +463,24 @@ BEGIN
       SELECT stock INTO v_stock
         FROM productos
        WHERE id = r.producto_id AND sucursal_id = v_nc.sucursal_id;
+      -- B22 v3 (decisión del dueño del 18/11): la merma vale lo que la venta contó por
+      -- esas unidades (la foto de la línea, por costo_valuacion), el mismo número que
+      -- sale del CMV del gerencial; no el costo de hoy. Sin foto ni costo, NULL: el
+      -- trigger de mermas_stock pone el de hoy. El texto de observaciones lo lee
+      -- merma_procedencia ('nota_credito_venta').
       INSERT INTO mermas_stock (
         producto_id, cantidad, motivo, observaciones,
-        stock_anterior, stock_nuevo, usuario_id, sucursal_id
+        stock_anterior, stock_nuevo, usuario_id, sucursal_id, costo_unitario
       ) VALUES (
         r.producto_id, r.cantidad,
         CASE v_nc.motivo WHEN 'producto_danado' THEN 'rotura' ELSE 'vencimiento' END,
         'Nota de crédito de venta #' || p_nota_credito_id || ' (pedido #' || v_nc.pedido_id || ')',
-        v_stock, GREATEST(v_stock - r.cantidad, 0), p_usuario, v_nc.sucursal_id
+        v_stock, GREATEST(v_stock - r.cantidad, 0), p_usuario, v_nc.sucursal_id,
+        (SELECT round(public.costo_valuacion(pi.costo_unitario_al_crear, p.costo_promedio, p.costo_real,
+                                             p.costo_sin_iva, p.impuestos_internos), 4)
+           FROM productos p
+           LEFT JOIN pedido_items pi ON pi.id = r.pedido_item_id
+          WHERE p.id = r.producto_id)
       ) RETURNING id INTO v_merma_id;
       PERFORM set_config('app.stock_origen', 'merma', true);
       PERFORM set_config('app.stock_ref_tipo', 'mermas_stock', true);
@@ -616,10 +744,12 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION public._nc_venta_desglose(numeric, numeric, numeric, numeric) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public._nc_venta_mover_mercaderia(bigint, uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._nc_venta_repartir(numeric, jsonb) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._nc_venta_mover_mercaderia(bigint, uuid, bigint[]) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._nc_venta_deshacer_mercaderia(bigint, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._nc_venta_desglose(numeric, numeric, numeric, numeric) TO service_role;
-GRANT EXECUTE ON FUNCTION public._nc_venta_mover_mercaderia(bigint, uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public._nc_venta_repartir(numeric, jsonb) TO service_role;
+GRANT EXECUTE ON FUNCTION public._nc_venta_mover_mercaderia(bigint, uuid, bigint[]) TO service_role;
 GRANT EXECUTE ON FUNCTION public._nc_venta_deshacer_mercaderia(bigint, uuid) TO service_role;
 
 -- =========================================================================
@@ -673,10 +803,16 @@ END
 $rsv$;
 
 -- =========================================================================
--- _ventas_nc: el ingreso real de un renglón que no es cantidad × precio
+-- _ventas_nc: el ingreso real de un renglón que no es cantidad × precio, y lo
+-- que la nota devolvió de verdad (para el CMV)
 -- =========================================================================
-CREATE OR REPLACE FUNCTION public._ventas_nc(p_sucs bigint[], p_desde date, p_hasta date)
- RETURNS TABLE(nota_credito_id bigint, fecha date, sucursal_id bigint, pedido_id bigint, cliente_id bigint, zona_id bigint, usuario_id uuid, tipo_factura text, pedido_item_id bigint, producto_id bigint, cantidad integer, monto numeric, iva numeric, ingreso_real numeric, costo_al_crear numeric)
+-- Suma una columna (cambia el tipo de retorno): se dropea y se crea. Nada
+-- depende de ella en pg_depend (las diez que la leen son plpgsql y piden sus
+-- columnas por nombre; el gerencial hace SELECT * a su CTE y después nombra).
+-- Queda una sola firma, con los mismos permisos.
+DROP FUNCTION public._ventas_nc(bigint[], date, date);
+CREATE FUNCTION public._ventas_nc(p_sucs bigint[], p_desde date, p_hasta date)
+ RETURNS TABLE(nota_credito_id bigint, fecha date, sucursal_id bigint, pedido_id bigint, cliente_id bigint, zona_id bigint, usuario_id uuid, tipo_factura text, pedido_item_id bigint, producto_id bigint, cantidad integer, monto numeric, iva numeric, ingreso_real numeric, costo_al_crear numeric, cantidad_mercaderia integer)
  LANGUAGE sql
  STABLE
  SET search_path TO 'public'
@@ -687,21 +823,29 @@ AS $function$
          i.subtotal * n.iva / n.total,
          -- B22 (#1603): un renglón por monto (cantidad 0) o uno por unidades que
          -- acredita menos que cantidad × precio (la línea tenía un descuento) da el
-         -- ingreso real en proporción a su plata; los de siempre, como siempre.
+         -- ingreso real como su plata menos lo que no es ingreso real, al centavo:
+         -- en una FC, el neto de la parte (el de _nc_venta_desglose), así que la
+         -- suma de la nota da su neto (H6). Los de siempre, como siempre.
          CASE WHEN pi.id IS NOT NULL AND i.subtotal = i.cantidad * pi.precio_unitario
               THEN i.cantidad * COALESCE(pi.ingreso_real_unitario,
                                          CASE WHEN pe.tipo_factura = 'FC'
                                               THEN COALESCE(pi.neto_unitario, pi.precio_unitario)
                                               ELSE pi.precio_unitario END)
               WHEN pi.id IS NOT NULL AND pi.precio_unitario > 0
-              THEN i.subtotal * COALESCE(pi.ingreso_real_unitario,
-                                         CASE WHEN pe.tipo_factura = 'FC'
-                                              THEN COALESCE(pi.neto_unitario, pi.precio_unitario)
-                                              ELSE pi.precio_unitario END)
-                   / pi.precio_unitario
+              THEN i.subtotal
+                   - round(i.subtotal * (pi.precio_unitario
+                                         - COALESCE(pi.ingreso_real_unitario,
+                                                    CASE WHEN pe.tipo_factura = 'FC'
+                                                         THEN COALESCE(pi.neto_unitario, pi.precio_unitario)
+                                                         ELSE pi.precio_unitario END))
+                           / pi.precio_unitario, 2)
               ELSE i.subtotal * CASE WHEN pe.tipo_factura = 'FC' THEN n.neto ELSE n.total END / n.total
          END,
-         pi.costo_unitario_al_crear
+         pi.costo_unitario_al_crear,
+         -- B22 v3 (decisión del dueño del 18/11): las unidades que la nota devolvió
+         -- de verdad (reingresaron o fueron a merma). Son las que salen del CMV; un
+         -- renglón que no movió mercadería da 0.
+         CASE WHEN i.lotes_devueltos IS NOT NULL OR i.merma_id IS NOT NULL THEN i.cantidad ELSE 0 END
     FROM notas_credito_venta n
     JOIN nota_credito_venta_items i ON i.nota_credito_id = n.id
     JOIN pedidos pe ON pe.id = n.pedido_id
@@ -715,6 +859,91 @@ AS $function$
      AND COALESCE(pe.canal, 'app') <> 'cambio'
      AND pe.tipo_factura IS DISTINCT FROM 'VB'
 $function$;
+REVOKE ALL ON FUNCTION public._ventas_nc(bigint[], date, date) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._ventas_nc(bigint[], date, date) TO service_role;
+
+-- =========================================================================
+-- _nc_rendimiento: lo que la nota devolvió de verdad
+-- =========================================================================
+-- Una columna más, cantidad_mercaderia, con la que rendimiento_preventistas
+-- resta el costo de lo devuelto (sección 4). Mismo cuerpo: se dropea y se
+-- crea; la lee sólo rendimiento_preventistas (plpgsql, por nombre). La
+-- anotación (lotes_devueltos / merma_id) queda en el renglón aunque la nota se
+-- anule, así que una nota anulada que sigue restando por congelada
+-- (resta_rendimiento) resta también su costo, como restaba su plata.
+DROP FUNCTION public._nc_rendimiento(bigint[], date, date);
+CREATE FUNCTION public._nc_rendimiento(p_sucs bigint[], p_desde date, p_hasta date)
+ RETURNS TABLE(usuario_id uuid, producto_id bigint, cantidad integer, monto numeric, costo_al_crear numeric, cantidad_mercaderia integer)
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public'
+AS $function$
+  SELECT pe.usuario_id, i.producto_id,
+         CASE WHEN mot.descuenta_unidades THEN i.cantidad ELSE 0 END,
+         i.subtotal, pi.costo_unitario_al_crear,
+         -- B22 v3: lo que devolvió de verdad (su costo resta del margen).
+         CASE WHEN i.lotes_devueltos IS NOT NULL OR i.merma_id IS NOT NULL THEN i.cantidad ELSE 0 END
+    FROM notas_credito_venta n
+    JOIN nota_credito_venta_items i ON i.nota_credito_id = n.id
+    JOIN pedidos pe ON pe.id = n.pedido_id
+    JOIN public.nc_venta_motivos() mot ON mot.motivo = n.motivo
+    LEFT JOIN pedido_items pi ON pi.id = i.pedido_item_id
+   WHERE n.resta_rendimiento
+     AND n.total > 0
+     AND n.sucursal_id = ANY(p_sucs)
+     AND n.fecha BETWEEN p_desde AND p_hasta
+     AND pe.estado = 'entregado'
+     AND COALESCE(pe.canal, 'app') <> 'cambio'
+     AND pe.tipo_factura IS DISTINCT FROM 'VB'
+$function$;
+REVOKE ALL ON FUNCTION public._nc_rendimiento(bigint[], date, date) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._nc_rendimiento(bigint[], date, date) TO service_role;
+
+-- =========================================================================
+-- merma_procedencia: la merma de una nota (H3)
+-- =========================================================================
+DO $mp$
+DECLARE
+  v_def text := pg_get_functiondef('public.merma_procedencia(bigint,text,text)'::regprocedure);
+BEGIN
+  v_def := pg_temp.parche(v_def,
+    $a$    WHEN p_observaciones LIKE 'Cancelacion por falta de stock, pedido #%'        THEN 'cancelacion_falta_stock'
+$a$,
+    $n$    WHEN p_observaciones LIKE 'Cancelacion por falta de stock, pedido #%'        THEN 'cancelacion_falta_stock'
+    -- B22 (#1603): el texto lo escribe _nc_venta_mover_mercaderia.
+    WHEN p_observaciones LIKE 'Nota de crédito de venta #%'                      THEN 'nota_credito_venta'
+$n$,
+    'merma_procedencia');
+  EXECUTE v_def;
+END
+$mp$;
+
+-- =========================================================================
+-- rendimiento_preventistas: el margen resta el costo de lo devuelto (sección 4)
+-- =========================================================================
+-- El renglón de la nota en `it` restaba la plata con costo 0 (`0 * …`). Ahora
+-- resta lo devuelto al costo con que la venta lo contó. Sólo llegan las notas
+-- con resta_rendimiento (_nc_rendimiento). Las unidades (`-n.cantidad`, por
+-- motivo desde B16) no se tocan. Una línea sin costo sigue dando NULL.
+DO $rp$
+DECLARE
+  v_def text := pg_get_functiondef('public.rendimiento_preventistas(bigint,date)'::regprocedure);
+BEGIN
+  v_def := pg_temp.parche(v_def,
+    $a$    -- la plata y, si el motivo lo dice, las unidades). No toca el costo. Una línea acreditada sin costo
+    -- resta de la venta sin costo.
+    SELECT n.usuario_id, -n.cantidad, -n.monto,
+           0 * public.costo_valuacion($a$,
+    $n$    -- la plata y, si el motivo lo dice, las unidades). Una línea acreditada sin costo
+    -- resta de la venta sin costo. B22 v3 («Sí, las dos», el dueño el 18/11): lo
+    -- que la nota devolvió de verdad resta también su costo, el de la foto de la
+    -- línea; las unidades siguen siendo las del motivo.
+    SELECT n.usuario_id, -n.cantidad, -n.monto,
+           -n.cantidad_mercaderia * public.costo_valuacion($n$,
+    'rendimiento_preventistas');
+  EXECUTE v_def;
+END
+$rp$;
 
 -- =========================================================================
 -- crear_nota_credito_venta_impl: los dos modos y la mercadería
@@ -766,6 +995,8 @@ DECLARE
   v_vendido     numeric;
   v_vigentes    numeric;
   v_movidas     integer := 0;
+  v_mueve       boolean := false; -- algún renglón pide mover la mercadería (H1)
+  v_a_mover     bigint[];         -- las líneas de esos renglones
 BEGIN
   IF v_sucursal IS NULL THEN
     RAISE EXCEPTION 'No hay sucursal activa' USING ERRCODE = '42501';
@@ -805,6 +1036,21 @@ BEGIN
   IF v_modo = 'monto' AND p_motivo IS DISTINCT FROM 'descuento_comercial' THEN
     RAISE EXCEPTION 'Un monto sin unidades es sólo para un descuento comercial: con otro motivo se acredita por unidades'
       USING ERRCODE = '22023';
+  END IF;
+  -- B22 (H1 de la revisión): la mercadería se mueve sólo en el renglón que lo pide
+  -- ("mercaderia": true). Un PWA anterior no lo manda y su nota queda como antes:
+  -- sólo plata. La marca es un booleano, y no va con un motivo que no mueve nada
+  -- ni en un renglón por monto.
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_items) e
+              WHERE e ? 'mercaderia' AND jsonb_typeof(e->'mercaderia') <> 'boolean') THEN
+    RAISE EXCEPTION 'La marca de mercadería de un renglón es sí o no (true / false)' USING ERRCODE = '22023';
+  END IF;
+  v_mueve := EXISTS (SELECT 1 FROM jsonb_array_elements(p_items) e WHERE (e->>'mercaderia')::boolean IS TRUE);
+  IF v_mueve AND v_modo = 'monto' THEN
+    RAISE EXCEPTION 'Un descuento por monto no mueve mercadería' USING ERRCODE = '22023';
+  END IF;
+  IF v_mueve AND v_mercaderia NOT IN ('reingresa', 'merma') THEN
+    RAISE EXCEPTION 'El motivo elegido no mueve mercadería: un renglón no puede pedir que se mueva' USING ERRCODE = '22023';
   END IF;
 
   -- #1512 (COB-1): el credito baja esta boleta y lo que sobra va FIFO a las
@@ -887,10 +1133,13 @@ BEGIN
              pi.subtotal,
              COALESCE(pi.es_bonificacion, false) AS es_bonif,
              COALESCE(a.cantidad, 0)           AS ya_acreditada,
-             COALESCE(a.monto, 0)              AS ya_monto
+             COALESCE(a.monto, 0)              AS ya_monto,
+             r.pide_mercaderia,
+             COALESCE(pr.nombre, 'este producto') AS nombre
         FROM (
           SELECT e->>'pedido_item_id' AS pedido_item_id_txt,
                  e->>'cantidad'       AS cantidad_txt,
+                 COALESCE((e->>'mercaderia')::boolean, false) AS pide_mercaderia,
                  o
             FROM jsonb_array_elements(p_items) WITH ORDINALITY AS t(e, o)
         ) r
@@ -898,6 +1147,7 @@ BEGIN
           ON pi.id::text = r.pedido_item_id_txt
          AND pi.pedido_id = p_pedido_id
          AND pi.sucursal_id = v_sucursal
+        LEFT JOIN productos pr ON pr.id = pi.producto_id
         LEFT JOIN LATERAL (
           SELECT SUM(i.cantidad) AS cantidad, SUM(i.subtotal) AS monto
             FROM nota_credito_venta_items i
@@ -938,15 +1188,24 @@ BEGIN
                                       COALESCE(v_it.precio_unitario, 0) - COALESCE(v_it.iva_unitario, 0));
       ELSE
         -- B22: la línea ya tiene un descuento por monto. Cada unidad acredita lo que
-        -- le queda a la línea por unidad, y la última, lo que quede.
-        v_sub := CASE WHEN v_cant = v_resto_u THEN GREATEST(v_resto_m, 0)
-                      ELSE GREATEST(round(v_cant * v_resto_m / v_resto_u, 2), 0) END;
+        -- le queda a la línea por unidad (la última, lo que quede), y nunca más que
+        -- su precio (D7: anulado un descuento, la plata que queda por unidad puede
+        -- pasar el precio). Si el descuento se llevó toda la plata de la línea, no
+        -- hay nota de total 0: hay que anular primero ese descuento (H4).
+        IF v_resto_m <= 0 THEN
+          RAISE EXCEPTION 'A «%» ya se le acreditó toda su plata con un descuento. Para devolver la mercadería, anulá primero ese descuento.',
+            v_it.nombre USING ERRCODE = '22023';
+        END IF;
+        v_sub := LEAST(v_cant * COALESCE(v_it.precio_unitario, 0),
+                       CASE WHEN v_cant = v_resto_u THEN v_resto_m
+                            ELSE GREATEST(round(v_cant * v_resto_m / v_resto_u, 2), 0) END);
         SELECT d.neto, d.iva INTO v_neto_r, v_iva_r
           FROM public._nc_venta_desglose(v_sub, v_it.precio_unitario, v_it.neto_unitario, v_it.iva_unitario) d;
       END IF;
       v_filas := v_filas || jsonb_build_object(
         'pedido_item_id', v_it.pi_id, 'producto_id', v_it.producto_id, 'cantidad', v_cant,
-        'precio_unitario', v_it.precio_unitario, 'subtotal', v_sub);
+        'precio_unitario', v_it.precio_unitario, 'subtotal', v_sub,
+        'mercaderia', v_it.pide_mercaderia AND v_mercaderia IN ('reingresa', 'merma'));
       v_total := v_total + v_sub;
       v_iva   := v_iva   + v_iva_r;
       v_neto  := v_neto  + v_neto_r;
@@ -999,18 +1258,16 @@ BEGIN
         RAISE EXCEPTION 'El descuento (%) pasa lo que le queda a la boleta (%)',
           to_char(v_monto, 'FM999999990.00'), to_char(v_resto_m, 'FM999999990.00') USING ERRCODE = '22023';
       END IF;
+      -- H2 de la revisión: restos mayores con tope (_nc_venta_repartir), no
+      -- prorratear_cargo: ninguna parte pasa lo que le queda a su línea ni es
+      -- negativa, y un descuento de todo lo que queda entra.
       FOR v_it IN
-        SELECT pr.item_id, pr.monto AS parte, (v_pesos->>pr.item_id::text)::numeric AS resto,
+        SELECT pr.item_id, pr.monto AS parte,
                pi.producto_id, pi.precio_unitario, pi.neto_unitario, pi.iva_unitario
-          FROM public.prorratear_cargo(v_monto, v_pesos) pr
+          FROM public._nc_venta_repartir(v_monto, v_pesos) pr
           JOIN pedido_items pi ON pi.id = pr.item_id
          ORDER BY pr.item_id
       LOOP
-        IF v_it.parte < 0 OR v_it.parte > v_it.resto THEN
-          RAISE EXCEPTION 'No se pudo repartir el descuento: al renglón % le tocan % y le quedan %',
-            v_it.item_id, v_it.parte, v_it.resto USING ERRCODE = '22023';
-        END IF;
-        CONTINUE WHEN v_it.parte = 0;
         SELECT d.neto, d.iva INTO v_neto_r, v_iva_r
           FROM public._nc_venta_desglose(v_it.parte, v_it.precio_unitario, v_it.neto_unitario, v_it.iva_unitario) d;
         v_filas := v_filas || jsonb_build_object(
@@ -1027,7 +1284,8 @@ BEGIN
                public._monto_de_cobro(r.monto_txt::numeric) AS parte,
                pi.id AS pi_id, pi.producto_id, pi.precio_unitario, pi.neto_unitario, pi.iva_unitario,
                COALESCE(pi.es_bonificacion, false) AS es_bonif,
-               pi.subtotal - COALESCE(a.monto, 0) AS resto
+               pi.subtotal - COALESCE(a.monto, 0) AS resto,
+               COALESCE((SELECT p.nombre FROM productos p WHERE p.id = pi.producto_id), 'este producto') AS nombre
           FROM (
             SELECT e->>'pedido_item_id' AS pedido_item_id_txt, e->>'monto' AS monto_txt, o
               FROM jsonb_array_elements(p_items) WITH ORDINALITY AS t(e, o)
@@ -1053,12 +1311,12 @@ BEGIN
             USING ERRCODE = '22023';
         END IF;
         IF v_it.producto_id IS NULL THEN
-          RAISE EXCEPTION 'El item % es de un producto que ya no existe: el descuento va sobre toda la boleta', v_it.pi_id
+          RAISE EXCEPTION 'Una de las líneas es de un producto que ya no existe: el descuento va sobre toda la boleta'
             USING ERRCODE = '22023';
         END IF;
         IF v_it.parte > v_it.resto THEN
-          RAISE EXCEPTION 'Item %: le quedan % por acreditar; no se le pueden descontar %',
-            v_it.pi_id, to_char(GREATEST(v_it.resto, 0), 'FM999999990.00'), to_char(v_it.parte, 'FM999999990.00')
+          RAISE EXCEPTION 'A «%» le quedan % por acreditar; no se le pueden descontar %',
+            v_it.nombre, to_char(GREATEST(v_it.resto, 0), 'FM999999990.00'), to_char(v_it.parte, 'FM999999990.00')
             USING ERRCODE = '22023';
         END IF;
         SELECT d.neto, d.iva INTO v_neto_r, v_iva_r
@@ -1091,12 +1349,16 @@ BEGIN
       to_char(v_total, 'FM999999990.00') USING ERRCODE = '22023';
   END IF;
 
-  -- B22: los productos que la nota mueve, todos y por id, después de la boleta y
-  -- antes de las rutas y los créditos: el orden de la venta y de la salvedad.
-  IF v_modo = 'unidades' AND v_mercaderia IN ('reingresa', 'merma') THEN
+  -- B22: los productos que la nota mueve (los de los renglones que lo piden),
+  -- todos y por id, después de la boleta y antes de las rutas y los créditos: el
+  -- orden de la venta y de la salvedad.
+  v_a_mover := ARRAY(SELECT (f->>'pedido_item_id')::bigint FROM jsonb_array_elements(v_filas) f
+                      WHERE (f->>'mercaderia')::boolean IS TRUE);
+  IF cardinality(v_a_mover) > 0 THEN
     PERFORM 1 FROM productos
      WHERE sucursal_id = v_sucursal
-       AND id IN (SELECT (f->>'producto_id')::bigint FROM jsonb_array_elements(v_filas) f)
+       AND id IN (SELECT (f->>'producto_id')::bigint FROM jsonb_array_elements(v_filas) f
+                   WHERE (f->>'mercaderia')::boolean IS TRUE)
      ORDER BY id
        FOR UPDATE;
   END IF;
@@ -1143,10 +1405,10 @@ BEGIN
    ORDER BY o;
 
   -- B22 (decisión del dueño del 17/11): la mercadería según el motivo (reingresa
-  -- a su lote / merma / nada). La nota sigue sin tocar el total ni las líneas de
-  -- la boleta.
-  IF v_modo = 'unidades' AND v_mercaderia IN ('reingresa', 'merma') THEN
-    v_movidas := public._nc_venta_mover_mercaderia(v_nc_id, v_user);
+  -- a su lote / merma / nada), en los renglones que lo piden (H1). La nota sigue
+  -- sin tocar el total ni las líneas de la boleta.
+  IF cardinality(v_a_mover) > 0 THEN
+    v_movidas := public._nc_venta_mover_mercaderia(v_nc_id, v_user, v_a_mover);
   END IF;
 
   -- El credito: nace como pago sin pedido = saldo a favor (165/235).
@@ -1371,6 +1633,36 @@ END;
 $function$;
 
 -- =========================================================================
+-- reporte_gerencial: la nota resta lo que devolvió (sección 4)
+-- =========================================================================
+-- El renglón de una nota en `it` llevaba cantidad 0. Ahora lleva menos lo que
+-- devolvió de verdad (cantidad_mercaderia: reingresó o fue a merma), así que
+-- resta de las unidades (KPI y top de productos) y, a su costo_unit, de todo
+-- CMV y todo margen (los ocho SUM(cantidad*costo_unit), sin tocarlos). Un
+-- descuento, un motivo que no mueve nada y una nota anterior a esta migración
+-- dan 0. Los pedidos y los clientes no cambian (la nota no tiene pedido).
+-- Por ancla, sin md5 (otras tarjetas le parchan el tramo de compras).
+DO $rg$
+DECLARE
+  v_def text := pg_get_functiondef('public.reporte_gerencial(bigint,date,date,boolean,boolean)'::regprocedure);
+BEGIN
+  v_def := pg_temp.parche(v_def,
+    $a$    SELECT NULL::bigint, n.usuario_id, n.fecha,
+           0, -n.monto, false,$a$,
+    $n$    SELECT NULL::bigint, n.usuario_id, n.fecha,
+           -n.cantidad_mercaderia, -n.monto, false,$n$,
+    'reporte_gerencial (it, la nota)');
+  v_def := pg_temp.parche(v_def,
+    $a$    -- Sin pedido (no suma pedidos) y con cantidad 0 (no toca unidades ni CMV). Es$a$,
+    $n$    -- Sin pedido (no suma pedidos). Su cantidad es menos lo que devolvió de verdad
+    -- (B22 v3, decisión del dueño del 18/11): resta de las unidades y, al costo
+    -- con que la venta lo contó (la foto de la línea), del CMV. Es$n$,
+    'reporte_gerencial (comentario)');
+  EXECUTE v_def;
+END
+$rg$;
+
+-- =========================================================================
 -- Poscondiciones
 -- =========================================================================
 DO $post$
@@ -1378,15 +1670,21 @@ DECLARE
   r record;
 BEGIN
   FOR r IN SELECT * FROM (VALUES
-    ('public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)', '_nc_venta_mover_mercaderia(v_nc_id, v_user)', true),
-    ('public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)', 'prorratear_cargo(v_monto, v_pesos)', true),
+    ('public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)', '_nc_venta_mover_mercaderia(v_nc_id, v_user, v_a_mover)', true),
+    ('public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)', '_nc_venta_repartir(v_monto, v_pesos)', true),
     ('public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)', 'es_motivo_nc_venta', true),
     ('public.anular_nota_credito_venta(bigint,text)', '_nc_venta_deshacer_mercaderia(p_nota_credito_id, v_user)', true),
     ('public.anular_nota_credito_venta(bigint,text)', 'OR id = (SELECT n.pedido_id FROM notas_credito_venta n', true),
     ('public.sincronizar_lotes_stock()', '''movimiento_editado'', ''nota_credito_venta'') THEN', true),
     ('public._ventas_nc(bigint[],date,date)', 'i.subtotal = i.cantidad * pi.precio_unitario', false),
-    ('public._nc_venta_mover_mercaderia(bigint,uuid)', '''nota_credito_venta_merma''', true),
-    ('public._nc_venta_deshacer_mercaderia(bigint,uuid)', '''nota_credito_venta_anulada''', true)
+    ('public._ventas_nc(bigint[],date,date)', 'i.lotes_devueltos IS NOT NULL OR i.merma_id IS NOT NULL', false),
+    ('public._nc_rendimiento(bigint[],date,date)', 'i.lotes_devueltos IS NOT NULL OR i.merma_id IS NOT NULL', false),
+    ('public._nc_venta_mover_mercaderia(bigint,uuid,bigint[])', '''nota_credito_venta_merma''', true),
+    ('public._nc_venta_mover_mercaderia(bigint,uuid,bigint[])', 'stock_nuevo, usuario_id, sucursal_id, costo_unitario', true),
+    ('public._nc_venta_deshacer_mercaderia(bigint,uuid)', '''nota_credito_venta_anulada''', true),
+    ('public.merma_procedencia(bigint,text,text)', 'THEN ''nota_credito_venta''', false),
+    ('public.reporte_gerencial(bigint,date,date,boolean,boolean)', '-n.cantidad_mercaderia, -n.monto, false,', true),
+    ('public.rendimiento_preventistas(bigint,date)', '-n.cantidad_mercaderia * public.costo_valuacion(', true)
   ) AS t(f, marca, definer) LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = r.f::regprocedure
                     AND position(r.marca in prosrc) > 0 AND prosecdef = r.definer) THEN
@@ -1406,9 +1704,21 @@ BEGIN
               WHERE oid = 'public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)'::regprocedure) THEN
     RAISE EXCEPTION 'mig NNN · el parche de registrar_salvedad no entró como se esperaba';
   END IF;
+  -- reporte_gerencial: el CMV y los márgenes siguen siendo los ocho SUM(cantidad*costo_unit).
+  IF (SELECT (length(prosrc) - length(replace(prosrc, 'SUM(cantidad*costo_unit)', ''))) / length('SUM(cantidad*costo_unit)')
+        FROM pg_proc WHERE oid = 'public.reporte_gerencial(bigint,date,date,boolean,boolean)'::regprocedure) <> 8 THEN
+    RAISE EXCEPTION 'mig NNN · reporte_gerencial ya no tiene los ocho SUM(cantidad*costo_unit) del CMV';
+  END IF;
+  -- Una sola firma de cada función que se dropeó y se creó.
+  IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace
+         AND proname IN ('_ventas_nc', '_nc_rendimiento', '_nc_venta_mover_mercaderia')) <> 3 THEN
+    RAISE EXCEPTION 'mig NNN · quedó más de una firma de _ventas_nc, _nc_rendimiento o _nc_venta_mover_mercaderia';
+  END IF;
   -- Las de server: sin EXECUTE para nadie de la API. La RPC y la anulación, sí.
   FOR r IN SELECT unnest(ARRAY['public._nc_venta_desglose(numeric,numeric,numeric,numeric)',
-                               'public._nc_venta_mover_mercaderia(bigint,uuid)',
+                               'public._nc_venta_repartir(numeric,jsonb)',
+                               'public._nc_rendimiento(bigint[],date,date)',
+                               'public._nc_venta_mover_mercaderia(bigint,uuid,bigint[])',
                                'public._nc_venta_deshacer_mercaderia(bigint,uuid)',
                                'public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)',
                                'public._ventas_nc(bigint[],date,date)']) AS f LOOP
