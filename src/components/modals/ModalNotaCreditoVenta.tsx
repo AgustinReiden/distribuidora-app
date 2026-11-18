@@ -171,7 +171,8 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
   const porMonto = esMotivoPorMonto(motivo)
   const quedaBoleta = montoDisponibleBoleta(lineas)
   const pct = enPorcentaje ? leerDecimalSinMiles(valorDescuento) : null
-  const montoBoleta = enPorcentaje ? montoDePorcentaje(lineas, pct ?? 0) : (leerNumero(valorDescuento) ?? 0)
+  // N5: al centavo, el mismo número que se reparte y que se manda.
+  const montoBoleta = enPorcentaje ? montoDePorcentaje(lineas, pct ?? 0) : redondearSQL(leerNumero(valorDescuento) ?? 0, 2)
   const motivoValor = enPorcentaje ? motivoPorcentajeNC(valorDescuento) : motivoMontoNC(valorDescuento, quedaBoleta)
   const montos: MontosNC = Object.fromEntries(Object.entries(montosTexto).map(([k, t]) => [k, leerNumero(t) ?? 0]))
   const montosDescuento = modoDescuento === 'productos' ? montos : null

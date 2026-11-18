@@ -288,6 +288,33 @@ describe('B22 · el descuento comercial por monto', () => {
     expect(montoUnidadesNC(lineasAcreditables(fc)[0], 2)).toBe(242)
   })
 
+  // N1 de la revisión (espejo de D7 del server): 3 × 100, un descuento de 30, una unidad acreditó 90 y
+  // después se anuló el descuento: a la línea le quedan 210 para 2 unidades (105 c/u), pero una unidad
+  // nunca acredita más que su precio.
+  it('una unidad nunca acredita más que su precio (D7)', () => {
+    const [l] = lineasAcreditables([{ id: 1, producto_id: 1, cantidad: 3, precio_unitario: 100 }], [
+      { anulada: false, items: [{ pedido_item_id: 1, cantidad: 1, subtotal: 90 }] },
+      { anulada: true, items: [{ pedido_item_id: 1, cantidad: 0, subtotal: 30 }] },
+    ])
+    expect([l.disponible, l.montoDisponible]).toEqual([2, 210])
+    expect(montoUnidadesNC(l, 1)).toBe(100)
+    expect(montoUnidadesNC(l, 2)).toBe(200)
+    // Con el descuento vigente, por debajo del precio: lo que le queda por unidad.
+    const [d] = lineasAcreditables([{ id: 1, producto_id: 1, cantidad: 3, precio_unitario: 100 }], [
+      { anulada: false, items: [{ pedido_item_id: 1, cantidad: 0, subtotal: 30 }] },
+    ])
+    expect(montoUnidadesNC(d, 1)).toBe(90)
+  })
+
+  // N5 de la revisión: el reparto sale del monto al centavo, el mismo que se manda.
+  it('con más de dos decimales, el reparto es el del monto al centavo', () => {
+    const lineas = lineasAcreditables(fc)
+    // 128,015 × 100 da 12801,4999… en double: redondeado así sería 128,01, y se manda 128,02.
+    const reparto = repartoDescuentoNC(lineas, 128.015)
+    expect(Math.round(reparto.reduce((s, r) => s + r.monto, 0) * 100)).toBe(12802)
+    expect(itemsDescuentoParaRPC(lineas, 128.015, null)).toEqual([{ monto: 128.02 }])
+  })
+
   it('valida el tope de la boleta y el de cada renglón', () => {
     const lineas = lineasAcreditables(fc)
     expect(validarDescuentoNC(lineas, 0, null)).toMatch(/Escribí el monto/)

@@ -233,15 +233,19 @@ export function lineasAcreditables(
  * Lo que acreditan `cant` unidades de una línea. Espejo de `crear_nota_credito_venta_impl`:
  * sin descuento previo en la línea es cantidad × precio; si la línea ya tiene un descuento
  * por monto (B22), cada unidad acredita lo que le queda a la línea por unidad y la última, lo
- * que quede.
+ * que quede; nunca más que cantidad × precio (D7: con un descuento ya anulado, lo que le queda a
+ * la línea por unidad puede pasar el precio, y el server topea en el precio).
  */
 export function montoUnidadesNC(l: LineaAcreditable, cant: number): number {
   if (!(cant > 0)) return 0
+  const tope = cant * l.precioUnitario
   if (l.disponible <= 0 || Math.abs(l.montoDisponible - l.disponible * l.precioUnitario) < 0.005) {
-    return cant * l.precioUnitario
+    return tope
   }
-  if (cant >= l.disponible) return l.montoDisponible
-  return Math.max(0, redondearSQL(cant * l.montoDisponible / l.disponible, 2))
+  const resto = cant >= l.disponible
+    ? l.montoDisponible
+    : Math.max(0, redondearSQL(cant * l.montoDisponible / l.disponible, 2))
+  return Math.min(tope, resto)
 }
 
 export type CantidadesNC = Readonly<Record<string, number>>
@@ -379,10 +383,13 @@ export function repartoDescuentoNC(
   lineas: ReadonlyArray<LineaAcreditable>,
   monto: number,
 ): Array<{ pedidoItemId: string; nombre: string; monto: number }> {
-  if (!(monto > 0)) return []
+  // N5 de la revisión: el reparto sale del monto ya al centavo, el mismo número que se manda
+  // (itemsDescuentoParaRPC); el campo guarda al centavo lo tipeado con más decimales.
+  const alCentavo = redondearSQL(monto, 2)
+  if (!(alCentavo > 0)) return []
   const restos: Record<string, number> = {}
   for (const l of lineas) if (l.montoDisponible > 0) restos[l.pedidoItemId] = l.montoDisponible
-  const partes = repartirDescuentoNC(monto, restos) ?? {}
+  const partes = repartirDescuentoNC(alCentavo, restos) ?? {}
   return lineas
     .filter(l => (partes[l.pedidoItemId] ?? 0) > 0)
     .map(l => ({ pedidoItemId: l.pedidoItemId, nombre: l.nombre, monto: partes[l.pedidoItemId] }))

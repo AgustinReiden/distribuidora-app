@@ -258,6 +258,18 @@ describe('ModalNotaCreditoVenta', () => {
       expect(mutateAsync.mock.calls[0][0]).toMatchObject({ motivo: 'descuento_comercial', items: [{ monto: 1000 }] })
     })
 
+    // N5 de la revisión: con tres decimales se guarda al centavo (aviso ámbar del campo), y el reparto que
+    // se muestra es el de ese mismo monto: 128,02 → Fideos 63,72 y Arroz 64,30 (con 128,01, 64,29).
+    it('con más de dos decimales, el reparto y el payload son los del monto al centavo', async () => {
+      elegirDescuento()
+      fireEvent.change(screen.getByLabelText('Monto del descuento'), { target: { value: '128,015' } })
+      expect(screen.getByText(/63,72/)).toBeInTheDocument()
+      expect(screen.getByText(/64,30/)).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /Emitir nota de crédito/ }))
+      await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+      expect(mutateAsync.mock.calls[0][0].items).toEqual([{ monto: 128.02 }])
+    })
+
     it('un porcentaje se convierte a plata y la pantalla lo muestra', async () => {
       elegirDescuento()
       fireEvent.click(screen.getByLabelText('%'))
