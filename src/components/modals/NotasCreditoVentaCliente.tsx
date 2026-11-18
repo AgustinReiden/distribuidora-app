@@ -17,6 +17,7 @@ import { formatPrecio, formatFecha } from '../../utils/formatters'
 import {
   LEYENDA_NC_COMISION,
   fechasNotaCreditoVenta,
+  mercaderiaDeNotaNC,
   motivoNCVentaLabel,
   totalNotasCreditoVigentes,
 } from '../../utils/notaCreditoVenta'
@@ -109,6 +110,7 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
           const credito = pagos && !pagosNoDisponibles ? estadoCreditoNotaCredito(pagos, nc.id) : null
           const yaAplicada = !!credito && credito.aplicado > TOLERANCIA_CENTAVOS
           const pagoLibre = credito?.pagoLibre && credito.pagoLibre.monto > TOLERANCIA_CENTAVOS ? credito.pagoLibre : null
+          const mercaderia = mercaderiaDeNotaNC(nc)
           return (
           <div
             key={nc.id}
@@ -122,6 +124,12 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
                 <p className="text-sm text-gray-500">
                   {fechasNotaCreditoVenta(nc)} • {motivoNCVentaLabel(nc.motivo)} • Pedido #{nc.pedido_id}
                 </p>
+                {mercaderia && (
+                  <p className="text-sm text-gray-500">
+                    {mercaderia === 'reingresa' ? 'La mercadería reingresó al stock' : 'La mercadería quedó como merma'}
+                    {nc.anulada ? ' (se deshizo al anularla)' : ''}
+                  </p>
+                )}
                 {nc.observaciones && <p className="mt-1 text-sm text-gray-400">{nc.observaciones}</p>}
               </div>
               <div className="flex items-center gap-2">
@@ -167,7 +175,10 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
               <ul className="mt-2 space-y-0.5 text-sm text-gray-600 dark:text-gray-300">
                 {nc.items.map(it => (
                   <li key={it.id} className="flex justify-between gap-2">
-                    <span>{it.cantidad} × {it.producto?.nombre ?? `Producto #${it.producto_id}`}</span>
+                    <span>
+                      {Number(it.cantidad) > 0 ? `${it.cantidad} × ` : 'Descuento · '}
+                      {it.producto?.nombre ?? `Producto #${it.producto_id}`}
+                    </span>
                     <span className="tabular-nums">{formatPrecio(it.subtotal)}</span>
                   </li>
                 ))}
@@ -189,6 +200,8 @@ export default function NotasCreditoVentaCliente({ clienteId, puedeAnular, onCam
                     y lo que ya se aplicó a boletas, que vuelven a deber eso
                     {yaAplicada && credito ? <> (<strong>{formatPrecio(credito.aplicado)}</strong> aplicados)</> : null}.
                     El total de la nota es <strong>{formatPrecio(nc.total)}</strong>.
+                    {mercaderia === 'reingresa' && ' Lo que reingresó al stock vuelve a salir.'}
+                    {mercaderia === 'merma' && ' Su merma se anula.'}
                   </span>
                 </p>
                 <input

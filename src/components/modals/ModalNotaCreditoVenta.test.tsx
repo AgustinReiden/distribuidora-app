@@ -26,8 +26,13 @@ vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => ({ success: vi.fn(), error: vi.fn() }),
 }))
 
-import ModalNotaCreditoVenta, { notaCreditoVentaSchema } from './ModalNotaCreditoVenta'
+import ModalNotaCreditoVenta, { descuentoNCVentaSchema, notaCreditoVentaSchema } from './ModalNotaCreditoVenta'
 import type { PedidoDB } from '../../types'
+
+// B22 (H1 de la revisión): el motivo no viene elegido; sin él no se emite.
+function elegirMotivo(valor: string) {
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: valor } })
+}
 
 const pedido = {
   id: '6510',
@@ -64,6 +69,7 @@ describe('ModalNotaCreditoVenta', () => {
   it('dice, según el motivo, si la nota le descuenta al vendedor', () => {
     render(<ModalNotaCreditoVenta pedido={pedido} onClose={() => {}} />)
     const motivo = screen.getByRole('combobox')
+    fireEvent.change(motivo, { target: { value: 'otro' } })
     expect(screen.getByText('Este motivo no le descuenta nada al vendedor.')).toBeInTheDocument()
     fireEvent.change(motivo, { target: { value: 'cliente_rechaza' } })
     expect(screen.getByText(/le descuenta al vendedor la plata y las unidades/)).toBeInTheDocument()
@@ -74,12 +80,16 @@ describe('ModalNotaCreditoVenta', () => {
   // Antes de la imputación elegida el modal se cerraba al emitir. Ahora queda
   // abierto en un paso final (imputar ya o dejar a favor), así que este test
   // fija que NO cierra solo y que «Dejar como saldo a favor» es lo que cierra.
+  // B22 (H1): con un motivo que mueve mercadería, cada renglón la pide al server, y antes de
+  // emitir el modal dice cuántas unidades van a merma.
   it('manda a la RPC sólo las líneas elegidas y pasa al paso final', async () => {
     const onClose = vi.fn()
     render(<ModalNotaCreditoVenta pedido={pedido} onClose={onClose} />)
+    elegirMotivo('producto_vencido')
     fireEvent.change(screen.getByLabelText('Cantidad a acreditar de Fideos'), { target: { value: '1' } })
     fireEvent.change(screen.getByLabelText('Cantidad a acreditar de Arroz'), { target: { value: '1' } })
     expect(screen.getByText(/16\.700/)).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Van a merma 2 u.')
     fireEvent.click(screen.getByRole('button', { name: /Emitir nota de crédito/ }))
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
     const arg = mutateAsync.mock.calls[0][0]
@@ -87,7 +97,10 @@ describe('ModalNotaCreditoVenta', () => {
       pedidoId: '6510',
       clienteId: '858',
       motivo: 'producto_vencido',
-      items: [{ pedido_item_id: 23807, cantidad: 1 }, { pedido_item_id: 23808, cantidad: 1 }],
+      items: [
+        { pedido_item_id: 23807, cantidad: 1, mercaderia: true },
+        { pedido_item_id: 23808, cantidad: 1, mercaderia: true },
+      ],
     })
     expect(typeof arg.clientRequestId).toBe('string')
     expect(await screen.findByText(/emitido \(nota de crédito #1\)/)).toBeInTheDocument()
@@ -100,6 +113,7 @@ describe('ModalNotaCreditoVenta', () => {
   // COB-1 (mig 479): el crédito baja primero este pedido y lo que sobra va FIFO a las otras
   // boletas. El modal cuenta adónde fue, sólo con las líneas que no son 0.
   async function emitir16700() {
+    elegirMotivo('otro')
     fireEvent.change(screen.getByLabelText('Cantidad a acreditar de Fideos'), { target: { value: '1' } })
     fireEvent.change(screen.getByLabelText('Cantidad a acreditar de Arroz'), { target: { value: '1' } })
     fireEvent.click(screen.getByRole('button', { name: /Emitir nota de crédito/ }))
@@ -148,6 +162,7 @@ describe('ModalNotaCreditoVenta', () => {
     imputarMutate.mockResolvedValue({ pagoId: '901', pedidoId: '7001', montoImputado: 10000, restoAFavor: 6700, pagoRestoId: '902', idempotentReplay: false })
     const onClose = vi.fn()
     render(<ModalNotaCreditoVenta pedido={pedido} onClose={onClose} />)
+    elegirMotivo('otro')
     fireEvent.change(screen.getByLabelText('Cantidad a acreditar de Fideos'), { target: { value: '1' } })
     fireEvent.change(screen.getByLabelText('Cantidad a acreditar de Arroz'), { target: { value: '1' } })
     fireEvent.click(screen.getByRole('button', { name: /Emitir nota de crédito/ }))
@@ -181,5 +196,136 @@ describe('ModalNotaCreditoVenta', () => {
   it('el schema co-locado acepta los motivos de la tabla', () => {
     expect(notaCreditoVentaSchema.safeParse({ motivo: 'producto_vencido' }).success).toBe(true)
     expect(notaCreditoVentaSchema.safeParse({ motivo: 'devolucion' }).success).toBe(false)
+    expect(descuentoNCVentaSchema.safeParse({ modo: 'boleta', total: 100 }).success).toBe(true)
+    expect(descuentoNCVentaSchema.safeParse({ modo: 'boleta', total: 0 }).success).toBe(false)
+  })
+
+  // B22 (17/11): según el motivo, la mercadería reingresa, queda como merma o no se mueve.
+  // Cambió de regla (H1 de la revisión, 18/11): el motivo ya no viene puesto («Producto vencido»
+  // movía stock sin que nadie lo eligiera) y, antes de emitir, el modal dice qué pasa con las
+  // unidades elegidas.
+  it('dice qué pasa con la mercadería según el motivo, con las unidades, antes de emitir', () => {
+    render(<ModalNotaCreditoVenta pedido={pedido} onClose={() => {}} />)
+    expect(screen.getByRole('combobox')).toHaveValue('')
+    expect(screen.queryByText(/quedan como merma/)).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
+    elegirMotivo('producto_vencido')
+    expect(screen.getByText(/quedan como merma/)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Cantidad a acreditar de Arroz'), { target: { value: '2' } })
+    expect(screen.getByRole('status')).toHaveTextContent('Van a merma 2 u.')
+    elegirMotivo('cliente_rechaza')
+    expect(screen.getByText('Las unidades vuelven al stock, al lote del que salieron.')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Vuelven al stock 2 u.')
+    elegirMotivo('otro')
+    expect(screen.getByText('No se mueve mercadería.')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('No mueve stock')
+  })
+
+  it('sin motivo no se emite', () => {
+    render(<ModalNotaCreditoVenta pedido={pedido} onClose={() => {}} />)
+    fireEvent.change(screen.getByLabelText('Cantidad a acreditar de Fideos'), { target: { value: '1' } })
+    expect(screen.getByRole('button', { name: /Emitir nota de crédito/ })).toBeDisabled()
+    elegirMotivo('otro')
+    expect(screen.getByRole('button', { name: /Emitir nota de crédito/ })).toBeEnabled()
+  })
+
+  // B22 (18/11): el descuento comercial va por monto, sin unidades, sobre toda la boleta
+  // (prorrateado) por defecto.
+  describe('descuento comercial por monto', () => {
+    // Fideos 1 × 11.100 y Arroz 2 × 5.600: le quedan 22.300 a la boleta.
+    function elegirDescuento() {
+      render(<ModalNotaCreditoVenta pedido={pedido} onClose={() => {}} />)
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: 'descuento_comercial' } })
+    }
+
+    it('cambia la carga: monto sobre toda la boleta, sin cantidades, y dice cuánto queda', () => {
+      elegirDescuento()
+      expect(screen.queryByLabelText('Cantidad a acreditar de Fideos')).toBeNull()
+      expect(screen.getByLabelText('Sobre toda la boleta')).toBeChecked()
+      expect(screen.getByText(/Queda por acreditar de la boleta/)).toHaveTextContent(/22\.300/)
+      expect(screen.getByRole('status')).toHaveTextContent('No mueve stock')
+    })
+
+    it('muestra cómo se reparte y manda un solo monto a la RPC', async () => {
+      elegirDescuento()
+      fireEvent.change(screen.getByLabelText('Monto del descuento'), { target: { value: '1000' } })
+      // 1.000 × 11.100 / 22.300 = 497,76; el resto (502,24) a Arroz, que pesa más.
+      expect(screen.getByText('Cómo se reparte')).toBeInTheDocument()
+      expect(screen.getByText(/497,76/)).toBeInTheDocument()
+      expect(screen.getByText(/502,24/)).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /Emitir nota de crédito/ }))
+      await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+      expect(mutateAsync.mock.calls[0][0]).toMatchObject({ motivo: 'descuento_comercial', items: [{ monto: 1000 }] })
+    })
+
+    // N5 de la revisión: con tres decimales se guarda al centavo (aviso ámbar del campo), y el reparto que
+    // se muestra es el de ese mismo monto: 128,02 → Fideos 63,72 y Arroz 64,30 (con 128,01, 64,29).
+    it('con más de dos decimales, el reparto y el payload son los del monto al centavo', async () => {
+      elegirDescuento()
+      fireEvent.change(screen.getByLabelText('Monto del descuento'), { target: { value: '128,015' } })
+      expect(screen.getByText(/63,72/)).toBeInTheDocument()
+      expect(screen.getByText(/64,30/)).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /Emitir nota de crédito/ }))
+      await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+      expect(mutateAsync.mock.calls[0][0].items).toEqual([{ monto: 128.02 }])
+    })
+
+    it('un porcentaje se convierte a plata y la pantalla lo muestra', async () => {
+      elegirDescuento()
+      fireEvent.click(screen.getByLabelText('%'))
+      fireEvent.change(screen.getByLabelText('Porcentaje del descuento'), { target: { value: '10' } })
+      // D6 de la revisión: con sus números, sobre qué se calcula.
+      expect(screen.getByText(/^10 % de .*22\.300,00 que quedan por acreditar = .*2\.230,00$/)).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /Emitir nota de crédito/ }))
+      await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+      expect(mutateAsync.mock.calls[0][0].items).toEqual([{ monto: 2230 }])
+    })
+
+    // H8 de la revisión: lo que pasa lo que queda va en rojo con su motivo y no se emite; no se
+    // recorta en silencio al máximo.
+    it('no deja pasar lo que le queda a la boleta: en rojo, con lo que queda', () => {
+      elegirDescuento()
+      fireEvent.change(screen.getByLabelText('Monto del descuento'), { target: { value: '22300,01' } })
+      expect(screen.getByLabelText('Monto del descuento')).toHaveValue('22.300,01')
+      expect(screen.getByText(/Quedan .*22\.300,00 por acreditar/)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Emitir nota de crédito/ })).toBeDisabled()
+      fireEvent.click(screen.getByRole('button', { name: /Emitir nota de crédito/ }))
+      expect(mutateAsync).not.toHaveBeenCalled()
+      // Todo lo que queda, entero, entra.
+      fireEvent.change(screen.getByLabelText('Monto del descuento'), { target: { value: '22300' } })
+      expect(screen.queryByText(/por acreditar$/)).toBeNull()
+      expect(screen.getByRole('button', { name: /Emitir nota de crédito/ })).toBeEnabled()
+    })
+
+    it('un porcentaje de más de 100 va en rojo', () => {
+      elegirDescuento()
+      fireEvent.click(screen.getByLabelText('%'))
+      fireEvent.change(screen.getByLabelText('Porcentaje del descuento'), { target: { value: '101' } })
+      expect(screen.getByText(/Hasta 100 %/)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Emitir nota de crédito/ })).toBeDisabled()
+    })
+
+    it('en avanzado, más de lo que le queda a un producto va en rojo', () => {
+      elegirDescuento()
+      fireEvent.click(screen.getByLabelText('Sobre productos (avanzado)'))
+      fireEvent.change(screen.getByLabelText('Monto a descontar de Fideos'), { target: { value: '11100,01' } })
+      expect(screen.getByText(/Quedan .*11\.100,00 por acreditar/)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Emitir nota de crédito/ })).toBeDisabled()
+    })
+
+    it('en avanzado manda un monto por producto', async () => {
+      elegirDescuento()
+      fireEvent.click(screen.getByLabelText('Sobre productos (avanzado)'))
+      fireEvent.change(screen.getByLabelText('Monto a descontar de Arroz'), { target: { value: '500' } })
+      fireEvent.click(screen.getByRole('button', { name: /Emitir nota de crédito/ }))
+      await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+      expect(mutateAsync.mock.calls[0][0].items).toEqual([{ pedido_item_id: 23808, monto: 500 }])
+    })
+
+    it('lo que ya descontó otra nota no se vuelve a ofrecer', () => {
+      notasPedido = [{ id: '1', fecha: '2026-09-29', anulada: false, items: [{ pedido_item_id: '23807', cantidad: 0, subtotal: 11100 }] }]
+      elegirDescuento()
+      expect(screen.getByText(/Queda por acreditar de la boleta/)).toHaveTextContent(/11\.200/)
+    })
   })
 })

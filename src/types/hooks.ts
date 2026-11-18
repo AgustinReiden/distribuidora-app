@@ -1157,13 +1157,20 @@ export interface NotaCreditoVentaItemDB {
   pedido_item_id: string | null;
   producto_id: string;
   producto?: { id: string; nombre: string } | null;
+  /** 0 = renglón por monto (un descuento comercial sin unidades, B22): la plata es `subtotal`. */
   cantidad: number;
   precio_unitario: number;
   subtotal: number;
+  /**
+   * B22: lo que la nota hizo con la mercadería del renglón (a qué lote volvió, qué huella
+   * perdió la línea) y su merma. NULL si no movió nada. Opcionales: un server anterior no los tiene.
+   */
+  lotes_devueltos?: unknown[] | null;
+  merma_id?: string | null;
 }
 
 /**
- * Documento aparte (no modifica el pedido ni el stock). El crédito es un pago
+ * Documento aparte (no modifica el pedido; según el motivo mueve mercadería, B22). El crédito es un pago
  * sin pedido con forma `nota_credito` que la apunta por `pagos.nota_credito_id`.
  */
 export interface NotaCreditoVentaDB {

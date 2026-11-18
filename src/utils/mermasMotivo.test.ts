@@ -12,9 +12,9 @@ import {
 
 describe('procedencia de la merma (#847)', () => {
   /** Espejo del CASE de `merma_procedencia()` (mig 301). */
-  const PROCEDENCIAS = ['entrega_salvedad', 'cancelacion_falta_stock', 'carga_directa', 'promocion']
+  const PROCEDENCIAS = ['entrega_salvedad', 'cancelacion_falta_stock', 'nota_credito_venta', 'carga_directa', 'promocion']
 
-  it('las cuatro procedencias del servidor tienen etiqueta', () => {
+  it('las cinco procedencias del servidor tienen etiqueta (la nota de crédito de venta desde B22)', () => {
     expect(Object.keys(LABELS_PROCEDENCIA).sort()).toEqual([...PROCEDENCIAS].sort())
     for (const p of PROCEDENCIAS) expect(labelProcedencia(p)).not.toBe(p)
   })
@@ -32,6 +32,7 @@ describe('procedencia de la merma (#847)', () => {
     expect(labelProcedenciaMotivo('cancelacion_falta_stock', 'error_inventario'))
       .toBe('Cancelación por falta de stock · Error inventario')
     expect(labelProcedenciaMotivo('carga_directa', 'error_inventario')).toBe('Carga directa · Error inventario')
+    expect(labelProcedenciaMotivo('nota_credito_venta', 'vencimiento')).toMatch(/^Nota de crédito de venta · /)
   })
 })
 
