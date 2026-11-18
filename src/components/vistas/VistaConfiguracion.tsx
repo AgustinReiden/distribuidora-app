@@ -13,6 +13,7 @@ import { formatCurrency } from '../../utils/formatters';
 import { leerPlataTipeada, numeroEditable, parsePrecio } from '../../utils/calculations';
 import { leerDecimalSinMiles, leerEntero, numeroConMiles } from '../../utils/normalizarNumero';
 import { CampoNumero } from '../ui/CampoNumero';
+import { useTrabajoEnCurso } from '../../hooks/useTrabajoEnCurso';
 import { DIAS_ATRAS_FECHA_PEDIDO_MAXIMO, DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO } from '../../utils/fechaPedido';
 import { errorDeMultiploRedondeo, MULTIPLO_REDONDEO_PRECIO } from '../../utils/precios';
 import { MONTO_MINIMO_TECHO, type ModoMinimoPedido, type ReglaMinimoPedido } from '../../utils/montoMinimo';
@@ -121,6 +122,8 @@ function FormAlertasVencimiento({
   // de sucursal.
   useEffect(() => { setAmarillo(numeroConMiles(diasAlerta)); }, [diasAlerta]);
   useEffect(() => { setRojo(numeroConMiles(diasCritico)); }, [diasCritico]);
+  // Lo tipeado y no guardado: la actualización obligatoria de la app no recarga encima (#1655).
+  useTrabajoEnCurso(amarillo !== numeroConMiles(diasAlerta) || rojo !== numeroConMiles(diasCritico), 'configuración: alertas de vencimiento sin guardar');
 
   // Enteros, con los miles que pone el campo (B20, D17): «3.650» son 3650 días; una coma, no.
   const nAmarillo = leerEntero(amarillo) ?? NaN;
@@ -329,6 +332,8 @@ function FormVentanaPrecioAnterior({
   // El valor del servidor llega después del primer render y cambia al cambiar
   // de sucursal.
   useEffect(() => { setValor(String(horas)); }, [horas]);
+  // Lo tipeado y no guardado: la actualización obligatoria de la app no recarga encima (#1655).
+  useTrabajoEnCurso(valor !== String(horas), 'configuración: ventana del precio anterior sin guardar');
 
   const n = leerEntero(valor) ?? NaN;
   // Mismo rango que el CHECK de la tabla y la RPC: entero de 0 a 168.
@@ -435,6 +440,8 @@ function FormDiasAtrasFechaPedido({
   // El valor del servidor llega después del primer render y cambia al cambiar
   // de sucursal.
   useEffect(() => { setValor(String(dias)); }, [dias]);
+  // Lo tipeado y no guardado: la actualización obligatoria de la app no recarga encima (#1655).
+  useTrabajoEnCurso(valor !== String(dias), 'configuración: días hacia atrás del pedido sin guardar');
 
   const n = leerEntero(valor) ?? NaN;
   // Mismo rango que el CHECK de la columna y la RPC: entero de 0 a 30.
@@ -542,6 +549,8 @@ function FormMultiploRedondeo({
   // El valor del servidor llega después del primer render y cambia al cambiar
   // de sucursal.
   useEffect(() => { setValor(numeroConMiles(multiplo)); }, [multiplo]);
+  // Lo tipeado y no guardado: la actualización obligatoria de la app no recarga encima (#1655).
+  useTrabajoEnCurso(valor !== numeroConMiles(multiplo), 'configuración: múltiplo de redondeo sin guardar');
 
   // Es plata (#1560): «1.000» es mil, no uno. Sin redondear, para que «1,234»
   // siga diciendo «hasta dos decimales» en vez de guardarse 1,23.
@@ -645,6 +654,8 @@ function FormAlertasCombos({
 
   useEffect(() => { setMargen(numeroEditable(margenMinimo)); }, [margenMinimo]);
   useEffect(() => { setDescuento(numeroEditable(descuentoMaximo)); }, [descuentoMaximo]);
+  // Lo tipeado y no guardado: la actualización obligatoria de la app no recarga encima (#1655).
+  useTrabajoEnCurso(margen !== numeroEditable(margenMinimo) || descuento !== numeroEditable(descuentoMaximo), 'configuración: alertas de combos sin guardar');
 
   // Porcentajes: sin miles (B20, D17); la tecla del punto es la coma.
   const nM = leerDecimalSinMiles(margen) ?? NaN;
@@ -776,6 +787,8 @@ function FormComisiones({
   // de sucursal.
   useEffect(() => { setPrev(numeroEditable(pctPreventista)); }, [pctPreventista]);
   useEffect(() => { setOtros(numeroEditable(pctOtros)); }, [pctOtros]);
+  // Lo tipeado y no guardado: la actualización obligatoria de la app no recarga encima (#1655).
+  useTrabajoEnCurso(prev !== numeroEditable(pctPreventista) || otros !== numeroEditable(pctOtros), 'configuración: comisiones sin guardar');
 
   // Porcentajes: sin miles (B20, D17); la tecla del punto es la coma.
   const nPrev = leerDecimalSinMiles(prev) ?? NaN;
@@ -980,6 +993,12 @@ export default function VistaConfiguracion({
   useEffect(() => { setModo(modoMinimoActual); }, [modoMinimoActual]);
   useEffect(() => { setGratis(numeroConMiles(montoEnvioGratisActual ?? 0)); }, [montoEnvioGratisActual]);
   useEffect(() => { setCargo(numeroConMiles(cargoEnvioActual ?? 0)); }, [cargoEnvioActual]);
+  // Lo tipeado y no guardado: la actualización obligatoria de la app no recarga encima (#1655).
+  useTrabajoEnCurso(
+    valor !== numeroConMiles(montoMinimoActual ?? 0) || gratis !== numeroConMiles(montoEnvioGratisActual ?? 0)
+      || cargo !== numeroConMiles(cargoEnvioActual ?? 0) || modo !== modoMinimoActual,
+    'configuración: compra mínima y envío sin guardar',
+  );
 
   const parseado = parsearMonto(valor);
   const parseadoGratis = parsearMonto(gratis);

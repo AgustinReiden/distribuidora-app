@@ -128,3 +128,39 @@ describe('VistaConfiguracion — múltiplo del redondeo de los precios en masa',
     expect(screen.getByText('Solo un admin puede cambiarlo.')).toBeInTheDocument()
   })
 })
+
+// Punto 9 de la segunda pasada de #1644 (#1655): /configuracion guarda en `useState` hasta
+// «Guardar», sin modal. Lo tipeado y no guardado levanta la marca de trabajo en curso, para que la
+// actualización obligatoria de la app no recargue encima; volver al valor precargado la baja.
+describe('VistaConfiguracion — lo tipeado sin guardar es trabajo en curso', () => {
+  const todas = props({
+    puedeEditarMinimo: true,
+    onGuardarAlertasCombos: vi.fn(),
+    puedeEditarAlertasCombos: true,
+    onGuardarDiasAtrasFechaPedido: vi.fn(),
+    puedeEditarDiasAtrasFechaPedido: true,
+  })
+
+  it.each([
+    ['Compra mínima por pedido', '5', 'configuración: compra mínima y envío sin guardar'],
+    ['Preventistas', '5', 'configuración: comisiones sin guardar'],
+    ['Amarillo', '5', 'configuración: alertas de vencimiento sin guardar'],
+    ['Horas', '5', 'configuración: ventana del precio anterior sin guardar'],
+    ['Múltiplo', '5', 'configuración: múltiplo de redondeo sin guardar'],
+    ['Margen mínimo', '5', 'configuración: alertas de combos sin guardar'],
+    ['Días hacia atrás', '5', 'configuración: días hacia atrás del pedido sin guardar'],
+  ])('«%s»', async (etiqueta, tecla, motivo) => {
+    const { motivosDeTrabajoEnCurso, _resetTrabajoEnCursoParaTests } = await import('../../utils/trabajoEnCurso')
+    _resetTrabajoEnCursoParaTests()
+    const user = userEvent.setup()
+    render(<VistaConfiguracion {...todas} />)
+    expect(motivosDeTrabajoEnCurso()).toEqual([])
+    const campo = screen.getByLabelText(etiqueta) as HTMLInputElement
+    const precargado = campo.value
+    await user.type(campo, tecla)
+    expect(motivosDeTrabajoEnCurso()).toEqual([motivo])
+    await user.clear(campo)
+    await user.type(campo, precargado)
+    expect(motivosDeTrabajoEnCurso()).toEqual([])
+  })
+})
