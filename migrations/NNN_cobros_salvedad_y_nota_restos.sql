@@ -62,6 +62,19 @@
 -- parte de ese renglón dé $ 0, con qué hacer: anular primero el descuento.
 -- N7: los mensajes de la rama por unidades (y los mismos de la rama por monto)
 -- nombran el producto, no el id de la línea.
+--
+-- =========================================================================
+-- 5 · 1592-b5 residual (#1592; N1 de la revisión de M4, parche de la tarjeta C2)
+-- =========================================================================
+-- Anular una salvedad que vuelve a dar derecho a un regalo se rechaza si alguna
+-- salvedad del pedido, viva o anulada, recortó un regalo de esa promo. Una
+-- salvedad sobre el propio regalo baja esa línea en su transacción, y eso se
+-- leía como un recorte: anular OTRA salvedad que no recortó nada se rechazaba.
+-- Ahora no cuenta la transacción en la que todas las salvedades son sobre un
+-- regalo de promo (sólo bajó el regalo que no llegó; no cambia la venta, así que
+-- no recorta derecho). Esas salvedades no se pueden anular (la guarda de la mig
+-- 234), así que el conjunto que se mira no depende del orden de las
+-- anulaciones. Una transacción que mezcla venta y regalo sigue contando entera.
 -- =========================================================================
 
 BEGIN;
@@ -126,7 +139,7 @@ BEGIN
 END
 $f$;
 
--- B15 (mig 531): una SECURITY DEFINER lleva pg_temp al final de su search_path.
+-- B15 (mig 531, ampliada el 19/11): toda función que fija search_path lo termina en pg_temp.
 -- Si la 531 ya entró, la definición ya lo trae y no se toca.
 CREATE FUNCTION pg_temp.con_pg_temp(p_def text, p_que text)
 RETURNS text LANGUAGE plpgsql AS $f$
@@ -163,18 +176,15 @@ DECLARE
   v_def text;
 BEGIN
   -- crear_nota_credito_venta_impl lleva el mismo parche más abajo, con N2 y N7.
-  FOR r IN SELECT * FROM (VALUES
-    ('public._aplicar_credito_pagos(bigint,bigint,bigint[])', false),
-    ('public.imputar_credito_a_pedido_impl(bigint,bigint,numeric)', true)
-  ) AS t(f, definer) LOOP
+  FOR r IN SELECT unnest(ARRAY['public._aplicar_credito_pagos(bigint,bigint,bigint[])',
+                               'public.imputar_credito_a_pedido_impl(bigint,bigint,numeric)']) AS f LOOP
     v_def := pg_get_functiondef(r.f::regprocedure);
     v_def := pg_temp.parche(v_def,
       $a$replace(COALESCE(notas, ''), '[saldo a favor]', '')$a$,
       $a$public._notas_sin_saldo_a_favor(notas)$a$,
       2, r.f);
-    IF r.definer THEN
-      v_def := pg_temp.con_pg_temp(v_def, r.f);
-    END IF;
+    -- B15 ampliada (19/11): definer o invoker, el search_path fijado termina en pg_temp.
+    v_def := pg_temp.con_pg_temp(v_def, r.f);
     EXECUTE v_def;
   END LOOP;
 END
@@ -318,6 +328,28 @@ $a$,
 $a$,
     1, v_que || ' (cobro nuevo)');
 
+  -- 1592-b5 residual (sección 5): la transacción de una salvedad sobre el regalo no cuenta como recorte.
+  v_def := pg_temp.parche(v_def,
+    $a$    WITH tx AS (
+      SELECT DISTINCT s.created_at
+        FROM salvedades_items s
+       WHERE s.pedido_id = v_salvedad.pedido_id AND s.sucursal_id = v_sucursal
+    ), filas AS (
+$a$,
+    $a$    WITH tx AS (
+      -- 1592-b5 residual (N1 de la revisión de M4; tanda 5 de #1603): una transacción cuyas
+      -- salvedades son todas sobre un regalo de promo sólo bajó esa línea (el regalo que no llegó), no
+      -- recortó nada. Esas salvedades no se anulan (la guarda de la mig 234, arriba), así que lo que se
+      -- mira no depende del orden en que se anulan las demás.
+      SELECT s.created_at
+        FROM salvedades_items s
+       WHERE s.pedido_id = v_salvedad.pedido_id AND s.sucursal_id = v_sucursal
+       GROUP BY s.created_at
+      HAVING NOT bool_and(COALESCE(s.es_bonificacion, false) AND s.promocion_id IS NOT NULL)
+    ), filas AS (
+$a$,
+    1, v_que || ' (1592-b5)');
+
   v_def := pg_temp.con_pg_temp(v_def, v_que);
   EXECUTE v_def;
 END
@@ -380,7 +412,9 @@ BEGIN
     ('public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)', '''Item %:', 0, true),
     ('public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)', 'Cantidad invalida para el item', 0, true),
     ('public.anular_salvedad(bigint,text)', 'COALESCE((r_rec.e->''marcas''->>''a_cuenta'')::boolean, false)', 1, true),
-    ('public.anular_salvedad(bigint,text)', '''pagos'' AND a.accion = ''DELETE''', 1, true)
+    ('public.anular_salvedad(bigint,text)', '''pagos'' AND a.accion = ''DELETE''', 1, true),
+    ('public.anular_salvedad(bigint,text)', 'HAVING NOT bool_and(COALESCE(s.es_bonificacion, false) AND s.promocion_id IS NOT NULL)', 1, true),
+    ('public.anular_salvedad(bigint,text)', 'SELECT DISTINCT s.created_at', 0, true)
   ) AS t(f, marca, n, definer) LOOP
     IF (SELECT (length(prosrc) - length(replace(prosrc, r.marca, ''))) / length(r.marca)
           FROM pg_proc WHERE oid = r.f::regprocedure) <> r.n
@@ -395,8 +429,10 @@ BEGIN
                 AND position($a$'[saldo a favor]', '')$a$ in prosrc) > 0) THEN
     RAISE EXCEPTION 'mig NNN · quedó un replace de «[saldo a favor]» sin la limpieza nueva';
   END IF;
-  -- Las definer que se recrearon llevan pg_temp (B15).
-  FOR r IN SELECT unnest(ARRAY['public.imputar_credito_a_pedido_impl(bigint,bigint,numeric)',
+  -- Las que se recrearon o nacieron con search_path lo terminan en pg_temp (B15, ampliada el 19/11).
+  FOR r IN SELECT unnest(ARRAY['public._aplicar_credito_pagos(bigint,bigint,bigint[])',
+                               'public._notas_sin_saldo_a_favor(text)',
+                               'public.imputar_credito_a_pedido_impl(bigint,bigint,numeric)',
                                'public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)',
                                'public.anular_salvedad(bigint,text)']) AS f LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = r.f::regprocedure

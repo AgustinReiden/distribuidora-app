@@ -32,6 +32,16 @@
 --   L8 · Los mensajes de la rama por unidades nombran el producto y no el id de la línea: cantidad 0, un regalo,
 --        más de lo entregado y un renglón que no es de la boleta.
 --
+--   1592-b5 residual (N1 de la revisión de M4) · una salvedad sobre el regalo no es un recorte
+--   Promo 10 → 2 del mismo producto, venta 20 y regalo 4. Cada salvedad en su propia transacción (se corre la
+--   hora de lo escrito, como en el ensayo de la tarjeta C2).
+--   L9 · R baja el regalo 2; A rechaza 5 de la venta (le quedan 15, derecho 2: no recorta). Anular A entra
+--        (antes se rechazaba porque la transacción de R bajó una línea de regalo).
+--   L10 · R, A (5) y C (5) sin recorte. Anular A y después C, y en el otro orden C y después A (con una
+--        anulada en el medio): las dos entran en los dos órdenes, y el pedido vuelve a venta 20 y regalo 2.
+--   E3 · R, A (10, no recorta) y B (5 más: el regalo baja a 0, recorta). Anular A y después B, y B y después A:
+--        las dos se rechazan en los dos órdenes (la regla conservadora, que no depende del orden).
+--
 -- Un único DO que termina siempre en una excepción (no deja nada), y cada caso en un sub-bloque que se revierte.
 -- Corre en la primera sucursal activa con un admin propio. Sin la migración tiene que dar 'ENSAYO FALLÓ' por los L.
 
@@ -618,6 +628,224 @@ BEGIN
 END
 $fn$;
 
+-- ---------------------------------------------------------------------------
+-- 1592-b5 residual
+-- ---------------------------------------------------------------------------
+-- Una promo «compra p_compra, lleva p_bonif» del mismo producto.
+CREATE OR REPLACE FUNCTION pg_temp.c1_promo(p_suc bigint, p_prod bigint, p_compra int, p_bonif int)
+RETURNS bigint LANGUAGE plpgsql AS $fn$
+DECLARE
+  v bigint;
+BEGIN
+  INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id)
+  VALUES ('C1 promo', 'bonificacion', public._tablero_hoy(), p_suc, true, p_prod) RETURNING id INTO v;
+  INSERT INTO public.promocion_reglas (promocion_id, clave, valor, sucursal_id)
+  VALUES (v, 'cantidad_compra', p_compra, p_suc), (v, 'cantidad_bonificacion', p_bonif, p_suc);
+  INSERT INTO public.promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v, p_prod, p_suc);
+  RETURN v;
+END
+$fn$;
+
+-- Venta de 20 a $ 100 con 4 de regalo de la promo 10 → 2, entregada. Devuelve el pedido; el regalo en p_reg.
+CREATE OR REPLACE FUNCTION pg_temp.c1_pedido_regalo(p_suc bigint, p_adm uuid, OUT o_ped bigint, OUT o_prod bigint, OUT o_reg bigint)
+LANGUAGE plpgsql AS $fn$
+DECLARE
+  v_promo bigint;
+BEGIN
+  o_prod := pg_temp.c1_producto(p_suc, 'C1 fardo con regalo', 100);
+  o_ped := pg_temp.c1_boleta(pg_temp.c1_cliente(p_suc, 'C1 regalo'), p_adm, p_suc, pg_temp.c1_linea(o_prod, 20, 100), false);
+  v_promo := pg_temp.c1_promo(p_suc, o_prod, 10, 2);
+  INSERT INTO public.pedido_items (pedido_id, producto_id, cantidad, precio_unitario, subtotal, sucursal_id, es_bonificacion, promocion_id)
+  VALUES (o_ped, o_prod, 4, 0, 0, p_suc, true, v_promo) RETURNING id INTO o_reg;
+  PERFORM set_config('app.stock_origen', 'pedido_creado', true);
+  PERFORM set_config('app.stock_ref_tipo', 'pedido', true);
+  PERFORM set_config('app.stock_ref_id', o_ped::text, true);
+  PERFORM set_config('app.stock_pedido_item_id', o_reg::text, true);
+  UPDATE public.productos SET stock = stock - 4 WHERE id = o_prod;
+  PERFORM pg_temp.c1_reset();
+  UPDATE public.pedidos SET estado = 'entregado', retiro_deposito = true, fecha_entrega = now() WHERE id = o_ped;
+  PERFORM pg_temp.c1_otra_tx();
+END
+$fn$;
+
+-- Lo escrito en esta transacción pasa a ser de una transacción anterior (una hora antes), para que la
+-- salvedad siguiente tenga su propia created_at, como si fuera otra llamada.
+CREATE OR REPLACE FUNCTION pg_temp.c1_otra_tx()
+RETURNS void LANGUAGE plpgsql AS $fn$
+BEGIN
+  UPDATE public.audit_logs SET created_at = created_at - interval '1 hour' WHERE created_at > now() - interval '2 days';
+  UPDATE public.salvedades_items SET created_at = created_at - interval '1 hour' WHERE created_at > now() - interval '2 days';
+  UPDATE public.pedido_historial SET created_at = created_at - interval '1 hour' WHERE created_at > now() - interval '2 days';
+END
+$fn$;
+
+-- Salvedad 'cliente_rechaza' sobre una línea dada, en su propia transacción.
+CREATE OR REPLACE FUNCTION pg_temp.c1_salv_item(p_ped bigint, p_item bigint, p_cant int, p_adm uuid, p_suc bigint)
+RETURNS bigint LANGUAGE plpgsql AS $fn$
+DECLARE
+  v_res jsonb;
+BEGIN
+  PERFORM pg_temp.c1_claims(p_adm, p_suc);
+  v_res := public.registrar_salvedad(p_ped, p_item, p_cant, 'cliente_rechaza', 'ensayo C1', NULL, true, NULL);
+  PERFORM pg_temp.c1_reset();
+  IF NOT COALESCE((v_res->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'la salvedad no entró: %', v_res;
+  END IF;
+  PERFORM pg_temp.c1_otra_tx();
+  RETURN (v_res->>'salvedad_id')::bigint;
+END
+$fn$;
+
+-- Anular sin abortar: 'ok' o el código del rechazo.
+CREATE OR REPLACE FUNCTION pg_temp.c1_anu(p_salv bigint, p_adm uuid, p_suc bigint)
+RETURNS text LANGUAGE plpgsql AS $fn$
+DECLARE
+  v_res jsonb;
+BEGIN
+  PERFORM pg_temp.c1_claims(p_adm, p_suc);
+  v_res := public.anular_salvedad(p_salv, 'ensayo C1');
+  PERFORM pg_temp.c1_reset();
+  PERFORM pg_temp.c1_otra_tx();
+  RETURN CASE WHEN COALESCE((v_res->>'success')::boolean, false) THEN 'ok' ELSE COALESCE(v_res->>'codigo', v_res::text) END;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.c1_venta_regalo(p_ped bigint)
+RETURNS text LANGUAGE sql AS $fn$
+  SELECT 'venta ' || COALESCE(sum(cantidad) FILTER (WHERE NOT COALESCE(es_bonificacion, false)), 0)
+         || ' regalo ' || COALESCE(sum(cantidad) FILTER (WHERE es_bonificacion), 0)
+    FROM public.pedido_items WHERE pedido_id = p_ped;
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.c1_caso_l9(a jsonb)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f     text[] := '{}';
+  v_suc bigint := (a->>'suc')::bigint;
+  v_adm uuid := (a->>'adm')::uuid;
+  x     record;
+  v_a   bigint;
+  v_r   text;
+BEGIN
+  x := pg_temp.c1_pedido_regalo(v_suc, v_adm);
+  PERFORM pg_temp.c1_salv_item(x.o_ped, x.o_reg, 2, v_adm, v_suc);
+  v_a := pg_temp.c1_salv_item(x.o_ped, pg_temp.c1_item(x.o_ped, x.o_prod), 5, v_adm, v_suc);
+  IF pg_temp.c1_venta_regalo(x.o_ped) <> 'venta 15 regalo 2' THEN
+    RAISE EXCEPTION 'fixture · tras R y A el pedido quedó %', pg_temp.c1_venta_regalo(x.o_ped);
+  END IF;
+  v_r := pg_temp.c1_anu(v_a, v_adm, v_suc);
+  f := pg_temp.c1_si(f, v_r = 'ok', format('anular A (no recortó nada) dio %s', v_r));
+  f := pg_temp.c1_si(f, v_r <> 'ok' OR pg_temp.c1_venta_regalo(x.o_ped) = 'venta 20 regalo 2',
+                     format('tras anular A el pedido quedó %s', pg_temp.c1_venta_regalo(x.o_ped)));
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
+-- p_orden: 'ac' anula A y después C; 'ca', al revés.
+CREATE OR REPLACE FUNCTION pg_temp.c1_l10(a jsonb, p_orden text)
+RETURNS text[] LANGUAGE plpgsql AS $fn$
+DECLARE
+  f     text[] := '{}';
+  v_suc bigint := (a->>'suc')::bigint;
+  v_adm uuid := (a->>'adm')::uuid;
+  x     record;
+  v_a   bigint;
+  v_c   bigint;
+  v_r1  text;
+  v_r2  text;
+BEGIN
+  x := pg_temp.c1_pedido_regalo(v_suc, v_adm);
+  PERFORM pg_temp.c1_salv_item(x.o_ped, x.o_reg, 2, v_adm, v_suc);
+  v_a := pg_temp.c1_salv_item(x.o_ped, pg_temp.c1_item(x.o_ped, x.o_prod), 5, v_adm, v_suc);
+  v_c := pg_temp.c1_salv_item(x.o_ped, pg_temp.c1_item(x.o_ped, x.o_prod), 5, v_adm, v_suc);
+  IF pg_temp.c1_venta_regalo(x.o_ped) <> 'venta 10 regalo 2' THEN
+    RAISE EXCEPTION 'fixture · tras R, A y C el pedido quedó %', pg_temp.c1_venta_regalo(x.o_ped);
+  END IF;
+  IF p_orden = 'ac' THEN
+    v_r1 := pg_temp.c1_anu(v_a, v_adm, v_suc);
+    v_r2 := pg_temp.c1_anu(v_c, v_adm, v_suc);
+  ELSE
+    v_r1 := pg_temp.c1_anu(v_c, v_adm, v_suc);
+    v_r2 := pg_temp.c1_anu(v_a, v_adm, v_suc);
+  END IF;
+  f := pg_temp.c1_si(f, v_r1 = 'ok' AND v_r2 = 'ok', format('orden %s: la primera dio %s y la segunda %s', p_orden, v_r1, v_r2));
+  f := pg_temp.c1_si(f, pg_temp.c1_venta_regalo(x.o_ped) = 'venta 20 regalo 2',
+                     format('orden %s: el pedido quedó %s', p_orden, pg_temp.c1_venta_regalo(x.o_ped)));
+  RETURN f;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.c1_caso_l10(a jsonb)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}';
+BEGIN
+  -- Cada orden en su sub-bloque, que se revierte.
+  BEGIN
+    f := f || pg_temp.c1_l10(a, 'ac');
+    RAISE EXCEPTION USING ERRCODE = 'ZZ002', MESSAGE = array_to_string(f, ' | ');
+  EXCEPTION WHEN SQLSTATE 'ZZ002' THEN NULL;
+  END;
+  BEGIN
+    f := f || pg_temp.c1_l10(a, 'ca');
+    RAISE EXCEPTION USING ERRCODE = 'ZZ002';
+  EXCEPTION WHEN SQLSTATE 'ZZ002' THEN NULL;
+  END;
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.c1_e3(a jsonb, p_orden text)
+RETURNS text[] LANGUAGE plpgsql AS $fn$
+DECLARE
+  f     text[] := '{}';
+  v_suc bigint := (a->>'suc')::bigint;
+  v_adm uuid := (a->>'adm')::uuid;
+  x     record;
+  v_a   bigint;
+  v_b   bigint;
+  v_r1  text;
+  v_r2  text;
+BEGIN
+  x := pg_temp.c1_pedido_regalo(v_suc, v_adm);
+  PERFORM pg_temp.c1_salv_item(x.o_ped, x.o_reg, 2, v_adm, v_suc);
+  v_a := pg_temp.c1_salv_item(x.o_ped, pg_temp.c1_item(x.o_ped, x.o_prod), 10, v_adm, v_suc);
+  v_b := pg_temp.c1_salv_item(x.o_ped, pg_temp.c1_item(x.o_ped, x.o_prod), 5, v_adm, v_suc);
+  IF pg_temp.c1_venta_regalo(x.o_ped) <> 'venta 5 regalo 0' THEN
+    RAISE EXCEPTION 'fixture · tras R, A y B el pedido quedó %', pg_temp.c1_venta_regalo(x.o_ped);
+  END IF;
+  IF p_orden = 'ab' THEN
+    v_r1 := pg_temp.c1_anu(v_a, v_adm, v_suc);
+    v_r2 := pg_temp.c1_anu(v_b, v_adm, v_suc);
+  ELSE
+    v_r1 := pg_temp.c1_anu(v_b, v_adm, v_suc);
+    v_r2 := pg_temp.c1_anu(v_a, v_adm, v_suc);
+  END IF;
+  f := pg_temp.c1_si(f, v_r1 = 'anulacion_toca_promociones' AND v_r2 = 'anulacion_toca_promociones',
+                     format('orden %s: la primera dio %s y la segunda %s (las dos se rechazan)', p_orden, v_r1, v_r2));
+  RETURN f;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.c1_caso_e3(a jsonb)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}';
+BEGIN
+  BEGIN
+    f := f || pg_temp.c1_e3(a, 'ab');
+    RAISE EXCEPTION USING ERRCODE = 'ZZ002';
+  EXCEPTION WHEN SQLSTATE 'ZZ002' THEN NULL;
+  END;
+  BEGIN
+    f := f || pg_temp.c1_e3(a, 'ba');
+    RAISE EXCEPTION USING ERRCODE = 'ZZ002';
+  EXCEPTION WHEN SQLSTATE 'ZZ002' THEN NULL;
+  END;
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
 DO $ensayoC1$
 DECLARE
   v_suc    bigint;
@@ -634,7 +862,7 @@ BEGIN
   v_args := jsonb_build_object('suc', v_suc, 'adm', pg_temp.c1_usuario('admin', v_suc),
                                'suc_b', (SELECT min(id) FROM sucursales WHERE activa AND id > v_suc));
 
-  FOREACH v_caso IN ARRAY ARRAY['l1', 'l2', 'e1', 'l3', 'l4', 'l5', 'l6', 'l7', 'e2', 'l8'] LOOP
+  FOREACH v_caso IN ARRAY ARRAY['l1', 'l2', 'e1', 'l3', 'l4', 'l5', 'l6', 'l7', 'e2', 'l8', 'l9', 'l10', 'e3'] LOOP
     v_out := NULL;
     BEGIN
       PERFORM pg_temp.c1_reset();
@@ -653,6 +881,6 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION E'ENSAYO FALLÓ (% fallas):\n- %', cardinality(v_fallas), array_to_string(v_fallas, E'\n- ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · 1595-b2, COB-b6, 1598-b4, N2 y N7 (tarjeta C1 de la tanda 5)';
+  RAISE EXCEPTION 'ENSAYO OK · 1595-b2, COB-b6, 1598-b4, N2, N7 y 1592-b5 (tarjeta C1 de la tanda 5)';
 END
 $ensayoC1$;

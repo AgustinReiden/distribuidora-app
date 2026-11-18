@@ -291,7 +291,9 @@ suelta en `sucursales`.
   combo), y uno que repunte escalas repunta también la de la foto.
   Anular una salvedad que devuelve el derecho a un regalo se rechaza si **cualquier** salvedad
   del pedido, viva o anulada, recortó un regalo de esa promo (1592-b5 y su revisión): mirar
-  sólo la propia hacía que el resultado dependiera del orden en que se anulan.
+  sólo la propia hacía que el resultado dependiera del orden en que se anulan. Una salvedad sobre
+  el propio regalo (baja esa línea, no la venta) no es un recorte y no cuenta: como no se puede
+  anular, el resultado sigue sin depender del orden (1592-b5 residual).
   **La boleta nueva absorbe el saldo a favor al crearse** (mig 463c, #1469; decisión del dueño):
   FIFO, por `aplicar_credito_cliente`, en `crear_pedido_completo` y el bot. Un camino nuevo que
   cree una boleta hace lo mismo con `_alta_bloquea_boletas_credito` (antes de los productos),
