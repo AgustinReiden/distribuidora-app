@@ -85,6 +85,12 @@ suelta en `sucursales`.
   falla ante lo alcanzable con la **anon key**, no con una sesión—. Pasó con
   `bot_digest_destinatarios` (261, corregida en la 262): devolvía los `telegram_user_id` de
   todos los admins y cualquier preventista logueado podía enumerarlos.
+- **Toda `SECURITY DEFINER` nueva o reemplazada escribe `SET search_path = public, pg_temp`**
+  (o su search_path, con `pg_temp` al final; B15 de #1603). Sin `pg_temp` escrito, Postgres busca
+  primero en las tablas temporales de la sesión: una `perfiles` temporal del que llama hacía que
+  `es_admin()` le diera true. Un `CREATE OR REPLACE` sin el `SET` lo pierde, y copiar el
+  `SET search_path TO 'public'` de una función vieja lo vuelve a abrir. Lo vigila
+  `scripts/check-search-path.mjs`, sin lista de permitidas.
 - **El alta de un usuario no le cree al usuario, y el admin gestiona a los de sus sucursales**
   (migs 403b y 404, #1243 y #1244). `handle_new_user()` toma el rol y la sucursal de
   `raw_app_meta_data`: en la admin API, `app_metadata: {rol, sucursal_id}`; por SQL, la
