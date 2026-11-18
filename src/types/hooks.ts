@@ -208,7 +208,8 @@ export interface PedidoItemDB {
 export interface PerfilDB {
   id: string;
   nombre: string;
-  email: string;
+  /** Sólo para admin y encargado, por `emails_de_usuarios()` (1601-b5): `perfiles` no lo da por REST. */
+  email?: string;
   rol?: 'admin' | 'preventista' | 'transportista' | 'deposito' | 'encargado';
   zona?: string;
   activo?: boolean;

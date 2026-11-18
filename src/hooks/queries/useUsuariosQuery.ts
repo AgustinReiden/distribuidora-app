@@ -12,6 +12,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { PerfilDB } from '../../types'
+import { PERFIL_COLUMNAS } from '../../lib/perfilColumnas'
+import { fetchEmailsDeUsuarios } from './emailsDeUsuarios'
 
 // Query keys scoped by sucursalId (multi-tenant). Using function factories so
 // every cache entry lives under its own tenant prefix and a sucursal switch
@@ -51,18 +53,22 @@ async function fetchUsuarios(sucursalId: number | null): Promise<PerfilDB[]> {
   if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*, usuario_sucursales!inner(sucursal_id)')
+    .select(`${PERFIL_COLUMNAS}, usuario_sucursales!inner(sucursal_id)`)
     .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los usuarios. Revisá la señal e intentá de nuevo.')
-  return (data as PerfilDB[]) || []
+  const usuarios = (data as unknown as PerfilDB[]) || []
+  // El email de cada uno, para la pantalla de usuarios: por la RPC (D53, 1601-b5), que se lo
+  // da sólo a admin y encargado. Sin email, la lista sale igual.
+  const emails = await fetchEmailsDeUsuarios(usuarios.map(u => u.id))
+  return usuarios.map(u => (emails.has(u.id) ? { ...u, email: emails.get(u.id) } : u))
 }
 
 async function fetchUsuarioById(id: string): Promise<PerfilDB | null> {
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*')
+    .select(PERFIL_COLUMNAS)
     .eq('id', id)
     .single()
 
@@ -74,7 +80,7 @@ async function fetchUsuariosByRol(sucursalId: number | null, rol: string): Promi
   if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*, usuario_sucursales!inner(sucursal_id)')
+    .select(`${PERFIL_COLUMNAS}, usuario_sucursales!inner(sucursal_id)`)
     .eq('rol', rol)
     .eq('activo', true)
     .eq('usuario_sucursales.sucursal_id', sucursalId)
@@ -97,7 +103,7 @@ async function fetchTransportistas(sucursalId: number | null): Promise<PerfilDB[
   // vacio, no incompleto. Mismo patron que pedidos!transportista_id_fkey.
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*, usuario_sucursales!inner(sucursal_id), perfil_roles!perfil_roles_usuario_id_fkey(rol, sucursal_id)')
+    .select(`${PERFIL_COLUMNAS}, usuario_sucursales!inner(sucursal_id), perfil_roles!perfil_roles_usuario_id_fkey(rol, sucursal_id)`)
     .eq('activo', true)
     .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
@@ -170,7 +176,7 @@ async function fetchPreventistas(sucursalId: number | null): Promise<PerfilDB[]>
   if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*, usuario_sucursales!inner(sucursal_id)')
+    .select(`${PERFIL_COLUMNAS}, usuario_sucursales!inner(sucursal_id)`)
     .eq('rol', 'preventista')
     .eq('activo', true)
     .eq('usuario_sucursales.sucursal_id', sucursalId)
@@ -187,7 +193,7 @@ async function fetchPreventistasAsignables(sucursalId: number | null): Promise<P
   if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*, usuario_sucursales!inner(sucursal_id)')
+    .select(`${PERFIL_COLUMNAS}, usuario_sucursales!inner(sucursal_id)`)
     .in('rol', ['admin', 'preventista'])
     .eq('activo', true)
     .eq('usuario_sucursales.sucursal_id', sucursalId)
@@ -212,7 +218,7 @@ async function fetchVendedoresComisionables(sucursalId: number | null): Promise<
   if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*, usuario_sucursales!inner(sucursal_id)')
+    .select(`${PERFIL_COLUMNAS}, usuario_sucursales!inner(sucursal_id)`)
     .in('rol', ['admin', 'encargado', 'preventista'])
     .eq('activo', true)
     .eq('usuario_sucursales.sucursal_id', sucursalId)
@@ -233,7 +239,7 @@ async function updateUsuario({ id, data: usuario }: { id: string; data: UsuarioU
     .from('perfiles')
     .update(usuario)
     .eq('id', id)
-    .select()
+    .select(PERFIL_COLUMNAS)
     .single()
 
   // Cero filas (PGRST116): la policy perfiles_update_admin (mig 404, #1244) no
@@ -251,7 +257,7 @@ async function toggleUsuarioActivo(id: string, activo: boolean): Promise<PerfilD
     .from('perfiles')
     .update({ activo })
     .eq('id', id)
-    .select()
+    .select(PERFIL_COLUMNAS)
     .single()
 
   // Mismo caso que `updateUsuario`: activar o desactivar a alguien de otra
@@ -416,7 +422,9 @@ export function useActualizarUsuarioMutation() {
       // Actualizar cache de lista
       queryClient.setQueryData<PerfilDB[]>(usuariosKeys.lists(currentSucursalId), (old) => {
         if (!old) return [updatedUsuario]
-        return old.map(u => u.id === updatedUsuario.id ? updatedUsuario : u)
+        // `{ ...u, ...}`: la fila que devuelve el update no trae el email (1601-b5), y la
+        // de la lista sí (lo puso la RPC): se conserva.
+        return old.map(u => u.id === updatedUsuario.id ? { ...u, ...updatedUsuario } : u)
       })
       // Invalidar listas por rol
       if (updatedUsuario.rol) {
@@ -442,7 +450,9 @@ export function useToggleUsuarioActivoMutation() {
       queryClient.setQueryData(usuariosKeys.detail(currentSucursalId, updatedUsuario.id), updatedUsuario)
       queryClient.setQueryData<PerfilDB[]>(usuariosKeys.lists(currentSucursalId), (old) => {
         if (!old) return [updatedUsuario]
-        return old.map(u => u.id === updatedUsuario.id ? updatedUsuario : u)
+        // `{ ...u, ...}`: la fila que devuelve el update no trae el email (1601-b5), y la
+        // de la lista sí (lo puso la RPC): se conserva.
+        return old.map(u => u.id === updatedUsuario.id ? { ...u, ...updatedUsuario } : u)
       })
       queryClient.invalidateQueries({ queryKey: usuariosKeys.transportistas(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: usuariosKeys.preventistas(currentSucursalId) })

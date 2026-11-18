@@ -199,7 +199,7 @@ export default function TopNavigation({
   const navigate = useNavigate();
   const location = useLocation();
   const { darkMode, toggleDarkMode } = useTheme();
-  const { rolesEfectivos } = useAuthData();
+  const { rolesEfectivos, user } = useAuthData();
   const [menuAbierto, setMenuAbierto] = useState<boolean>(false);
   const [userMenuAbierto, setUserMenuAbierto] = useState<boolean>(false);
   const [dropdownAbierto, setDropdownAbierto] = useState<string | null>(null);
@@ -600,7 +600,7 @@ export default function TopNavigation({
                 <div className="absolute right-0 mt-2 w-64 max-h-[calc(100dvh-var(--header-h)-1rem)] overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 rounded-xl shadow-lg border dark:border-gray-700 py-2 px-1.5 z-50">
                   <div className="px-4 py-3 border-b dark:border-gray-700">
                     <p className="font-medium text-gray-800 dark:text-white truncate">{perfil?.nombre}</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{perfil?.email}</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{user?.email ?? perfil?.email}</p>
                     <Badge tone={toneDeRol(perfil?.rol || '')} className="mt-2 py-1 font-normal">
                       {getRolLabel(perfil?.rol || '')}
                     </Badge>

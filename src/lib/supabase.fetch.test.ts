@@ -54,6 +54,26 @@ describe('fetch de supabase.ts', () => {
     expect(new Headers(init.headers).get('X-Sucursal-ID')).toBe('3')
   })
 
+  // 1601-b5 (#1601): el build va en el X-Client-Info, para medir en los logs del gateway si
+  // quedan bundles viejos antes de cerrar una columna. Una sola vez, en REST y en Storage.
+  it('suma el build al X-Client-Info de supabase-js, una sola vez', async () => {
+    fetchFalso.mockResolvedValue(new Response('{}'))
+    const { supabase, MARCA_DE_BUILD } = await cargarCliente()
+
+    await supabase.from('perfiles').select('id')
+    await supabase.storage.from('facturas').createSignedUrl('1/x.pdf', 60)
+
+    const [, rest] = pedidoA('/rest/v1/perfiles')!
+    const [, storage] = pedidoA('/storage/v1/')!
+    for (const init of [rest, storage]) {
+      const info = new Headers(init.headers).get('X-Client-Info') ?? ''
+      expect(info).toMatch(/^supabase-js-/)
+      expect(info.endsWith(` ${MARCA_DE_BUILD}`)).toBe(true)
+      expect(info.split(MARCA_DE_BUILD)).toHaveLength(2)
+    }
+    expect(MARCA_DE_BUILD).toMatch(/^distribuidora\/\S+$/)
+  })
+
   // INF-2 (#1563): el replay de la cola manda la sucursal de cada operación en el
   // request; el wrapper no se la pisa con la de la pantalla, ni la de la pantalla cambia.
   it('un request que trae su sucursal la conserva, y los demás siguen con la activa', async () => {

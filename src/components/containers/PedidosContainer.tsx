@@ -1285,7 +1285,7 @@ export default function PedidosContainer(): React.ReactElement {
     let perfilesMap: Record<string, PerfilDB> = {}
     if (perfilIds.size > 0) {
       const { data: perfiles } = await supabase
-        .from('perfiles').select('id, nombre, email').in('id', Array.from(perfilIds))
+        .from('perfiles').select('id, nombre').in('id', Array.from(perfilIds))
       if (perfiles) {
         perfilesMap = Object.fromEntries((perfiles as PerfilDB[]).map(p => [p.id, p]))
       }

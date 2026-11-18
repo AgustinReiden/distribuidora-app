@@ -15,6 +15,9 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
  */
 let currentSucursalId: number | null = null
 
+/** `distribuidora/<build>`, lo que el fetch de abajo le suma al X-Client-Info. */
+export const MARCA_DE_BUILD = `distribuidora/${typeof __APP_BUILD_ID__ === 'string' ? __APP_BUILD_ID__ : 'dev'}`
+
 /**
  * Set or clear the X-Sucursal-ID header that is attached to every
  * subsequent Supabase REST request from this tab. Pass null to clear it
@@ -55,6 +58,14 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       // que manda la de cada operación sin tocar la global (INF-2, #1563).
       if (currentSucursalId != null && !headers.has('X-Sucursal-ID')) {
         headers.set('X-Sucursal-ID', String(currentSucursalId))
+      }
+      // El build que hace el pedido, al final del X-Client-Info que ya pone supabase-js
+      // (#1601, 1601-b5): los logs del gateway guardan ese header, y es la forma de medir si
+      // todavía hay teléfonos con un bundle viejo antes de cerrar una columna (sin la marca =
+      // un bundle anterior a esta). No es un header nuevo: no cambia el CORS.
+      const clientInfo = headers.get('X-Client-Info')
+      if (clientInfo && !clientInfo.includes(MARCA_DE_BUILD)) {
+        headers.set('X-Client-Info', `${clientInfo} ${MARCA_DE_BUILD}`)
       }
       const respuesta = await fetch(input, { ...init, headers })
       if (!respuesta.ok && String(input).includes('/rest/v1/rpc/')) {

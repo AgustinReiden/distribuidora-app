@@ -255,7 +255,10 @@ suelta en `sucursales`.
   salió: un pedazo de un pedazo se mide contra él, #1359; un CHECK pide los dos o ninguno), y el
   pago que se parte se bloquea
   `FOR UPDATE` **antes** de insertar el pedazo: la foto de una rendición se fía de eso para
-  saber si un pedazo nació antes o después de ella (`ultimo_pago_id`, #1292). **La rendición confirmada se congela**
+  saber si un pedazo nació antes o después de ella (`ultimo_pago_id`, #1292). El linaje (`pago_padre_id`,
+  `pago_origen_id`) tiene FK compuesta con la sucursal a `pagos_linaje`, el registro de todo id de pago que
+  existió (1601-b9): el padre se puede borrar y el pedazo lo sigue nombrando; el pago nuevo entra al registro
+  por trigger. **La rendición confirmada se congela**
   (#1248): al cerrarla, `trg_rendiciones_control_foto` guarda sus pagos en
   `rendicion_pagos_confirmados`, y un día cerrado se lee de esa foto. Reabrirla la descarta.
   Por eso reimputar ya no mueve la plata de una rendición cerrada a otro chofer. Una RPC
@@ -589,7 +592,10 @@ suelta en `sucursales`.
   y `compra_cargo_repartos`.
 - **Un producto con stock, con lotes (aun agotados) o que es el regalo de una promo no se borra: se
   desactiva** (1561-b2, decisión del dueño). Lo frena `productos_rechazar_borrado_con_historial`,
-  junto con el historial; sin nada de eso se borra y su `stock_historico` se va con él.
+  junto con el historial; sin nada de eso se borra y su `stock_historico` se va con él. Tampoco uno que
+  está en una meta (`trg_productos_rechazar_borrado_en_meta`, 1601-b9), y cada id de
+  `metas_preventista.producto_ids` es un producto de la sucursal de la meta (su trigger, la FK que un
+  array no puede tener).
 - **Un stock mínimo de 0 es «sin alerta», y vacío es 10** (CAT-13, decisión del dueño): con alerta,
   está bajo cuando `stock <= mínimo`. Es una regla en tres lugares: `stockBajo`
   (`src/utils/stockMinimo.ts`), su copia del bot (`supabase/functions/_shared/utils/stockMinimo.ts`)
