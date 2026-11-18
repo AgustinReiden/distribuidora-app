@@ -1487,7 +1487,9 @@ const ModalPedido = memo(function ModalPedido({
                                     <button
                                       type="button"
                                       aria-label="Cancelar precio"
-                                      onPointerDown={e => e.preventDefault()}
+                                      // T8 de la tercera pasada: la marca va en el pointerdown, antes de un
+                                      // blur que el navegador dispare igual; el onBlur la respeta.
+                                      onPointerDown={e => { e.preventDefault(); precioResueltoRef.current = true; }}
                                       onClick={() => {
                                         precioResueltoRef.current = true;
                                         setEditingPriceId(null);
@@ -1993,8 +1995,9 @@ const ModalPedido = memo(function ModalPedido({
               type="button"
               variant="primary"
               size="sm"
-              onClick={() => { void onGuardarEnCola() }}
-              disabled={guardando}
+              // T1 de la tercera pasada: con un campo en rojo, encolar guardaría el valor de antes.
+              onClick={() => { if (!ilegibles.hay) void onGuardarEnCola() }}
+              disabled={guardando || ilegibles.hay}
               className="flex-shrink-0"
             >
               Guardar en el teléfono

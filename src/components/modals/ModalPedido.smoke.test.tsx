@@ -1405,6 +1405,50 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     expect(onGuardarSpy).not.toHaveBeenCalled()
   })
 
+  // T8 de la tercera pasada: la X cancela aunque el navegador le saque el foco al precio antes del
+  // click (el onBlur guardaba lo tipeado si se entendía).
+  it('la X cancela aunque el precio pierda el foco antes del click', async () => {
+    const { user, onActualizarPrecioSpy } = montar({ isAdmin: true })
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
+    await user.clear(input)
+    await user.type(input, '1500')
+    const x = screen.getByRole('button', { name: 'Cancelar precio' })
+    fireEvent.pointerDown(x)
+    fireEvent.blur(input)
+    fireEvent.click(x)
+    expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
+    expect(screen.queryByRole('textbox', { name: 'Editar precio unitario' })).not.toBeInTheDocument()
+  })
+
+  // T1 de la tercera pasada: con la oferta de la cola a la vista (alta en duda), un campo en rojo
+  // también frena «Guardar en el teléfono»: si no, encolaba el pedido con el valor de antes.
+  it.each([
+    ['el precio', '1..5'],
+    ['la cantidad', '1.200'],
+  ])('con %s en rojo, «Guardar en el teléfono» no encola', async (que, tipeado) => {
+    const onGuardarEnColaSpy = vi.fn()
+    const { user } = montar({ isAdmin: true, onGuardarEnColaSpy })
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    if (que === 'el precio') {
+      await user.click(screen.getByText(/1\.250,00 c\/u/))
+      const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
+      await user.clear(input)
+      await user.type(input, tipeado)
+    } else {
+      await user.click(screen.getByRole('textbox', { name: 'Cantidad' }))
+      await user.keyboard(tipeado)
+    }
+    const enCola = screen.getByRole('button', { name: 'Guardar en el teléfono' })
+    expect(enCola).toBeDisabled()
+    await user.click(enCola)
+    expect(onGuardarEnColaSpy).not.toHaveBeenCalled()
+  })
+
   it('sin ser admin el precio no es editable', async () => {
     const { user } = montar()
 

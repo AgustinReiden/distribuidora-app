@@ -214,7 +214,10 @@ export function NumberInput({
     if (sinMiles) {
       const tecleado = teclearNumero(display, crudo, e.target.selectionStart ?? undefined)
       if (tecleado !== crudo) cursor.current = e.target.selectionStart
-      next = sanitizeSinMiles(tecleado)
+      // Lo insertado de una vez (pegado, el chip del portapapeles, el dictado: T3 de la tercera
+      // pasada) entra tal cual para que el lector lo marque si no lo entiende; filtrarlo haría de
+      // «1.234,5» un 1,2345 callado. Lo tipeado de a una tecla se filtra.
+      next = esPegado(e, display) || crudo.length - display.length > 1 ? tecleado.trim() : sanitizeSinMiles(tecleado)
     } else {
       const direccion = (e.nativeEvent as InputEvent).inputType === 'deleteContentForward' ? 'adelante' : 'atras'
       const r = formatearTecleo(display, crudo, e.target.selectionStart ?? crudo.length, { direccion })

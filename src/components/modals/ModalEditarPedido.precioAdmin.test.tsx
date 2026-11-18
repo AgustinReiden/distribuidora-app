@@ -14,7 +14,7 @@
  * Los ids van como number, como llegan de PostgREST: con strings el bug no se ve.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 // #1191: los combos tienen su propia query (y su sucursal): acá no hay combos.
@@ -186,6 +186,35 @@ describe('ModalEditarPedido — precio puesto por el admin', () => {
     expect(screen.getByText('$7400.00 c/u')).toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: /^Guardar( Todo)?$/ })).toBeEnabled()
+  })
+
+  // T8 de la tercera pasada: la X cancela aunque el navegador le saque el foco al precio antes del
+  // click (el onBlur guardaba lo tipeado si se entendía).
+  it('la X cancela aunque el precio pierda el foco antes del click', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const onSaveItems = vi.fn().mockResolvedValue(undefined)
+    render(
+      <ModalEditarPedido
+        productos={productos}
+        pedido={pedido}
+        isAdmin
+        onSave={onSave}
+        onSaveItems={onSaveItems}
+        onClose={vi.fn()}
+        guardando={false}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText('PLACER MANZANA 500 cc')).toBeInTheDocument())
+    await user.click(screen.getByText('$7400.00 c/u'))
+    const input = screen.getByLabelText('Editar precio unitario')
+    await user.clear(input)
+    await user.type(input, '1500')
+    const x = screen.getByRole('button', { name: 'Cancelar precio' })
+    fireEvent.pointerDown(x)
+    fireEvent.blur(input)
+    fireEvent.click(x)
+    expect(screen.getByText('$7400.00 c/u')).toBeInTheDocument()
   })
 
   // B20 (D17): los miles los pone el campo; lo que no se entiende queda abierto y en rojo.

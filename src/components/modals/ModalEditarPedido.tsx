@@ -227,6 +227,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const [itemsModificados, setItemsModificados] = useState<boolean>(false);
   const [errorStock, setErrorStock] = useState<string | null>(null);
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
+  // T8 de la tercera pasada: tocar la X marca «cancelando» ANTES de que el navegador pueda sacarle el
+  // foco al precio; el blur que venga después no lo guarda. Así cancelar no depende de quién gana.
+  const cancelandoPrecioRef = useRef(false);
   const [editingPriceValue, setEditingPriceValue] = useState<string>('');
 
   // Sustitucion de regalos: el row persistido a editar (id real de pedido_items).
@@ -962,6 +965,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // forma confiable, asi que damos una via explicita para commitear el valor.
   const commitEditingPrice = (): void => {
     if (editingPriceId == null) return;
+    if (cancelandoPrecioRef.current) return;
     // Lo que no se entiende (o un precio 0) queda abierto, en rojo y con el motivo: ni Enter, ni el
     // botón, ni tocar afuera lo descartan en silencio (B20, como el alta).
     if (motivoPrecioTipeado(editingPriceValue)) return;
@@ -1461,6 +1465,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                                 motivo={motivoPrecioTipeado(editingPriceValue)}
                                 onKeyDown={e => {
                                   if (e.key === 'Enter') {
+                                    cancelandoPrecioRef.current = false;
                                     commitEditingPrice();
                                   } else if (e.key === 'Escape') {
                                     setEditingPriceId(null);
@@ -1474,7 +1479,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                                 type="button"
                                 aria-label="Confirmar precio"
                                 onPointerDown={e => e.preventDefault()}
-                                onClick={commitEditingPrice}
+                                onClick={() => { cancelandoPrecioRef.current = false; commitEditingPrice(); }}
                                 className="p-1 text-white bg-orange-500 hover:bg-orange-600 rounded shrink-0"
                               >
                                 <Check className="w-3.5 h-3.5" />
@@ -1485,8 +1490,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                               <button
                                 type="button"
                                 aria-label="Cancelar precio"
-                                onPointerDown={e => e.preventDefault()}
-                                onClick={() => setEditingPriceId(null)}
+                                onPointerDown={e => { e.preventDefault(); cancelandoPrecioRef.current = true; }}
+                                onClick={() => { cancelandoPrecioRef.current = false; setEditingPriceId(null); }}
                                 className="p-1 text-stone-500 hover:text-stone-700 dark:text-gray-400 dark:hover:text-gray-200 rounded shrink-0"
                               >
                                 <X className="w-3.5 h-3.5" aria-hidden="true" />
@@ -1498,6 +1503,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                               className={`${item.precioOverride ? 'text-orange-600 font-medium' : ''} ${puedeEditarPrecios ? 'cursor-pointer hover:underline' : ''}`}
                               onClick={() => {
                                 if (puedeEditarPrecios) {
+                                  cancelandoPrecioRef.current = false;
                                   setEditingPriceId(item.productoId);
                                   setEditingPriceValue(numeroConMiles(precioResuelto));
                                 }

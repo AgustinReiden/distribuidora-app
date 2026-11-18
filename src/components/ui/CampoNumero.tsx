@@ -134,10 +134,12 @@ export function CampoNumero({
     const crudo = e.target.value
     const posicion = e.target.selectionStart ?? crudo.length
     const tecleado = teclearNumero(value, crudo, posicion)
-    // Lo pegado (lo dice el evento: `esPegado`) entra tal cual, para que el lector lo marque si no lo entiende:
-    // filtrarlo haría de «1.234,5» un 1,2345 callado.
-    if (pegado) {
-      anotar(true, tecleado)
+    // Lo pegado entra tal cual, para que el lector lo marque si no lo entiende: filtrarlo haría de
+    // «1.234,5» un 1,2345 callado. Para eso cuenta también una inserción de varios caracteres que
+    // no viene como «pegar» (T3 de la tercera pasada: el chip del portapapeles de Gboard, el
+    // reemplazo de texto, el dictado llegan como `insertText`). El aviso sigue con `esPegado`.
+    if (pegado || crudo.length - value.length > 1) {
+      anotar(pegado, tecleado)
       return
     }
     const filtrado = filtrarSinMiles(tecleado, negativo)
