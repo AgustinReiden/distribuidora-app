@@ -274,6 +274,13 @@ export function validarNotaCreditoVenta(
     if (cant > l.disponible) {
       return `${l.nombre}: se pueden acreditar hasta ${l.disponible} (entregadas ${l.entregada}, ya acreditadas ${l.yaAcreditada})`
     }
+    // H4 y N2 de la revisión de B22, espejo de crear_nota_credito_venta_impl: no hay renglón de $ 0.
+    // Si un descuento se llevó la plata de la línea (toda, o toda menos unos centavos que no alcanzan
+    // para estas unidades), la mercadería se devuelve anulando primero ese descuento.
+    if (montoUnidadesNC(l, cant) <= 0) {
+      return `A «${l.nombre}» ya se le acreditó ${l.montoDisponible > 0 ? 'casi ' : ''}toda su plata con un descuento. ` +
+        'Para devolver la mercadería, anulá primero ese descuento.'
+    }
     alguna = true
   }
   if (!alguna) return 'Elegí al menos un producto y su cantidad'

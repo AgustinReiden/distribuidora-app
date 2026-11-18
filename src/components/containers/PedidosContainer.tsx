@@ -96,10 +96,9 @@ import {
   useCrearPedidoCambioEnRutaMutation,
   useAplicarCambioParadaMutation,
   useZonasEstandarizadasQuery,
-  fetchPedidoIdsConSalvedad,
   type RegistrarCambioInput,
 } from '../../hooks/queries'
-import { construirFiltrosPedidos, aplicarFiltroConSalvedad, motivoDelFiltroSalvedad } from '../../utils/construirFiltrosPedidos'
+import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
 import { filtrosParaStats } from '../../utils/kpiFiltroPedidos'
 import { useRecorridoActivoQuery } from '../../hooks/queries/useRecorridoActivoQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
@@ -274,7 +273,6 @@ export default function PedidosContainer(): React.ReactElement {
     data: paginatedResult,
     isLoading: loadingPedidos,
     isError: errorPedidos,
-    error: errorPedidosDetalle,
     refetch: refetchPedidos,
     dataUpdatedAt: pedidosActualizadosAt,
     isSuccess: pedidosCargados,
@@ -1238,13 +1236,6 @@ export default function PedidosContainer(): React.ReactElement {
       ? `*, cliente:clientes!inner(*), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PRODUCTO_COLUMNAS})), pagos(forma_pago, monto)`
       : `*, cliente:clientes(*), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PRODUCTO_COLUMNAS})), pagos(forma_pago, monto)`
 
-    // conSalvedad necesita un round-trip previo a salvedades_items: no es un
-    // filtro que se pueda encadenar solo (ver fetchPedidoIdsConSalvedad).
-    let idsConSalvedad: number[] | null = null
-    if (filtros.conSalvedad && filtros.conSalvedad !== 'todos') {
-      idsConSalvedad = await fetchPedidoIdsConSalvedad()
-    }
-
     // Los filtros se arman en `construirFiltrosPedidos`, EL MISMO armado que usan
     // la lista paginada y las cards de stats: el conteo y las páginas tienen que
     // mirar exactamente el mismo universo, o la verificación no prueba nada.
@@ -1258,7 +1249,7 @@ export default function PedidosContainer(): React.ReactElement {
         .order('id')
 
       query = construirFiltrosPedidos(query, filtros, debouncedBusqueda)
-      query = aplicarFiltroConSalvedad(query, filtros.conSalvedad, idsConSalvedad)
+      query = aplicarFiltroConSalvedad(query, filtros.conSalvedad)
       return query
     }
 
@@ -2903,7 +2894,6 @@ export default function PedidosContainer(): React.ReactElement {
           usuarios={usuarios}
           loading={loadingPedidos}
           error={errorPedidos}
-          errorMotivo={motivoDelFiltroSalvedad(errorPedidosDetalle)}
           onRetry={refetchPedidos}
           exportando={exportando}
           onBusquedaChange={handleBusquedaChange}

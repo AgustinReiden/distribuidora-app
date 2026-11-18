@@ -10,22 +10,20 @@
  */
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, cleanup } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 // `vi.mock` se hoistea arriba de todo: las factories no pueden capturar consts
 // de este módulo, así que los spies viven en `vi.hoisted`.
-const { invalidateQueries, supabaseStub, registrarPagosBatch, fetchPagosPedido, eliminarPago, listaMock, notifyMock, PEDIDO, PEDIDO_IMPAGO } = vi.hoisted(() => {
+const { invalidateQueries, supabaseStub, registrarPagosBatch, fetchPagosPedido, eliminarPago, notifyMock, PEDIDO, PEDIDO_IMPAGO } = vi.hoisted(() => {
   const rpcFn = vi.fn()
   return {
     invalidateQueries: vi.fn(),
     registrarPagosBatch: vi.fn(),
     fetchPagosPedido: vi.fn(),
     eliminarPago: vi.fn(),
-    // El error con que falla la lista (null = anda).
-    listaMock: { error: null as unknown },
     notifyMock: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() },
     PEDIDO: {
       id: 42, cliente_id: '9', estado: 'entregado', total: 1000, monto_pagado: 0, items: [],
@@ -75,7 +73,7 @@ vi.mock('../../../hooks/queries', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   usePedidosPaginatedQuery: () => ({
     data: { pedidos: [PEDIDO], total: 1, totalPages: 1 }, isLoading: false, isFetching: false,
-    isError: listaMock.error !== null, error: listaMock.error,
+    isError: false, error: null,
   }),
   usePedidoStatsQuery: () => ({ data: undefined, isLoading: false }),
   EMPTY_PEDIDO_STATS_SUMMARY: {},
@@ -194,7 +192,6 @@ vi.mock('../../modals/ModalEntregaConSalvedad', () => ({
 }))
 
 import PedidosContainer from '../PedidosContainer'
-import { FiltroSalvedadDemasiadoGrandeError } from '../../../utils/construirFiltrosPedidos'
 
 function renderContainer() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -217,7 +214,6 @@ function invalidoClientes() {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  listaMock.error = null
   fetchPagosPedido.mockResolvedValue([])
   registrarPagosBatch.mockResolvedValue({ idempotentReplay: false })
   supabaseStub.rpc.mockImplementation(() => Promise.resolve({ data: { success: true }, error: null }))
@@ -245,19 +241,6 @@ describe('PedidosContainer — el saldo del cliente se entera (FRT-2)', () => {
 
     await waitFor(() => expect(supabaseStub.rpc).toHaveBeenCalledWith('registrar_salvedad', expect.anything()))
     await waitFor(() => expect(invalidoClientes()).toBe(true))
-  })
-
-  // H1 (lente B10): el filtro con salvedad pasado el tope fallaba con el «No se pudo cargar» genérico.
-  it('la lista que falla por el filtro de salvedad muestra su motivo; otro error, no', async () => {
-    listaMock.error = new FiltroSalvedadDemasiadoGrandeError(812)
-    renderContainer()
-    expect(await screen.findByRole('alert')).toHaveTextContent(/Hay 812 pedidos con salvedad.*acotá por fecha/)
-    cleanup()
-
-    listaMock.error = new Error('Failed to fetch')
-    renderContainer()
-    await screen.findByRole('button', { name: 'Cobrar' })
-    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   // H5 (lente B10): «Entregar y registrar pago» no invalidaba los clientes ni el recorrido DESPUÉS

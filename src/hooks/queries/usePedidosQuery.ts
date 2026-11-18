@@ -231,25 +231,6 @@ async function enrichWithSalvedades(pedidos: Record<string, unknown>[]): Promise
   return salvedadesMap
 }
 
-/**
- * Ids de pedido con al menos una salvedad vigente (no anulada) en
- * `salvedades_items`, para el filtro "Con salvedad / Sin salvedad" (#524).
- * Mismo criterio que el badge de la tarjeta y que las jornadas: una anulada
- * deshace todo y no es faltante (#1180). `enrichWithSalvedades` sí trae todas,
- * porque la tarjeta rotula las anuladas.
- *
- * Paginado con `traerTodo`: la tabla crece con cada entrega con salvedad y no
- * hay ninguna garantía de que se mantenga bajo las 1.000 filas que corta
- * PostgREST.
- */
-export async function fetchPedidoIdsConSalvedad(): Promise<number[]> {
-  const filas = await traerTodo<{ pedido_id: number }>(
-    () => supabase.from('salvedades_items').select('pedido_id').neq('estado_resolucion', 'anulada').order('id'),
-    { etiqueta: 'los pedidos con salvedad' },
-  )
-  return Array.from(new Set(filas.map(f => f.pedido_id)))
-}
-
 // Fetch functions
 
 async function fetchPedidoById(id: string): Promise<PedidoDB | null> {
@@ -331,13 +312,6 @@ async function fetchPedidosPaginated(
   // Use !inner join when searching so PostgREST filters parent rows by client fields
   const selectStr = hasSearch ? PEDIDO_SELECT_CLIENTE_INNER : PEDIDO_SELECT
 
-  // conSalvedad necesita un round-trip previo a salvedades_items (ver
-  // fetchPedidoIdsConSalvedad): no es un filtro que se pueda encadenar solo.
-  let idsConSalvedad: number[] | null = null
-  if (filters?.conSalvedad && filters.conSalvedad !== 'todos') {
-    idsConSalvedad = await fetchPedidoIdsConSalvedad()
-  }
-
   // `created_at` solo no es único (un alta masiva o el replay de la cola comparten
   // timestamp): sin desempate, `range()` puede repetir un pedido entre dos páginas
   // y saltar otro. El `id` lo fija.
@@ -348,7 +322,7 @@ async function fetchPedidosPaginated(
     .order('id', { ascending: false })
 
   query = construirFiltrosPedidos(query, filters, search)
-  query = aplicarFiltroConSalvedad(query, filters?.conSalvedad, idsConSalvedad)
+  query = aplicarFiltroConSalvedad(query, filters?.conSalvedad)
   query = query.range(from, to)
 
   const { data, error, count } = await query

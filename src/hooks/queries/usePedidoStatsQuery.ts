@@ -9,7 +9,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { FiltrosPedidosState } from '../../types'
-import { pedidosKeys, fetchPedidoIdsConSalvedad } from './usePedidosQuery'
+import { pedidosKeys } from './usePedidosQuery'
 import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
 import { PAGINA_SUPABASE } from '../../utils/paginacion'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
@@ -118,17 +118,10 @@ async function fetchPedidoStats(
     ? 'estado, estado_pago, total, monto_pagado, cargo_envio, tipo_factura, cliente:clientes!inner(id)'
     : 'estado, estado_pago, total, monto_pagado, cargo_envio, tipo_factura'
 
-  // conSalvedad necesita un round-trip previo a salvedades_items: no es un
-  // filtro que se pueda encadenar solo (ver fetchPedidoIdsConSalvedad).
-  let idsConSalvedad: number[] | null = null
-  if (filters?.conSalvedad && filters.conSalvedad !== 'todos') {
-    idsConSalvedad = await fetchPedidoIdsConSalvedad()
-  }
-
   const armarQuery = () => {
     let query = supabase.from('pedidos').select(selectStr).order('id', { ascending: true })
     query = construirFiltrosPedidos(query, filters, search)
-    query = aplicarFiltroConSalvedad(query, filters?.conSalvedad, idsConSalvedad)
+    query = aplicarFiltroConSalvedad(query, filters?.conSalvedad)
     return query as unknown as QueryPaginablePedidos
   }
 

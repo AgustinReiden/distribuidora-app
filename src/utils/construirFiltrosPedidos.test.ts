@@ -10,9 +10,6 @@ import { describe, it, expect } from 'vitest'
 import {
   construirFiltrosPedidos,
   aplicarFiltroConSalvedad,
-  motivoDelFiltroSalvedad,
-  FiltroSalvedadDemasiadoGrandeError,
-  TOPE_IDS_FILTRO_SALVEDAD,
 } from './construirFiltrosPedidos'
 import type { FiltrosPedidosState } from '../types'
 
@@ -231,74 +228,28 @@ describe('construirFiltrosPedidos', () => {
 describe('aplicarFiltroConSalvedad', () => {
   it('"todos" no toca la query', () => {
     const { builder, llamadas } = crearQueryFalsa()
-    aplicarFiltroConSalvedad(builder, 'todos', [1, 2, 3])
+    aplicarFiltroConSalvedad(builder, 'todos')
     expect(llamadas).toHaveLength(0)
   })
 
-  it('con_salvedad filtra por los ids conocidos', () => {
+  // 1598-b4: el filtro va por la columna calculada `tiene_salvedad_vigente(pedidos)` (mig NNN).
+  // Antes viajaban los ids de todos los pedidos con salvedad en la URL (`id=in.(…)`), y pasados
+  // 700 el filtro dejaba de andar.
+  it('con_salvedad filtra por la marca del server, sin ids en la URL', () => {
     const { builder, llamadas } = crearQueryFalsa()
-    aplicarFiltroConSalvedad(builder, 'con_salvedad', [10, 20])
-    expect(llamadas).toContainEqual({ metodo: 'in', args: ['id', [10, 20]] })
+    aplicarFiltroConSalvedad(builder, 'con_salvedad')
+    expect(llamadas).toEqual([{ metodo: 'eq', args: ['tiene_salvedad_vigente', true] }])
   })
 
-  it('con_salvedad sin ninguna fila conocida no trae nada (sentinela -1, no in.() inválido)', () => {
+  it('sin_salvedad pide la marca en false', () => {
     const { builder, llamadas } = crearQueryFalsa()
-    aplicarFiltroConSalvedad(builder, 'con_salvedad', [])
-    expect(llamadas).toContainEqual({ metodo: 'in', args: ['id', [-1]] })
+    aplicarFiltroConSalvedad(builder, 'sin_salvedad')
+    expect(llamadas).toEqual([{ metodo: 'eq', args: ['tiene_salvedad_vigente', false] }])
   })
 
-  it('sin_salvedad excluye los ids conocidos', () => {
+  it('undefined no toca la query', () => {
     const { builder, llamadas } = crearQueryFalsa()
-    aplicarFiltroConSalvedad(builder, 'sin_salvedad', [10, 20])
-    expect(llamadas).toContainEqual({ metodo: 'not', args: ['id', 'in', '(10,20)'] })
-  })
-
-  it('sin_salvedad sin ninguna fila conocida no excluye nada', () => {
-    const { builder, llamadas } = crearQueryFalsa()
-    aplicarFiltroConSalvedad(builder, 'sin_salvedad', null)
-    expect(llamadas).toContainEqual({ metodo: 'not', args: ['id', 'in', '(-1)'] })
-  })
-
-  // 1598-b4: los ids viajan en la URL (`id=in.(…)`). Sin tope, con la tabla creciendo la URL pasa
-  // el límite del proxy y el filtro falla con un error de red que no dice nada.
-  describe('tope de ids en la URL (1598-b4)', () => {
-    const ids = (n: number) => Array.from({ length: n }, (_, i) => 10_000 + i)
-
-    it('hasta el tope arma el filtro como siempre', () => {
-      const { builder, llamadas } = crearQueryFalsa()
-      aplicarFiltroConSalvedad(builder, 'con_salvedad', ids(TOPE_IDS_FILTRO_SALVEDAD))
-      expect(llamadas).toHaveLength(1)
-    })
-
-    it('pasado el tope, con_salvedad no manda la URL: avisa qué hacer', () => {
-      const { builder, llamadas } = crearQueryFalsa()
-      expect(() => aplicarFiltroConSalvedad(builder, 'con_salvedad', ids(TOPE_IDS_FILTRO_SALVEDAD + 1)))
-        .toThrow(FiltroSalvedadDemasiadoGrandeError)
-      expect(llamadas).toHaveLength(0)
-    })
-
-    it('lo mismo con sin_salvedad', () => {
-      const { builder } = crearQueryFalsa()
-      expect(() => aplicarFiltroConSalvedad(builder, 'sin_salvedad', ids(TOPE_IDS_FILTRO_SALVEDAD + 1)))
-        .toThrow(/son demasiados para filtrar por salvedad/i)
-    })
-
-    it('el tope no baja de lo que antes andaba (~700 ids en la URL)', () => {
-      expect(TOPE_IDS_FILTRO_SALVEDAD).toBeGreaterThanOrEqual(700)
-    })
-
-    it('el motivo que se le muestra a la pantalla es el del filtro, y sólo el suyo', () => {
-      const { builder } = crearQueryFalsa()
-      let error: unknown
-      try { aplicarFiltroConSalvedad(builder, 'con_salvedad', ids(TOPE_IDS_FILTRO_SALVEDAD + 5)) } catch (e) { error = e }
-      expect(motivoDelFiltroSalvedad(error)).toMatch(/Hay 705 pedidos con salvedad.*acotá por fecha/)
-      expect(motivoDelFiltroSalvedad(new Error('Failed to fetch'))).toBeUndefined()
-      expect(motivoDelFiltroSalvedad(null)).toBeUndefined()
-    })
-
-    it('«todos» nunca mira el tamaño de la lista', () => {
-      const { builder } = crearQueryFalsa()
-      expect(() => aplicarFiltroConSalvedad(builder, 'todos', ids(TOPE_IDS_FILTRO_SALVEDAD * 3))).not.toThrow()
-    })
+    aplicarFiltroConSalvedad(builder, undefined)
+    expect(llamadas).toHaveLength(0)
   })
 })
