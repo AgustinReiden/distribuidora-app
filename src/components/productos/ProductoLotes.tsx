@@ -33,6 +33,7 @@ import BadgeVencimiento from '../vencimientos/BadgeVencimiento'
 import { Button } from '../ui/Button'
 import { CampoNumero } from '../ui/CampoNumero'
 import { leerEntero, numeroConMiles } from '../../utils/normalizarNumero'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 
 export interface ProductoLotesProps {
   /** Producto en edición. Sin id (alta nueva) la sección no se muestra. */
@@ -53,6 +54,9 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
 
   const crearLote = useCrearLoteManualMutation()
   const ajustarLote = useAjustarLoteMutation()
+  // Su propio registro (N7 de la segunda pasada): una cantidad de lote en rojo no frena el Guardar
+  // de la ficha del producto. Los guardar de acá releen con `leerEntero`, el lector del rojo.
+  const ilegibles = useRegistroIlegibles()
 
   // Etiquetar es una tarea de depósito: es quien camina el galpón y ve la caja.
   // Corregir un contador es administración. La RPC vuelve a chequear las dos
@@ -115,6 +119,7 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
   }
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <section className="border-t dark:border-gray-700 pt-4">
       <div className="flex items-center justify-between gap-2 mb-2">
         <h3 className="text-sm font-medium flex items-center gap-1.5 dark:text-white">
@@ -279,5 +284,6 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
         </span>
       </p>
     </section>
+    </RegistroIlegiblesContext.Provider>
   )
 }

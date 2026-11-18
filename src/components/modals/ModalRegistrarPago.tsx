@@ -284,6 +284,21 @@ export default function ModalRegistrarPago({
   const { validate, getFirstError } = useZodValidation(modalPagoSchema)
 
   const [monto, setMonto] = useState<string>('')
+  // N10 y N11 de la segunda pasada: un preset (Total, 50 %) limpia el borrador en rojo aunque el
+  // monto ya fuera ése (vuelve a montar el campo), y «Se registra» no muestra el monto de antes
+  // mientras el campo está en rojo.
+  const [vueltaMonto, setVueltaMonto] = useState(0)
+  const [montoEnRojo, setMontoEnRojo] = useState(false)
+  const [pagosEnRojo, setPagosEnRojo] = useState<ReadonlySet<number>>(new Set())
+  const marcarPagoEnRojo = (index: number, valido: boolean): void => {
+    setPagosEnRojo(prev => {
+      if (valido === !prev.has(index)) return prev
+      const sig = new Set(prev)
+      if (valido) sig.delete(index)
+      else sig.add(index)
+      return sig
+    })
+  }
   const [formaPago, setFormaPago] = useState<string>('efectivo')
   const [referencia, setReferencia] = useState<string>('')
   const [notas, setNotas] = useState<string>('')
@@ -588,6 +603,7 @@ export default function ModalRegistrarPago({
   const handleMontoPreset = (porcentaje: number): void => {
     if (baseMedida && !saldoCargando) {
       setMonto((baseMedida * porcentaje / 100).toFixed(2))
+      setVueltaMonto(v => v + 1)
     }
   }
 
@@ -859,11 +875,12 @@ export default function ModalRegistrarPago({
                         commitOnChange
                         value={Number(pago.monto) || 0}
                         onChange={(n) => handlePagoChange(index, 'monto', String(n))}
+                        onValidez={valido => marcarPagoEnRojo(index, valido)}
                         placeholder="0.00"
                         className="w-full pl-7 pr-2 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-semibold"
                       />
                     </div>
-                    <MontoLeido monto={parsePrecio(pago.monto)} />
+                    <MontoLeido monto={pagosEnRojo.has(index) ? 0 : parsePrecio(pago.monto)} />
                   </div>
                   <select
                     value={pago.formaPago}
@@ -926,17 +943,19 @@ export default function ModalRegistrarPago({
               <div className="relative">
                 <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <NumberInput
+                  key={vueltaMonto}
                   min={0}
                   emptyValue={0}
                   commitOnChange
                   value={Number(monto) || 0}
                   onChange={(n) => setMonto(String(n))}
+                  onValidez={valido => setMontoEnRojo(!valido)}
                   placeholder="0.00"
                   className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-lg font-semibold"
                   required
                 />
               </div>
-              <MontoLeido monto={parsePrecio(monto)} />
+              <MontoLeido monto={montoEnRojo ? 0 : parsePrecio(monto)} />
               {baseMedida > 0 && !saldoCargando && (
                 <div className="flex gap-2 mt-2">
                   <button

@@ -56,6 +56,24 @@ describe('ModalRegistrarPago · el monto leído', () => {
     expect(onConfirmar.mock.calls[0][0]).toMatchObject({ monto })
   })
 
+  // N11 y N10 de la segunda pasada: con el monto en rojo, «Se registra» no muestra el de antes; y
+  // el botón «Total» limpia el rojo aunque el monto ya fuera el total.
+  it('con el monto en rojo no dice «Se registra» con el de antes, y «Total» lo limpia', async () => {
+    const user = userEvent.setup()
+    const { onConfirmar } = montar()
+    await user.click(screen.getByRole('button', { name: 'Total' }))
+    expect(screen.getByText(/Se registra:/)).toHaveTextContent(/300\.000,00/)
+    await user.click(campoMonto())
+    await user.keyboard('{Control>}a{/Control}1.500.000')
+    expect(campoMonto()).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.queryByText(/Se registra:/)).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Total' }))
+    expect(campoMonto()).not.toHaveAttribute('aria-invalid', 'true')
+    expect(campoMonto()).toHaveValue('300.000')
+    await user.click(screen.getByRole('button', { name: 'Registrar' }))
+    expect(onConfirmar.mock.calls[0][0]).toMatchObject({ monto: 300000 })
+  })
+
   it('sin monto no muestra nada', () => {
     montar()
     expect(screen.queryByText(/Se registra:/)).toBeNull()

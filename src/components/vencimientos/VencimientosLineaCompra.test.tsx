@@ -56,6 +56,35 @@ describe('VencimientosLineaCompra · las unidades', () => {
     expect(screen.getByRole('button', { name: 'Registrar Compra' })).toBeEnabled()
   })
 
+  // N6 de la segunda pasada: si la lista se cerraba con un rojo adentro, el campo se desmontaba y la
+  // compra se guardaba callada con las unidades de antes.
+  it('con unas unidades en rojo, el badge no cierra la lista y la compra sigue frenada', async () => {
+    const user = userEvent.setup()
+    render(<Compra inicial={[{ fecha: '2027-03-01', cantidad: 5 }]} />)
+    await abrir(user)
+    const campo = screen.getByLabelText('Unidades del vencimiento 1')
+    await user.click(campo)
+    await user.keyboard('1.200')
+    await user.click(screen.getByRole('button', { name: /^Vence/ }))
+    expect(screen.getByLabelText('Unidades del vencimiento 1')).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('button', { name: 'Registrar Compra' })).toBeDisabled()
+  })
+
+  it('quitar el renglón de arriba de uno en rojo no le pasa el rojo a otro ni lo pierde', async () => {
+    const user = userEvent.setup()
+    render(<Compra inicial={[{ fecha: '2027-03-01', cantidad: 5 }, { fecha: '2027-04-01', cantidad: 7 }]} />)
+    await user.click(screen.getByRole('button', { name: /vencimientos/ }))
+    const segundo = screen.getByLabelText('Unidades del vencimiento 2')
+    await user.click(segundo)
+    await user.keyboard('1.200')
+    await user.click(screen.getByRole('button', { name: 'Quitar el vencimiento 1' }))
+    // El que queda es el de abril, todavía en rojo: la compra sigue frenada.
+    const queda = screen.getByLabelText('Unidades del vencimiento 1')
+    expect(queda).toHaveAttribute('aria-invalid', 'true')
+    expect(queda).toHaveValue('1,200')
+    expect(screen.getByRole('button', { name: 'Registrar Compra' })).toBeDisabled()
+  })
+
   it('un vencimiento con 0 unidades lo dice y frena la compra', async () => {
     const user = userEvent.setup()
     render(<Compra inicial={[{ fecha: '2027-03-01', cantidad: 0 }]} />)

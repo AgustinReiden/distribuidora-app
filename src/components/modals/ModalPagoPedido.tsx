@@ -227,6 +227,17 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   // valor prellenado ahi, un pedido a medias cobrar se abria pidiendo el total,
   // en rojo y con el boton muerto: habia que borrar y retipear a mano. El
   // efecto de abajo lo completa cuando los pagos previos ya estan.
+  // N11 de la segunda pasada: «Se registra» no muestra el monto de antes de un renglón en rojo.
+  const [lineasEnRojo, setLineasEnRojo] = useState<ReadonlySet<number>>(new Set())
+  const marcarLineaEnRojo = (index: number, valido: boolean): void => {
+    setLineasEnRojo(prev => {
+      if (valido === !prev.has(index)) return prev
+      const sig = new Set(prev)
+      if (valido) sig.delete(index)
+      else sig.add(index)
+      return sig
+    })
+  }
   const [lineas, setLineas] = useState<LineaPago[]>(
     sinConfirmar
       ? sinConfirmar.pagos.map(p => ({ formaPago: p.formaPago, monto: p.monto.toFixed(2) }))
@@ -746,11 +757,12 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                           commitOnChange
                           value={Number(linea.monto) || 0}
                           onChange={(n) => handleLineaChange(index, { monto: String(n) })}
+                          onValidez={valido => marcarLineaEnRojo(index, valido)}
                           placeholder="0.00"
                           className="w-full pl-6 pr-2 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white font-semibold"
                         />
                       </div>
-                      <MontoLeido monto={parsePrecio(linea.monto)} />
+                      <MontoLeido monto={lineasEnRojo.has(index) ? 0 : parsePrecio(linea.monto)} />
                     </div>
                     {lineas.length > 1 && (
                       <button
