@@ -81,13 +81,19 @@ export function psql(sql, { env = process.env, destino: d = destino(env) } = {})
  * dicen su veredicto en un NOTICE o en el mensaje de su excepción final (los dos van por
  * stderr) y cuyo exit code no es el veredicto. Sin `-At`: el formato no importa.
  */
-export function psqlCompleto(sql, { destino: d } = {}) {
+export function psqlCompleto(sql, { destino: d, tz } = {}) {
   if (!d) throw new Error('Falta la base (destino).');
+  // `tz` corre la sesión en otra zona horaria (PGTZ): `CURRENT_DATE` y `now()::date` pasan a ser el día de esa zona.
   const [cmd, args] =
     d.tipo === 'docker'
-      ? ['docker', ['exec', '-i', d.contenedor, 'psql', '-U', 'postgres', '-h', 'localhost', '-d', 'postgres', '-X', '-q']]
+      ? ['docker', ['exec', ...(tz ? ['-e', `PGTZ=${tz}`] : []), '-i', d.contenedor, 'psql', '-U', 'postgres', '-h', 'localhost', '-d', 'postgres', '-X', '-q']]
       : ['psql', [d.url, '-X', '-q']];
-  const r = spawnSync(cmd, args, { input: sql, encoding: 'utf8', maxBuffer: 1 << 28 });
+  const r = spawnSync(cmd, args, {
+    input: sql,
+    encoding: 'utf8',
+    maxBuffer: 1 << 28,
+    env: tz ? { ...process.env, PGTZ: tz } : process.env,
+  });
   if (r.error) throw new Error(`No pude ejecutar ${cmd}: ${r.error.message}`);
   return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }

@@ -684,7 +684,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.er_caso_l1(p_cli bigint, p_adm uuid, p_suc bigint)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
-  f text[] := '{}'; v_def text; v_firma text;
+  f text[] := '{}'; v_def text; v_firma text; v_tope int;
 BEGIN
   FOREACH v_firma IN ARRAY ARRAY['public.cancelar_pedido_con_stock(bigint,text,uuid,text)',
                                  'public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz)',
@@ -692,8 +692,22 @@ BEGIN
                                  'public.sustituir_regalo_pedido(bigint,bigint,numeric,text,bigint,uuid)',
                                  'public.dividir_regalo_pedido(bigint,jsonb,text,uuid)'] LOOP
     v_def := pg_get_functiondef(v_firma::regprocedure);
+    -- Desde B19 (ola 2 de #1603) la edición, la sustitución y el reparto llegan al motor por
+    -- _barra_mover_neto, y en la edición el helper va al final: medir contra él no mordía (los
+    -- pre-bloqueos podían ir a cualquier lugar antes del final). El tope es el comienzo del tramo
+    -- que toma filas: en la edición, la vuelta sobre las líneas viejas (FOR v_bonif IN); en la
+    -- sustitución y el reparto, el lock de la promo (productos antes que promo, #1460); en el
+    -- resto, la primera mención del motor, como siempre. Sin tope, rojo.
+    v_tope := CASE v_firma
+                WHEN 'public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamptz)'
+                  THEN position('FOR v_bonif IN' IN v_def)
+                WHEN 'public.sustituir_regalo_pedido(bigint,bigint,numeric,text,bigint,uuid)'
+                  THEN position('INTO v_promo FROM promociones' IN v_def)
+                WHEN 'public.dividir_regalo_pedido(bigint,jsonb,text,uuid)'
+                  THEN position('INTO v_promo FROM promociones' IN v_def)
+                ELSE position('aplicar_uso_promo_acumulador' IN v_def) END;
     f := pg_temp.er_si(f, position('public._contenedores_de_promos(' IN v_def) > 0
-                          AND position('public._contenedores_de_promos(' IN v_def) < position('aplicar_uso_promo_acumulador' IN v_def),
+                          AND position('public._contenedores_de_promos(' IN v_def) < v_tope,
                        format('%s no bloquea los contenedores antes del motor de promos', v_firma));
   END LOOP;
   FOREACH v_firma IN ARRAY ARRAY['public.sustituir_regalo_pedido(bigint,bigint,numeric,text,bigint,uuid)',

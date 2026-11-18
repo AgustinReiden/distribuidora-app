@@ -164,6 +164,34 @@ describe('ModalNotaCredito — tope del ajuste (#1557, CMP-2)', () => {
   })
 })
 
+describe('ModalNotaCredito — una nota anulada no cuenta (B18 de #1603, mig 523)', () => {
+  // A: 10 u. Una devolución de 4 anulada y un ajuste de 1.000 anulado sobre una ZZ de 1.210.
+  const compraZZ: ModalNotaCreditoProps['compra'] = {
+    ...compraFC, tipo_factura: 'ZZ', impuestos_internos: 0, total: 1210,
+  }
+  const anuladas = [
+    {
+      id: '20', compra_id: '313', fecha: '2026-11-12', subtotal: 400, iva: 0, total: 400, tipo: 'devolucion' as const,
+      anulada: true, items: [{ id: '1', nota_credito_id: '20', producto_id: '10', cantidad: 4, costo_unitario: 100, subtotal: 400 }],
+    },
+    { id: '21', compra_id: '313', fecha: '2026-11-12', subtotal: 1000, iva: 0, total: 1000, tipo: 'ajuste' as const, anulada: true },
+  ] as unknown as ModalNotaCreditoProps['notasExistentes']
+
+  it('lo devuelto por una nota anulada se puede volver a devolver (ya acreditado 0, máximo 10)', () => {
+    render(<ModalNotaCredito compra={compraZZ} notasExistentes={anuladas} onSave={vi.fn()} onClose={() => {}} />)
+    const fila = screen.getByLabelText('Cantidad a acreditar de Agua').closest('tr')!
+    expect(fila).toHaveTextContent('max: 10')
+  })
+
+  it('el tope del ajuste no descuenta la nota anulada: le quedan los 1.210', () => {
+    render(<ModalNotaCredito compra={compraZZ} notasExistentes={anuladas} onSave={vi.fn()} onClose={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Ajuste sin mercadería' }))
+    fireEvent.change(screen.getByLabelText('Total que acredita el proveedor'), { target: { value: '1210' } })
+    expect(screen.getByTestId('nc-ajuste-restante')).toHaveTextContent('Le quedan')
+    expect(screen.getByTestId('nc-ajuste-restante')).toHaveTextContent('1.210')
+  })
+})
+
 describe('ModalNotaCredito — aviso de la devolución cuando hay un ajuste (#1590-c)', () => {
   // 10 u. x 100 sin IVA = 1.000. Con un ajuste de 800 le quedan 200: la devolución no puede pasarlos.
   const compra: ModalNotaCreditoProps['compra'] = {
@@ -219,6 +247,14 @@ describe('ModalNotaCredito — aviso de la devolución cuando hay un ajuste (#15
     fireEvent.click(guardar())
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
     expect(onSave.mock.calls[0][0]).toMatchObject({ total: 200 })
+  })
+
+  it('un ajuste ANULADO no pone tope: la devolución no muestra el aviso (B18, mig 526)', () => {
+    renderDevolucion([{ ...nota('ajuste', 800), anulada: true } as ReturnType<typeof nota>])
+    expect(screen.queryByTestId('nc-devolucion-restante')).toBeNull()
+    cantidad('9')
+    expect(screen.queryByTestId('nc-devolucion-restante')).toBeNull()
+    expect(guardar()).toBeEnabled()
   })
 
   it('sin un ajuste en la compra el tope no rige: devolver toda la mercadería entra siempre', async () => {

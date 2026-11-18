@@ -13,6 +13,9 @@
 --
 --   psql "$DATABASE_URL" -f scripts/test-subtotal-compra-1077.sql
 
+-- El día es el argentino, no el de la sesión: entre las 21 y las 24 de Argentina CURRENT_DATE ya es mañana y el
+-- sistema (que mide con _tablero_hoy()) rechaza la fecha del ensayo como futura (B13d). Es la misma cuenta
+-- que hace _tablero_hoy(), a mano porque algunos pasos corren como `authenticated`.
 DO $ensayo$
 DECLARE
   v_fallas    text[] := '{}';
@@ -64,7 +67,7 @@ BEGIN
   -- ------------------------------------------- 1 · alta con cabecera desfasada
   EXECUTE 'SET LOCAL ROLE authenticated';
   v_r := public.registrar_compra_completa(
-    NULL, 'ENSAYO 1077', 'ENSAYO-1077-A', current_date,
+    NULL, 'ENSAYO 1077', 'ENSAYO-1077-A', (now() AT TIME ZONE 'America/Argentina/Tucuman')::date,
     1500, 0, 0, 1500, 'efectivo', 'ensayo #1077', v_admin, v_items,
     'ZZ');
   EXECUTE 'RESET ROLE';
@@ -84,7 +87,7 @@ BEGIN
   -- ------------------------------- 1b · el borde: 1,50 de más también se rechaza
   EXECUTE 'SET LOCAL ROLE authenticated';
   v_r := public.registrar_compra_completa(
-    NULL, 'ENSAYO 1077', 'ENSAYO-1077-A2', current_date,
+    NULL, 'ENSAYO 1077', 'ENSAYO-1077-A2', (now() AT TIME ZONE 'America/Argentina/Tucuman')::date,
     1001.50, 0, 0, 1001.50, 'efectivo', 'ensayo #1077', v_admin, v_items,
     'ZZ');
   EXECUTE 'RESET ROLE';
@@ -95,7 +98,7 @@ BEGIN
   -- -------------------------- 2 · alta dentro de la tolerancia (como la 73)
   EXECUTE 'SET LOCAL ROLE authenticated';
   v_r := public.registrar_compra_completa(
-    NULL, 'ENSAYO 1077', 'ENSAYO-1077-B', current_date,
+    NULL, 'ENSAYO 1077', 'ENSAYO-1077-B', (now() AT TIME ZONE 'America/Argentina/Tucuman')::date,
     999.98, 0, 0, 999.98, 'efectivo', 'ensayo #1077', v_admin, v_items,
     'ZZ');
   EXECUTE 'RESET ROLE';
