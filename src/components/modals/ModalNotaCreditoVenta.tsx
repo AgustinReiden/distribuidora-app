@@ -5,8 +5,10 @@
  * se le reconoce un crédito en su cuenta corriente. Desde la mig 479 (COB-1) el
  * crédito baja primero este pedido, si sigue impago, y lo que sobra va FIFO a las
  * otras boletas abiertas del cliente; sólo queda de saldo a favor lo que no
- * alcanza a ninguna. La NC NO modifica el pedido (ni total, ni ítems, ni estado),
- * no mueve stock y no afecta la comisión del vendedor.
+ * alcanza a ninguna. La NC NO modifica el pedido (ni total, ni ítems, ni estado)
+ * y no mueve stock. Se imputa al día del pedido; según el motivo le descuenta o no
+ * al vendedor, y el modal lo dice al elegirlo (B16, decisiones del dueño del 16/11
+ * y del 17/11).
  *
  * La cuenta es la de `utils/notaCreditoVenta`; el servidor la rehace con el
  * precio del pedido y revalida las cantidades.
@@ -24,8 +26,10 @@ import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio, formatFecha } from '../../utils/formatters'
 import {
-  LEYENDA_NC_NO_AFECTA_COMISION,
+  LEYENDA_NC_COMISION,
   MOTIVOS_NC_VENTA,
+  diaEmisionNotaCreditoVenta,
+  leyendaMotivoNCVenta,
   itemsNotaCreditoParaRPC,
   lineasAcreditables,
   lineasReparticionCreditoNC,
@@ -47,13 +51,22 @@ import type { PedidoDB } from '../../types'
 
 const ModalImputarCredito = lazyWithReload(() => import('./ModalImputarCredito'))
 
-const TITULO_NC = 'Nota de crédito por mercadería vencida o dañada'
+const TITULO_NC = 'Nota de crédito de venta'
 
 // Co-locado a propósito (CLAUDE.md): un modal lazy no valida contra un schema de
 // un chunk compartido que un bundle viejo del PWA podría tener desincronizado.
 // eslint-disable-next-line react-refresh/only-export-components
 export const notaCreditoVentaSchema = z.object({
-  motivo: z.enum(['producto_vencido', 'producto_danado', 'otro']),
+  // Los de nc_venta_motivos() (B16 v3): lo vigila constants/motivosNCVenta.espejo.test.ts.
+  motivo: z.enum([
+    'cliente_rechaza',
+    'error_pedido',
+    'error_entrega',
+    'producto_vencido',
+    'producto_danado',
+    'descuento_comercial',
+    'otro',
+  ]),
   observaciones: z.string().max(500, { message: 'Máximo 500 caracteres' }).optional(),
 })
 
@@ -198,7 +211,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
         <div className="flex items-start gap-2 rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-800 dark:border-teal-800 dark:bg-teal-900/20 dark:text-teal-300">
           <Info className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
-            <p className="font-semibold">{LEYENDA_NC_NO_AFECTA_COMISION}</p>
+            <p className="font-semibold">{LEYENDA_NC_COMISION}</p>
             <p>
               El pedido no se modifica y no se mueve stock. El crédito baja primero este pedido,
               si todavía debe algo, y lo que sobra va a las otras boletas abiertas del cliente,
@@ -210,7 +223,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
         {notasVigentes.length > 0 && (
           <p className="text-sm text-gray-600 dark:text-gray-400">
             Este pedido ya tiene {notasVigentes.length === 1 ? 'una nota de crédito' : `${notasVigentes.length} notas de crédito`}{' '}
-            ({notasVigentes.map(n => `#${n.id} ${formatFecha(n.fecha)}`).join(', ')}). Lo ya acreditado se descuenta.
+            ({notasVigentes.map(n => `#${n.id} del ${formatFecha(diaEmisionNotaCreditoVenta(n))}`).join(', ')}). Lo ya acreditado se descuenta.
           </p>
         )}
 
@@ -287,6 +300,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
                 <option key={m.value} value={m.value}>{m.label}</option>
               ))}
             </select>
+            <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">{leyendaMotivoNCVenta(motivo)}</span>
           </label>
           <label className="block text-sm">
             <span className="mb-1 block font-medium text-gray-700 dark:text-gray-300">Observaciones</span>

@@ -11,17 +11,22 @@
 --   P1 · ZZ, C1, vendedor V: A×10 a 100 y B×5 a 50 (1.250). Cobrado 300 en efectivo.
 --   P2 · FC, C2, el admin: A×2 a 121 (neto 100, IVA 21; 242).
 --   P3 · ZZ, C3, el admin, hace 20 días (fuera del período): A×1 a 100.
---   Notas de venta en el período: P1 A×2 (200), P1 B×1 (50, sin costo), P2 A×1 (121, IVA 21),
---   P3 A×1 (100); y una anulada (P1 B×1) que no cuenta. El crédito de la primera se imputa a P1.
+--   Notas de venta en el período: P1 A×2 (200), P1 B×1 (50, sin costo), P2 A×1 (121, IVA 21);
+--   una anulada (P1 B×1) que no cuenta, y una de hoy sobre P3 (A×1, 100) que, desde B16 (la nota
+--   se imputa al día de su boleta), cae fuera del período con P3. El crédito de la primera se
+--   imputa a P1.
+--   Cambió de regla con B16 (decisión del dueño del 16/11): hasta ahí la nota de P3 se restaba
+--   por el día en que se emitió y C3 salía con −100 y 0 pedidos; ahora no hay un cliente que sólo
+--   tenga una nota en un período, y los números de D, M1, M2 y R5 son 100 más.
 --   Compra de 5.000 con una NC de devolución de 800 y una de ajuste de 200.
 --
---   D  · REP-D (#1545, D44): la venta del gerencial es neta de notas: 1.492 − 471 = 1.021, y
+--   D  · REP-D (#1545, D44): la venta del gerencial es neta de notas: 1.492 − 371 = 1.121, y
 --        venta_bruta, notas_credito_venta, IVA débito, venta neta, FC/ZZ, vendedores, rubros y
---        top de clientes también; los pedidos no cambian. Ventas por cliente (C3 sólo con una
---        nota: −100, 0 pedidos, no se cuenta como cliente), por zona y por preventista dan lo
---        mismo; el bot de preventistas lo hereda.
---   M  · 1562-b6 (#1562, D42): lo sin costo queda fuera del margen: margen comercial 301
---        (1.021 − 200 sin costo − 720 de CMV + 200 de la NC de ajuste del proveedor; antes 972),
+--        top de clientes también; los pedidos no cambian. Ventas por cliente (C3, con su nota
+--        imputada a su boleta, no aparece), por zona y por preventista dan lo mismo; el bot de
+--        preventistas lo hereda.
+--   M  · 1562-b6 (#1562, D42): lo sin costo queda fuera del margen: margen comercial 401
+--        (1.121 − 200 sin costo − 720 de CMV + 200 de la NC de ajuste del proveedor; antes 1.072),
 --        el rubro «Sin rubro» con margen 0 y su venta aparte, y la lista de la alerta «Productos
 --        sin costo» suma el KPI (200, M5). Rentabilidad: B margen 0, total 480 (antes 730).
 --   R  · 1562-b7 (#1562, D43): el rubro es «Bebidas B8b» y «Sin rubro» en el gerencial,
@@ -220,82 +225,81 @@ BEGIN
   -- ================================================================== D · REP-D
   v_g := public.reporte_gerencial(v_s, v_desde, v_hoy);
   v_k := v_g->'kpis';
-  IF NOT pg_temp.igual((v_k->>'venta')::numeric, 1021) THEN
-    v_fallas := v_fallas || format('D1 venta del gerencial: esperaba 1021 (1492 − 471 de notas), dio %s', v_k->>'venta');
+  IF NOT pg_temp.igual((v_k->>'venta')::numeric, 1121) THEN
+    v_fallas := v_fallas || format('D1 venta del gerencial: esperaba 1121 (1492 − 371 de notas), dio %s', v_k->>'venta');
   END IF;
   IF NOT pg_temp.igual((v_k->>'venta_bruta')::numeric, 1492)
-     OR NOT pg_temp.igual((v_k->>'notas_credito_venta')::numeric, 471)
-     OR (v_k->>'notas_credito_venta_n')::int IS DISTINCT FROM 4 THEN
-    v_fallas := v_fallas || format('D2 venta bruta 1492 y 4 notas por 471: dio %s, %s, %s',
+     OR NOT pg_temp.igual((v_k->>'notas_credito_venta')::numeric, 371)
+     OR (v_k->>'notas_credito_venta_n')::int IS DISTINCT FROM 3 THEN
+    v_fallas := v_fallas || format('D2 venta bruta 1492 y 3 notas por 371: dio %s, %s, %s',
       v_k->>'venta_bruta', v_k->>'notas_credito_venta', v_k->>'notas_credito_venta_n');
   END IF;
-  IF NOT pg_temp.igual((v_k->>'iva_debito')::numeric, 21) OR NOT pg_temp.igual((v_k->>'venta_neta')::numeric, 1000)
-     OR NOT pg_temp.igual((v_k->>'fc_venta')::numeric, 121) OR NOT pg_temp.igual((v_k->>'zz_venta')::numeric, 900) THEN
-    v_fallas := v_fallas || format('D3 IVA 21, neta 1000, FC 121, ZZ 900: dio %s, %s, %s, %s',
+  IF NOT pg_temp.igual((v_k->>'iva_debito')::numeric, 21) OR NOT pg_temp.igual((v_k->>'venta_neta')::numeric, 1100)
+     OR NOT pg_temp.igual((v_k->>'fc_venta')::numeric, 121) OR NOT pg_temp.igual((v_k->>'zz_venta')::numeric, 1000) THEN
+    v_fallas := v_fallas || format('D3 IVA 21, neta 1100, FC 121, ZZ 1000: dio %s, %s, %s, %s',
       v_k->>'iva_debito', v_k->>'venta_neta', v_k->>'fc_venta', v_k->>'zz_venta');
   END IF;
   IF (v_k->>'pedidos')::int IS DISTINCT FROM 2 OR (v_k->>'clientes')::int IS DISTINCT FROM 2 THEN
     v_fallas := v_fallas || format('D4 las notas no son pedidos ni clientes: 2 y 2, dio %s y %s', v_k->>'pedidos', v_k->>'clientes');
   END IF;
-  IF NOT pg_temp.igual(pg_temp.suma(v_g->'vendedores', 'venta'), 1021)
+  IF NOT pg_temp.igual(pg_temp.suma(v_g->'vendedores', 'venta'), 1121)
      OR NOT pg_temp.igual((pg_temp.fila(v_g->'vendedores', 'id', v_ven::text)->>'venta')::numeric, 1000)
-     OR NOT pg_temp.igual((pg_temp.fila(v_g->'vendedores', 'id', v_adm::text)->>'venta')::numeric, 21)
+     OR NOT pg_temp.igual((pg_temp.fila(v_g->'vendedores', 'id', v_adm::text)->>'venta')::numeric, 121)
      OR (pg_temp.fila(v_g->'vendedores', 'id', v_ven::text)->>'pedidos')::int IS DISTINCT FROM 1 THEN
-    v_fallas := v_fallas || format('D5 vendedores V 1000 (1 pedido) y admin 21: %s', v_g->'vendedores');
+    v_fallas := v_fallas || format('D5 vendedores V 1000 (1 pedido) y admin 121: %s', v_g->'vendedores');
   END IF;
-  IF NOT pg_temp.igual(pg_temp.suma(v_g->'categorias', 'venta'), 1021)
-     OR NOT pg_temp.igual(pg_temp.suma(v_g->'mensual', 'venta'), 1021)
-     OR NOT pg_temp.igual((SELECT sum((e->>1)::numeric) FROM jsonb_array_elements(v_g->'serie_diaria') e), 1021) THEN
-    v_fallas := v_fallas || format('D6 Σ rubros, Σ mensual y Σ serie = 1021: %s, %s, %s',
+  IF NOT pg_temp.igual(pg_temp.suma(v_g->'categorias', 'venta'), 1121)
+     OR NOT pg_temp.igual(pg_temp.suma(v_g->'mensual', 'venta'), 1121)
+     OR NOT pg_temp.igual((SELECT sum((e->>1)::numeric) FROM jsonb_array_elements(v_g->'serie_diaria') e), 1121) THEN
+    v_fallas := v_fallas || format('D6 Σ rubros, Σ mensual y Σ serie = 1121: %s, %s, %s',
       pg_temp.suma(v_g->'categorias', 'venta'), pg_temp.suma(v_g->'mensual', 'venta'),
       (SELECT sum((e->>1)::numeric) FROM jsonb_array_elements(v_g->'serie_diaria') e));
   END IF;
   IF NOT pg_temp.igual((pg_temp.fila(v_g->'top_clientes', 'cliente_id', v_c1::text)->>'venta')::numeric, 1000)
-     OR NOT pg_temp.igual((pg_temp.fila(v_g->'top_clientes', 'cliente_id', v_c3::text)->>'venta')::numeric, -100) THEN
-    v_fallas := v_fallas || format('D7 top de clientes C1 1000 y C3 −100: %s', v_g->'top_clientes');
+     OR pg_temp.fila(v_g->'top_clientes', 'cliente_id', v_c3::text) IS NOT NULL THEN
+    v_fallas := v_fallas || format('D7 top de clientes C1 1000 y C3 fuera (su nota va con su boleta): %s', v_g->'top_clientes');
   END IF;
 
   v_j := public.reporte_ventas_por_cliente(v_desde, v_hoy, NULL, v_s);
-  IF NOT pg_temp.igual((v_j->'totales'->>'total')::numeric, 1021)
-     OR NOT pg_temp.igual(pg_temp.suma(v_j->'clientes', 'total'), 1021)
-     OR NOT pg_temp.igual(pg_temp.suma(v_j->'zonas', 'total'), 1021)
-     OR NOT pg_temp.igual(pg_temp.suma(v_j->'vendedores', 'total'), 1021) THEN
-    v_fallas := v_fallas || format('D8 ventas por cliente: total, Σ clientes, Σ zonas y Σ vendedores 1021: %s, %s, %s, %s',
+  IF NOT pg_temp.igual((v_j->'totales'->>'total')::numeric, 1121)
+     OR NOT pg_temp.igual(pg_temp.suma(v_j->'clientes', 'total'), 1121)
+     OR NOT pg_temp.igual(pg_temp.suma(v_j->'zonas', 'total'), 1121)
+     OR NOT pg_temp.igual(pg_temp.suma(v_j->'vendedores', 'total'), 1121) THEN
+    v_fallas := v_fallas || format('D8 ventas por cliente: total, Σ clientes, Σ zonas y Σ vendedores 1121: %s, %s, %s, %s',
       v_j->'totales'->>'total', pg_temp.suma(v_j->'clientes', 'total'), pg_temp.suma(v_j->'zonas', 'total'),
       pg_temp.suma(v_j->'vendedores', 'total'));
   END IF;
   IF (v_j->'totales'->>'pedidos')::int IS DISTINCT FROM 2 OR (v_j->'totales'->>'clientes')::int IS DISTINCT FROM 2
      OR (pg_temp.fila(v_j->'zonas', 'zona_id', v_z::text)->>'clientes')::int IS DISTINCT FROM 2
-     OR (pg_temp.fila(v_j->'clientes', 'cliente_id', v_c3::text)->>'pedidos')::int IS DISTINCT FROM 0
-     OR NOT pg_temp.igual((pg_temp.fila(v_j->'clientes', 'cliente_id', v_c3::text)->>'total')::numeric, -100) THEN
-    v_fallas := v_fallas || format('D9 2 pedidos, 2 clientes compradores, C3 −100 con 0 pedidos: %s / %s',
+     OR pg_temp.fila(v_j->'clientes', 'cliente_id', v_c3::text) IS NOT NULL THEN
+    v_fallas := v_fallas || format('D9 2 pedidos, 2 clientes compradores, C3 fuera: %s / %s',
       v_j->'totales', pg_temp.fila(v_j->'clientes', 'cliente_id', v_c3::text));
   END IF;
 
   v_j := public.reporte_ventas_por_preventista(v_desde, v_hoy, v_s);
-  IF NOT pg_temp.igual(pg_temp.suma(v_j, 'totalVentas'), 1021)
+  IF NOT pg_temp.igual(pg_temp.suma(v_j, 'totalVentas'), 1121)
      OR NOT pg_temp.igual((pg_temp.fila(v_j, 'id', v_ven::text)->>'totalVentas')::numeric, 1000)
      OR NOT pg_temp.igual(pg_temp.suma(v_j, 'cantidadPedidos'), 2) THEN
-    v_fallas := v_fallas || format('D10 ventas por preventista: Σ 1021, V 1000, 2 pedidos: %s', v_j);
+    v_fallas := v_fallas || format('D10 ventas por preventista: Σ 1121, V 1000, 2 pedidos: %s', v_j);
   END IF;
   v_j := public.bot_ventas_por_preventista(v_desde, v_hoy, v_s, false)::jsonb;
-  IF NOT pg_temp.igual((v_j->>'total_todos_los_roles')::numeric, 1021) THEN
-    v_fallas := v_fallas || format('D11 el bot de preventistas lo hereda: 1021, dio %s', v_j->>'total_todos_los_roles');
+  IF NOT pg_temp.igual((v_j->>'total_todos_los_roles')::numeric, 1121) THEN
+    v_fallas := v_fallas || format('D11 el bot de preventistas lo hereda: 1121, dio %s', v_j->>'total_todos_los_roles');
   END IF;
 
   -- ================================================================== M · 1562-b6
-  IF NOT pg_temp.igual((v_k->>'margen_comercial')::numeric, 301)
-     OR NOT pg_temp.igual((v_k->>'margen_neto')::numeric, 301)
+  IF NOT pg_temp.igual((v_k->>'margen_comercial')::numeric, 401)
+     OR NOT pg_temp.igual((v_k->>'margen_neto')::numeric, 401)
      OR NOT pg_temp.igual((v_k->>'ingreso_sin_costo')::numeric, 200) THEN
-    v_fallas := v_fallas || format('M1 margen comercial y neto 301 (1021 − 200 sin costo − 720 de CMV + 200 de la NC de ajuste del proveedor), sin costo 200: dio %s, %s, %s, %s',
+    v_fallas := v_fallas || format('M1 margen comercial y neto 401 (1121 − 200 sin costo − 720 de CMV + 200 de la NC de ajuste del proveedor), sin costo 200: dio %s, %s, %s, %s',
       v_k->>'margen_comercial', v_k->>'margen_neto', v_k->>'ingreso_sin_costo', v_k->>'cmv');
   END IF;
   IF NOT pg_temp.igual((pg_temp.fila(v_g->'categorias', 'categoria', 'Sin rubro')->>'margen_comercial')::numeric, 0)
      OR NOT pg_temp.igual((pg_temp.fila(v_g->'categorias', 'categoria', 'Sin rubro')->>'venta_sin_costo')::numeric, 200)
-     OR NOT pg_temp.igual((pg_temp.fila(v_g->'categorias', 'categoria', 'Bebidas B8b')->>'margen_comercial')::numeric, 101)
+     OR NOT pg_temp.igual((pg_temp.fila(v_g->'categorias', 'categoria', 'Bebidas B8b')->>'margen_comercial')::numeric, 201)
      OR NOT pg_temp.igual((pg_temp.fila(v_g->'vendedores', 'id', v_ven::text)->>'margen_comercial')::numeric, 200)
      OR NOT pg_temp.igual((pg_temp.fila(v_g->'vendedores', 'id', v_ven::text)->>'venta_sin_costo')::numeric, 200) THEN
-    v_fallas := v_fallas || format('M2 «Sin rubro» margen 0 y 200 aparte, «Bebidas B8b» 101, V margen 200 y 200 sin costo: %s / %s',
+    v_fallas := v_fallas || format('M2 «Sin rubro» margen 0 y 200 aparte, «Bebidas B8b» 201, V margen 200 y 200 sin costo: %s / %s',
       v_g->'categorias', pg_temp.fila(v_g->'vendedores', 'id', v_ven::text));
   END IF;
   IF (v_g->'alertas')::text LIKE '%sobreestimado%' THEN
@@ -340,8 +344,8 @@ BEGIN
   IF to_regprocedure('public.tablero_categorias(bigint,date,date,bigint)') IS NOT NULL THEN
     v_j := public.tablero_categorias(v_s, v_desde, v_hoy);
     v_t := (SELECT string_agg(e->>'nombre', ', ' ORDER BY e->>'nombre') FROM jsonb_array_elements(v_j->'categorias') e);
-    IF v_t IS DISTINCT FROM 'Bebidas B8b, Sin rubro' OR NOT pg_temp.igual((v_j->>'total')::numeric, 1021) THEN
-      v_fallas := v_fallas || format('R5 tablero de rubros: «Bebidas B8b, Sin rubro» y total 1021, dio «%s» y %s', v_t, v_j->>'total');
+    IF v_t IS DISTINCT FROM 'Bebidas B8b, Sin rubro' OR NOT pg_temp.igual((v_j->>'total')::numeric, 1121) THEN
+      v_fallas := v_fallas || format('R5 tablero de rubros: «Bebidas B8b, Sin rubro» y total 1121, dio «%s» y %s', v_t, v_j->>'total');
     END IF;
   ELSE
     v_notas := v_notas || text 'R5 sin tablero_categorias (SEG-3)';

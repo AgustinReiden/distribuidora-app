@@ -9,8 +9,17 @@
  * cliente, de la más vieja a la más nueva; sólo queda de saldo a favor lo que no
  * alcanza a ninguna. Anular la NC (COB-3) quita todo su crédito, suelto y ya
  * aplicado: las boletas que pagaba vuelven a deber eso. La NC es un documento aparte: NO toca el
- * pedido (ni total, ni ítems, ni estado), así que no afecta la venta por
- * vendedor ni la comisión, y no mueve stock.
+ * pedido (ni total, ni ítems, ni estado) y no mueve stock.
+ *
+ * Decisiones del dueño del 16/11 y del 17/11 (B16 de #1603, en #1545): la nota se
+ * imputa al día de su boleta (`fecha` es la de la boleta, la que cuenta para los
+ * reportes y la posición fiscal; cuándo se emitió es `created_at`), y su crédito
+ * es plata del día en que se emitió. Le descuenta al vendedor de la boleta sólo
+ * según su MOTIVO (la lista es una, `nc_venta_motivos()` del server, con espejo
+ * en `constants/motivosNCVenta.espejo.json`), y sin ir hacia atrás: la comisión
+ * ya liquidada y la meta ya cumplida o fuera de su mes no se mueven. Eso lo
+ * decide el server al crear la nota y queda en `resta_comision` (y, por meta, en
+ * una tabla de server).
  *
  * Esto es la cuenta que ve la UI antes de confirmar. La que vale es la de la
  * RPC `crear_nota_credito_venta_impl`, que toma el precio del pedido y vuelve a
@@ -21,20 +30,76 @@
  *   - total = Σ cantidad × precio_unitario del pedido, y tiene que ser > 0.
  */
 
-import { formatPrecio } from './formatters'
+import { diaArgentino, formatFecha, formatPrecio } from './formatters'
 
-export const LEYENDA_NC_NO_AFECTA_COMISION = 'No afecta la comisión del vendedor'
+export const LEYENDA_NC_COMISION =
+  'Se imputa al mes de la boleta. Según el motivo, le descuenta o no al vendedor'
 
-export type MotivoNCVenta = 'producto_vencido' | 'producto_danado' | 'otro'
+type FechasNC = { fecha: string; created_at?: string | null }
 
-export const MOTIVOS_NC_VENTA: ReadonlyArray<{ value: MotivoNCVenta; label: string }> = [
-  { value: 'producto_vencido', label: 'Producto vencido' },
-  { value: 'producto_danado', label: 'Producto dañado' },
-  { value: 'otro', label: 'Otro' },
+/** El día argentino (YYYY-MM-DD) en que se emitió la nota; sin `created_at`, su `fecha`. */
+export function diaEmisionNotaCreditoVenta(nc: FechasNC): string {
+  return nc.created_at ? diaArgentino(nc.created_at) : nc.fecha
+}
+
+/**
+ * Las fechas de una nota para mostrar (B16): `fecha` es la de imputación (la de
+ * su boleta) y `created_at`, cuándo se emitió. Si caen el mismo día argentino,
+ * una sola; si no, las dos.
+ */
+export function fechasNotaCreditoVenta(nc: FechasNC): string {
+  const emitida = diaEmisionNotaCreditoVenta(nc)
+  if (emitida === nc.fecha) return formatFecha(nc.fecha)
+  return `Imputada al ${formatFecha(nc.fecha)} (día de la boleta) · emitida el ${formatFecha(emitida)}`
+}
+
+export type MotivoNCVenta =
+  | 'cliente_rechaza'
+  | 'error_pedido'
+  | 'error_entrega'
+  | 'producto_vencido'
+  | 'producto_danado'
+  | 'descuento_comercial'
+  | 'otro'
+
+export interface MotivoNCVentaInfo {
+  value: MotivoNCVenta
+  label: string
+  /** Resta de la comisión y de las metas del vendedor de la boleta. */
+  descuentaVendedor: boolean
+  /** Además de la plata, resta unidades (metas de unidades, Rendimiento). */
+  descuentaUnidades: boolean
+  /** Qué pasa con lo acreditado. Definido y todavía sin uso: la nota no mueve stock. */
+  mercaderia: 'reingresa' | 'merma' | 'nada'
+}
+
+/**
+ * Espejo de `nc_venta_motivos()` (B16 v3, decisión del dueño del 17/11). Lo vigila
+ * `constants/motivosNCVenta.espejo.test.ts`: si cambia la lista del server, cambia ésta.
+ */
+export const MOTIVOS_NC_VENTA: ReadonlyArray<MotivoNCVentaInfo> = [
+  { value: 'cliente_rechaza', label: 'El cliente lo devuelve o lo rechaza', descuentaVendedor: true, descuentaUnidades: true, mercaderia: 'reingresa' },
+  { value: 'error_pedido', label: 'El pedido se tomó mal', descuentaVendedor: true, descuentaUnidades: true, mercaderia: 'reingresa' },
+  { value: 'error_entrega', label: 'Se entregó mal (producto equivocado, error de armado o de reparto)', descuentaVendedor: false, descuentaUnidades: false, mercaderia: 'reingresa' },
+  { value: 'producto_vencido', label: 'Producto vencido', descuentaVendedor: false, descuentaUnidades: false, mercaderia: 'merma' },
+  { value: 'producto_danado', label: 'Producto dañado', descuentaVendedor: false, descuentaUnidades: false, mercaderia: 'merma' },
+  { value: 'descuento_comercial', label: 'Descuento comercial acordado después', descuentaVendedor: true, descuentaUnidades: false, mercaderia: 'nada' },
+  { value: 'otro', label: 'Otro', descuentaVendedor: false, descuentaUnidades: false, mercaderia: 'nada' },
 ]
 
 export function motivoNCVentaLabel(motivo: string | null | undefined): string {
   return MOTIVOS_NC_VENTA.find(m => m.value === motivo)?.label ?? (motivo || '')
+}
+
+/**
+ * La línea que el modal muestra al elegir el motivo: si la nota le descuenta al
+ * vendedor, y qué. La regla de «nada hacia atrás» la aplica el server.
+ */
+export function leyendaMotivoNCVenta(motivo: string | null | undefined): string {
+  const m = MOTIVOS_NC_VENTA.find(x => x.value === motivo)
+  if (!m || !m.descuentaVendedor) return 'Este motivo no le descuenta nada al vendedor.'
+  const que = m.descuentaUnidades ? 'la plata y las unidades' : 'la plata (no las unidades)'
+  return `Este motivo le descuenta al vendedor ${que}: de su comisión, si todavía no se liquidó, y de sus metas del mes que todavía no cumplió.`
 }
 
 /** Lo mínimo de un `pedido_items` que hace falta para acreditar. */

@@ -391,6 +391,18 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/espejo-formas-pago.mjs
 
+      # Los motivos de una nota de crédito de venta (B16 v3 de #1603): el server tiene
+      # una sola lista, `nc_venta_motivos()` (descuenta al vendedor / unidades /
+      # mercadería), y el front la espeja en `src/constants/motivosNCVenta.espejo.json`.
+      # El TS lo vigila vitest (`motivosNCVenta.espejo.test.ts`); este paso la compara
+      # contra prod. No necesita node_modules.
+      - name: Espejo de motivos de NC de venta (B16)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/espejo-motivos-nc-venta.mjs
+
       # El motor de costos de una compra está escrito dos veces —TypeScript para
       # la vista previa del modal, SQL para lo que se persiste— y las dos tienen
       # que dar el mismo número al centavo. Esto corre LAS DOS sobre los mismos
