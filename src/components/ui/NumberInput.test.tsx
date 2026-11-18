@@ -5,8 +5,10 @@ import '@testing-library/jest-dom/vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { useState } from 'react'
+import { useState, type ComponentProps } from 'react'
 import { NumberInput } from './NumberInput'
+import { AvisoCamposEnRojo } from './AvisoCamposEnRojo'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 import { NUMERO_ILEGIBLE } from '../../utils/normalizarNumero'
 
 describe('NumberInput', () => {
@@ -47,19 +49,24 @@ describe('NumberInput', () => {
     expect(input).toHaveValue('12')
   })
 
-  it('confirma el mínimo (emptyValue) cuando queda vacío al salir', async () => {
+  // B23 (cambió de regla): vacío con un mínimo de 1 ya no se completa con el mínimo, y lo que pasa
+  // del máximo ya no se recorta. Sin registro alrededor, el campo vuelve al valor de antes y lo dice.
+  it('vacío con un mínimo (sin emptyValue) no confirma el mínimo: vuelve al valor de antes y lo dice', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
     render(<NumberInput aria-label="num" integer min={1} value={3} onChange={onChange} />)
     const input = screen.getByLabelText('num')
 
     await user.clear(input)
+    expect(input).toHaveAttribute('aria-invalid', 'true')
     await user.tab() // blur
 
-    expect(onChange).toHaveBeenLastCalledWith(1)
+    expect(onChange).not.toHaveBeenCalled()
+    expect(input).toHaveValue('3')
+    expect(screen.getByRole('alert')).toHaveTextContent('Poné un número: el campo volvió a «3»')
   })
 
-  it('clampa al máximo al confirmar', async () => {
+  it('lo que pasa del máximo no se recorta: vuelve al valor de antes y lo dice', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
     render(<NumberInput aria-label="num" integer max={10} value={5} onChange={onChange} />)
@@ -69,7 +76,9 @@ describe('NumberInput', () => {
     await user.type(input, '50')
     await user.tab()
 
-    expect(onChange).toHaveBeenLastCalledWith(10)
+    expect(onChange).not.toHaveBeenCalled()
+    expect(input).toHaveValue('5')
+    expect(screen.getByRole('alert')).toHaveTextContent('No puede pasar de 10: el campo volvió a «5»')
   })
 
   it('parsea decimales con coma', async () => {
@@ -468,6 +477,136 @@ describe('NumberInput', () => {
     await user.tab()
 
     expect(onChange).toHaveBeenLastCalledWith(1.5)
+  })
+})
+
+// B23 de #1603 (decisión del dueño, 18/11): un número fuera de su límite queda en rojo con su motivo y
+// el formulario no guarda. Nada se recorta ni se completa en silencio, tampoco tocando Guardar sin
+// salir antes del campo.
+describe('NumberInput fuera de su límite, en un formulario con registro', () => {
+  type Props = Partial<ComponentProps<typeof NumberInput>> & { inicial?: number | null }
+  function Formulario({ inicial = 6, onGuardar, ...props }: Props & { onGuardar: (n: number | null) => void }) {
+    const [v, setV] = useState<number | null>(inicial)
+    const ilegibles = useRegistroIlegibles()
+    return (
+      <RegistroIlegiblesContext.Provider value={ilegibles.registro}>
+        <NumberInput aria-label="num" integer value={v} onChange={setV} {...props} />
+        <button type="button" onClick={() => setV(props.max ?? 0)}>Máx</button>
+        <AvisoCamposEnRojo />
+        <button type="button" disabled={ilegibles.hay} onClick={() => { if (!ilegibles.hay) onGuardar(v) }}>Guardar</button>
+      </RegistroIlegiblesContext.Provider>
+    )
+  }
+
+  it.each([
+    ['bajo el mínimo', { min: 6, motivoMin: 'El mínimo de venta es 6' }, '2', 'El mínimo de venta es 6'],
+    ['sobre el máximo', { min: 1, max: 5, motivoMax: 'Quedan 5 para devolver' }, '50', 'Quedan 5 para devolver'],
+    ['sobre el máximo, con el motivo de siempre', { max: 100 }, '150', 'No puede pasar de 100'],
+    ['bajo el mínimo, con el motivo de siempre', { min: 6 }, '2', 'El mínimo es 6'],
+  ])('%s: queda en rojo, con su motivo, y Guardar no guarda (ni en vivo)', async (_caso, limites, texto, motivo) => {
+    for (const commitOnChange of [false, true]) {
+      const user = userEvent.setup()
+      const onGuardar = vi.fn()
+      const { unmount } = render(<Formulario inicial={3} onGuardar={onGuardar} {...limites} commitOnChange={commitOnChange} />)
+      const input = screen.getByLabelText('num')
+
+      await user.clear(input)
+      await user.type(input, texto)
+      await user.click(screen.getByRole('button', { name: 'Guardar' }))
+
+      expect(onGuardar).not.toHaveBeenCalled()
+      expect(input).toHaveValue(texto)
+      expect(input).toHaveAttribute('aria-invalid', 'true')
+      expect(screen.getByRole('alert')).toHaveTextContent(motivo)
+      expect(screen.getByText('Hay un campo en rojo para corregir')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled()
+      unmount()
+    }
+  })
+
+  it('dentro del límite guarda lo tipeado, tocando Guardar sin salir del campo', async () => {
+    const user = userEvent.setup()
+    const onGuardar = vi.fn()
+    render(<Formulario inicial={3} min={1} max={5} onGuardar={onGuardar} />)
+    const input = screen.getByLabelText('num')
+
+    await user.clear(input)
+    await user.type(input, '4')
+    await user.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    expect(onGuardar).toHaveBeenCalledWith(4)
+  })
+
+  it('vacío en un campo obligatorio queda en rojo con su motivo, y no se completa con el mínimo', async () => {
+    const user = userEvent.setup()
+    const onGuardar = vi.fn()
+    render(<Formulario inicial={3} min={1} max={5} motivoVacio="Poné una cantidad" onGuardar={onGuardar} />)
+    const input = screen.getByLabelText('num')
+
+    await user.clear(input)
+    await user.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    expect(onGuardar).not.toHaveBeenCalled()
+    expect(input).toHaveValue('')
+    expect(screen.getByRole('alert')).toHaveTextContent('Poné una cantidad')
+  })
+
+  it('vacío en un campo opcional vale su emptyValue, que el campo muestra en gris', async () => {
+    const user = userEvent.setup()
+    const onGuardar = vi.fn()
+    render(<Formulario inicial={30} min={0} max={365} emptyValue={0} onGuardar={onGuardar} />)
+    const input = screen.getByLabelText('num')
+
+    await user.clear(input)
+    expect(input).toHaveAttribute('placeholder', '0')
+    expect(input).not.toHaveAttribute('aria-invalid', 'true')
+    await user.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    expect(onGuardar).toHaveBeenCalledWith(0)
+  })
+
+  it('el rojo se queda al salir del campo, y un botón que pone un valor válido («Máx») lo limpia', async () => {
+    const user = userEvent.setup()
+    const onGuardar = vi.fn()
+    render(<Formulario inicial={3} min={1} max={5} onGuardar={onGuardar} />)
+    const input = screen.getByLabelText('num')
+
+    await user.clear(input)
+    await user.type(input, '50')
+    await user.tab()
+    expect(input).toHaveValue('50')
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+
+    await user.click(screen.getByRole('button', { name: 'Máx' }))
+    expect(input).toHaveValue('5')
+    expect(input).not.toHaveAttribute('aria-invalid', 'true')
+    await user.click(screen.getByRole('button', { name: 'Guardar' }))
+    expect(onGuardar).toHaveBeenCalledWith(5)
+  })
+
+  it('en vivo, mientras está fuera del límite el padre vuelve al valor de antes de tipear', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    render(<NumberInput aria-label="num" integer min={1} max={5} commitOnChange value={3} onChange={onChange} />)
+    const input = screen.getByLabelText('num')
+
+    await user.clear(input)
+    await user.type(input, '50')
+
+    // «5» se manda; «50» no: el padre vuelve al 3 de antes de tipear, nunca al 5 recortado.
+    expect(onChange).toHaveBeenLastCalledWith(3)
+    expect(onChange).not.toHaveBeenCalledWith(50)
+  })
+
+  it('el límite que cambia (otro producto, otro stock) cambia el rojo del borrador', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<NumberInput aria-label="num" integer min={1} max={5} value={3} onChange={vi.fn()} />)
+    const input = screen.getByLabelText('num')
+    await user.clear(input)
+    await user.type(input, '8')
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    rerender(<NumberInput aria-label="num" integer min={1} max={10} value={3} onChange={vi.fn()} />)
+    expect(input).not.toHaveAttribute('aria-invalid', 'true')
   })
 })
 

@@ -28,6 +28,13 @@
  * escrito debajo y no se le manda al padre. Al salir del campo vuelve al valor
  * del padre, con un aviso a la vista: lo que se ve es siempre lo que se guarda
  * (H1 de la lente de #1644). `onValidez` le avisa al padre mientras tanto.
+ *
+ * Lo mismo con un número fuera de su límite (B23 de #1603, decisión del dueño del 18/11: «Que
+ * quede en rojo y no guarde»): bajo `min`, sobre `max`, o vacío en un campo obligatorio, queda en
+ * rojo con su motivo (`motivoMin`, `motivoMax`, `motivoVacio`, que dicen el dato del que depende el
+ * límite) y no se le manda al padre. Nada se recorta ni se completa en silencio. Un campo con un
+ * `min` mayor que 0 y sin `emptyValue` es obligatorio; con `emptyValue` es opcional, y vacío vale
+ * eso, que el campo muestra en gris si no tiene otro `placeholder`.
  */
 import {
   useState,
@@ -74,12 +81,22 @@ export interface NumberInputProps extends InheritedInputProps {
    * llega a mil, como un porcentaje. Sin esto, «12.125» se lee doce mil ciento veinticinco (#1560).
    */
   sinMiles?: boolean;
-  /** Mínimo; se clampa al confirmar. */
+  /** Mínimo: menos queda en rojo con `motivoMin` (nunca se sube solo). */
   min?: number;
-  /** Máximo; se clampa al confirmar. */
+  /** Máximo: más queda en rojo con `motivoMax` (nunca se recorta solo). */
   max?: number;
-  /** Qué número confirmar si el campo queda vacío. Default: `min ?? 0`. */
+  /** Por qué no puede ser menos que `min`, con el dato del que depende («El mínimo de venta es 6»). */
+  motivoMin?: string;
+  /** Por qué no puede ser más que `max`, con el dato del que depende («Quedan 5 para devolver»). */
+  motivoMax?: string;
+  /**
+   * Qué número vale el campo vacío (un campo opcional; se muestra en gris). Sin esto, vacío vale 0,
+   * salvo con un `min` mayor que 0 o un `motivoVacio`: entonces el campo es obligatorio y vacío queda
+   * en rojo.
+   */
   emptyValue?: number;
+  /** El motivo de un campo obligatorio vacío («Poné una cantidad»). Si está, el campo es obligatorio. */
+  motivoVacio?: string;
   /**
    * Para un campo donde vacío no es un número (L3, #1603: el stock mínimo vacío
    * usa el de siempre, y 0 apaga la alerta): si está, confirmar el campo vacío la
@@ -113,7 +130,10 @@ export function NumberInput({
   sinMiles = false,
   min,
   max,
+  motivoMin,
+  motivoMax,
   emptyValue,
+  motivoVacio,
   onVaciar,
   commitOnChange = false,
   selectOnFocus = true,
@@ -164,21 +184,30 @@ export function NumberInput({
     return integer ? n : redondear(n, decimales)
   }
 
-  /** Por qué lo escrito no sirve, o null si sirve (o está vacío). Lo decide el mismo lector que `toNumber`. */
-  const motivo = (raw: string | null): string | null => {
-    if (raw === null || raw.trim() === '') return null
-    if (toNumber(raw) !== null) return null
-    const leido = integer ? leerNumero(raw) : sinMiles ? leerDecimalSinMiles(raw) : leerNumero(raw)
-    if (leido !== null && leido < 0) return MENSAJE_NEGATIVO
-    if (integer && leido !== null) return MENSAJE_ENTERO_CON_COMA
-    return NUMERO_ILEGIBLE
-  }
+  /** Un límite como se ve en el campo («1.500», o «12,5» sin miles). */
+  const mostrar = (n: number): string => (sinMiles ? numeroEditable(n) : numeroConMiles(n))
 
-  const clamp = (n: number): number => {
-    let v = n
-    if (typeof min === 'number') v = Math.max(min, v)
-    if (typeof max === 'number') v = Math.min(max, v)
-    return integer ? Math.round(v) : v
+  // Obligatorio: vacío no es un número. Con un mínimo mayor que 0 y sin `emptyValue`, vacío se
+  // completaba con el mínimo sin que se viera (B23).
+  const vacioEnRojo = !onVaciar && (motivoVacio !== undefined || (emptyValue === undefined && typeof min === 'number' && min > 0))
+
+  /**
+   * Por qué lo escrito no sirve, o null si sirve. Lo decide el mismo lector que `toNumber`: lo que no
+   * se entiende, lo que queda fuera del límite y, en un campo obligatorio, el vacío.
+   */
+  const motivo = (raw: string | null): string | null => {
+    if (raw === null) return null
+    if (raw.trim() === '') return vacioEnRojo ? (motivoVacio ?? 'Poné un número') : null
+    const n = toNumber(raw)
+    if (n === null) {
+      const leido = integer ? leerNumero(raw) : sinMiles ? leerDecimalSinMiles(raw) : leerNumero(raw)
+      if (leido !== null && leido < 0) return MENSAJE_NEGATIVO
+      if (integer && leido !== null) return MENSAJE_ENTERO_CON_COMA
+      return NUMERO_ILEGIBLE
+    }
+    if (typeof min === 'number' && n < min) return motivoMin ?? `El mínimo es ${mostrar(min)}`
+    if (typeof max === 'number' && n > max) return motivoMax ?? `No puede pasar de ${mostrar(max)}`
+    return null
   }
 
   // El último número que este campo le mandó al padre: si el `value` cambia a otra cosa, lo cambió
@@ -234,10 +263,11 @@ export function NumberInput({
       // En vivo mandamos el número crudo (como hacía el parseInt anterior);
       // el clamp/normalización quedan para el blur. El vacío NO empuja 0:
       // se mantiene el último valor y el campo se ve vacío. Lo que no sirve no se manda: el padre
-      // vuelve al valor de antes de tipear.
+      // vuelve al valor de antes de tipear. Lo mismo fuera del límite, o vacío en un campo
+      // obligatorio: nunca el número recortado ni el mínimo (B23).
       const n = motivo(next) === null ? toNumber(next) : null
       if (n !== null) enviar(n)
-      else if (next.trim() !== '') restaurar()
+      else if (next.trim() !== '' || vacioEnRojo) restaurar()
     }
   }
 
@@ -245,13 +275,16 @@ export function NumberInput({
     if (draft === null) return
     // Lo que no sirve no se confirma. Con un registro alrededor (el formulario no guarda mientras haya
     // un campo en rojo), queda en rojo para corregirlo. Sin registro, el campo vuelve al valor de antes
-    // de tipear (que es lo que se va a guardar) y lo dice a la vista.
-    if (motivo(draft) !== null) {
+    // de tipear (que es lo que se va a guardar) y lo dice a la vista. Lo mismo fuera del límite: no
+    // se recorta ni se completa (B23).
+    const porQue = motivo(draft)
+    if (porQue !== null) {
       if (commitOnChange) restaurar()
       if (conRegistro) return
       const anterior = sinMiles ? numeroEditable(antesDeTipear.current) : numeroConMiles(antesDeTipear.current)
+      const volvio = `el campo volvió a ${anterior === '' ? 'quedar vacío' : `«${anterior}»`}`
       setDraft(null)
-      setAviso(`No se entendió «${draft}»: el campo volvió a ${anterior === '' ? 'quedar vacío' : `«${anterior}»`}`)
+      setAviso(toNumber(draft) === null && draft.trim() !== '' ? `No se entendió «${draft}»: ${volvio}` : `${porQue}: ${volvio}`)
       return
     }
     const parsed = toNumber(draft)
@@ -261,7 +294,7 @@ export function NumberInput({
       onVaciar()
       return
     }
-    enviar(clamp(parsed ?? emptyValue ?? min ?? 0))
+    enviar(parsed ?? emptyValue ?? 0)
   }
 
   // Un cambio del padre desde afuera limpia el borrador (y el aviso): si no, el campo seguiría
@@ -325,6 +358,8 @@ export function NumberInput({
       <input
         {...rest}
         ref={inputRef}
+        // Un campo opcional dice a la vista lo que vale vacío (B23).
+        placeholder={rest.placeholder ?? (emptyValue !== undefined && !onVaciar ? mostrar(emptyValue) : undefined)}
         type="text"
         inputMode={integer ? 'numeric' : 'decimal'}
         aria-invalid={invalido ? true : rest['aria-invalid']}

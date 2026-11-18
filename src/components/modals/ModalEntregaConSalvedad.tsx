@@ -176,6 +176,9 @@ export default function ModalEntregaConSalvedad({
   }
 
   const handleContinuar = () => {
+    // Un campo en rojo no pasa a la confirmación: al desmontarse, el paso siguiente confirmaba con el
+    // valor de antes de tipear (B23).
+    if (ilegibles.hay) return
     setError('')
     if (!validarDatos()) return
     setPaso('confirmacion')
@@ -390,7 +393,8 @@ export default function ModalEntregaConSalvedad({
                               integer
                               min={1}
                               max={itemSalv.item.cantidad}
-                              emptyValue={1}
+                              motivoMax={`La línea tiene ${itemSalv.item.cantidad}`}
+                              motivoVacio="Poné una cantidad"
                               commitOnChange
                               value={itemSalv.cantidadAfectada}
                               onChange={(n) => updateItemSalvedad(itemSalv.item.id, { cantidadAfectada: n })}
@@ -600,7 +604,7 @@ export default function ModalEntregaConSalvedad({
               </Button>
               <button
                 onClick={handleContinuar}
-                disabled={itemsConSalvedad.length === 0}
+                disabled={itemsConSalvedad.length === 0 || ilegibles.hay}
                 className="flex-1 px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white rounded-lg flex items-center justify-center gap-2"
               >
                 Continuar

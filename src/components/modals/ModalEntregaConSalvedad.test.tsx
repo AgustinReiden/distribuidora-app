@@ -330,6 +330,41 @@ describe('ModalEntregaConSalvedad — validaciones antes de continuar', () => {
   })
 })
 
+// B23 de #1603: la cantidad fuera de su límite queda en rojo y no deja continuar. Antes el blur del
+// toque en «Continuar» la recortaba: «50» sobre 5 seguía con 5, y vacío seguía con 1.
+describe('ModalEntregaConSalvedad — la cantidad fuera de su límite (B23)', () => {
+  it.each([
+    ['50 sobre una línea de 5', '50', 'La línea tiene 5'],
+    ['0', '0', 'El mínimo es 1'],
+    ['vacío', '', 'Poné una cantidad'],
+  ])('%s: queda en rojo con su motivo y no continúa', async (_caso, texto, motivo) => {
+    const { user, onSave } = renderModal()
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
+    await user.clear(inputCantidadAfectada())
+    if (texto) await user.type(inputCantidadAfectada(), texto)
+    await user.click(screen.getByRole('button', { name: /continuar/i }))
+
+    expect(inputCantidadAfectada()).toHaveValue(texto)
+    expect(inputCantidadAfectada()).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('alert')).toHaveTextContent(motivo)
+    expect(screen.getByText('Hay un campo en rojo para corregir')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /confirmar/i })).toBeNull()
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('dentro del límite continúa con lo tipeado, sin salir antes del campo', async () => {
+    const { user } = renderModal()
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
+    await user.clear(inputCantidadAfectada())
+    await user.type(inputCantidadAfectada(), '4')
+    await user.click(screen.getByRole('button', { name: /continuar/i }))
+
+    expect(screen.getByText(/4 ud\. con problema/)).toBeInTheDocument()
+  })
+})
+
 describe('ModalEntregaConSalvedad — paso de confirmación', () => {
   it('resume lo entregado, lo afectado y los totales', async () => {
     const { user } = renderModal()

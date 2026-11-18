@@ -205,7 +205,8 @@ export default function ModalMermaStock({
             integer
             min={1}
             max={producto.stock}
-            emptyValue={1}
+            motivoMax={`Hay ${producto.stock} en stock`}
+            motivoVacio="Poné una cantidad"
             commitOnChange
             value={Number(cantidad) || 0}
             onChange={(n) => setCantidad(n)}
