@@ -403,6 +403,17 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/espejo-motivos-nc-venta.mjs
 
+      # El reparto de un descuento comercial sobre toda la boleta (B22) está escrito dos
+      # veces: `_nc_venta_repartir` en el server y `repartirDescuentoNC` en el modal. El TS
+      # lo vigila vitest (`repartoDescuentoNC.espejo.test.ts`); este paso corre los mismos
+      # casos contra prod. No necesita node_modules.
+      - name: Paridad del reparto de un descuento de NC de venta (B22)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/espejo-reparto-descuento-nc.mjs
+
       # El motor de costos de una compra está escrito dos veces —TypeScript para
       # la vista previa del modal, SQL para lo que se persiste— y las dos tienen
       # que dar el mismo número al centavo. Esto corre LAS DOS sobre los mismos

@@ -379,9 +379,14 @@ suelta en `sucursales`.
   **La venta de los rankings es neta de notas de crédito de venta** (REP-D, #1545; decisión del
   dueño): el gerencial, Ventas por cliente, por zona y por preventista, los rubros y el tablero le
   restan `_ventas_nc`, que es la séptima parte: la nota vigente cuya boleta es venta, por la fecha
-  **de la nota**, al cliente de la nota y al vendedor de la boleta. Resta plata, no pedidos,
-  clientes, unidades ni CMV, y resta toda nota, sea cual sea su motivo: es la venta de la empresa.
-  El bot también (`bot_ventas_periodo`, `bot_mis_ventas` y el resumen del preventista); las jornadas
+  **de la nota**, al cliente de la nota y al vendedor de la boleta. Resta plata, no pedidos ni
+  clientes, y resta toda nota, sea cual sea su motivo: es la venta de la empresa; si la nota devolvió
+  mercadería (reingresó o fue a merma: `cantidad_mercaderia` de `_ventas_nc`), el gerencial, los rubros
+  del tablero y el bot le restan además sus unidades, y el gerencial su costo, al costo con que la venta
+  lo contó (B22, decisiones del dueño del 18/11: con 10 fardos a $ 1.000 de costo $ 700 y 2 devueltos,
+  8 unidades en los tres, CMV $ 5.600 y margen $ 2.400). Un descuento, un motivo que no mueve nada y una
+  nota anterior a B22 no restan unidades ni costo. Un reporte nuevo que muestre unidades de venta resta
+  `cantidad_mercaderia` igual. El bot también (`bot_ventas_periodo`, `bot_mis_ventas` y el resumen del preventista); las jornadas
   y Rentabilidad siguen por boleta. Lo que le toca al VENDEDOR resta sólo las notas cuyo motivo le
   descuenta (ver «Los motivos de una nota de crédito de venta»): la comisión, las metas y Rendimiento,
   cada uno con su foto. Un ranking nuevo de venta resta `_ventas_nc` igual.
@@ -397,14 +402,16 @@ suelta en `sucursales`.
   CHECK, la RPC y la foto), con espejo en `src/constants/motivosNCVenta.espejo.json` (su test y
   `scripts/espejo-motivos-nc-venta.mjs`): descuentan `cliente_rechaza` y `error_pedido` (plata y
   unidades) y `descuento_comercial` (sólo plata); `error_entrega`, `producto_vencido`,
-  `producto_danado` y `otro`, no. Su `mercaderia` (reingresa / merma / nada) está definida y todavía
-  sin uso: la nota no mueve stock. Qué resta se decide AL CREAR la nota
+  `producto_danado` y `otro`, no. Su `mercaderia` (reingresa / merma / nada) la aplica la nota (B22,
+  ver abajo). Qué resta se decide AL CREAR la nota
   (`trg_notas_credito_venta_foto_vendedor`) y queda anotado: `resta_comision` si la comisión de la
   boleta no estaba liquidada para su vendedor, una fila en `nota_credito_venta_metas` por cada meta
   del vendedor que estaba en su mes y sin cumplir (`_metas_logrado`, la misma cuenta de
   `avance_metas_preventista`, de una pasada para todas las metas) y `resta_rendimiento` si la nota se
   emite dentro del mes de su boleta (decisión del dueño del 18/11: una nota de octubre sobre una boleta
-  de septiembre no cambia el Rendimiento de septiembre). Anular la nota devuelve sólo lo que no quedó
+  de septiembre no cambia el Rendimiento de septiembre). En Rendimiento, una nota que devolvió
+  mercadería resta también su costo del margen (B22 v3, decisión del dueño del 18/11), con la misma
+  foto; sus unidades siguen siendo las del motivo. Anular la nota devuelve sólo lo que no quedó
   congelado: lo liquidado, la meta cumplida o fuera de su mes y el Rendimiento de un mes cerrado
   siguen restando aunque la nota esté anulada (decisión del dueño del 18/11). Anular una liquidación
   (`anular_liquidacion`) deja cada nota de las boletas que dejan de estar liquidadas como si se hubiera
@@ -419,6 +426,30 @@ suelta en `sucursales`.
   y por id, las boletas que toca, como `liquidar_empleado` y `anular_liquidacion` (si no, una nota
   emitida o anulada en el medio no se ve y deja un ajuste). Lo prueba
   `scripts/concurrencia/b16-nota-y-liquidacion.sh`.
+  **La nota de crédito de venta mueve la mercadería según su motivo, y anularla lo deshace** (B22,
+  decisión del dueño del 17/11): `reingresa` vuelve al lote de la huella de su línea, `merma` devuelve y
+  merma en el mismo movimiento (una fila de `mermas_stock`, al costo con que la venta lo contó y con
+  procedencia `nota_credito_venta`), `nada` no toca el stock; la línea y el total de la boleta no
+  cambian. **Sólo la mueve el renglón que lo pide** (`"mercaderia": true` en `p_items`, que entra en el
+  contenido de la solicitud): un PWA anterior a B22 no lo manda y su nota es sólo plata, como dice su
+  pantalla. La marca con un motivo que no mueve, en un renglón por monto o que no es sí/no se rechaza. El
+  modal no trae motivo elegido y, antes de emitir, dice qué pasa («Vuelven al stock 2 u.»). Lo que hizo queda en `nota_credito_venta_items.lotes_devueltos` y `merma_id`
+  (NULL: no movió nada) y lo deshace `_nc_venta_deshacer_mercaderia`, que rechaza la anulación si lo que
+  reingresó ya no está en stock. Las reglas de lotes son las de la salvedad (`migrations/CLAUDE.md`).
+  Un camino que decide por «la boleta tiene una nota vigente» (la salvedad, su anulación, la edición, la
+  cancelación, el cambio de factura) lo mira **con la boleta tomada**: mirarlo antes del `FOR UPDATE` deja
+  pasar una nota que se está emitiendo (lo prueba `scripts/concurrencia/b22-nota-con-mercaderia.sh`, V3).
+  **El descuento comercial va por monto, sin unidades** (B22, decisión del dueño del 18/11): un renglón
+  con `cantidad = 0` es plata (`subtotal`) imputada a una línea; sobre toda la boleta se reparte con
+  `_nc_venta_repartir` por lo que le queda a cada línea (subtotal menos sus notas vigentes), al centavo,
+  por restos mayores y con tope: ninguna parte pasa lo que le queda a su línea, y todo lo que queda entra.
+  Su espejo es `repartirDescuentoNC` (`repartoDescuentoNC.espejo.json`, con su test y
+  `scripts/espejo-reparto-descuento-nc.mjs`). Su neto e IVA salen de la foto de la línea
+  (`_nc_venta_desglose`). Toda nota tiene tope en lo vendido en la boleta
+  (sus líneas de venta, sin el envío) menos las vigentes, y las unidades de una línea con un descuento
+  acreditan lo que le queda por unidad, nunca más que su precio; si el descuento se llevó toda la plata
+  de la línea, devolver la mercadería pide anular antes ese descuento. Un lector nuevo de `nota_credito_venta_items` toma la plata de
+  `subtotal`, nunca de `cantidad × precio`.
   **El envío vive en `pedidos.cargo_envio`, dentro de `total`** (migs 389 y NNN cargo_1–4), y su
   desglose (`cargo_envio_desglose`) dentro de `total_neto`/`total_iva`, no de `total_real`. La plata
   a cobrar (saldo, cobranza, deuda, recorridos, rendiciones, transportista) usa `total`; la venta, la

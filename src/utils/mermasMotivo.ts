@@ -51,11 +51,18 @@ export function labelClasificacion(clasificacion: string): string {
  * puede ser un faltante en la entrega, una cancelación por falta de stock o un
  * ajuste cargado a mano, y en el corte por motivo los tres eran un solo renglón.
  */
-export type ProcedenciaMerma = 'entrega_salvedad' | 'cancelacion_falta_stock' | 'carga_directa' | 'promocion'
+export type ProcedenciaMerma =
+  | 'entrega_salvedad'
+  | 'cancelacion_falta_stock'
+  | 'nota_credito_venta'
+  | 'carga_directa'
+  | 'promocion'
 
 export const LABELS_PROCEDENCIA: Record<ProcedenciaMerma, string> = {
   entrega_salvedad: 'Entrega con salvedad',
   cancelacion_falta_stock: 'Cancelación por falta de stock',
+  // B22 (#1603): lo vencido o dañado de una nota de crédito de venta.
+  nota_credito_venta: 'Nota de crédito de venta',
   carga_directa: 'Carga directa',
   promocion: 'Promoción',
 }
