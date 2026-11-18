@@ -54,8 +54,10 @@ async function reemplazar(label: string | RegExp, valor: string) {
 
 async function guardarYVerError(mensaje: string | RegExp, onSave: ReturnType<typeof vi.fn>) {
   await userEvent.click(guardar())
-  const alerta = await screen.findByRole('alert')
-  expect(within(alerta).getByText(mensaje)).toBeInTheDocument()
+  // Puede haber más de un aviso: el del formulario y, desde B20, el del campo («Las cantidades van
+  // sin coma»). El del formulario tiene que estar.
+  const alertas = await screen.findAllByRole('alert')
+  expect(alertas.some(a => within(a).queryByText(mensaje) !== null)).toBe(true)
   expect(onSave).not.toHaveBeenCalled()
 }
 

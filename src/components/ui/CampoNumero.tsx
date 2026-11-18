@@ -16,7 +16,7 @@
  */
 import { useId, type ChangeEvent, type InputHTMLAttributes, type ReactElement } from 'react'
 import { useTecleoNumero } from '../../hooks/useTecleoNumero'
-import { NUMERO_ILEGIBLE, esTextoIlegible, teclearNumero } from '../../utils/normalizarNumero'
+import { NUMERO_ILEGIBLE, esTextoIlegible, motivoEnteroTipeado, teclearNumero } from '../../utils/normalizarNumero'
 
 type PropsHeredadas = Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type' | 'inputMode'>
 
@@ -31,7 +31,8 @@ export interface CampoNumeroProps extends PropsHeredadas {
   negativo?: boolean
   /**
    * El motivo por el que lo escrito no sirve, si el padre tiene una regla propia (un rango, un
-   * entero). `undefined` usa la del lector: «no se entiende» si `leerNumero` no lo lee.
+   * entero). `undefined` usa la del lector: «no se entiende» si `leerNumero` no lo lee, y con
+   * `entero`, además, «las cantidades van sin coma».
    */
   motivo?: string | null
 }
@@ -51,7 +52,9 @@ export function CampoNumero({
 }: CampoNumeroProps): ReactElement {
   const tecleo = useTecleoNumero({ negativo })
   const idMensaje = useId()
-  const error = motivo !== undefined ? motivo : esTextoIlegible(value) ? NUMERO_ILEGIBLE : null
+  const error = motivo !== undefined
+    ? motivo
+    : entero ? motivoEnteroTipeado(value) : esTextoIlegible(value) ? NUMERO_ILEGIBLE : null
 
   const alCambiar = (e: ChangeEvent<HTMLInputElement>): void => {
     if (sinMiles) onChange(teclearNumero(value, e.target.value, e.target.selectionStart ?? undefined))

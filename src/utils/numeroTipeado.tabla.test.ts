@@ -12,8 +12,11 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  NUMERO_ILEGIBLE,
+  esCeldaIlegible,
   formatearTecleo,
   leerEntero,
+  motivoEnteroTipeado,
   leerNumero,
   normalizarNumero,
   numeroConMiles,
@@ -429,5 +432,31 @@ describe('numeroEditable', () => {
     [1500, '1500'],
   ])('%d se precarga %j', (n, texto) => {
     expect(numeroEditable(n)).toBe(texto)
+  })
+})
+
+// B20: lo que usan los formularios y el import para decir por qué un número no sirve.
+describe('motivoEnteroTipeado y esCeldaIlegible', () => {
+  it.each([
+    ['', null],
+    ['12', null],
+    ['1.500', null],
+    ['1,5', 'Las cantidades van sin coma'],
+    ['abc', NUMERO_ILEGIBLE],
+  ])('motivoEnteroTipeado(%j) = %j', (texto, motivo) => {
+    expect(motivoEnteroTipeado(texto)).toBe(motivo)
+  })
+
+  it.each([
+    [null, false],
+    ['', false],
+    [1250.5, false],
+    ['1.250,50', false],
+    ['150000', false],
+    ['1,234,567', true],
+    ['abc', true],
+    [Infinity, true],
+  ])('esCeldaIlegible(%j) = %s', (celda, ilegible) => {
+    expect(esCeldaIlegible(celda as string | number | null)).toBe(ilegible)
   })
 })

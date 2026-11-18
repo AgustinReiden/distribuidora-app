@@ -25,6 +25,7 @@
 import { useState } from 'react'
 import { CalendarClock, Plus, X } from 'lucide-react'
 import type { VencimientoLinea } from '../modals/ModalCompra.reducer'
+import { NumberInput } from '../ui/NumberInput'
 import {
   formatearFechaVencimiento,
   lineaExcedeVencimientos,
@@ -115,11 +116,13 @@ export default function VencimientosLineaCompra({
                 aria-label={`Fecha de vencimiento ${i + 1}`}
                 className="px-2 py-1 border rounded text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
               />
-              <input
-                type="number"
-                min={1}
+              {/* B20 (D17): era `type="number"`; los miles los pone el campo y una coma no entra. */}
+              <NumberInput
+                integer
+                commitOnChange
+                emptyValue={0}
                 value={v.cantidad}
-                onChange={e => actualizar(i, { cantidad: Number(e.target.value) })}
+                onChange={n => actualizar(i, { cantidad: n })}
                 aria-label={`Unidades del vencimiento ${i + 1}`}
                 className="w-20 px-2 py-1 border rounded text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
               />

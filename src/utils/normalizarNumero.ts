@@ -96,6 +96,15 @@ export function motivoPrecioTipeado(texto: string): string | null {
 }
 
 /**
+ * Por qué una cantidad tipeada no sirve, o null si sirve (o está vacía): con coma no es una
+ * cantidad («1,5»), y lo que no se entiende, no se entiende. El texto va a la vista bajo el campo.
+ */
+export function motivoEnteroTipeado(texto: string): string | null {
+  if (texto.trim() === '' || leerEntero(texto) !== null) return null
+  return leerNumero(texto) !== null ? 'Las cantidades van sin coma' : NUMERO_ILEGIBLE
+}
+
+/**
  * Una cantidad de unidades: un entero, con o sin puntos de miles («1.250»). Una coma —la tecla del
  * punto— no se redondea ni se borra: «1,5» o «1,250» no es una cantidad y da `null`.
  */
@@ -340,4 +349,15 @@ export function numeroConMiles(n: number | null | undefined): string {
  */
 export function normalizarNumero(valor: string | number | null | undefined): number {
   return leerNumero(valor) ?? 0
+}
+
+/**
+ * Una celda de la planilla con algo escrito que no es un número («1,234,567», «abc»):
+ * `normalizarNumero` la daría 0, y el import la tiene que rechazar con su motivo en vez de cargar
+ * un costo 0 (B20). Una celda vacía o numérica no es ilegible.
+ */
+export function esCeldaIlegible(valor: string | number | null | undefined): boolean {
+  if (valor === null || valor === undefined) return false
+  if (typeof valor === 'number') return !Number.isFinite(valor)
+  return valor.trim() !== '' && leerNumero(valor) === null
 }

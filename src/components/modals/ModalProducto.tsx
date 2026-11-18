@@ -18,7 +18,9 @@ import {
   calcularCostoReal,
   numeroEditable,
   parsePrecio,
+  redondear,
 } from '../../utils/calculations';
+import { numeroConMiles } from '../../utils/normalizarNumero';
 import type { CondicionIva, ProductoDB, ProveedorDBExtended } from '../../types';
 import { OPCIONES_CONDICION_IVA, claveCondicionIva } from '../../utils/condicionIva';
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta';
@@ -322,6 +324,18 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   // FRG-5). Sin esto, guardar un cambio de subrubro volvía el precio y los costos a
   // los de la apertura si una compra o un aumento masivo los cambió en el medio.
   const [formInicial] = useState<ProductoFormData>(form);
+
+  // Las unidades por bulto/fardo (de la boleta) y las sueltas por unidad de stock (B20: dejaron el
+  // `type="number"`). Vaciar las de la boleta también limpia la etiqueta: sola no tiene sentido y
+  // antes generaba un guardado bloqueado.
+  const cambiarUnidadesFardo = (n: number | undefined): void => {
+    setForm(f => ({ ...f, unidades_de_venta_por_fardo: n, ...(n ? {} : { etiqueta_bulto: undefined }) }));
+    if (intentoGuardar && errores.unidades_de_venta_por_fardo) clearFieldError('unidades_de_venta_por_fardo');
+  };
+  const cambiarUnidadesPorBulto = (n: number | undefined): void => {
+    setForm(f => ({ ...f, unidades_por_bulto: n }));
+    if (intentoGuardar && errores.unidades_por_bulto) clearFieldError('unidades_por_bulto');
+  };
   // null = eligiendo de la lista; un string = escribiendo una nueva.
   const [categoriaNueva, setCategoriaNueva] = useState<string | null>(null);
   const [subrubroNuevo, setSubrubroNuevo] = useState<string | null>(null);
@@ -800,26 +814,13 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-sm font-medium mb-1">Unidades por bulto/fardo</label>
-            <input
-              type="number"
-              inputMode="decimal"
-              step="0.5"
-              min="0"
-              value={form.unidades_de_venta_por_fardo ?? ''}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => {
-                const val = e.target.value
-                const nuevasUnidades = val === '' ? undefined : Number(val)
-                setForm({
-                  ...form,
-                  unidades_de_venta_por_fardo: nuevasUnidades,
-                  // Si dejan unidades vacío, también limpiar la etiqueta — la etiqueta
-                  // sola no tiene sentido y antes generaba un guardado bloqueado.
-                  ...(nuevasUnidades ? {} : { etiqueta_bulto: undefined })
-                })
-                if (intentoGuardar && errores.unidades_de_venta_por_fardo) {
-                  clearFieldError('unidades_de_venta_por_fardo');
-                }
-              }}
+            {/* B20 (D17): un NumberInput (era `type="number"`): la tecla del punto es la coma y lo
+                que no se entiende no se guarda. */}
+            <NumberInput
+              min={0}
+              value={form.unidades_de_venta_por_fardo ?? null}
+              onChange={(n) => cambiarUnidadesFardo(n)}
+              onVaciar={() => cambiarUnidadesFardo(undefined)}
               className={inputClass('unidades_de_venta_por_fardo')}
               placeholder="ej. 2"
             />
@@ -862,20 +863,14 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
           <label htmlFor="producto-unidades-por-bulto" className="block text-sm font-medium mb-1">
             Unidades sueltas por unidad de stock
           </label>
-          <input
+          {/* B20 (D17): un NumberInput entero (era `type="number"`): una coma no es una cantidad.
+              Sin commitOnChange: confirma al salir, así lo que no se entiende vuelve a lo que había. */}
+          <NumberInput
             id="producto-unidades-por-bulto"
-            type="number"
-            inputMode="numeric"
-            step="1"
-            min="1"
-            value={form.unidades_por_bulto ?? ''}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => {
-              const val = e.target.value
-              setForm({ ...form, unidades_por_bulto: val === '' ? undefined : Number(val) })
-              if (intentoGuardar && errores.unidades_por_bulto) {
-                clearFieldError('unidades_por_bulto');
-              }
-            }}
+            integer
+            value={form.unidades_por_bulto ?? null}
+            onChange={(n) => cambiarUnidadesPorBulto(n)}
+            onVaciar={() => cambiarUnidadesPorBulto(undefined)}
             className={inputClass('unidades_por_bulto')}
             placeholder="ej. 6"
           />
@@ -988,10 +983,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
                 {adicionalCompra !== 0 ? ' + cargos' : ''}
               </label>
               <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                value={costoTotalMostrado ? costoTotalMostrado.toFixed(2) : ''}
+                type="text"
+                value={costoTotalMostrado ? numeroConMiles(redondear(costoTotalMostrado, 2)) : ''}
                 readOnly
                 className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-100"
                 placeholder="0.00"
@@ -1087,10 +1080,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
             <div>
               <label className="block text-xs font-medium mb-1 text-gray-600">Precio Neto (calculado)</label>
               <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                value={form.precio_sin_iva || ''}
+                type="text"
+                value={form.precio_sin_iva ? numeroConMiles(Number(form.precio_sin_iva)) : ''}
                 readOnly
                 className="w-full px-3 py-2 border rounded-lg bg-gray-100"
                 placeholder="0.00"

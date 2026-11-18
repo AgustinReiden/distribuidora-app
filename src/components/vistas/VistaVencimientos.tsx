@@ -37,6 +37,8 @@ import { useMemo, useState } from 'react'
 import { z } from 'zod'
 import { AlertTriangle, CalendarClock, Check, Loader2, PackageX, RefreshCw, Undo2, X } from 'lucide-react'
 import { Button } from '../ui/Button'
+import { CampoNumero } from '../ui/CampoNumero'
+import { leerEntero, numeroConMiles } from '../../utils/normalizarNumero'
 import Paginacion from '../layout/Paginacion'
 import QueryErrorState from '../layout/QueryErrorState'
 import type { LoteReporte } from '../../hooks/queries/useLotesQuery'
@@ -190,7 +192,8 @@ export default function VistaVencimientos({
   }
 
   async function confirmarBaja(lote: LoteReporte) {
-    const cantidad = Number(cantidadBaja)
+    // Un entero, con los miles que pone el campo (B20, D17); con coma no es una cantidad.
+    const cantidad = leerEntero(cantidadBaja) ?? NaN
     if (!Number.isFinite(cantidad) || cantidad <= 0 || cantidad > lote.cantidad_restante) return
     if (bajaDeLotePideMotivo(lote.fecha_vencimiento)) {
       const motivo = motivoBaja.trim()
@@ -215,7 +218,7 @@ export default function VistaVencimientos({
   function abrirDevolucion(lote: LoteReporte) {
     cerrarBaja()
     setDevolviendo(lote.lote_id)
-    setCantidadDevolucion(String(lote.cantidad_restante))
+    setCantidadDevolucion(numeroConMiles(Number(lote.cantidad_restante)))
     setNumeroNota('')
     setMotivoDevolucion('')
     setErrorDevolucion('')
@@ -232,7 +235,8 @@ export default function VistaVencimientos({
   async function confirmarDevolucion(lote: LoteReporte) {
     const parsed = devolucionProveedorSchema.safeParse({
       loteId: lote.lote_id,
-      cantidad: cantidadDevolucion,
+      // Los miles que pone el campo (B20): «1.200» son 1200; lo que no es un entero lo rechaza el schema.
+      cantidad: leerEntero(cantidadDevolucion) ?? cantidadDevolucion,
       numeroNota,
       motivo: motivoDevolucion,
     })
@@ -395,12 +399,10 @@ export default function VistaVencimientos({
                           </>
                         )}
                         <span className="inline-flex items-center gap-1">
-                          <input
-                            type="number"
-                            min={1}
-                            max={lote.cantidad_restante}
+                          <CampoNumero
+                            entero
                             value={cantidadBaja}
-                            onChange={e => setCantidadBaja(e.target.value)}
+                            onChange={setCantidadBaja}
                             aria-label="Unidades a dar de baja"
                             className="w-16 px-2 py-1 border rounded text-sm text-right dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                           />
@@ -433,12 +435,10 @@ export default function VistaVencimientos({
                       // RPC desde la factura de origen, que es la única que lo
                       // sabe.
                       <span className="inline-flex flex-col items-end gap-1">
-                        <input
-                          type="number"
-                          min={1}
-                          max={lote.cantidad_restante}
+                        <CampoNumero
+                          entero
                           value={cantidadDevolucion}
-                          onChange={e => setCantidadDevolucion(e.target.value)}
+                          onChange={setCantidadDevolucion}
                           aria-label="Unidades a devolver al proveedor"
                           placeholder="Unidades"
                           className="w-28 px-2 py-1 border rounded text-sm text-right dark:bg-gray-700 dark:border-gray-600 dark:text-white"
@@ -495,7 +495,7 @@ export default function VistaVencimientos({
                               cerrarDevolucion()
                               cerrarBaja()
                               setDandoDeBaja(lote.lote_id)
-                              setCantidadBaja(String(lote.cantidad_restante))
+                              setCantidadBaja(numeroConMiles(Number(lote.cantidad_restante)))
                             }}
                             className="inline-flex items-center gap-1 px-2 py-1 text-xs border rounded text-red-700 border-red-200 hover:bg-red-50 dark:text-red-300 dark:border-red-800 dark:hover:bg-red-900/20"
                           >

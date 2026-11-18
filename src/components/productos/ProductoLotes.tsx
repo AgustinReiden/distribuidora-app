@@ -31,6 +31,8 @@ import { useNotification } from '../../contexts/NotificationContext'
 import { bolsaSinVencimiento, formatearFechaVencimiento } from '../../utils/vencimientos'
 import BadgeVencimiento from '../vencimientos/BadgeVencimiento'
 import { Button } from '../ui/Button'
+import { CampoNumero } from '../ui/CampoNumero'
+import { leerEntero, numeroConMiles } from '../../utils/normalizarNumero'
 
 export interface ProductoLotesProps {
   /** Producto en edición. Sin id (alta nueva) la sección no se muestra. */
@@ -72,7 +74,8 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
   const bolsa = bolsaSinVencimiento(stock, asignado)
 
   async function guardarLoteNuevo() {
-    const cantidad = Number(cantidadNueva)
+    // Un entero, con los miles que pone el campo (B20, D17); con coma no es una cantidad.
+    const cantidad = leerEntero(cantidadNueva) ?? NaN
     if (!fechaNueva) {
       notify.error('Falta la fecha de vencimiento')
       return
@@ -97,9 +100,9 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
   }
 
   async function guardarAjuste(loteId: number) {
-    const restante = Number(restanteEditado)
+    const restante = leerEntero(restanteEditado) ?? NaN
     if (!Number.isFinite(restante) || restante < 0) {
-      notify.error('La cantidad no puede ser negativa')
+      notify.error('Escribí las unidades que quedan, sin coma')
       return
     }
     try {
@@ -152,13 +155,11 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
             <label htmlFor="lote-cantidad" className="block text-xs text-stone-500 dark:text-gray-400 mb-0.5">
               Unidades (hay {bolsa})
             </label>
-            <input
+            <CampoNumero
               id="lote-cantidad"
-              type="number"
-              min={1}
-              max={bolsa}
+              entero
               value={cantidadNueva}
-              onChange={e => setCantidadNueva(e.target.value)}
+              onChange={setCantidadNueva}
               className="w-24 px-2 py-1 border rounded text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white"
             />
           </div>
@@ -209,12 +210,10 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
               />
               {editando === lote.id ? (
                 <span className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    min={0}
-                    max={lote.cantidad}
+                  <CampoNumero
+                    entero
                     value={restanteEditado}
-                    onChange={e => setRestanteEditado(e.target.value)}
+                    onChange={setRestanteEditado}
                     aria-label="Unidades que quedan"
                     className="w-20 px-2 py-0.5 border rounded text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white"
                   />
@@ -255,7 +254,7 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
                   {puedeCorregir && (
                     <button
                       type="button"
-                      onClick={() => { setEditando(lote.id); setRestanteEditado(String(lote.cantidad_restante)) }}
+                      onClick={() => { setEditando(lote.id); setRestanteEditado(numeroConMiles(Number(lote.cantidad_restante))) }}
                       aria-label={`Corregir el contador del lote que vence el ${formatearFechaVencimiento(lote.fecha_vencimiento)}`}
                       className="p-1 text-stone-400 hover:text-blue-600"
                     >

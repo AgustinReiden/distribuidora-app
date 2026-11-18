@@ -203,7 +203,8 @@ describe('VistaVencimientos — acciones por fila', () => {
     const { props } = renderVista({ lotes: [lote(1, VENCIDO)] })
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: /Dar de baja/ }))
-    expect(screen.getByRole('spinbutton', { name: 'Unidades a dar de baja' })).toHaveValue(8)
+    // B20: dejó `type="number"` (era un spinbutton): ahora es texto con teclado numérico.
+    expect(screen.getByRole('textbox', { name: 'Unidades a dar de baja' })).toHaveValue('8')
     await user.click(screen.getByRole('button', { name: 'Confirmar la baja' }))
     expect(props.onDarDeBaja).toHaveBeenCalledWith(1, 8)
   })
