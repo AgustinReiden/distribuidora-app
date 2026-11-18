@@ -51,6 +51,7 @@ import type { ProductoDB } from '../../types'
 import type { CambioDeVersion } from '../../utils/versionPedido'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
+import { useClavesDeRenglones } from '../../hooks/useClavesDeRenglones'
 
 export interface ModalSustituirRegaloProps {
   pedidoItemId: string
@@ -136,12 +137,20 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   const productoNuevoId = filas[0]?.productoId ?? ''
   const actualizarFila = (idx: number, cambio: Partial<ParteReparto>) =>
     setFilas(prev => prev.map((f, i) => (i === idx ? { ...f, ...cambio } : f)))
-  const agregarFila = () =>
+  // T6 de la tercera pasada: claves estables por renglón (con el índice, quitar uno le pasaba el
+  // borrador en rojo al de abajo).
+  const clavesFilas = useClavesDeRenglones(filas.length)
+  const agregarFila = () => {
     setFilas(prev => {
       const asignadas = prev.reduce((acc, f) => acc + (Number(f.cantidad) || 0), 0)
       return [...prev, { productoId: '', cantidad: Math.max(cantidadOriginal - asignadas, 0) }]
     })
-  const quitarFila = (idx: number) => setFilas(prev => prev.filter((_, i) => i !== idx))
+    clavesFilas.agregar()
+  }
+  const quitarFila = (idx: number) => {
+    setFilas(prev => prev.filter((_, i) => i !== idx))
+    clavesFilas.quitar(idx)
+  }
   const [motivo, setMotivo] = useState<string>('')
   const [error, setError] = useState<string>('')
   const [avanzadoOpen, setAvanzadoOpen] = useState<boolean>(false)
@@ -392,7 +401,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
             const prodFila = productos.find(p => String(p.id) === String(fila.productoId)) ?? null
             const opciones = esReparto ? opcionesReparto : productosOpcionesSimple
             return (
-              <div key={idx} className="space-y-1">
+              <div key={clavesFilas.de(idx)} className="space-y-1">
                 <div className="flex items-center gap-2">
                   <Combobox<ProductoDB>
                     aria-label={`Producto ${idx + 1}`}

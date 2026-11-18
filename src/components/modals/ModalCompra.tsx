@@ -2899,7 +2899,9 @@ function ItemsList({ items, onActualizarItem, onCondicionItem, onEliminarItem, o
       </div>
       {items.map((item, index) => (
         <ItemRow
-          key={index}
+          // T6 de la tercera pasada: la clave es el producto (y su vez, si se repite), no el índice:
+          // quitar un renglón le pasaba al de abajo el borrador en rojo.
+          key={`${item.productoId}#${items.slice(0, index).filter(i => i.productoId === item.productoId).length}`}
           item={item}
           index={index}
           onActualizarItem={onActualizarItem}

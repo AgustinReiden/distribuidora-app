@@ -17,6 +17,7 @@ import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerrad
 import type { ClienteDB, Pedido, Pago, FormaPago, RegistrarPagoFifoInput, RegistrarPagoCombinadoFifoInput, RegistrarPagoFifoResult, PagoFifoAplicacion } from '../../types'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
+import { useClavesDeRenglones } from '../../hooks/useClavesDeRenglones'
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
 // para el incidente de chunk desincronizado que motivó la regla.
@@ -291,12 +292,13 @@ export default function ModalRegistrarPago({
   const [vueltaMonto, setVueltaMonto] = useState(0)
   const [montoEnRojo, setMontoEnRojo] = useState(false)
   const [pagosEnRojo, setPagosEnRojo] = useState<ReadonlySet<number>>(new Set())
-  const marcarPagoEnRojo = (index: number, valido: boolean): void => {
+  // Por clave del renglón (T6), no por índice: quitar uno no desfasa los demás.
+  const marcarPagoEnRojo = (clave: number, valido: boolean): void => {
     setPagosEnRojo(prev => {
-      if (valido === !prev.has(index)) return prev
+      if (valido === !prev.has(clave)) return prev
       const sig = new Set(prev)
-      if (valido) sig.delete(index)
-      else sig.add(index)
+      if (valido) sig.delete(clave)
+      else sig.add(clave)
       return sig
     })
   }
@@ -398,13 +400,19 @@ export default function ModalRegistrarPago({
   const adelantoComprobando = adelantoElegido && clienteEsEmpleado == null
   const adelantoBloqueado = adelantoSinEmpleado || adelantoComprobando
 
+  // T6 de la tercera pasada: claves estables por renglón (con el índice, quitar uno le pasaba el
+  // borrador en rojo al de abajo).
+  const clavesPagos = useClavesDeRenglones(pagos.length)
+
   const handleAddPago = () => {
     setPagos(prev => [...prev, { monto: '', formaPago: 'efectivo' }])
+    clavesPagos.agregar()
   }
 
   const handleRemovePago = (index: number) => {
     if (pagos.length <= 2) return
     setPagos(prev => prev.filter((_, i) => i !== index))
+    clavesPagos.quitar(index)
   }
 
   const handlePagoChange = (index: number, field: keyof PagoDividido, value: string) => {
@@ -866,7 +874,7 @@ export default function ModalRegistrarPago({
             {/* Pagos divididos */}
             <div className="space-y-3">
               {pagos.map((pago, index) => (
-                <div key={index} className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                <div key={clavesPagos.de(index)} className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                   <div className="flex-1">
                     <div className="relative">
                       <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -876,12 +884,12 @@ export default function ModalRegistrarPago({
                         commitOnChange
                         value={Number(pago.monto) || 0}
                         onChange={(n) => handlePagoChange(index, 'monto', String(n))}
-                        onValidez={valido => marcarPagoEnRojo(index, valido)}
+                        onValidez={valido => marcarPagoEnRojo(clavesPagos.de(index), valido)}
                         placeholder="0.00"
                         className="w-full pl-7 pr-2 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-semibold"
                       />
                     </div>
-                    <MontoLeido monto={pagosEnRojo.has(index) ? 0 : parsePrecio(pago.monto)} />
+                    <MontoLeido monto={pagosEnRojo.has(clavesPagos.de(index)) ? 0 : parsePrecio(pago.monto)} />
                   </div>
                   <select
                     value={pago.formaPago}

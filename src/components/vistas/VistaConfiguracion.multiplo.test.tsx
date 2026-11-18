@@ -163,4 +163,21 @@ describe('VistaConfiguracion — lo tipeado sin guardar es trabajo en curso', ()
     await user.type(campo, precargado)
     expect(motivosDeTrabajoEnCurso()).toEqual([])
   })
+
+  // T4 de la tercera pasada: se comparan números con el lector del campo, no textos. «10,00» sobre
+  // un múltiplo de 10 o «2,0» sobre una comisión de 2 no son cambios; un texto que no se entiende sí.
+  it.each([
+    ['Múltiplo', '10.00', []],
+    ['Preventistas', '2.0', []],
+    ['Múltiplo', '1..0', ['configuración: múltiplo de redondeo sin guardar']],
+  ])('«%s» con «%s»', async (etiqueta, texto, marcas) => {
+    const { motivosDeTrabajoEnCurso, _resetTrabajoEnCursoParaTests } = await import('../../utils/trabajoEnCurso')
+    _resetTrabajoEnCursoParaTests()
+    const user = userEvent.setup()
+    render(<VistaConfiguracion {...todas} />)
+    const campo = screen.getByLabelText(etiqueta)
+    await user.clear(campo)
+    await user.type(campo, texto)
+    expect(motivosDeTrabajoEnCurso()).toEqual(marcas)
+  })
 })

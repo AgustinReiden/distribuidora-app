@@ -41,6 +41,7 @@ import type { FranjaHoraria } from '../../utils/horariosCliente';
 import type { ClienteDB, TipoComprobanteVenta } from '../../types';
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles';
 import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo';
+import { useClavesDeRenglones } from '../../hooks/useClavesDeRenglones';
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): si viviera en ese chunk
 // compartido, un deploy podía dejar la versión vieja cacheada en el PWA y
@@ -425,7 +426,11 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
   );
 
   // --- Descuentos por categoría (filas dinámicas) ---
+  // T6 de la tercera pasada: claves estables por renglón (con el índice, quitar uno le pasaba el
+  // borrador en rojo al de abajo).
+  const clavesDescuentos = useClavesDeRenglones(form.descuentosPorCategoria.length);
   const agregarDescuentoCategoria = (): void => {
+    clavesDescuentos.agregar();
     setForm(prev => ({
       ...prev,
       descuentosPorCategoria: [...prev.descuentosPorCategoria, { categoria: '', porcentaje: 0 }],
@@ -445,6 +450,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
     }));
   };
   const eliminarDescuentoCategoria = (index: number): void => {
+    clavesDescuentos.quitar(index);
     setForm(prev => ({
       ...prev,
       descuentosPorCategoria: prev.descuentosPorCategoria.filter((_, i) => i !== index),
@@ -1269,7 +1275,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
               {form.descuentosPorCategoria.length > 0 && (
                 <div className="space-y-2 mb-2">
                   {form.descuentosPorCategoria.map((row, index) => (
-                    <div key={index} className="flex items-center gap-2">
+                    <div key={clavesDescuentos.de(index)} className="flex items-center gap-2">
                       <input
                         type="text"
                         list="cliente-categorias-disponibles"

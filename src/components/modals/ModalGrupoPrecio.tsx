@@ -25,6 +25,7 @@ import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useR
 import { describirReglaEscala } from '../../utils/describirReglaEscala'
 import type { EscalaPrecio } from '../../utils/precioMayorista'
 import type { GrupoPrecioConDetalles, GrupoPrecioFormInput, ProductoDB } from '../../types'
+import { useClavesDeRenglones } from '../../hooks/useClavesDeRenglones'
 
 /**
  * Una cantidad tipeada, o NaN si no es un entero (#1560-b3). Era `parseInt` sobre un
@@ -198,12 +199,17 @@ export default function ModalGrupoPrecio({
     })
   }
 
+  // T6 de la tercera pasada: claves estables por renglón (con el índice, quitar uno le pasaba el
+  // borrador en rojo al de abajo).
+  const clavesEscalas = useClavesDeRenglones(escalas.length)
   const agregarEscala = () => {
     setEscalas(prev => [...prev, escalaVacia()])
+    clavesEscalas.agregar()
   }
 
   const eliminarEscala = (index: number) => {
     setEscalas(prev => prev.filter((_, i) => i !== index))
+    clavesEscalas.quitar(index)
   }
 
   const actualizarEscala = (index: number, patch: Partial<EscalaForm>) => {
@@ -574,7 +580,7 @@ export default function ModalGrupoPrecio({
                 }
 
                 return (
-                  <div key={index} className="border dark:border-gray-700 rounded-lg p-2 space-y-2">
+                  <div key={clavesEscalas.de(index)} className="border dark:border-gray-700 rounded-lg p-2 space-y-2">
                     <div className="flex items-center gap-2">
                       <input
                         ref={el => { cantidadRefs.current[index] = el }}
