@@ -174,22 +174,31 @@ suelta en `sucursales`.
   tipeado: «185,000» se guardaba 185 km). Lo vigila `src/test/lectoresNumero.contract.test.ts` en
   `components`, `hooks` y `utils`, con su lista de permitidos que sólo se achica; un lector bueno en
   el campo equivocado (`leerNumero` en un entero) no lo ve, y eso lo cubre un test que tipee en el
-  formulario. **Lo que se ve es lo que se guarda:** el formulario no topea, no pone un piso ni un
-  default callado sobre lo tipeado (los meses de un gasto guardaban 2 con «1» a la vista); lo que no
-  vale va en rojo con su motivo (`motivo` de `CampoNumero`). **Lo que está en rojo no se guarda:** ni
-  el valor de antes, ni un pedazo, ni 0, ni `null`. Los tres campos se anotan solos en el registro
-  del formulario (`useRegistroIlegibles`): el formulario pone el `Provider` alrededor de sus campos,
-  frena su Guardar con `ilegibles.hay` y pone `AvisoCamposEnRojo` al lado, que dice cuántos hay y
-  lleva al primero (una sección que se cierra, como el carrito del alta, dice cómo abrirse con
-  `AbrirSeccionContext`). Un subformulario con su propio guardar (los lotes, la escala mayorista)
-  pone su propio registro. Con `commitOnChange`, mientras lo tipeado no se entiende el padre vuelve
+  formulario. **Lo que se ve es lo que se guarda:** un formulario nuevo no topea, no pone un piso
+  ni un default callado sobre lo tipeado (los meses de un gasto guardaban 2 con «1» a la vista); lo
+  que no vale va en rojo con su motivo (`motivo` de `CampoNumero`). **La excepción que queda es el
+  recorte de `NumberInput`:** `min`, `max` y `emptyValue` se aplican al salir del campo, y tocar
+  Guardar sale del campo y guarda en el mismo toque un valor recortado sin que se vea (una cantidad
+  bajo el mínimo de venta en el alta, sobre el stock en la edición, un descuento de 150 %). Ya pasaba
+  antes de B20; se corrige en una tarjeta aparte, con una decisión del dueño. **Lo que está en rojo
+  no se guarda:** ni el valor de antes, ni un pedazo, ni 0, ni `null`. Los tres campos se anotan
+  solos en el registro del formulario (`useRegistroIlegibles`): el formulario pone el `Provider`
+  alrededor de sus campos, frena con `ilegibles.hay` TODO botón que guarda o encola (no sólo el
+  Guardar: la oferta «Guardar en el teléfono» del alta encolaba con el valor de antes) y pone
+  `AvisoCamposEnRojo` al lado, que dice cuántos hay y lleva al primero (abre un `<details>` cerrado,
+  y una sección que se cierra, como el carrito del alta, dice cómo abrirse con
+  `AbrirSeccionContext`). Lo vigila `src/test/avisoCamposEnRojo.contract.test.ts`. Un subformulario
+  con su propio guardar (los lotes, la escala mayorista, el alta rápida de una compra) pone su
+  propio registro (`RegistroPropio`). Una lista de renglones que se agregan y se quitan usa claves
+  estables (`useClavesDeRenglones`), no `key={index}`. Con `commitOnChange`, mientras lo tipeado no se entiende el padre vuelve
   al valor de antes de tipear (vacío, si estaba vacío). Sin registro alrededor, al salir el campo
   vuelve a su valor con un aviso. **En la plata, más de dos decimales tipeados no son un error**
   (decisión del dueño, 17/11: «Que guarde 1,50 pero salga un aviso en amarillo no grande sobre el
   campo»): se guarda al centavo y un aviso ámbar (`role="status"`) arriba del campo dice qué se
   guarda, y cómo se escribe lo otro si parece la costumbre de los miles (`avisoPlataDecimalesDeMas`);
-  no sale con lo pegado (lo dice el evento, `esPegado`) ni con lo precargado. Un «$» va con
-  `prefijo`, no puesto por el formulario. Nada de `type="number"`. La tabla de casos es `numeroTipeado.tabla.test.ts`. Y `redondear` redondea medio
+  no sale con lo pegado (lo dice el evento, `esPegado`) ni con lo precargado. En un campo sin miles,
+  lo insertado de una vez (pegado, el chip del portapapeles, el dictado) entra tal cual para que el
+  lector lo marque; sólo la tecla se filtra. Un «$» va con `prefijo`, no puesto por el formulario. Nada de `type="number"`. La tabla de casos es `numeroTipeado.tabla.test.ts`. Y `redondear` redondea medio
   hacia afuera, como `round(numeric, n)`: da lo mismo que el server para un número leído de un
   texto, pero no es espejo de una cuenta con división o de un costo a 4 decimales, donde el double
   ya puede haber perdido el medio.
