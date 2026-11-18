@@ -13,6 +13,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Download, Loader2, Users, FileText, Clock } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
+import { NumberInput } from '../ui/NumberInput'
 import { supabase } from '../../hooks/supabase/base'
 import { formatPrecio } from '../../utils/formatters'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
@@ -187,11 +188,15 @@ function ModalCtaCtePendiente({
             </button>
           ))}
           <span className="text-gray-400">o</span>
-          <input
-            type="number"
+          {/* B20 (D17): era `type="number"`; los miles los pone el campo y una coma no entra. */}
+          <NumberInput
+            integer
             min={0}
-            value={diasMin || ''}
-            onChange={e => setDiasMin(Math.max(0, Number(e.target.value) || 0))}
+            commitOnChange
+            value={diasMin || null}
+            onChange={n => setDiasMin(Math.max(0, n))}
+            onVaciar={() => setDiasMin(0)}
+            aria-label="Días mínimos de deuda"
             placeholder="días"
             className="w-20 px-2 py-1 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
           />

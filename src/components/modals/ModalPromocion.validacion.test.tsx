@@ -87,6 +87,21 @@ describe('ModalPromocion · las fechas en orden y las reglas enteras', () => {
     expect(onSave.mock.calls[0][0]).toMatchObject({ fechaInicio: '2026-11-10', fechaFin: '2026-11-10' })
   })
 
+  // B20 (D17): dejaron `type="number"`; los miles los pone el campo.
+  it('la cantidad de compra tipeada «1200» se ve «1.200» y se guarda 1200', async () => {
+    const { onSave } = renderModal()
+    await userEvent.type(screen.getByPlaceholderText('Ej: Promo Manaos 12+2'), 'Promo test')
+    await userEvent.click(screen.getByText('PRODUCTO A'))
+    await userEvent.type(screen.getByPlaceholderText('Ej: 12'), '1200')
+    expect(screen.getByPlaceholderText('Ej: 12')).toHaveValue('1.200')
+    await userEvent.type(screen.getByPlaceholderText('Ej: 2'), '2')
+    await userEvent.type(screen.getByPlaceholderText('Buscar producto de regalo...'), 'REGALO')
+    await userEvent.click(await screen.findByRole('button', { name: /PRODUCTO REGALO/ }))
+    await userEvent.click(crear())
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(onSave.mock.calls[0][0])).toContain('1200')
+  })
+
   it('no guarda una cantidad de bonificación con decimales', async () => {
     const { onSave } = renderModal()
     await userEvent.type(screen.getByPlaceholderText('Ej: Promo Manaos 12+2'), 'Promo test')

@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import { X, Target } from 'lucide-react'
 import { Button } from '../../ui/Button'
+import { CampoNumero } from '../../ui/CampoNumero'
+import { esTextoIlegible, leerNumero, numeroConMiles } from '../../../utils/normalizarNumero'
 import type { MetasGerenciales } from '../../../hooks/queries'
 
 /** Modal para cargar las metas (objetivos) del mes: venta y margen neto. */
@@ -19,13 +21,13 @@ export default function ModalMetas({
   onClose: () => void
   guardando?: boolean
 }): React.ReactElement {
-  const [venta, setVenta] = useState<string>(metas?.venta != null ? String(metas.venta) : '')
-  const [margen, setMargen] = useState<string>(metas?.margen_neto != null ? String(metas.margen_neto) : '')
+  const [venta, setVenta] = useState<string>(metas?.venta != null ? numeroConMiles(Number(metas.venta)) : '')
+  const [margen, setMargen] = useState<string>(metas?.margen_neto != null ? numeroConMiles(Number(metas.margen_neto)) : '')
 
-  const parse = (s: string): number | null => {
-    const n = Number(s.replace(/[^\d.-]/g, ''))
-    return s.trim() === '' || !Number.isFinite(n) ? null : n
-  }
+  // B20 (D17): plata, con los miles que pone el campo. Antes se borraba todo menos dígitos, punto y
+  // menos: «1.500,50» quedaba 1,5005 y «20.000.000», sin meta. Lo que no se entiende no se guarda.
+  const parse = (s: string): number | null => (s.trim() === '' ? null : leerNumero(s))
+  const ilegible = esTextoIlegible(venta) || esTextoIlegible(margen)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -47,18 +49,20 @@ export default function ModalMetas({
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">{sucursalNombre} · {periodoLabel}</p>
 
         <label className="block text-sm font-medium mb-1 dark:text-gray-200">Venta objetivo ($)</label>
-        <input
-          inputMode="numeric"
+        <CampoNumero
+          aria-label="Venta objetivo"
+          negativo
           value={venta}
-          onChange={(e) => setVenta(e.target.value)}
+          onChange={setVenta}
           placeholder="Ej: 20000000"
           className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm mb-3"
         />
         <label className="block text-sm font-medium mb-1 dark:text-gray-200">Margen neto objetivo ($)</label>
-        <input
-          inputMode="numeric"
+        <CampoNumero
+          aria-label="Margen neto objetivo"
+          negativo
           value={margen}
-          onChange={(e) => setMargen(e.target.value)}
+          onChange={setMargen}
           placeholder="Ej: 6000000"
           className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm mb-4"
         />
@@ -67,7 +71,7 @@ export default function ModalMetas({
           <Button variant="ghost" size="md" onClick={onClose}>Cancelar</Button>
           <Button
             onClick={() => onGuardar(parse(venta), parse(margen))}
-            disabled={guardando}
+            disabled={guardando || ilegible}
             variant="primary"
             size="md"
           >
