@@ -246,7 +246,8 @@ export default function VistaComisiones({
       {resultado && (
         <p className="text-xs text-gray-500 dark:text-gray-400">
           Base: pedidos entregados, sin canjes, vales blancos ni bonificaciones, menos las notas de
-          crédito de esas boletas; lo cobrado con adelanto de sueldo no comisiona. Cada mes se calcula con el porcentaje y las reglas que
+          crédito que le descuentan al vendedor (cliente que rechaza, pedido mal tomado, descuento
+          comercial) emitidas antes de liquidar esa boleta; lo cobrado con adelanto de sueldo no comisiona. Cada mes se calcula con el porcentaje y las reglas que
           regían en él: cambiarlos no reescribe un mes cerrado. Sin regla que aplique se comisiona con
           el default por rol, que al final del período es{' '}
           {resultado.comision_pct_preventista ?? resultado.comision_default}% para quien vende como

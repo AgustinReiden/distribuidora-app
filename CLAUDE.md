@@ -330,9 +330,9 @@ suelta en `sucursales`.
   **de la nota**, al cliente de la nota y al vendedor de la boleta. Resta plata, no pedidos,
   clientes, unidades ni CMV, y resta toda nota, sea cual sea su motivo: es la venta de la empresa.
   El bot también (`bot_ventas_periodo`, `bot_mis_ventas` y el resumen del preventista); las jornadas
-  y Rentabilidad siguen por boleta. Lo que le toca al VENDEDOR (comisión, metas, Rendimiento) resta
-  sólo las notas cuyo motivo le descuenta, con su foto (ver «Los motivos de una nota de crédito de
-  venta»). Un ranking nuevo de venta resta `_ventas_nc` igual.
+  y Rentabilidad siguen por boleta. Lo que le toca al VENDEDOR resta sólo las notas cuyo motivo le
+  descuenta (ver «Los motivos de una nota de crédito de venta»): la comisión, las metas y Rendimiento,
+  cada uno con su foto. Un ranking nuevo de venta resta `_ventas_nc` igual.
   **La nota de crédito de venta se imputa al día de su boleta** (B16, #1545; decisión del dueño):
   `notas_credito_venta.fecha` es la de imputación, la de `pedidos.fecha`, y es la que cuenta para los
   reportes y la posición fiscal; cuándo se emitió es `created_at`, y su crédito (los pagos) es plata
@@ -348,13 +348,20 @@ suelta en `sucursales`.
   `producto_danado` y `otro`, no. Su `mercaderia` (reingresa / merma / nada) está definida y todavía
   sin uso: la nota no mueve stock. Qué resta se decide AL CREAR la nota
   (`trg_notas_credito_venta_foto_vendedor`) y queda anotado: `resta_comision` si la comisión de la
-  boleta no estaba liquidada para su vendedor, y una fila en `nota_credito_venta_metas` por cada meta
-  del vendedor que estaba en su mes y sin cumplir (`_meta_logrado`, la misma cuenta de
-  `avance_metas_preventista`). Anular la nota devuelve sólo lo que no quedó congelado: lo liquidado y
-  la meta cumplida o fuera de su mes siguen restando aunque la nota esté anulada. Una meta creada
-  después de la nota no la ve; si la boleta cambia de vendedor, la comisión sigue a la boleta y las
-  metas del anterior dejan de contarla. Un camino nuevo que lea lo del vendedor sale de
-  `_nc_resta_comision` o de `_meta_logrado`, nunca de `_ventas_nc`.
+  boleta no estaba liquidada para su vendedor, una fila en `nota_credito_venta_metas` por cada meta
+  del vendedor que estaba en su mes y sin cumplir (`_metas_logrado`, la misma cuenta de
+  `avance_metas_preventista`, de una pasada para todas las metas) y `resta_rendimiento` si la nota se
+  emite dentro del mes de su boleta (decisión del dueño del 18/11: una nota de octubre sobre una boleta
+  de septiembre no cambia el Rendimiento de septiembre). Anular la nota devuelve sólo lo que no quedó
+  congelado: lo liquidado, la meta cumplida o fuera de su mes y el Rendimiento de un mes cerrado
+  siguen restando aunque la nota esté anulada (decisión del dueño del 18/11); si después se anula la
+  liquidación que la congelaba, deja de restar
+  (`anular_liquidacion`). Una nota no cambia de motivo ni vuelve a estar vigente (lo rechaza la tabla).
+  Una meta creada después de la nota no la ve; si la boleta cambia de vendedor, la comisión sigue a la
+  boleta y las metas del anterior dejan de contarla. Un camino nuevo que lea lo del vendedor sale de
+  `_nc_resta_comision` (comisión), `_metas_logrado` (metas) o `_nc_rendimiento` (desempeño), no de
+  `_ventas_nc` pelado. Y un camino nuevo que congele comisiones toma antes las boletas que congela, como
+  `liquidar_empleado` (si no, una nota emitida en el medio no se ve y deja un ajuste).
   **El envío vive en `pedidos.cargo_envio`, dentro de `total`** (migs 389 y NNN cargo_1–4), y su
   desglose (`cargo_envio_desglose`) dentro de `total_neto`/`total_iva`, no de `total_real`. La plata
   a cobrar (saldo, cobranza, deuda, recorridos, rendiciones, transportista) usa `total`; la venta, la
@@ -371,8 +378,9 @@ suelta en `sucursales`.
   del dueño del 16/11 y del 17/11): `_comision_lineas` baja cada clave por lo que acreditan las notas
   con `resta_comision` de la boleta (`_nc_resta_comision`, con tope en lo que la clave vende; sin
   renglón, en la del mismo producto o, si la boleta no lo tiene, en la de su renglón de mayor venta).
-  Como la foto se decide al crear, una nota no produce ajustes en el libro: lo ya liquidado no se
-  mueve. El factor del adelanto de sueldo va sobre la venta neta de esas notas (sin nota que
+  La foto se decide al crear la nota y la liquidación toma las boletas antes de calcular, así que una
+  nota no produce ajustes en el libro: lo ya liquidado no se mueve (salvo que se anule esa
+  liquidación). El factor del adelanto de sueldo va sobre la venta neta de esas notas (sin nota que
   descuente, sobre el total). La base del gerencial (`nc`) resta lo mismo.
   El efectivo a entregar resta también los pagos al personal de esa rendición
   (`total_pagos_personal`), que el encargado ve sólo como un total. `confirmar_rendicion` rechaza

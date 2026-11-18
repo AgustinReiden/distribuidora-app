@@ -67,8 +67,8 @@
 --   · `nota_credito_venta_metas`: las metas de facturación (y de unidades, si
 --     el motivo descuenta unidades) del vendedor de la boleta, activas, cuyo
 --     período tiene la boleta, que la nota encuentra en su mes (hoy ≤ fin) y
---     todavía sin cumplir (`_meta_logrado`, la misma cuenta que
---     avance_metas_preventista, antes de esta nota).
+--     todavía sin cumplir (`_metas_logrado`, la misma cuenta que
+--     avance_metas_preventista, antes de esta nota y de una pasada para todas).
 --   · Anular la nota devuelve lo restado sólo donde no quedó congelado:
 --     `resta_comision` queda si la comisión de la boleta ya se liquidó (el
 --     descuento se pagó así), y la fila de una meta queda si la meta ya
@@ -82,13 +82,25 @@
 --     si la nota no descuenta, sobre el total.
 --   · Las metas cuentan las notas de su fila (plata; unidades si el motivo las
 --     descuenta). Rendimiento (venta, unidades, margen, marca y rubro del
---     vendedor) resta las notas vigentes cuyo motivo le descuenta, sin foto:
---     es el desempeño del mes. El gerencial, en lo del vendedor
+--     vendedor) también va con su foto (decisión del dueño del 18/11: «que se
+--     queden congelados… es lo mismo que las metas»):
+--     `notas_credito_venta.resta_rendimiento`, que vale sí cuando el motivo
+--     descuenta, la boleta tiene vendedor y la nota se emite dentro del mes de
+--     su boleta (la condición «en su mes» de las metas; «cumplida» no aplica:
+--     Rendimiento no tiene objetivo). Al anularla queda si ese mes ya cerró.
+--     Lo lee `_nc_rendimiento`. El gerencial, en lo del vendedor
 --     (`kpis.base_comision`, `vendedores[].base_nc`), resta lo mismo que la
 --     comisión; su venta sigue restando toda nota. El bot muestra venta: resta
 --     toda nota (bot_ventas_periodo, bot_mis_ventas y el resumen del
 --     preventista).
---   · `_liquidacion_lineas` no cambia: con la foto, una nota no produce deltas.
+--   · La foto y la liquidación no se cruzan: `liquidar_empleado` toma las
+--     boletas que congela FOR KEY SHARE antes de calcular, y
+--     `anular_nota_credito_venta` toma también la boleta de la nota. Si se anula
+--     una liquidación, la nota anulada que había quedado congelada por ella deja
+--     de restar (`anular_liquidacion`). Con eso, una nota no produce ajustes en
+--     el libro. `_liquidacion_lineas` no cambia.
+--   · Una nota no cambia de motivo ni vuelve a estar vigente: la foto se decidió
+--     con ellos (lo rechaza la tabla; ninguna RPC lo hace).
 -- =========================================================================
 
 BEGIN;
@@ -111,7 +123,7 @@ END
 $lf$;
 
 -- ---------------------------------------------------------------------------
--- Premisas: los cuerpos vivos de producción en la 526. reporte_gerencial va sin
+-- Premisas: los cuerpos vivos de producción en la 527. reporte_gerencial va sin
 -- md5 (otras tarjetas le parchan el tramo de compras): se exige que las anclas
 -- de su tramo aparezcan una vez.
 -- ---------------------------------------------------------------------------
@@ -129,7 +141,10 @@ BEGIN
     ('public.bot_mis_ventas(uuid,date,date,bigint,integer)', 'fff91e69cfa74fd6c95ac05b57a5299e'),
     ('public.reporte_gerencial(bigint,date,date,boolean,boolean)', NULL),
     ('public._ventas_nc(bigint[],date,date)', 'c44fdae60942de6e93649d62b2024d75'),
-    ('public.anular_nota_credito_venta(bigint,text)', NULL),
+    ('public.anular_nota_credito_venta(bigint,text)', '842276e15b7b438ed778834ceb76f36f'),
+    ('public.liquidar_empleado(bigint,jsonb)', 'c29edc547e9b788a1e30e89a7f37b51f'),
+    ('public.anular_liquidacion(bigint,text)', '2d5dfd976973cda9540d0cc6e822580f'),
+    ('public._liquidacion_lineas(empleados,date)', NULL),
     ('public._tablero_hoy()', NULL)
   ) AS t(f, h) LOOP
     IF to_regprocedure(r.f) IS NULL THEN
@@ -146,8 +161,9 @@ BEGIN
      OR to_regproc('public.notas_credito_venta_foto_vendedor') IS NOT NULL
      OR to_regproc('public.nc_venta_motivos') IS NOT NULL
      OR to_regproc('public.es_motivo_nc_venta') IS NOT NULL
-     OR to_regproc('public._meta_logrado') IS NOT NULL
+     OR to_regproc('public._metas_logrado') IS NOT NULL
      OR to_regproc('public._nc_resta_comision') IS NOT NULL
+     OR to_regproc('public._nc_rendimiento') IS NOT NULL
      OR to_regclass('public.nota_credito_venta_metas') IS NOT NULL THEN
     RAISE EXCEPTION 'mig NNN · algo de esta migración ya existe: revisar a mano';
   END IF;
@@ -368,6 +384,13 @@ ALTER TABLE public.notas_credito_venta
 COMMENT ON COLUMN public.notas_credito_venta.resta_comision IS
   'B16 v3 (decisión del dueño del 17/11): la nota resta de la comisión de su boleta. Lo decide trg_notas_credito_venta_foto_vendedor al crearla (el motivo descuenta, la boleta tiene vendedor y su comisión no estaba liquidada) y al anularla (queda si la comisión ya se liquidó: lo pagado no se mueve). Una nota anulada con esta marca sigue restando de la comisión, no de la venta.';
 
+-- B16 v4 (decisión del dueño del 18/11): Rendimiento también con su foto.
+ALTER TABLE public.notas_credito_venta
+  ADD COLUMN resta_rendimiento boolean NOT NULL DEFAULT false;
+
+COMMENT ON COLUMN public.notas_credito_venta.resta_rendimiento IS
+  'B16 v4 (decisión del dueño del 18/11): la nota resta del Rendimiento del vendedor (venta; unidades si el motivo las descuenta) en el mes de su boleta. Lo decide trg_notas_credito_venta_foto_vendedor al crearla (el motivo descuenta, la boleta tiene vendedor y la nota se emite dentro del mes de la boleta) y al anularla (queda si ese mes ya cerró). Una nota anulada con esta marca sigue restando del Rendimiento, no de la venta. La lee _nc_rendimiento.';
+
 -- B16 v3: las metas de las que resta una nota (la foto al crearla). Tabla de
 -- server: se lee y se escribe sólo por los triggers y las funciones de metas.
 CREATE TABLE public.nota_credito_venta_metas (
@@ -386,81 +409,136 @@ ALTER TABLE public.nota_credito_venta_metas ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.nota_credito_venta_metas FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.nota_credito_venta_metas TO service_role;
 
--- Lo logrado de una meta: la cuenta de avance_metas_preventista, en una sola
--- función (la usan avance_metas_preventista y la foto de la nota). Las notas
--- restan sólo de las metas de su fila (plata; unidades si el motivo las
--- descuenta), y sólo mientras la boleta siga siendo venta del vendedor de la
--- meta en su período.
-CREATE FUNCTION public._meta_logrado(p_meta_id bigint)
-RETURNS numeric
+-- Lo logrado de las metas: la cuenta de avance_metas_preventista, en una sola
+-- función y de una pasada para todas las metas pedidas (H5 de la revisión: la
+-- foto de la nota la usa dentro de la RPC, y una consulta por meta podía tardar
+-- segundos). La usan avance_metas_preventista y la foto. Las notas restan sólo
+-- de las metas de su fila (plata; unidades si el motivo las descuenta), y sólo
+-- mientras la boleta siga siendo venta del vendedor de la meta en su período.
+CREATE FUNCTION public._metas_logrado(p_meta_ids bigint[])
+RETURNS TABLE(meta_id bigint, logrado numeric)
 LANGUAGE sql
 STABLE
 SET search_path TO 'public'
 AS $function$
-  WITH m AS (
-    SELECT * FROM metas_preventista WHERE id = p_meta_id
+  WITH m AS MATERIALIZED (
+    SELECT * FROM metas_preventista WHERE id = ANY(p_meta_ids)
+  ),
+  rango AS (
+    SELECT m.preventista_id, m.sucursal_id, min(m.periodo) AS desde, max(m.periodo_fin) AS hasta
+      FROM m
+     GROUP BY m.preventista_id, m.sucursal_id
   ),
   ped AS MATERIALIZED (
-    SELECT p.id, p.cliente_id
-      FROM pedidos p, m
-     WHERE p.usuario_id = m.preventista_id
-       AND p.sucursal_id = m.sucursal_id
-       AND p.estado = 'entregado'
+    SELECT p.id, p.cliente_id, p.usuario_id, p.sucursal_id, p.fecha
+      FROM rango r
+      JOIN pedidos p ON p.usuario_id = r.preventista_id AND p.sucursal_id = r.sucursal_id
+                    AND p.fecha BETWEEN r.desde AND r.hasta
+     WHERE p.estado = 'entregado'
        AND p.canal <> 'cambio'
        -- 3XB: el vale blanco no cuenta para ninguna meta.
        AND p.tipo_factura IS DISTINCT FROM 'VB'
-       AND p.fecha BETWEEN m.periodo AND m.periodo_fin
   ),
   it AS MATERIALIZED (
-    SELECT pi.cantidad, pi.subtotal, pi.producto_id, prod.categoria_id, prod.marca_id
+    SELECT ped.usuario_id, ped.sucursal_id, ped.fecha, pi.cantidad, pi.subtotal,
+           pi.producto_id, prod.categoria_id, prod.marca_id
       FROM ped
       JOIN pedido_items pi ON pi.pedido_id = ped.id
       -- #1262: LEFT. La línea de un producto borrado suma a las metas globales.
       LEFT JOIN productos prod ON prod.id = pi.producto_id
      WHERE pi.es_bonificacion IS NOT TRUE
-    UNION ALL
-    SELECT CASE WHEN mot.descuenta_unidades THEN -i.cantidad ELSE 0 END, -i.subtotal,
-           i.producto_id, prod.categoria_id, prod.marca_id
+  ),
+  -- La boleta de la nota se busca por id, nota por nota, y se le piden las
+  -- condiciones de ped con el período de la meta: el LIMIT hace que el planner
+  -- no la cruce antes con las metas ni la busque por otro índice. Sin
+  -- estadísticas, cruzar las boletas del vendedor con las metas antes de las
+  -- notas multiplicaba las filas (31 s con 500 notas).
+  ncm AS MATERIALIZED (
+    SELECT nm.meta_id, CASE WHEN mot.descuenta_unidades THEN -i.cantidad ELSE 0 END AS cantidad,
+           -i.subtotal AS subtotal, i.producto_id, prod.categoria_id, prod.marca_id
       FROM nota_credito_venta_metas nm
+      JOIN m ON m.id = nm.meta_id
       JOIN notas_credito_venta n ON n.id = nm.nota_credito_id
-      JOIN ped ON ped.id = n.pedido_id
+      CROSS JOIN LATERAL (
+        SELECT p.usuario_id, p.sucursal_id, p.fecha, p.estado, p.canal, p.tipo_factura
+          FROM pedidos p WHERE p.id = n.pedido_id LIMIT 1
+      ) bol
       JOIN nota_credito_venta_items i ON i.nota_credito_id = n.id
       JOIN public.nc_venta_motivos() mot ON mot.motivo = n.motivo
       LEFT JOIN productos prod ON prod.id = i.producto_id
-     WHERE nm.meta_id = p_meta_id
+     WHERE bol.usuario_id = m.preventista_id AND bol.sucursal_id = m.sucursal_id
+       AND bol.fecha BETWEEN m.periodo AND m.periodo_fin
+       AND bol.estado = 'entregado' AND bol.canal <> 'cambio'
+       AND bol.tipo_factura IS DISTINCT FROM 'VB'
+  ),
+  filas AS (
+    SELECT m.id AS meta_id, it.cantidad, it.subtotal
+      FROM m
+      JOIN it ON it.usuario_id = m.preventista_id AND it.sucursal_id = m.sucursal_id
+             AND it.fecha BETWEEN m.periodo AND m.periodo_fin
+     WHERE m.tipo_meta IN ('facturacion', 'unidades')
+       AND (m.marca_id     IS NULL OR it.marca_id     = m.marca_id)
+       AND (m.categoria_id IS NULL OR it.categoria_id = m.categoria_id)
+       AND (m.producto_ids IS NULL OR it.producto_id  = ANY(m.producto_ids))
+    UNION ALL
+    SELECT m.id, ncm.cantidad, ncm.subtotal
+      FROM m
+      JOIN ncm ON ncm.meta_id = m.id
+     WHERE m.tipo_meta IN ('facturacion', 'unidades')
+       AND (m.marca_id     IS NULL OR ncm.marca_id     = m.marca_id)
+       AND (m.categoria_id IS NULL OR ncm.categoria_id = m.categoria_id)
+       AND (m.producto_ids IS NULL OR ncm.producto_id  = ANY(m.producto_ids))
+  ),
+  suma AS (
+    SELECT filas.meta_id, SUM(filas.cantidad) AS cantidad, SUM(filas.subtotal) AS monto
+      FROM filas GROUP BY filas.meta_id
+  ),
+  cob AS (
+    SELECT m.id AS meta_id, COUNT(DISTINCT ped.cliente_id) AS n
+      FROM m
+      JOIN ped ON ped.usuario_id = m.preventista_id AND ped.sucursal_id = m.sucursal_id
+              AND ped.fecha BETWEEN m.periodo AND m.periodo_fin
+     WHERE m.tipo_meta = 'cobertura'
+     GROUP BY m.id
+  ),
+  primer AS (
+    SELECT DISTINCT ON (p.cliente_id, p.sucursal_id) p.cliente_id, p.sucursal_id, p.usuario_id, p.fecha
+      FROM pedidos p
+     WHERE p.estado = 'entregado' AND p.canal <> 'cambio'
+       AND p.tipo_factura IS DISTINCT FROM 'VB'  -- 3XB: un vale no hace cliente nuevo
+       AND p.sucursal_id IN (SELECT m.sucursal_id FROM m WHERE m.tipo_meta = 'clientes_nuevos')
+     ORDER BY p.cliente_id, p.sucursal_id, p.fecha, p.id
+  ),
+  nuevos AS (
+    SELECT m.id AS meta_id, COUNT(*) AS n
+      FROM m
+      JOIN primer pp ON pp.sucursal_id = m.sucursal_id AND pp.usuario_id = m.preventista_id
+                    AND pp.fecha BETWEEN m.periodo AND m.periodo_fin
+     WHERE m.tipo_meta = 'clientes_nuevos'
+     GROUP BY m.id
   )
-  SELECT CASE m.tipo_meta
-           WHEN 'facturacion' THEN (
-             SELECT COALESCE(SUM(i.subtotal), 0) FROM it i
-              WHERE (m.marca_id     IS NULL OR i.marca_id     = m.marca_id)
-                AND (m.categoria_id IS NULL OR i.categoria_id = m.categoria_id)
-                AND (m.producto_ids IS NULL OR i.producto_id  = ANY(m.producto_ids)))
-           WHEN 'unidades' THEN (
-             SELECT COALESCE(SUM(i.cantidad), 0) FROM it i
-              WHERE (m.marca_id     IS NULL OR i.marca_id     = m.marca_id)
-                AND (m.categoria_id IS NULL OR i.categoria_id = m.categoria_id)
-                AND (m.producto_ids IS NULL OR i.producto_id  = ANY(m.producto_ids)))
-           WHEN 'cobertura' THEN (SELECT COUNT(DISTINCT ped.cliente_id) FROM ped)
-           WHEN 'clientes_nuevos' THEN (
-             SELECT COUNT(*)
-               FROM (SELECT DISTINCT ON (p.cliente_id) p.cliente_id, p.usuario_id, p.fecha
-                       FROM pedidos p
-                      WHERE p.estado = 'entregado' AND p.canal <> 'cambio'
-                        AND p.tipo_factura IS DISTINCT FROM 'VB'  -- 3XB: un vale no hace cliente nuevo
-                        AND p.sucursal_id = m.sucursal_id
-                      ORDER BY p.cliente_id, p.fecha, p.id) pp
-              WHERE pp.usuario_id = m.preventista_id
-                AND pp.fecha BETWEEN m.periodo AND m.periodo_fin)
-         END::numeric
-    FROM m;
+  SELECT m.id,
+         (CASE m.tipo_meta
+            WHEN 'facturacion'     THEN COALESCE(s.monto, 0)
+            WHEN 'unidades'        THEN COALESCE(s.cantidad, 0)
+            WHEN 'cobertura'       THEN COALESCE(c.n, 0)
+            WHEN 'clientes_nuevos' THEN COALESCE(nu.n, 0)
+          END)::numeric
+    FROM m
+    LEFT JOIN suma s    ON s.meta_id = m.id
+    LEFT JOIN cob c     ON c.meta_id = m.id
+    LEFT JOIN nuevos nu ON nu.meta_id = m.id;
 $function$;
 
-REVOKE ALL ON FUNCTION public._meta_logrado(bigint) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public._meta_logrado(bigint) TO service_role;
+REVOKE ALL ON FUNCTION public._metas_logrado(bigint[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._metas_logrado(bigint[]) TO service_role;
 
--- La foto: al crear la nota (BEFORE: si resta de la comisión; AFTER: de qué
--- metas) y al anularla (BEFORE: si sigue restando de la comisión; AFTER: de qué
--- metas sigue restando). DEFINER: la escribe la RPC de la nota o el server.
+-- La foto: al crear la nota (BEFORE: si resta de la comisión y del Rendimiento;
+-- AFTER: de qué metas) y al anularla (BEFORE: si sigue restando de la comisión y
+-- del Rendimiento; AFTER: de qué metas sigue restando). DEFINER: la escribe la
+-- RPC de la nota o el server.
+-- Y una nota no cambia de motivo ni vuelve a estar vigente (H6 de la revisión):
+-- la foto se decidió con ese motivo y esa anulación. Ninguna RPC lo hace.
 CREATE FUNCTION public.notas_credito_venta_foto_vendedor()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -472,7 +550,18 @@ DECLARE
   v_unidades  boolean;
   v_liquidada boolean;
   v_vendedor  uuid;
+  v_fin_mes   date;
 BEGIN
+  IF TG_OP = 'UPDATE' AND TG_WHEN = 'BEFORE' THEN
+    IF NEW.motivo IS DISTINCT FROM OLD.motivo THEN
+      RAISE EXCEPTION 'El motivo de la nota de crédito #% no se cambia: lo que le resta al vendedor se decidió con ése. Anulala y cargá otra.', OLD.id
+        USING ERRCODE = '22023';
+    END IF;
+    IF OLD.anulada AND NOT NEW.anulada THEN
+      RAISE EXCEPTION 'La nota de crédito #% está anulada y no vuelve a estar vigente: cargá otra.', OLD.id
+        USING ERRCODE = '22023';
+    END IF;
+  END IF;
   IF TG_OP = 'UPDATE' AND NOT (NEW.anulada AND NOT OLD.anulada) THEN
     IF TG_WHEN = 'BEFORE' THEN
       RETURN NEW;
@@ -484,31 +573,48 @@ BEGIN
     FROM public.nc_venta_motivos() m WHERE m.motivo = NEW.motivo;
   v_descuenta := COALESCE(v_descuenta, false);
   v_unidades := COALESCE(v_unidades, false);
-  -- El vendedor de hoy de la boleta (con perfil: sin él, nadie comisiona).
-  SELECT p.usuario_id INTO v_vendedor
+  -- El vendedor de hoy de la boleta (con perfil: sin él, nadie comisiona), y
+  -- el último día del mes de la boleta (el de su Rendimiento).
+  SELECT CASE WHEN p.usuario_id IN (SELECT id FROM perfiles) THEN p.usuario_id END,
+         (date_trunc('month', p.fecha) + interval '1 month - 1 day')::date
+    INTO v_vendedor, v_fin_mes
     FROM pedidos p
-   WHERE p.id = NEW.pedido_id AND p.usuario_id IN (SELECT id FROM perfiles);
-  -- ¿La comisión de la boleta ya se liquidó para ese vendedor?
+   WHERE p.id = NEW.pedido_id;
+  -- ¿La comisión de la boleta ya se liquidó para ese vendedor? Lo que se
+  -- liquida en paralelo no se cruza (H1 de la revisión): liquidar_empleado toma
+  -- las boletas que congela FOR KEY SHARE antes de calcular, y la RPC de la nota
+  -- y su anulación toman esta boleta FOR UPDATE antes de escribir la nota.
   v_liquidada := EXISTS (SELECT 1 FROM empleado_liquidacion_lineas l
                           WHERE l.pedido_id = NEW.pedido_id AND l.usuario_id = v_vendedor AND l.vigente);
 
   IF TG_OP = 'INSERT' THEN
     IF TG_WHEN = 'BEFORE' THEN
       NEW.resta_comision := v_descuenta AND NOT NEW.anulada AND v_vendedor IS NOT NULL AND NOT v_liquidada;
+      -- Rendimiento (decisión del dueño del 18/11): si la nota se emite dentro
+      -- del mes de su boleta. Una de octubre sobre una boleta de septiembre no
+      -- cambia el Rendimiento de septiembre.
+      NEW.resta_rendimiento := v_descuenta AND NOT NEW.anulada AND v_vendedor IS NOT NULL
+                               AND public._tablero_hoy() <= v_fin_mes;
       RETURN NEW;
     END IF;
     IF v_descuenta AND NOT NEW.anulada AND v_vendedor IS NOT NULL THEN
+      -- Las candidatas, y lo logrado de todas de una pasada (_metas_logrado).
       INSERT INTO nota_credito_venta_metas (nota_credito_id, meta_id)
-      SELECT NEW.id, m.id
-        FROM pedidos p
-        JOIN metas_preventista m ON m.preventista_id = p.usuario_id AND m.sucursal_id = p.sucursal_id
-       WHERE p.id = NEW.pedido_id
-         AND m.activo
-         AND (m.tipo_meta = 'facturacion' OR (m.tipo_meta = 'unidades' AND v_unidades))
-         AND p.fecha BETWEEN m.periodo AND m.periodo_fin
-         AND public._tablero_hoy() <= m.periodo_fin
-         AND public._meta_logrado(m.id) < m.valor_objetivo
-       ORDER BY m.id;
+      WITH cand AS MATERIALIZED (
+        SELECT m.id, m.valor_objetivo
+          FROM pedidos p
+          JOIN metas_preventista m ON m.preventista_id = p.usuario_id AND m.sucursal_id = p.sucursal_id
+         WHERE p.id = NEW.pedido_id
+           AND m.activo
+           AND (m.tipo_meta = 'facturacion' OR (m.tipo_meta = 'unidades' AND v_unidades))
+           AND p.fecha BETWEEN m.periodo AND m.periodo_fin
+           AND public._tablero_hoy() <= m.periodo_fin
+      )
+      SELECT NEW.id, c.id
+        FROM cand c
+        JOIN public._metas_logrado(ARRAY(SELECT cand.id FROM cand)) ml ON ml.meta_id = c.id
+       WHERE ml.logrado < c.valor_objetivo
+       ORDER BY c.id;
     END IF;
     RETURN NULL;
   END IF;
@@ -516,14 +622,18 @@ BEGIN
   -- La anulación: vuelve lo que no quedó congelado.
   IF TG_WHEN = 'BEFORE' THEN
     NEW.resta_comision := OLD.resta_comision AND v_liquidada;
+    NEW.resta_rendimiento := OLD.resta_rendimiento AND public._tablero_hoy() > v_fin_mes;
     RETURN NEW;
   END IF;
   DELETE FROM nota_credito_venta_metas nm
-   USING metas_preventista m
+   USING metas_preventista m,
+         public._metas_logrado(ARRAY(SELECT x.meta_id FROM nota_credito_venta_metas x
+                                      WHERE x.nota_credito_id = NEW.id)) ml
    WHERE nm.nota_credito_id = NEW.id
      AND m.id = nm.meta_id
+     AND ml.meta_id = m.id
      AND public._tablero_hoy() <= m.periodo_fin
-     AND public._meta_logrado(m.id) < m.valor_objetivo;
+     AND ml.logrado < m.valor_objetivo;
   RETURN NULL;
 END
 $function$;
@@ -532,7 +642,7 @@ REVOKE ALL ON FUNCTION public.notas_credito_venta_foto_vendedor() FROM PUBLIC, a
 GRANT EXECUTE ON FUNCTION public.notas_credito_venta_foto_vendedor() TO service_role;
 
 CREATE TRIGGER trg_notas_credito_venta_foto_vendedor
-  BEFORE INSERT OR UPDATE OF anulada ON public.notas_credito_venta
+  BEFORE INSERT OR UPDATE OF anulada, motivo ON public.notas_credito_venta
   FOR EACH ROW EXECUTE FUNCTION public.notas_credito_venta_foto_vendedor();
 
 CREATE TRIGGER trg_notas_credito_venta_foto_vendedor_metas
@@ -541,7 +651,8 @@ CREATE TRIGGER trg_notas_credito_venta_foto_vendedor_metas
 
 -- Las notas que ya existen: su foto con la misma regla. Los motivos de antes
 -- (vencido, dañado, otro) no le descuentan al vendedor, así que ninguna resta
--- de la comisión ni de una meta (la columna nace en false y la tabla vacía).
+-- de la comisión, de una meta ni del Rendimiento (las columnas nacen en false y
+-- la tabla vacía).
 DO $foto$
 DECLARE
   v_total int;
@@ -551,7 +662,7 @@ BEGIN
          count(*) FILTER (WHERE (SELECT m.descuenta_vendedor FROM public.nc_venta_motivos() m WHERE m.motivo = n.motivo))
     INTO v_total, v_descuentan
     FROM notas_credito_venta n;
-  RAISE NOTICE 'mig NNN · foto del vendedor: % notas existentes, % con un motivo que le descuenta: ninguna resta de una comisión ni de una meta',
+  RAISE NOTICE 'mig NNN · foto del vendedor: % notas existentes, % con un motivo que le descuenta: ninguna resta de una comisión, de una meta ni del Rendimiento',
     v_total, v_descuentan;
   IF v_descuentan > 0 THEN
     RAISE EXCEPTION 'mig NNN · hay % notas con un motivo que descuenta al vendedor: no pueden existir antes de esta migración', v_descuentan;
@@ -707,28 +818,36 @@ $n$      AND ped.factor > 0
          LIMIT 1
       ) alt ON pi.id IS NULL
   ),
-  -- Lo que restan las notas en cada clave, con tope en lo que la clave vende.
-  -- MATERIALIZED (H1 de la revisión): sin eso el planner, que estima `lin` en
-  -- una fila, lo reordenaba por cada renglón. Sólo las boletas con nota.
-  nc_clave AS MATERIALIZED (
-    SELECT k.pedido_id, k.clave, k.base, LEAST(n.monto, k.base) AS monto
-      FROM (SELECT lin.pedido_id, lin.clave, SUM(lin.subtotal) AS base
-              FROM lin
-             WHERE lin.pedido_id IN (SELECT nc.pedido_id FROM nc)
-             GROUP BY lin.pedido_id, lin.clave) k
-      JOIN (SELECT nc.pedido_id, nc.clave, SUM(nc.monto) AS monto FROM nc GROUP BY nc.pedido_id, nc.clave) n
-        ON n.pedido_id = k.pedido_id AND n.clave = k.clave
-     WHERE k.base > 0
-  ),
-  -- Cada renglón de la clave baja en proporción: los renglones (y los ítems) son
-  -- los de la boleta, y la suma de la clave es su venta menos sus notas.
-  it AS (
-    SELECT l.pedido_id, l.usuario_id, l.fecha, l.sucursal_id,
-           CASE WHEN k.pedido_id IS NULL THEN l.subtotal
-                ELSE l.subtotal - k.monto * l.subtotal / k.base END AS subtotal,
-           l.producto_id, l.combo_id, l.origen_precio, l.categoria_id, l.pct_default
+  -- Lo que restan las notas en cada clave, con tope en lo que la clave vende, y
+  -- cada renglón de la clave baja en proporción: los renglones (y los ítems) son
+  -- los de la boleta, y la suma de la clave es su venta menos sus notas. Con una
+  -- ventana sobre renglones y notas juntos, no con un join: el planner, que estima
+  -- `lin` en una fila, recorría las claves con nota una vez por renglón (H1 de la
+  -- primera revisión y la tercera de la v3: 500 notas en un mes duplicaban /comisiones).
+  lin_nc AS (
+    SELECT true AS es_lin, l.pedido_id, l.clave, l.subtotal, 0::numeric AS monto,
+           l.usuario_id, l.fecha, l.sucursal_id, l.producto_id, l.combo_id, l.origen_precio,
+           l.categoria_id, l.pct_default
       FROM lin l
-      LEFT JOIN nc_clave k ON k.pedido_id = l.pedido_id AND k.clave = l.clave
+    UNION ALL
+    SELECT false, nc.pedido_id, nc.clave, 0::numeric, nc.monto,
+           NULL::uuid, NULL::date, NULL::bigint, NULL::bigint, NULL::bigint, NULL::text,
+           NULL::uuid, NULL::numeric
+      FROM nc
+  ),
+  w AS (
+    SELECT x.*, SUM(x.subtotal) OVER k AS base_clave, SUM(x.monto) OVER k AS nc_clave
+      FROM lin_nc x
+    WINDOW k AS (PARTITION BY x.pedido_id, x.clave)
+  ),
+  it AS (
+    SELECT w.pedido_id, w.usuario_id, w.fecha, w.sucursal_id,
+           CASE WHEN w.nc_clave > 0 AND w.base_clave > 0
+                THEN w.subtotal - LEAST(w.nc_clave, w.base_clave) * w.subtotal / w.base_clave
+                ELSE w.subtotal END AS subtotal,
+           w.producto_id, w.combo_id, w.origen_precio, w.categoria_id, w.pct_default
+      FROM w
+     WHERE w.es_lin
   )
   SELECT it.pedido_id,$n$, 'comision · nc');
   EXECUTE v_def;
@@ -773,9 +892,9 @@ $ger$;
 -- 5 · Las metas y Rendimiento
 -- =========================================================================
 
--- avance_metas_preventista: lo logrado de cada meta sale de _meta_logrado (la
--- misma cuenta que la foto de la nota usa para saber si una meta estaba
--- cumplida). Reemplaza su tramo de ped/it/primer_pedido/logrado.
+-- avance_metas_preventista: lo logrado de las metas sale de _metas_logrado, de
+-- una pasada (la misma cuenta que la foto de la nota usa para saber si una meta
+-- estaba cumplida). Reemplaza su tramo de ped/it/primer_pedido/logrado.
 DO $metas$
 DECLARE
   v_def text := pg_temp.def('public.avance_metas_preventista(uuid,date)');
@@ -786,23 +905,58 @@ BEGIN
     RAISE EXCEPTION 'mig NNN · metas: el tramo no es el de ped, it, primer_pedido y logrado';
   END IF;
   v_def := replace(v_def, v_tramo,
-$n$  -- MATERIALIZED: _meta_logrado corre una vez por meta (sin esto el planner la
-  -- copiaba en cada lugar que lee `logrado`).
+$n$  -- B16 (decisión del dueño del 17/11): lo logrado es una sola cuenta,
+  -- _metas_logrado (las ventas del vendedor en el período, menos las notas que
+  -- restan de cada meta según su foto), de una pasada para todas las metas. La
+  -- foto de la nota la usa para saber si una meta estaba cumplida.
+  ml AS MATERIALIZED (
+    SELECT * FROM public._metas_logrado(ARRAY(SELECT metas.id FROM metas))
+  ),
   logrado AS MATERIALIZED (
     SELECT m.*,
       (m.periodo_fin - m.periodo + 1) AS dias_periodo,
       GREATEST(0, LEAST(v_hoy - m.periodo + 1, m.periodo_fin - m.periodo + 1)) AS dias_trans,
-      -- B16 v3 (decisión del dueño del 17/11): lo logrado es una sola cuenta,
-      -- _meta_logrado (las ventas del vendedor en el período, menos las notas
-      -- que restan de esta meta según su foto). La foto de la nota la usa para
-      -- saber si la meta estaba cumplida.
-      public._meta_logrado(m.id) AS logrado
+      COALESCE(ml.logrado, 0) AS logrado
     FROM metas m
+    LEFT JOIN ml ON ml.meta_id = m.id
   ),
 $n$);
   EXECUTE v_def;
 END
 $metas$;
+
+-- B16 (decisiones del dueño del 17/11 y del 18/11): lo que las notas le restan
+-- al desempeño del vendedor (Rendimiento), con su foto como las metas: las notas
+-- con resta_rendimiento de las boletas del período (emitidas dentro del mes de su
+-- boleta; una anulada después de cerrado el mes sigue restando), la plata y, si
+-- el motivo lo dice, las unidades. La boleta, como en _ventas_nc: entregada, sin
+-- canje ni vale blanco, y la nota con total. Una nota de octubre sobre una boleta
+-- de septiembre no cambia el Rendimiento de septiembre.
+CREATE FUNCTION public._nc_rendimiento(p_sucs bigint[], p_desde date, p_hasta date)
+RETURNS TABLE(usuario_id uuid, producto_id bigint, cantidad integer, monto numeric, costo_al_crear numeric)
+LANGUAGE sql
+STABLE
+SET search_path TO 'public'
+AS $function$
+  SELECT pe.usuario_id, i.producto_id,
+         CASE WHEN mot.descuenta_unidades THEN i.cantidad ELSE 0 END,
+         i.subtotal, pi.costo_unitario_al_crear
+    FROM notas_credito_venta n
+    JOIN nota_credito_venta_items i ON i.nota_credito_id = n.id
+    JOIN pedidos pe ON pe.id = n.pedido_id
+    JOIN public.nc_venta_motivos() mot ON mot.motivo = n.motivo
+    LEFT JOIN pedido_items pi ON pi.id = i.pedido_item_id
+   WHERE n.resta_rendimiento
+     AND n.total > 0
+     AND n.sucursal_id = ANY(p_sucs)
+     AND n.fecha BETWEEN p_desde AND p_hasta
+     AND pe.estado = 'entregado'
+     AND COALESCE(pe.canal, 'app') <> 'cambio'
+     AND pe.tipo_factura IS DISTINCT FROM 'VB'
+$function$;
+
+REVOKE ALL ON FUNCTION public._nc_rendimiento(bigint[], date, date) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._nc_rendimiento(bigint[], date, date) TO service_role;
 
 DO $rend$
 DECLARE
@@ -815,22 +969,17 @@ $a$    LEFT JOIN categorias cat ON cat.id = prod.categoria_id  -- 1562-b7: el ru
 $n$    LEFT JOIN categorias cat ON cat.id = prod.categoria_id  -- 1562-b7: el rubro
     WHERE pi.es_bonificacion IS NOT TRUE
     UNION ALL
-    -- B16 v3 (decisión del dueño del 17/11): el desempeño del vendedor resta las
-    -- notas de crédito vigentes de las boletas del mes cuyo motivo le descuenta
-    -- (nc_venta_motivos), la plata y, si el motivo lo dice, las unidades. Sin
-    -- foto: es el mes del vendedor, no lo que se le paga. No toca el costo. Una
-    -- línea acreditada sin costo resta de la venta sin costo.
-    SELECT n.usuario_id,
-           CASE WHEN mot.descuenta_unidades THEN -n.cantidad ELSE 0 END,
-           -n.monto,
+    -- B16 (decisiones del dueño del 17/11 y del 18/11): las notas que le
+    -- descuentan al vendedor restan de su desempeño con su foto (_nc_rendimiento:
+    -- la plata y, si el motivo lo dice, las unidades). No toca el costo. Una línea acreditada sin costo
+    -- resta de la venta sin costo.
+    SELECT n.usuario_id, -n.cantidad, -n.monto,
            0 * public.costo_valuacion(n.costo_al_crear, prod.costo_promedio,
              prod.costo_real, prod.costo_sin_iva, prod.impuestos_internos),
            COALESCE(mar.nombre, '(sin marca)'),
            CASE WHEN prod.id IS NULL THEN '(producto borrado)'
                 ELSE public._rubro_rotulo(COALESCE(cat.nombre, prod.categoria)) END
-      FROM public._ventas_nc(v_sucursales, v_periodo, v_hasta) n
-      JOIN notas_credito_venta nn ON nn.id = n.nota_credito_id
-      JOIN public.nc_venta_motivos() mot ON mot.motivo = nn.motivo AND mot.descuenta_vendedor
+      FROM public._nc_rendimiento(v_sucursales, v_periodo, v_hasta) n
       LEFT JOIN productos prod ON prod.id = n.producto_id
       LEFT JOIN marcas mar ON mar.id = prod.marca_id
       LEFT JOIN categorias cat ON cat.id = prod.categoria_id
@@ -852,22 +1001,39 @@ $n$  WITH nc AS MATERIALIZED (
     -- B16 (#1545): las notas de crédito de las boletas del período (_ventas_nc,
     -- imputadas al día de su boleta, de cualquier motivo: es venta) restan de la
     -- venta, del top de clientes y de lo facturado por producto. No de las
-    -- unidades. MATERIALIZED: _ventas_nc corre una vez, no una por boleta.
+    -- unidades. Agregadas una vez y unidas por boleta y por producto: un
+    -- recorrido de las notas por boleta crecía con la cantidad de notas.
     SELECT n.pedido_id, n.producto_id, n.monto
       FROM public._ventas_nc(ARRAY[p_sucursal_id], p_desde, p_hasta) n
   ),
+  nc_ped AS MATERIALIZED (
+    SELECT nc.pedido_id, SUM(nc.monto) AS monto FROM nc GROUP BY nc.pedido_id
+  ),
+  nc_prod AS MATERIALIZED (
+    SELECT nc.producto_id, SUM(nc.monto) AS monto FROM nc GROUP BY nc.producto_id
+  ),
   ventas_filtradas AS ($n$, 'bot_ventas_periodo · nc');
   v_def := pg_temp.parche(v_def,
-$a$    SELECT id, cliente_id, GREATEST(total - cargo_envio, 0) AS total, fecha$a$,
-$n$    SELECT id, cliente_id,
-           GREATEST(total - cargo_envio, 0)
-             - COALESCE((SELECT SUM(nc.monto) FROM nc WHERE nc.pedido_id = pedidos.id), 0) AS total,
-           fecha$n$, 'bot_ventas_periodo · total');
+$a$    SELECT id, cliente_id, GREATEST(total - cargo_envio, 0) AS total, fecha
+    FROM pedidos
+    WHERE sucursal_id = p_sucursal_id$a$,
+$n$    SELECT pedidos.id, pedidos.cliente_id,
+           GREATEST(pedidos.total - pedidos.cargo_envio, 0) - COALESCE(np.monto, 0) AS total,
+           pedidos.fecha
+    FROM pedidos
+    LEFT JOIN nc_ped np ON np.pedido_id = pedidos.id
+    WHERE sucursal_id = p_sucursal_id$n$, 'bot_ventas_periodo · total');
   v_def := pg_temp.parche(v_def,
 $a$    SELECT p.id, p.codigo, p.nombre, SUM(pi.cantidad) AS unidades, SUM(pi.subtotal) AS facturado$a$,
 $n$    SELECT p.id, p.codigo, p.nombre, SUM(pi.cantidad) AS unidades,
-           SUM(pi.subtotal) - COALESCE((SELECT SUM(nc.monto) FROM nc WHERE nc.producto_id = p.id), 0) AS facturado$n$,
+           SUM(pi.subtotal) - COALESCE(MAX(npr.monto), 0) AS facturado$n$,
     'bot_ventas_periodo · facturado');
+  v_def := pg_temp.parche(v_def,
+$a$    JOIN productos p ON p.id = pi.producto_id
+    WHERE pi.es_bonificacion IS NOT TRUE$a$,
+$n$    JOIN productos p ON p.id = pi.producto_id
+    LEFT JOIN nc_prod npr ON npr.producto_id = p.id
+    WHERE pi.es_bonificacion IS NOT TRUE$n$, 'bot_ventas_periodo · notas por producto');
   v_def := pg_temp.parche(v_def,
 $a$    ORDER BY SUM(pi.subtotal) DESC LIMIT p_limit$a$,
 $n$    ORDER BY facturado DESC LIMIT p_limit$n$, 'bot_ventas_periodo · orden');
@@ -879,22 +1045,101 @@ $a$  WITH ventas_filtradas AS ($a$,
 $n$  WITH nc AS MATERIALIZED (
     -- B16 (#1545): las notas de crédito de sus boletas restan de su venta
     -- (_ventas_nc, de cualquier motivo). El resumen del preventista
-    -- (bot_digest_preventista) lo lee de acá. MATERIALIZED: _ventas_nc corre una
-    -- vez, no una por boleta.
-    SELECT n.pedido_id, n.monto
+    -- (bot_digest_preventista) lo lee de acá. Agregadas una vez por boleta.
+    SELECT n.pedido_id, SUM(n.monto) AS monto
       FROM public._ventas_nc(ARRAY[p_sucursal_id], p_desde, p_hasta) n
      WHERE n.usuario_id = p_preventista_id
+     GROUP BY n.pedido_id
   ),
   ventas_filtradas AS ($n$, 'bot_mis_ventas · nc');
   v_def := pg_temp.parche(v_def,
-$a$    SELECT p.id, p.cliente_id, GREATEST(p.total - p.cargo_envio, 0) AS total$a$,
-$n$    SELECT p.id, p.cliente_id,
-           GREATEST(p.total - p.cargo_envio, 0)
-             - COALESCE((SELECT SUM(nc.monto) FROM nc WHERE nc.pedido_id = p.id), 0) AS total$n$,
+$a$    SELECT p.id, p.cliente_id, GREATEST(p.total - p.cargo_envio, 0) AS total
+    FROM pedidos p$a$,
+$n$    SELECT p.id, p.cliente_id, GREATEST(p.total - p.cargo_envio, 0) - COALESCE(nc.monto, 0) AS total
+    FROM pedidos p
+    LEFT JOIN nc ON nc.pedido_id = p.id$n$,
     'bot_mis_ventas · total');
   EXECUTE v_def;
 END
 $bot$;
+
+-- =========================================================================
+-- 7 · La foto y la liquidación no se cruzan (H1 y H2 de la revisión de la v3)
+-- =========================================================================
+
+-- liquidar_empleado: las boletas que va a congelar, tomadas FOR KEY SHARE por
+-- id ANTES de calcular. Una nota que ya tiene la boleta (la RPC la toma FOR
+-- UPDATE) hace esperar a la liquidación, que después la ve; una nota que llega
+-- después espera a que la liquidación confirme y lee el libro escrito («ya
+-- liquidada»). Sin esto, la nota y la liquidación no se veían y la siguiente
+-- liquidación traía un ajuste por la nota. El orden es empleados → pedidos; la
+-- nota sólo toma pedidos.
+DO $liq$
+DECLARE
+  v_def text := pg_temp.def('public.liquidar_empleado(bigint,jsonb)');
+BEGIN
+  v_def := pg_temp.parche(v_def,
+$a$  v_j := public._liquidacion_json(v_e, v_desde, v_hasta, v_sueldo);$a$,
+$n$  -- B16 (H1 de la revisión): las boletas que esta liquidación congela, antes de
+  -- calcular (ver migrations NNN_nc_mes_de_la_boleta).
+  PERFORM 1 FROM pedidos
+   WHERE id IN (SELECT l.pedido_id FROM public._liquidacion_lineas(v_e, v_hasta) l)
+   ORDER BY id
+     FOR KEY SHARE;
+  v_j := public._liquidacion_json(v_e, v_desde, v_hasta, v_sueldo);$n$, 'liquidar · boletas');
+  EXECUTE v_def;
+END
+$liq$;
+
+-- anular_liquidacion: si con la liquidación anulada una boleta deja de estar
+-- liquidada para su vendedor, la nota ANULADA que había quedado congelada por esa
+-- liquidación (resta_comision) ya no lo está: deja de restar (H2). Las vigentes
+-- quedan como están.
+DO $anliq$
+DECLARE
+  v_def text := pg_temp.def('public.anular_liquidacion(bigint,text)');
+BEGIN
+  v_def := pg_temp.parche(v_def,
+$a$  UPDATE empleado_liquidacion_lineas SET vigente = false WHERE liquidacion_id = v_l.id;$a$,
+$n$  UPDATE empleado_liquidacion_lineas SET vigente = false WHERE liquidacion_id = v_l.id;
+  -- B16 (H2 de la revisión): lo que no quedó congelado vuelve.
+  UPDATE notas_credito_venta n
+     SET resta_comision = false
+    FROM pedidos p
+   WHERE p.id = n.pedido_id
+     AND n.anulada
+     AND n.resta_comision
+     AND n.pedido_id IN (SELECT l.pedido_id FROM empleado_liquidacion_lineas l WHERE l.liquidacion_id = v_l.id)
+     AND NOT EXISTS (SELECT 1 FROM empleado_liquidacion_lineas l
+                      WHERE l.pedido_id = n.pedido_id AND l.usuario_id = p.usuario_id AND l.vigente);$n$,
+    'anular liquidación · notas');
+  EXECUTE v_def;
+END
+$anliq$;
+
+-- anular_nota_credito_venta: también la boleta de la nota, con las del crédito y
+-- por id, antes de la nota (el mismo orden que la RPC que la crea). Así la
+-- anulación y una liquidación de esa boleta no se cruzan (H1). Lo que devuelve
+-- (`pedidos_desimputados`) sigue siendo sólo las boletas del crédito.
+DO $annc$
+DECLARE
+  v_def text := pg_temp.def('public.anular_nota_credito_venta(bigint,text)');
+BEGIN
+  v_def := pg_temp.parche(v_def,
+$a$  PERFORM 1
+     FROM pedidos
+    WHERE id = ANY(v_boletas)
+      AND sucursal_id = v_sucursal$a$,
+$n$  -- B16 (H1 de la revisión): y la boleta de la nota.
+  PERFORM 1
+     FROM pedidos
+    WHERE (id = ANY(v_boletas)
+           OR id = (SELECT n.pedido_id FROM notas_credito_venta n
+                     WHERE n.id = p_nota_credito_id AND n.sucursal_id = v_sucursal))
+      AND sucursal_id = v_sucursal$n$, 'anular nota · su boleta');
+  EXECUTE v_def;
+END
+$annc$;
 
 -- =========================================================================
 -- Poscondiciones
@@ -907,10 +1152,15 @@ BEGIN
     ('public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)', 'es_motivo_nc_venta', true),
     ('public._comision_lineas(bigint[])', '_nc_resta_comision', false),
     ('public.reporte_gerencial(bigint,date,date,boolean,boolean)', '_nc_resta_comision', true),
-    ('public.avance_metas_preventista(uuid,date)', '_meta_logrado(m.id)', true),
-    ('public.rendimiento_preventistas(bigint,date)', 'mot.descuenta_vendedor', true),
+    ('public.avance_metas_preventista(uuid,date)', '_metas_logrado(ARRAY(SELECT metas.id FROM metas))', true),
+    ('public.rendimiento_preventistas(bigint,date)', '_nc_rendimiento(v_sucursales, v_periodo, v_hasta)', true),
     ('public.bot_ventas_periodo(date,date,bigint,integer)', '_ventas_nc', true),
-    ('public.bot_mis_ventas(uuid,date,date,bigint,integer)', '_ventas_nc', true)
+    ('public.bot_mis_ventas(uuid,date,date,bigint,integer)', '_ventas_nc', true),
+    ('public.liquidar_empleado(bigint,jsonb)', 'FOR KEY SHARE', true),
+    ('public.anular_liquidacion(bigint,text)', 'SET resta_comision = false', true),
+    ('public.anular_nota_credito_venta(bigint,text)', 'OR id = (SELECT n.pedido_id FROM notas_credito_venta n', true),
+    ('public.notas_credito_venta_foto_vendedor()', 'NEW.resta_rendimiento := OLD.resta_rendimiento', true),
+    ('public._nc_rendimiento(bigint[],date,date)', 'WHERE n.resta_rendimiento', false)
   ) AS t(f, marca, definer) LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = r.f::regprocedure
                     AND position(r.marca in prosrc) > 0 AND prosecdef = r.definer) THEN
@@ -921,8 +1171,9 @@ BEGIN
   FOR r IN SELECT unnest(ARRAY['public.notas_credito_venta_fecha_de_boleta()',
                                'public.pedidos_fecha_arrastra_notas_credito()',
                                'public.notas_credito_venta_foto_vendedor()',
-                               'public._meta_logrado(bigint)',
-                               'public._nc_resta_comision(bigint[])']) AS f LOOP
+                               'public._metas_logrado(bigint[])',
+                               'public._nc_resta_comision(bigint[])',
+                               'public._nc_rendimiento(bigint[],date,date)']) AS f LOOP
     IF has_function_privilege('anon', r.f, 'EXECUTE') OR has_function_privilege('authenticated', r.f, 'EXECUTE') THEN
       RAISE EXCEPTION 'mig NNN · % quedó con EXECUTE para la API', r.f;
     END IF;

@@ -22,14 +22,17 @@
 --     T2 calcular_comisiones del mes de F: V con base 6.400 (7.000 − 3 × 200).
 --     T3 la venta no depende del motivo: el gerencial resta las siete (V vende 5.600) y su base de
 --        comisión resta tres (6.400); la posición fiscal del mes resta toda nota vigente.
---     T4 Rendimiento del mes de F: V vende 6.400 y 66 unidades (70 − 2 − 2: el descuento comercial
---        resta plata y no unidades).
+--     T4 (v4, decisión del dueño del 18/11) Rendimiento va con su foto: las notas de T se emiten hoy,
+--        fuera del mes de su boleta, y no lo tocan: V vende 7.000 y 70 unidades en el mes de F.
+--     T4b dos de esas notas, como emitidas dentro del mes de F (resta_rendimiento): 6.600 y 68 u. (el
+--        descuento comercial resta plata y no unidades); anular la de rechazo con el mes cerrado no lo mueve.
 --     T5 un motivo que no está en la lista lo rechazan la RPC y la tabla.
 --   M · LAS METAS de V del mes en curso (facturación 100.000 y unidades de A 1.000), con cuatro boletas
 --       de hoy: cliente_rechaza A×3 (300), descuento_comercial A×1 (100), producto_vencido A×2 (no
 --       descuenta) y error_pedido A×1 (100) que se anula en el mes y sin cumplir.
 --     M1 facturación 3.600 y unidades 37; la foto: dos filas de la de rechazo, una del descuento.
---     M2 Rendimiento del mes: 3.600 y 37 unidades; la comisión de las cuatro, 3.600; su venta en el bot,
+--     M2 Rendimiento del mes (notas emitidas en el mes de su boleta: restan): 3.600 y 37 unidades; la
+--        comisión de las cuatro, 3.600; su venta en el bot,
 --        3.400 (toda nota vigente resta).
 --     M3 fuera del mes: las metas de V del mes de F (facturación 100.000, unidades 1.000) no ven las
 --        notas de T, emitidas hoy: 7.000 y 70.
@@ -45,6 +48,10 @@
 --     L2 T2 con una nota de rechazo (800); se liquida; se anula la nota: sigue en 800.
 --     L3 T3 con una nota de rechazo que se anula antes de liquidar: vuelve a 1.000.
 --     L4 lo que queda por liquidar es sólo T3 (1.000) y no hay ningún ajuste.
+--     L5 (v4) anulada la liquidación que congelaba T2 (con su nota anulada), la nota deja de restar: 1.000.
+--   G · (v4) una nota no cambia de motivo ni vuelve a estar vigente (los dos UPDATE se rechazan).
+--   Las carreras de la nota y la liquidación (H1 de la revisión de la v3) piden dos sesiones: las prueba
+--   scripts/concurrencia/b16-nota-y-liquidacion.sh.
 --   D · EL ADELANTO DE SUELDO va sobre la venta neta: V5, U1 con una nota de rechazo (200) que paga la
 --       boleta y 800 de adelanto: base 0; U2 con una de vencido (no descuenta) y 800 de adelanto: 200
 --       (sobre el total). El gerencial da lo mismo: 200.
@@ -75,12 +82,14 @@ DECLARE
   v_nc      bigint;
   v_nc2     bigint;
   v_emp     bigint;
+  v_liq     bigint;
   v_m       bigint;
   v_m2      bigint;
   v_r       jsonb;
   v_j       jsonb;
   v_x       jsonb;
   v_t       text;
+  v_t2      text;
   v_n       numeric;
   v_k       int;
   v_mot     text;
@@ -291,11 +300,31 @@ BEGIN
     v_fallas := v_fallas || format('T3b la posición fiscal del mes resta toda nota vigente (%s): %s', v_n, v_j#>>'{ventas,nc_zz_monto}');
   END IF;
 
+  -- T4 (decisión del dueño del 18/11): Rendimiento con su foto. Las notas de T se emiten hoy, fuera
+  -- del mes de su boleta: ninguna resta del Rendimiento del mes de F, que queda en 7.000 y 70 u.
   v_j := pg_temp.como(v_adm, v_s, format('SELECT public.rendimiento_preventistas(%s, %L::date)::text', v_s, v_mes))::jsonb;
   v_x := pg_temp.fila(v_j->'preventistas', 'preventista_id', v_ven::text);
-  IF NOT pg_temp.igual((v_x->>'venta')::numeric, 6400) OR NOT pg_temp.igual((v_x->>'unidades')::numeric, 66)
-     OR NOT pg_temp.igual(pg_temp.suma(v_x->'por_categoria', 'unidades'), 66) THEN
-    v_fallas := v_fallas || format('T4 Rendimiento del mes de F: V vende 6400 con 66 unidades: %s', v_x);
+  IF NOT pg_temp.igual((v_x->>'venta')::numeric, 7000) OR NOT pg_temp.igual((v_x->>'unidades')::numeric, 70)
+     OR NOT pg_temp.igual(pg_temp.suma(v_x->'por_categoria', 'unidades'), 70)
+     OR EXISTS (SELECT 1 FROM notas_credito_venta WHERE pedido_id = ANY(v_bol) AND resta_rendimiento) THEN
+    v_fallas := v_fallas || format('T4 Rendimiento del mes de F: las notas de hoy no lo tocan (7000 y 70 u., ninguna resta_rendimiento): %s', v_x);
+  END IF;
+  -- T4b: la de rechazo y la del descuento comercial, como si se hubieran emitido dentro del mes de F
+  -- (resta_rendimiento): restan 200 y 200, y sólo la de rechazo resta unidades (6.600 y 68 u.). Anular
+  -- la de rechazo con el mes ya cerrado no lo mueve: sigue restando (la marca queda).
+  UPDATE notas_credito_venta SET resta_rendimiento = true WHERE pedido_id IN (v_bol[1], v_bol[6]);
+  v_j := pg_temp.como(v_adm, v_s, format('SELECT public.rendimiento_preventistas(%s, %L::date)::text', v_s, v_mes))::jsonb;
+  v_x := pg_temp.fila(v_j->'preventistas', 'preventista_id', v_ven::text);
+  v_t2 := format('%s/%s', v_x->>'venta', v_x->>'unidades');
+  PERFORM pg_temp.anular((SELECT id FROM notas_credito_venta WHERE pedido_id = v_bol[1]));
+  v_j := pg_temp.como(v_adm, v_s, format('SELECT public.rendimiento_preventistas(%s, %L::date)::text', v_s, v_mes))::jsonb;
+  v_x := pg_temp.fila(v_j->'preventistas', 'preventista_id', v_ven::text);
+  IF NOT COALESCE(pg_temp.igual(NULLIF(split_part(v_t2, '/', 1), '')::numeric, 6600)
+                  AND pg_temp.igual(NULLIF(split_part(v_t2, '/', 2), '')::numeric, 68), false)
+     OR NOT pg_temp.igual((v_x->>'venta')::numeric, 6600) OR NOT pg_temp.igual((v_x->>'unidades')::numeric, 68)
+     OR NOT (SELECT resta_rendimiento FROM notas_credito_venta WHERE pedido_id = v_bol[1]) THEN
+    v_fallas := v_fallas || format('T4b dos notas emitidas en el mes de F restan del Rendimiento (6600 y 68 u.: %s) y anular una con el mes cerrado no lo mueve: %s',
+      v_t2, v_x);
   END IF;
 
   BEGIN
@@ -342,10 +371,15 @@ BEGIN
   v_x := pg_temp.fila(v_j->'preventistas', 'preventista_id', v_ven::text);
   v_n := (SELECT sum(pg_temp.base(b)) FROM unnest(v_bol) b);
   IF NOT pg_temp.igual((v_x->>'venta')::numeric, 3600) OR NOT pg_temp.igual((v_x->>'unidades')::numeric, 37)
+     -- Emitidas dentro del mes de su boleta: restan las que descuentan; la anulada en el mes, no.
+     OR (SELECT array_agg(n.resta_rendimiento ORDER BY b.o) FROM unnest(v_bol) WITH ORDINALITY b(p, o)
+           JOIN notas_credito_venta n ON n.pedido_id = b.p) IS DISTINCT FROM ARRAY[true, true, false, false]
      OR NOT pg_temp.igual(v_n, 3600)
      OR NOT pg_temp.igual((public.bot_mis_ventas(v_ven, v_mesh, v_finh, v_s, 10)::jsonb->>'total_ventas')::numeric, 3400) THEN
-    v_fallas := v_fallas || format('M2 el mes de V: Rendimiento 3600 y 37 u. (%s, %s), comisión 3600 (%s), venta del bot 3400 (%s)',
-      v_x->>'venta', v_x->>'unidades', v_n, public.bot_mis_ventas(v_ven, v_mesh, v_finh, v_s, 10)::jsonb->>'total_ventas');
+    v_fallas := v_fallas || format('M2 el mes de V: Rendimiento 3600 y 37 u. (%s, %s), resta_rendimiento sí/sí/no/no (%s), comisión 3600 (%s), venta del bot 3400 (%s)',
+      v_x->>'venta', v_x->>'unidades',
+      (SELECT array_agg(n.resta_rendimiento ORDER BY b.o) FROM unnest(v_bol) WITH ORDINALITY b(p, o) JOIN notas_credito_venta n ON n.pedido_id = b.p),
+      v_n, public.bot_mis_ventas(v_ven, v_mesh, v_finh, v_s, 10)::jsonb->>'total_ventas');
   END IF;
   v_m := split_part(v_mot_metas, ',', 1)::bigint;
   v_m2 := split_part(v_mot_metas, ',', 2)::bigint;
@@ -406,8 +440,10 @@ BEGIN
     v_fallas := v_fallas || format('L1 con la comisión liquidada la nota no resta: %s, base %s', v_r->>'resta_comision', pg_temp.base(v_p));
   END IF;
   v_p := pg_temp.bol(v_v4, v_c1, v_f);
+  v_p2 := v_p;
   v_r := pg_temp.nc(v_p, 2, 'cliente_rechaza');
-  PERFORM pg_temp.congelar(v_emp, v_finmes + 1, v_finmes + 1, interval '2 hours');
+  v_nc2 := (v_r->>'nota_credito_id')::bigint;
+  v_liq := pg_temp.congelar(v_emp, v_finmes + 1, v_finmes + 1, interval '2 hours');
   PERFORM pg_temp.anular((v_r->>'nota_credito_id')::bigint);
   IF (SELECT resta_comision FROM notas_credito_venta WHERE id = (v_r->>'nota_credito_id')::bigint) IS DISTINCT FROM true
      OR NOT pg_temp.igual(pg_temp.base(v_p), 800) THEN
@@ -426,6 +462,27 @@ BEGIN
   IF v_x IS DISTINCT FROM jsonb_build_array(jsonb_build_object('p', true, 'tipo', 'inicial', 'base', 1000.00)) THEN
     v_fallas := v_fallas || format('L4 por liquidar sólo T3 (1000) y ningún ajuste: %s', v_x);
   END IF;
+
+  -- L5 (v4, H2 de la revisión): se anula la liquidación que había congelado T2 con su nota
+  -- anulada: T2 ya no está liquidada, así que esa nota deja de restar (vuelve a 1.000).
+  PERFORM pg_temp.como(v_adm, v_s, format('SELECT public.anular_liquidacion(%s, %L)::text', v_liq, 'ensayo B16'));
+  IF (SELECT resta_comision FROM notas_credito_venta WHERE id = v_nc2) IS DISTINCT FROM false
+     OR NOT pg_temp.igual(pg_temp.base(v_p2), 1000) THEN
+    v_fallas := v_fallas || format('L5 anulada la liquidación, la nota anulada que congelaba deja de restar: %s, base %s',
+      (SELECT resta_comision FROM notas_credito_venta WHERE id = v_nc2), pg_temp.base(v_p2));
+  END IF;
+
+  -- ============================================ G · la foto no se rehace (v4, H6)
+  BEGIN
+    UPDATE notas_credito_venta SET motivo = 'otro' WHERE id = v_nc2;
+    v_fallas := v_fallas || text 'G1 se pudo cambiar el motivo de una nota ya creada';
+  EXCEPTION WHEN invalid_parameter_value THEN NULL;
+  END;
+  BEGIN
+    UPDATE notas_credito_venta SET anulada = false, anulada_at = NULL WHERE id = v_nc2;
+    v_fallas := v_fallas || text 'G2 una nota anulada volvió a estar vigente';
+  EXCEPTION WHEN invalid_parameter_value THEN NULL;
+  END;
 
   -- ================================================== D · el adelanto de sueldo
   INSERT INTO empleados (nombre, puesto, sucursal_id, cliente_id, creado_por)
@@ -451,7 +508,7 @@ BEGIN
   END;
 
   IF cardinality(v_fallas) = 0 THEN
-    RAISE EXCEPTION 'ENSAYO OK · B16 v3: la NC se imputa al mes de su boleta; motivos, foto del vendedor y nada hacia atrás';
+    RAISE EXCEPTION 'ENSAYO OK · B16 v4: la NC se imputa al mes de su boleta; motivos, foto del vendedor (comisión, metas y Rendimiento) y nada hacia atrás (también al anular una liquidación)';
   END IF;
   RAISE EXCEPTION E'ENSAYO FALLÓ · % caso(s):\n  - %', cardinality(v_fallas), array_to_string(v_fallas, E'\n  - ');
 END
