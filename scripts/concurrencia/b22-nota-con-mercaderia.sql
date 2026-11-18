@@ -129,9 +129,9 @@ CREATE FUNCTION b22c.veredicto(p_foto text, p_linea int, p_huella int) RETURNS t
   ), ult AS (
     SELECT stock_nuevo FROM stock_historico WHERE producto_id = b22c.fx('a')::bigint ORDER BY id DESC LIMIT 1
   ), lin AS (
-    SELECT pi.cantidad,
-           (SELECT COALESCE(sum(cantidad), 0) FROM pedido_item_lotes WHERE pedido_item_id = pi.id) AS huella
-      FROM pedido_items pi WHERE pi.id = b22c.fx('i1')::bigint
+    -- Si una salvedad de todo borró la línea, 0 y 0.
+    SELECT COALESCE((SELECT pi.cantidad FROM pedido_items pi WHERE pi.id = b22c.fx('i1')::bigint), 0) AS cantidad,
+           (SELECT COALESCE(sum(cantidad), 0) FROM pedido_item_lotes WHERE pedido_item_id = b22c.fx('i1')::bigint) AS huella
   )
   SELECT CASE WHEN b22c.foto() = p_foto AND led.saltos = 0
                AND ult.stock_nuevo = (SELECT stock FROM productos WHERE id = b22c.fx('a')::bigint)

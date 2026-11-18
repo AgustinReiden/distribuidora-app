@@ -10,12 +10,15 @@
 #      producto y sale de L1 ya repuesto: stock 28, lotes [8,20].
 #   V2 la venta primero, la nota durante: la nota espera y vuelve a L1: lo mismo.
 #   V3 la nota primero, una salvedad de A×2 sobre la misma línea durante: la salvedad espera la boleta y se
-#      rechaza (nota vigente). Stock 34, lotes [14,20], huella L1:6. OJO: registrar_salvedad mira la nota
-#      vigente ANTES de tomar la boleta (mig 276) y no después, así que hoy la salvedad entra igual (stock
-#      36, línea 8): V3 da FALLA hasta que registrar_salvedad repita esa guarda después de su FOR UPDATE
-#      (hallazgo fuera de B22, que no toca la salvedad; el parche está en el informe de la tarjeta).
+#      rechaza (nota vigente). Stock 34, lotes [14,20], huella L1:6. Sin el arreglo de registrar_salvedad
+#      de esta migración (miraba la nota vigente antes de tomar la boleta y no después) la salvedad entraba
+#      igual: stock 36, línea 8.
+#   V3b lo mismo con una salvedad de las 10: sin el arreglo la boleta quedaba en $ 0 con la nota de $ 400
+#      viva y el stock en 44 (4 unidades fantasma); con él, la salvedad se rechaza: stock 34.
 #   V4 la salvedad primero, la nota durante: la nota espera y acredita sobre las 8 que quedan. Stock 36,
 #      lotes [16,20], línea 8 con huella L1:4.
+#   V4b la salvedad de las 10 primero, la nota durante: la nota espera y se rechaza (la línea ya no está).
+#      Stock 40, lotes [20,20] (la salvedad devolvió las 10 a L1).
 #   V5 dos notas de A×6 a la vez: la segunda espera y se rechaza (quedan 4). Stock 36, lotes [16,20].
 #   V6 con la nota de A×4 hecha: anularla primero y la venta de A×6 durante: stock 24, lotes [4,20].
 #   V7 la venta primero y anular durante: lo mismo.
@@ -54,10 +57,12 @@ escenario() {
 escenario V1-nota-y-venta      false "b22c.nc_txt(4)"   "b22c.venta(6)"     "'stock=28 lotes=[8,20] bolsa=0', 10, 6"
 escenario V2-venta-y-nota      false "b22c.venta(6)"    "b22c.nc_txt(4)"    "'stock=28 lotes=[8,20] bolsa=0', 10, 6"
 escenario V3-nota-y-salvedad   false "b22c.nc_txt(4)"   "b22c.salvedad(2)"  "'stock=34 lotes=[14,20] bolsa=0', 10, 6"
+escenario V3b-nota-y-salvedad-de-todo false "b22c.nc_txt(4)" "b22c.salvedad(10)" "'stock=34 lotes=[14,20] bolsa=0', 10, 6"
 escenario V4-salvedad-y-nota   false "b22c.salvedad(2)" "b22c.nc_txt(4)"    "'stock=36 lotes=[16,20] bolsa=0', 8, 4"
+escenario V4b-salvedad-de-todo-y-nota false "b22c.salvedad(10)" "b22c.nc_txt(4)" "'stock=40 lotes=[20,20] bolsa=0', 0, 0"
 escenario V5-nota-y-nota       false "b22c.nc_txt(6)"   "b22c.nc_txt(6)"    "'stock=36 lotes=[16,20] bolsa=0', 10, 4"
 escenario V6-anular-y-venta    true  "b22c.anular()"    "b22c.venta(6)"     "'stock=24 lotes=[4,20] bolsa=0', 10, 10"
 escenario V7-venta-y-anular    true  "b22c.venta(6)"    "b22c.anular()"     "'stock=24 lotes=[4,20] bolsa=0', 10, 10"
 
 if [ "$FALLAS" -gt 0 ]; then echo "FALLAN $FALLAS escenario(s)"; exit 1; fi
-echo "OK: los siete órdenes dan lo que dice la foto, sin deadlock (la nota con mercadería se serializa con la venta del producto, con la salvedad y con otra nota de la misma boleta)"
+echo "OK: los nueve órdenes dan lo que dice la foto, sin deadlock (la nota con mercadería se serializa con la venta del producto, con la salvedad y con otra nota de la misma boleta)"

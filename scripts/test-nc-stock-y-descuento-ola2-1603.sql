@@ -51,6 +51,11 @@
 --     D9 un monto con otro motivo, mezclado con unidades, inválido, 0, NaN o dos montos sobre toda la
 --        boleta se rechazan. D10 el reintento con la misma clave es la misma nota; con otro monto, 22023.
 --     D11 anular un descuento no mueve stock y devuelve la comisión.
+--   X · LO QUE DEJA CADA NOTA: una nota anulada no deja una merma viva ni unidades reingresadas en el stock
+--       (su ledger suma 0), y una vigente deja exactamente las que reingresó.
+--   (S2 es la regla en serie de la salvedad: con una nota vigente, la salvedad se rechaza. La carrera
+--   —la nota en vuelo y la salvedad esperando la boleta— la prueba scripts/concurrencia/b22-nota-con-mercaderia.sh,
+--   V3 y V3b.)
 --   A · LA AUDITORÍA: STK-*, LOTE-*, MERMA-*, FISCAL-*, CC-*, VENTA-*, NC-A y PROMO-A no suman violaciones,
 --       y el ledger de cada producto cierra.
 --
@@ -743,6 +748,39 @@ BEGIN
     v_fallas := v_fallas || format('D11 anular un descuento: %s', v_r);
   END IF;
   v_fallas := v_fallas || pg_temp.ver('D11', z1, 'stock=98 lotes=[] bolsa=98');
+
+  -- ================================== X · lo que deja cada nota de la sucursal
+  -- (no es un check de auditoria_integridad: lo mira el ensayo sobre todas las notas que armó)
+  -- X1 una nota anulada no deja una merma viva.
+  v_fallas := v_fallas || ARRAY(
+    SELECT format('X1 la nota #%s está anulada y su merma #%s sigue viva', n.id, i.merma_id)
+      FROM notas_credito_venta n
+      JOIN nota_credito_venta_items i ON i.nota_credito_id = n.id
+      JOIN mermas_stock m ON m.id = i.merma_id
+     WHERE n.sucursal_id = v_s AND n.anulada AND m.anulada_at IS NULL);
+  -- X2 una nota anulada que reingresó no deja unidades en el stock (su ledger suma 0), y una vigente
+  -- deja exactamente las que reingresó; y lo que reingresó a un lote salió de él o de la bolsa: el
+  -- lote no queda con más de lo que tiene el stock (LOTE-A, arriba).
+  v_fallas := v_fallas || ARRAY(
+    SELECT format('X2 la nota #%s (%s) deja %s u. en el ledger y reingresó %s', x.id,
+                  CASE WHEN x.anulada THEN 'anulada' ELSE 'vigente' END, x.ledger, x.reingreso)
+      FROM (SELECT n.id, n.anulada,
+                   (SELECT COALESCE(sum(i.cantidad), 0) FROM nota_credito_venta_items i
+                     WHERE i.nota_credito_id = n.id AND i.lotes_devueltos IS NOT NULL AND i.merma_id IS NULL) AS reingreso,
+                   (SELECT COALESCE(sum(h.diferencia), 0) FROM stock_historico h
+                     WHERE h.referencia_tipo = 'nota_credito_venta' AND h.referencia_id = n.id
+                       AND h.origen IN ('nota_credito_venta', 'nota_credito_venta_anulada')) AS ledger
+              FROM notas_credito_venta n
+             WHERE n.sucursal_id = v_s) x
+     WHERE x.ledger <> CASE WHEN x.anulada THEN 0 ELSE x.reingreso END);
+  -- X3 hubo notas de todas las clases para que X1 y X2 digan algo.
+  IF (SELECT count(*) FILTER (WHERE n.anulada AND i.merma_id IS NOT NULL) > 0
+             AND count(*) FILTER (WHERE n.anulada AND i.lotes_devueltos IS NOT NULL AND i.merma_id IS NULL) > 0
+             AND count(*) FILTER (WHERE NOT n.anulada AND i.lotes_devueltos IS NOT NULL AND i.merma_id IS NULL) > 0
+        FROM notas_credito_venta n JOIN nota_credito_venta_items i ON i.nota_credito_id = n.id
+       WHERE n.sucursal_id = v_s) IS NOT TRUE THEN
+    v_fallas := v_fallas || text 'X3 faltan notas anuladas con merma, anuladas con reingreso o vigentes con reingreso';
+  END IF;
 
   -- ============================================================ A · auditoría
   v_fallas := v_fallas || ARRAY(

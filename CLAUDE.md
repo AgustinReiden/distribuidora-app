@@ -381,6 +381,9 @@ suelta en `sucursales`.
   la boleta no cambian. Lo que hizo queda en `nota_credito_venta_items.lotes_devueltos` y `merma_id`
   (NULL: no movió nada) y lo deshace `_nc_venta_deshacer_mercaderia`, que rechaza la anulación si lo que
   reingresó ya no está en stock. Las reglas de lotes son las de la salvedad (`migrations/CLAUDE.md`).
+  Un camino que decide por «la boleta tiene una nota vigente» (la salvedad, su anulación, la edición, la
+  cancelación, el cambio de factura) lo mira **con la boleta tomada**: mirarlo antes del `FOR UPDATE` deja
+  pasar una nota que se está emitiendo (lo prueba `scripts/concurrencia/b22-nota-con-mercaderia.sh`, V3).
   **El descuento comercial va por monto, sin unidades** (B22, decisión del dueño del 18/11): un renglón
   con `cantidad = 0` es plata (`subtotal`) imputada a una línea; sobre toda la boleta se prorratea con
   `prorratear_cargo` por lo que le queda a cada línea (subtotal menos sus notas vigentes), y su neto e IVA

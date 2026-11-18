@@ -74,6 +74,23 @@
 --   · _ventas_nc: el ingreso real de un renglón cuyo subtotal no es
 --     cantidad × precio (por monto, o con descuento previo) es proporcional a su
 --     subtotal; con cantidad 0 daba 0.
+--
+-- =========================================================================
+-- 3 · LA SALVEDAD MIRA LA NOTA VIGENTE CON LA BOLETA TOMADA (bug anterior)
+-- =========================================================================
+-- registrar_salvedad rechaza una boleta con nota de crédito vigente (mig 276),
+-- pero lo miraba ANTES de tomar la boleta y no después: una nota que se estaba
+-- emitiendo sobre la misma boleta no se veía, la salvedad esperaba la boleta y,
+-- cuando la nota confirmaba, seguía. Caso medido con dos sesiones: A×10 en la
+-- boleta, una nota de rechazo de A×4 en vuelo y una salvedad de rechazo de A×10:
+-- la boleta quedaba en $ 0, la nota seguía acreditando $ 400 (ya pasaba antes de
+-- esta tarjeta) y, con la mercadería de la nota, el stock subía 14 por 10
+-- entregadas (4 unidades fantasma). El parche repite la guarda después del
+-- FOR UPDATE de la boleta, como anular_salvedad (#1163). Los otros caminos que
+-- deciden por «la boleta tiene nota vigente» ya lo miran con la boleta tomada:
+-- actualizar_pedido_items, cancelar_pedido_con_stock, cambiar_tipo_factura_pedido
+-- y anular_salvedad (y cambiar_cliente_pedido rechaza un entregado con la boleta
+-- tomada y cancela por cancelar_pedido_con_stock).
 -- =========================================================================
 
 BEGIN;
@@ -115,6 +132,8 @@ BEGIN
     ('public.prorratear_cargo(numeric,jsonb)', '3d96a1fb66ba9549ec72892eb5f3ed59'),
     ('public._monto_de_cobro(numeric)', 'c41436f32c24e5a81fcce533e86ea04b'),
     ('public.nc_venta_motivos()', 'ff6636880e4c0573e957cc9e0f8fc648'),
+    ('public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)', 'a8232d05d0fc8f1124b7974f490db222'),
+    ('public.nota_credito_vigente_de_pedido(bigint)', NULL),
     ('public._credito_bloquea_boletas(bigint,bigint,bigint,numeric)', NULL),
     ('public._credito_bloquea_rutas_y_creditos(bigint[],bigint,bigint,bigint)', NULL),
     ('public._aplicar_credito_pagos(bigint,bigint,bigint[])', NULL)
@@ -617,6 +636,41 @@ BEGIN
   EXECUTE v_def;
 END
 $sls$;
+
+-- =========================================================================
+-- registrar_salvedad: la guarda de la nota vigente, con la boleta tomada
+-- =========================================================================
+-- El tramo que se suma, una sola vez: la poscondición lo saca y compara con el
+-- md5 de la premisa.
+CREATE FUNCTION pg_temp.tramo_salvedad() RETURNS text LANGUAGE sql IMMUTABLE AS $f$
+  SELECT $t$
+  -- mig NNN (B22 de #1603): la guarda de la mig 276 otra vez, con la boleta
+  -- tomada. Una nota de crédito que se emitía sobre esta boleta mientras
+  -- esperábamos ya confirmó y se ve (como anular_salvedad, #1163). Sin esto la
+  -- salvedad entraba igual sobre una boleta con nota vigente.
+  IF public.nota_credito_vigente_de_pedido(p_pedido_id) IS NOT NULL THEN
+    RETURN jsonb_build_object('success', false, 'codigo', 'nota_credito_vigente', 'error',
+      'El pedido tiene la nota de crédito #' || public.nota_credito_vigente_de_pedido(p_pedido_id)
+      || ' vigente: anulala primero');
+  END IF;
+$t$
+$f$;
+
+DO $rsv$
+DECLARE
+  v_def text := pg_get_functiondef(
+    'public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)'::regprocedure);
+  v_ancla text := $a$  PERFORM public._edicion_bloquea_boletas(p_pedido_id, v_sucursal);
+  PERFORM 1 FROM pedidos
+   WHERE id = p_pedido_id
+     AND sucursal_id = v_sucursal
+     FOR UPDATE;
+$a$;
+BEGIN
+  v_def := pg_temp.parche(v_def, v_ancla, v_ancla || pg_temp.tramo_salvedad(), 'registrar_salvedad');
+  EXECUTE v_def;
+END
+$rsv$;
 
 -- =========================================================================
 -- _ventas_nc: el ingreso real de un renglón que no es cantidad × precio
@@ -1339,6 +1393,19 @@ BEGIN
       RAISE EXCEPTION 'mig NNN · el parche de % no entró', r.f;
     END IF;
   END LOOP;
+  -- registrar_salvedad: el tramo está una vez y, sacándolo, vuelve el cuerpo de la premisa.
+  IF (SELECT (length(prosrc) - length(replace(prosrc, pg_temp.tramo_salvedad(), '')))
+               / length(pg_temp.tramo_salvedad())
+        FROM pg_proc
+       WHERE oid = 'public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)'::regprocedure) <> 1
+     OR (SELECT md5(replace(prosrc, pg_temp.tramo_salvedad(), ''))
+           FROM pg_proc
+          WHERE oid = 'public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)'::regprocedure)
+        IS DISTINCT FROM 'a8232d05d0fc8f1124b7974f490db222'
+     OR NOT (SELECT prosecdef FROM pg_proc
+              WHERE oid = 'public.registrar_salvedad(bigint,bigint,integer,character varying,text,text,boolean,uuid)'::regprocedure) THEN
+    RAISE EXCEPTION 'mig NNN · el parche de registrar_salvedad no entró como se esperaba';
+  END IF;
   -- Las de server: sin EXECUTE para nadie de la API. La RPC y la anulación, sí.
   FOR r IN SELECT unnest(ARRAY['public._nc_venta_desglose(numeric,numeric,numeric,numeric)',
                                'public._nc_venta_mover_mercaderia(bigint,uuid)',
