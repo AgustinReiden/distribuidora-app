@@ -9,6 +9,7 @@ import { z } from 'zod'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { CampoNumero } from '../ui/CampoNumero'
+import { leerEntero, motivoEnteroTipeado } from '../../utils/normalizarNumero'
 import { Badge } from '../ui/Badge'
 import Card from '../ui/Card'
 import { getErrorMessage } from '../../utils/errorHandling'
@@ -73,8 +74,14 @@ export default function ModalFichaVehiculo({
       setError('Escribí los km del tablero')
       return
     }
-    // Los puntos son separadores de miles; la coma, decimal (que el schema rechaza).
-    const resultado = lecturaKmSchema.safeParse({ fecha, km: kmTxt.replace(/\./g, '').replace(',', '.') })
+    // H1 de la segunda lente: el mismo lector que pone el campo en rojo (`leerEntero`). El de antes
+    // (`replace(/\./g, '')` + `Number`) leía «185,000» (la tecla del punto) como 185.
+    const km = leerEntero(kmTxt)
+    if (km === null) {
+      setError(motivoEnteroTipeado(kmTxt) ?? 'Revisá los km del tablero')
+      return
+    }
+    const resultado = lecturaKmSchema.safeParse({ fecha, km })
     if (!resultado.success) {
       setError(resultado.error.issues[0]?.message ?? 'Revisá la lectura')
       return

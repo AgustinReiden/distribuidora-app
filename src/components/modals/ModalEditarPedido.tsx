@@ -47,6 +47,7 @@ import SugerenciasCombo from '../pedidos/SugerenciasCombo';
 import type { PedidoDB, ProductoDB, PedidoItemDB, ClienteDB } from '../../types';
 import type { CambiarClientePayload } from './ModalCambiarCliente';
 import { lazyWithReload } from '../../utils/lazyWithReload';
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles';
 
 const ModalSustituirRegalo = lazyWithReload(() => import('./ModalSustituirRegalo'));
 const ModalCambiarCliente = lazyWithReload(() => import('./ModalCambiarCliente'));
@@ -170,6 +171,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   onRegaloCambiado,
   guardando
 }: ModalEditarPedidoProps) {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles();
   // Resolver flags de permiso. Si el caller pasa los flags nuevos los usamos;
   // si no, fallback al isAdmin legacy.
   const puedeEditarItems = canEditItems ?? isAdmin;
@@ -1004,6 +1007,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const handleGuardar = (): Promise<void> => conGuardadoUnico(guardarSinGuard);
 
   const guardarSinGuard = async (): Promise<void> => {
+    // H5 de la segunda lente: con un número en rojo (el precio del admin abierto, una cantidad) no
+    // se guarda el pedido.
+    if (ilegibles.hay) return;
     setErrorValidacion('');
     setErrorStock(null);
 
@@ -1257,6 +1263,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   };
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase
       title={`Editar Pedido #${pedido?.id}`}
       description="Editar items, fechas y notas del pedido. El pago se gestiona desde el menú del pedido."
@@ -1995,7 +2002,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </Button>
         <Button
           onClick={handleGuardar}
-          disabled={guardando || guardandoLocal || sustitucionesCargando || esperandoPromos || bloqueoMOQ.length > 0 || (puedeEditarItems && !pedidoEntregado && items.length === 0)}
+          disabled={ilegibles.hay || guardando || guardandoLocal || sustitucionesCargando || esperandoPromos || bloqueoMOQ.length > 0 || (puedeEditarItems && !pedidoEntregado && items.length === 0)}
           loading={guardando || guardandoLocal}
           variant="primary"
           size="md"
@@ -2067,6 +2074,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </Suspense>
       )}
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   );
 });
 

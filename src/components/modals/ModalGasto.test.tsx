@@ -234,6 +234,24 @@ describe('ModalGasto — rubros que cambian el formulario', () => {
     ).toBeInTheDocument()
   })
 
+  // H11 de la segunda lente: «1,5» en los meses quedaba 15 (el lector sacaba la coma). Ahora es rojo
+  // y el gasto no se guarda repartido en otra cantidad de meses.
+  it('los meses del reparto tipeados «1,5» quedan en rojo y el gasto no se guarda', async () => {
+    const { user, onSave } = renderModal()
+    await elegirRubro(user, 'Seguro')
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Recibo')
+    poner(/Monto total/, '1320000')
+    poner(/^Fecha/, '2026-10-28')
+    const meses = screen.getByLabelText('Meses del reparto')
+    await user.clear(meses)
+    await user.type(meses, '1,5')
+    expect(meses).toHaveAttribute('aria-invalid', 'true')
+    const guardar = screen.getByRole('button', { name: 'Guardar gasto' })
+    expect(guardar).toBeDisabled()
+    await user.click(guardar)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
   it('Ingresos brutos propone el mes anterior', async () => {
     const { user } = renderModal()
     poner(/^Fecha/, '2026-10-28')
@@ -592,7 +610,21 @@ describe('ModalGasto — renglones de la factura', () => {
     expect(screen.getByText('Los renglones de la factura van de 1 a 99')).toBeInTheDocument()
   })
 
-  it.each(['', 'abc', '100'])('renglones «%s» no guarda y avisa en castellano', async (texto) => {
+  // B20: «abc» lo marca el campo (y frena el guardado); vacío y 100 los rechaza el formulario.
+  it('renglones «abc»: el campo lo marca en rojo con el motivo y no guarda', async () => {
+    const { user, onSave } = renderModal()
+    await elegirRubro(user, 'Librería')
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
+    poner(/Monto total/, '254,34')
+    poner('IVA', '54,09')
+    poner('Renglones de la factura', 'abc')
+    expect(screen.getByLabelText('Renglones de la factura')).toHaveAttribute('aria-invalid', 'true')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText(/No se entiende el número/)).toBeInTheDocument()
+  })
+
+  it.each(['', '100'])('renglones «%s» no guarda y avisa en castellano', async (texto) => {
     const { user, onSave } = renderModal()
     await elegirRubro(user, 'Librería')
     await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
@@ -729,7 +761,23 @@ describe('ModalGasto — revisión del front', () => {
   it('2. los km con coma no se mandan', async () => {
     const { onSave } = await guardarCombustibleConKm('150000,5')
     expect(onSave).not.toHaveBeenCalled()
-    expect(screen.getByText('Los km del tablero tienen que ser un número entero')).toBeInTheDocument()
+    // B20: el campo lo dice con el mismo lector que el rojo, y el registro frena el guardado.
+    expect(screen.getByText(/Van sin coma: para mil escribí 1000/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Guardar gasto' })).toBeDisabled()
+  })
+
+  // H1 de la segunda lente: «185.000» TIPEADO (la tecla del punto) se ve «185,000», en rojo, y no se
+  // guarda. Antes el lector propio (`replace(/\./g, '')`) lo leía 185.
+  it('2. los km tipeados con el punto de miles no se mandan', async () => {
+    const ctx = renderModal()
+    await elegirRubro(ctx.user, 'Combustible')
+    poner(/Monto total/, '50000')
+    await ctx.user.click(screen.getByRole('button', { name: '+ litros y km del tablero' }))
+    await ctx.user.type(screen.getByLabelText('Km del tablero'), '185.000')
+    expect(screen.getByLabelText('Km del tablero')).toHaveValue('185,000')
+    expect(screen.getByLabelText('Km del tablero')).toHaveAttribute('aria-invalid', 'true')
+    await ctx.user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(ctx.onSave).not.toHaveBeenCalled()
   })
 
   it('3. si falla la lectura del km no deja guardar y avisa', () => {
@@ -1424,7 +1472,7 @@ describe('ModalGasto — el vehículo habitual precargado', () => {
 })
 
 describe('ModalGasto — importes tipeados con puntos de miles', () => {
-  const MENSAJE = 'Escribí el monto con números, por ejemplo 280.000 o 280.000,50'
+  const MENSAJE = 'Escribí el monto con números y hasta dos decimales, por ejemplo 280000 (se ve 280.000) o 280000,50'
 
   it('280.000 en el monto es doscientos ochenta mil, no 280', async () => {
     const { user, onSave } = renderModal()
@@ -1444,10 +1492,19 @@ describe('ModalGasto — importes tipeados con puntos de miles', () => {
     expect(onSave.mock.calls[0][0]).toMatchObject({ monto_total: 280000.5 })
   })
 
-  it('un monto que no se entiende no se guarda y dice cómo escribirlo', async () => {
+  // B20 (decisión del dueño, 17/11): «280,000» ya no es ilegible: se guarda 280 con el aviso amarillo.
+  it('un monto con tres decimales se guarda al centavo', async () => {
     const { user, onSave } = renderModal()
     await elegirRubro(user, 'Librería')
     poner(/Monto total/, '280,000')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ monto_total: 280 })
+  })
+
+  it('un monto que no se entiende no se guarda y dice cómo escribirlo', async () => {
+    const { user, onSave } = renderModal()
+    await elegirRubro(user, 'Librería')
+    poner(/Monto total/, '1,234,567')
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
 
     expect(onSave).not.toHaveBeenCalled()
@@ -1460,7 +1517,7 @@ describe('ModalGasto — importes tipeados con puntos de miles', () => {
     await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Factura A')
     poner(/Monto total/, '50000')
     await user.click(screen.getByRole('button', { name: '+ percepciones e impuestos' }))
-    poner('Percepción de IVA', '1,500')
+    poner('Percepción de IVA', '1,2,3')
     await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
 
     expect(onSave).not.toHaveBeenCalled()

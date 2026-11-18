@@ -49,6 +49,7 @@ import { evaluarCambioRegalo, topeSustitutoRegalo } from '../../utils/regaloOtro
 import { formatPrecio } from '../../utils/formatters'
 import type { ProductoDB } from '../../types'
 import type { CambioDeVersion } from '../../utils/versionPedido'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 
 export interface ModalSustituirRegaloProps {
   pedidoItemId: string
@@ -108,6 +109,8 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   const notify = useNotification()
   const { data: productos = [] } = useProductosQuery()
   const sustituirMut = useSustituirRegaloMutation()
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   const dividirMut = useDividirRegaloMutation()
   const enviando = sustituirMut.isPending || dividirMut.isPending
 
@@ -294,6 +297,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
     && !faltaBulto
     && !sobreTope
     && !enviando
+    && !ilegibles.hay
 
   // Calculos para el banner didactico (modo B)
   const usosOrigAntes = Number(acumuladorOriginal?.usos_pendientes ?? 0)
@@ -362,6 +366,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   }
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase title="Cambiar regalo" onClose={onClose} maxWidth="max-w-md" onEscapeKeyDown={handleEscapeKeyDown}>
       <div className="p-4 space-y-4">
         {/* Header: regalo actual */}
@@ -672,6 +677,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
         </Button>
       </div>
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   )
 })
 

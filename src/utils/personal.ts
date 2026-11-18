@@ -21,6 +21,8 @@ import type {
   VistaPreviaLiquidacion,
 } from '../types/personal'
 import { formatPrecio } from './formatters'
+import { leerNumero } from './normalizarNumero'
+import { redondear } from './calculations'
 import { normalizarBusqueda } from './filtrarOpciones'
 
 export const PUESTOS: ReadonlyArray<{ valor: PuestoEmpleado; etiqueta: string }> = [
@@ -59,23 +61,15 @@ export function fechaCompleta(fecha: string): string {
 
 /**
  * Un importe tipeado, estricto: lo que no entiende da `null`, nunca 0 (un 0 se guarda sin avisar).
- * Los puntos de miles van de a tres ("280.000"); el decimal es la coma ("280.000,50") o, sin
- * miles, el punto con uno o dos dígitos ("12.50"). El signo no se escribe: lo dan los botones.
- * `parsePrecio` sola leería "280.000" como 280.
+ * Es el lector de toda la app (`leerNumero`, B20: un solo lector por campo), sin signo (lo dan los
+ * botones) y al centavo. Más de dos decimales («1,500», la tecla del punto tipeada por costumbre)
+ * se guardan al centavo, con el aviso amarillo del campo (decisión del dueño, 17/11).
  */
 export function parseMonto(texto: string): number | null {
-  const t = texto.trim().replace(/^\$\s*/, '')
-  // La coma sin decimales ("280.000,") es la que deja el campo mientras se tipea.
-  let limpio: string
-  // Un grupo de miles no empieza con 0: «0.500» no es 500, como en `normalizarNumero` (#1560).
-  if (/^[1-9]\d{0,2}(\.\d{3})+(,\d{0,2})?$/.test(t)) limpio = t.replace(/\./g, '').replace(',', '.')
-  else if (/^[1-9]\d{0,2}( \d{3})+(,\d{0,2})?$/.test(t)) limpio = t.replace(/ /g, '').replace(',', '.')
-  else if (/^\d+(,\d{0,2})?$/.test(t)) limpio = t.replace(',', '.')
-  else if (/^\d+\.\d{1,2}$/.test(t)) limpio = t
-  else return null
-  // Una tira enorme de dígitos no es un monto: Number la da Infinity (B20).
-  const n = Number(limpio)
-  return Number.isFinite(n) ? n : null
+  if (/^\s*[$]?\s*[-−]/.test(texto)) return null
+  const n = leerNumero(texto)
+  if (n === null || n < 0) return null
+  return redondear(n, 2)
 }
 
 const conPuntosDeMiles = (digitos: string): string => digitos.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
@@ -126,7 +120,7 @@ export function armarCargos(lineas: ReadonlyArray<LineaCargo>): { cargos: CargoR
 }
 
 /** Lo que se le muestra a quien tipeó un importe que `parseMonto` no entiende. */
-export const MENSAJE_MONTO_ILEGIBLE = 'Escribí el monto con números, por ejemplo 280.000 o 280.000,50'
+export const MENSAJE_MONTO_ILEGIBLE = 'Escribí el monto con números y hasta dos decimales, por ejemplo 280000 (se ve 280.000) o 280000,50'
 
 /** El sueldo se escribe siempre: en blanco no es 0 (un arreglo sin sueldo fijo comisiona y lo dice con un 0). */
 export const MENSAJE_SIN_SUELDO = 'Falta el sueldo: poné 0 si es sólo comisión'

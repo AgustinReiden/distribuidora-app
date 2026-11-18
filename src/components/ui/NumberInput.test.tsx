@@ -187,7 +187,7 @@ describe('NumberInput', () => {
     await user.type(input, '1.5')
     expect(input).toHaveValue('1,5')
     expect(input).toHaveAttribute('aria-invalid', 'true')
-    expect(screen.getByRole('alert')).toHaveTextContent('Las cantidades van sin coma')
+    expect(screen.getByRole('alert')).toHaveTextContent('Van sin coma: para mil escribí 1000 (los puntos de miles los pone el sistema)')
     await user.tab()
     // No se confirma: vuelve a lo que tiene el padre, y lo dice.
     expect(onChange).toHaveBeenCalledTimes(1)

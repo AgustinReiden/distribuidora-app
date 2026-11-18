@@ -270,6 +270,20 @@ describe('ModalCombo · validación (las mismas reglas del server)', () => {
     await guardarYVerError('La cantidad de cada lugar tiene que ser un entero entre 1 y 1000', onSave)
   })
 
+  // H2 de la segunda lente: el tope y las cantidades son enteros, y se leen con `leerEntero`, el
+  // mismo lector que pone el campo en rojo. Con `leerNumero`, «1,000» (la tecla del punto) era 1 y
+  // «3,0» era 3, y el schema los dejaba pasar.
+  it.each([
+    ['Tope de combos (opcional)', '1.000'],
+    ['Cantidad (lugar 1)', '3.0'],
+  ])('%s tipeado «%s» queda en rojo y no se guarda como otro entero', async (campo, valor) => {
+    const { onSave } = renderModal()
+    await reemplazar(campo, valor)
+    expect(screen.getByLabelText(campo)).toHaveAttribute('aria-invalid', 'true')
+    await userEvent.click(guardar())
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
   it('cada lugar necesita al menos un producto', async () => {
     const { onSave } = renderModal()
     await userEvent.click(screen.getByRole('button', { name: /Agregar lugar/ }))

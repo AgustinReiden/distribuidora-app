@@ -498,11 +498,17 @@ describe('parseMonto', () => {
     ['10,5', 10.5],
     ['280.000,', 280000],
     ['0,', 0],
+    // B20 (decisión del dueño, 17/11): más de dos decimales se guardan al centavo, con aviso.
+    ['280,000', 280],
+    ['1500,555', 1500.56],
+    ['1.2345', 1.23],
+    // El lector de toda la app: la planilla en inglés con los dos separadores también se lee.
+    ['1,234.56', 1234.56],
   ])('lee %j como %d', (texto, esperado) => {
     expect(parseMonto(texto)).toBe(esperado)
   })
 
-  it.each(['', '   ', '-280.000', '280,000', '1,234.56', '280.000.', '12abc', 'abc', '1.2345', '280.00.0', '$'])(
+  it.each(['', '   ', '-280.000', '−5', '$ -10', '280.000.', '12abc', 'abc', '280.00.0', '$', '1,234,567'])(
     'no entiende %j: da null, nunca 0',
     texto => {
       expect(parseMonto(texto)).toBeNull()
@@ -548,8 +554,17 @@ describe('el importe tipeado (formatearTecleo + parseMonto)', () => {
 
   // «1.500» y «280.000» tipeados son decimales con tres dígitos: parseMonto los rechaza (no los lee
   // como 1,5 ni como 280, ni como miles), y el formulario dice «Escribí el monto con números».
-  it.each(['1.500', '280.000', '1500,555', '-3000'])('tipear %j queda a la vista para que parseMonto lo rechace', teclas => {
-    expect(parseMonto(tipear(teclas))).toBeNull()
+  // Más de dos decimales se guardan al centavo (decisión del dueño, 17/11): el campo lo avisa.
+  it.each([
+    ['1.500', 1.5],
+    ['280.000', 280],
+    ['1500,555', 1500.56],
+  ])('tipear %j se guarda al centavo: %d', (teclas, esperado) => {
+    expect(parseMonto(tipear(teclas))).toBe(esperado)
+  })
+
+  it('el menos tipeado queda a la vista para que parseMonto lo rechace', () => {
+    expect(parseMonto(tipear('-3000'))).toBeNull()
   })
 
   it('al borrar, los puntos son de miles: «1.500» sin el último 0 es 150, no 1,50', () => {

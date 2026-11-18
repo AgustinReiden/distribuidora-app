@@ -24,6 +24,7 @@
  * que desde la 277. Una alícuota futura no la cambia hasta su día.
  */
 import { redondearSQL } from './calculations'
+import { leerDecimalSinMiles } from './normalizarNumero'
 
 export interface EncuadreII {
   id: string
@@ -117,7 +118,9 @@ export const II_EFECTIVO_MAXIMO = 9900
  * es un porcentaje de 0 a `II_NOMINAL_MAXIMO`.
  */
 export function nominalDesdeTexto(texto: string): number | null {
-  const n = Number(texto.replace(',', '.'))
+  // El mismo lector que pone el campo en rojo (B20, H7 de la segunda lente): `Number` leía «0x10»
+  // como 16 %.
+  const n = leerDecimalSinMiles(texto) ?? NaN
   if (!Number.isFinite(n) || n < 0 || n > II_NOMINAL_MAXIMO) return null
   return n / 100
 }

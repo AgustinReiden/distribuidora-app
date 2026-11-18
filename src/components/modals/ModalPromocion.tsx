@@ -212,6 +212,19 @@ export default function ModalPromocion({
       setError('Ingresa la cantidad de bonificacion (un número entero mayor a 0)')
       return
     }
+    // H3 de la segunda lente: un límite o una prioridad que no es un entero no se guarda como «sin
+    // límite» ni como 0: se dice por qué.
+    if (limiteUsos.trim() !== '') {
+      const limite = entero(limiteUsos)
+      if (!Number.isInteger(limite) || limite <= 0) {
+        setError('El límite de usos es un número entero mayor a 0 (vacío es sin límite)')
+        return
+      }
+    }
+    if (prioridad.trim() !== '' && !Number.isInteger(entero(prioridad))) {
+      setError('La prioridad es un número entero')
+      return
+    }
 
     if (tipoRegalo === 'fraccion') {
       if (!descripcionRegalo.trim()) {

@@ -22,7 +22,8 @@ import { fechaLocalISO, fechaHaceDias, formatFecha, formatPrecio } from '../../u
 import { fechaQueFiltra, pedidoEnRangoDeFechas } from '../../utils/filtroFechaPedidos';
 import { pedidosVisiblesRuta, separarPorFiltroFecha } from '../../utils/pedidosVisiblesRuta';
 import type { PedidoDB, PerfilDB, ClienteDB, ProductoDB } from '../../types';
-import { CampoNumero } from '../ui/CampoNumero';
+import { CampoNumero } from '../ui/CampoNumero'
+import { numeroEditable } from '../../utils/calculations';
 import { leerDecimalSinMiles, leerEntero } from '../../utils/normalizarNumero';
 
 /** Una coordenada tipeada (B20, D17): sin miles, con menos; la tecla del punto es la coma. */
@@ -360,14 +361,14 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
 
   // Cargar coordenadas del deposito en los inputs
   useEffect(() => {
-    setDepositoLat(deposito.lat.toString());
-    setDepositoLng(deposito.lng.toString());
+    setDepositoLat(numeroEditable(deposito.lat));
+    setDepositoLng(numeroEditable(deposito.lng));
   }, [deposito.lat, deposito.lng]);
 
   // Cargar el punto de llegada en los inputs (vacío si no está configurado)
   useEffect(() => {
-    setDestinoLat(destinoRuta?.lat != null ? destinoRuta.lat.toString() : '');
-    setDestinoLng(destinoRuta?.lng != null ? destinoRuta.lng.toString() : '');
+    setDestinoLat(destinoRuta?.lat != null ? numeroEditable(destinoRuta.lat) : '');
+    setDestinoLng(destinoRuta?.lng != null ? numeroEditable(destinoRuta.lng) : '');
   }, [destinoRuta?.lat, destinoRuta?.lng]);
 
   // Cambiar a vista resultado cuando hay ruta optimizada
@@ -731,8 +732,14 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     });
   }, [repartidoresSel, paramsPorChofer]);
 
+  // H9 de la segunda lente: un máximo de paradas que no es un entero no viaja como «sin tope».
+  const maxParadasIlegible = Array.from(repartidoresSel).some(id => {
+    const texto = paramsPorChofer[id]?.maxParadas ?? '';
+    return texto.trim() !== '' && leerEntero(texto) === null;
+  });
+
   const ejecutarDividir = (): void => {
-    if (rutasDeLosRepartidoresDesconocidas) return;
+    if (rutasDeLosRepartidoresDesconocidas || maxParadasIlegible) return;
     if (onArmarRutaMulti && repartidoresParam.length > 0 && pedidosSeleccionados.length > 0) {
       onArmarRutaMulti(repartidoresParam, pedidosSeleccionados, fechaEntrega, horaInicio, horaFin);
     }
@@ -1855,7 +1862,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
               modoDividir ? (
                 <Button
                   onClick={handleDividir}
-                  disabled={repartidoresSel.size === 0 || loading || guardando || jornadaInvalida || pedidosSeleccionados.length === 0 || rutasDeLosRepartidoresDesconocidas}
+                  disabled={repartidoresSel.size === 0 || loading || guardando || jornadaInvalida || pedidosSeleccionados.length === 0 || rutasDeLosRepartidoresDesconocidas || maxParadasIlegible}
                   variant="primary"
                   size="lg"
                   loading={loading || guardando}

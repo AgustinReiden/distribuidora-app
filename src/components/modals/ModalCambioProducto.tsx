@@ -7,6 +7,7 @@ import NumberInput from '../ui/NumberInput'
 import { Button } from '../ui/Button'
 import { esProductoOperativo } from '../../utils/productosOperativos'
 import type { ClienteDB, ProductoDB } from '../../types'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 
 export type MotivoCambio = 'vencimiento' | 'rotura' | 'mal_estado' | 'erroneo' | 'otro'
 
@@ -92,6 +93,8 @@ export default function ModalCambioProducto({
   modo = 'standalone',
   clienteFijo = null,
 }: ModalCambioProductoProps): React.ReactElement {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   const { validate } = useZodValidation(modalCambioProductoSchema)
 
   const enRuta = modo === 'enRuta'
@@ -202,6 +205,7 @@ export default function ModalCambioProducto({
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault()
+    if (ilegibles.hay) return
     setError('')
 
     const result = validate({
@@ -245,6 +249,7 @@ export default function ModalCambioProducto({
   }
 
   const submitDeshabilitado = guardando
+    || ilegibles.hay
     || !clienteId
     || !productoDevueltoId
     || !productoEntregadoId
@@ -277,6 +282,7 @@ export default function ModalCambioProducto({
           </Button>
         </div>
 
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
         <form onSubmit={handleSubmit} className="p-4 space-y-4">
           {/* Cliente */}
           <div className="relative">
@@ -546,6 +552,7 @@ export default function ModalCambioProducto({
             </Button>
           </div>
         </form>
+    </RegistroIlegiblesContext.Provider>
       </div>
     </div>
   )

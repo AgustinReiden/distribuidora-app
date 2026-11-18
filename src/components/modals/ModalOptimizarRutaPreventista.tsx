@@ -6,7 +6,8 @@ import { Button } from '../ui/Button';
 import { getDepositoCoords, setDepositoCoords } from '../../hooks/useOptimizarRuta';
 import type { ClienteDB, PerfilDB } from '../../types';
 import type { RutaPreventistaResponse } from '../../hooks/useOptimizarRutaPreventista';
-import { CampoNumero } from '../ui/CampoNumero';
+import { CampoNumero } from '../ui/CampoNumero'
+import { numeroEditable } from '../../utils/calculations';
 import { leerDecimalSinMiles } from '../../utils/normalizarNumero';
 
 /** Una coordenada tipeada (B20, D17): sin miles, con menos; la tecla del punto es la coma. */
@@ -49,8 +50,8 @@ const ModalOptimizarRutaPreventista = memo(function ModalOptimizarRutaPreventist
   // Load depot coords on mount
   useEffect(() => {
     const coords = getDepositoCoords();
-    setDepositoLat(coords.lat.toString());
-    setDepositoLng(coords.lng.toString());
+    setDepositoLat(numeroEditable(coords.lat));
+    setDepositoLng(numeroEditable(coords.lng));
   }, []);
 
   // Filter clients assigned to selected preventista. La asignación es

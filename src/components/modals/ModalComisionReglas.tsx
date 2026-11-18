@@ -28,6 +28,7 @@ import { useNotification } from '../../contexts/NotificationContext'
 import { etiquetaOrigen } from '../../utils/origenPrecio'
 import { fechaLocalISO } from '../../utils/formatters'
 import type { OrigenPrecio } from '../../utils/origenPrecio'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 
 export interface PreventistaOption {
   id: string
@@ -59,6 +60,8 @@ export default function ModalComisionReglas({
   comisionOtros,
   onClose,
 }: ModalComisionReglasProps) {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   const notify = useNotification()
   const { data: reglas = [], isLoading } = useComisionReglasQuery()
   const guardar = useGuardarComisionReglaMutation()
@@ -143,6 +146,7 @@ export default function ModalComisionReglas({
   }
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase
       title="Reglas de comisión"
       description="Porcentaje por vendedor y por origen del precio"
@@ -243,7 +247,7 @@ export default function ModalComisionReglas({
             <Button
               type="button"
               onClick={() => void handleAgregar()}
-              disabled={guardar.isPending}
+              disabled={guardar.isPending || ilegibles.hay}
               variant="primary"
               size="md"
               className="gap-1.5"
@@ -319,5 +323,6 @@ export default function ModalComisionReglas({
         </Button>
       </div>
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   )
 }

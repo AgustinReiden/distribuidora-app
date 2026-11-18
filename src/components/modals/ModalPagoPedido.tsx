@@ -45,6 +45,7 @@ import CampoQuienRepartio from './CampoQuienRepartio'
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion'
 import type { EleccionChofer } from '../../utils/choferDeEntrega'
 import type { PedidoDB, PagoDBWithUsuario, PerfilDB } from '../../types'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 
 export interface PagoPedidoPayload {
   pedidoId: string
@@ -173,6 +174,8 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   onClose,
   guardando,
 }: ModalPagoPedidoProps) {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   const yaPagado = useMemo(
     () => pagosPrevios.reduce((s, p) => s + (p.monto || 0), 0),
     [pagosPrevios],
@@ -304,6 +307,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   }
 
   const handleSubmit = async (): Promise<void> => {
+    if (ilegibles.hay) return
     if (enVueloRef.current) return
     setError('')
     if (pagosPreviosFallaron) {
@@ -447,6 +451,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   }
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase
       title={modoEntregaTransportista ? `Entregar Pedido #${pedido.id}` : `Registrar Pago — Pedido #${pedido.id}`}
       description="Registrar o anular pagos del pedido. Cada forma de pago se guarda como un movimiento separado."
@@ -838,7 +843,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
             variant="primary"
             size="md"
             onClick={() => { void handleSubmit() }}
-            disabled={guardando || loadingPagosPrevios || pagosPreviosFallaron || excedeSaldo || !algunMontoValido || faltaChofer}
+            disabled={guardando || loadingPagosPrevios || pagosPreviosFallaron || excedeSaldo || !algunMontoValido || faltaChofer || ilegibles.hay}
             loading={guardando}
           >
             {modoEntregaTransportista ? 'Entregar y registrar pago' : 'Registrar pago'}
@@ -847,6 +852,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
       </div>
       <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   )
 })
 

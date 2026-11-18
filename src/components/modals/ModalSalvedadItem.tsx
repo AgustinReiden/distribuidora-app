@@ -19,6 +19,7 @@ import {
   recargoTotal,
 } from '../../utils/comboSalvedad'
 import type { PedidoItemDB, MotivoSalvedad, RegistrarSalvedadResult } from '../../types'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 
 interface MotivoOption {
   value: MotivoSalvedad;
@@ -114,12 +115,15 @@ export default function ModalSalvedadItem({
   // cobros, #1410): si la primera había entrado, cerrar y volver a cargarla igual
   // no la registra de nuevo. Se olvida cuando entra.
   const { requestId, olvidar } = useRequestIdPersistente()
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
 
   const productoNombre = item.producto?.nombre || 'Producto'
   const productoCodigo = item.producto?.codigo
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault()
+    if (ilegibles.hay) return
     setError('')
 
     const cantidadNum = typeof cantidad === 'string' ? parseInt(cantidad) || 0 : cantidad
@@ -222,6 +226,7 @@ export default function ModalSalvedadItem({
   const ajusteMotivoNuestro = recargoTotal(impactoMotivoNuestro)
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
         {/* Header */}
@@ -548,7 +553,7 @@ export default function ModalSalvedadItem({
                 propósito por el mismo swap condicional que en ModalPagoPedido. */}
             <button
               type="submit"
-              disabled={guardando || !motivo || cantidadNum <= 0}
+              disabled={guardando || !motivo || cantidadNum <= 0 || ilegibles.hay}
               className={`flex-1 min-h-[56px] px-4 py-3 text-white rounded-lg transition-colors flex items-center justify-center gap-2 font-semibold active:scale-95 ${
                 tienePromoRota || rompeCombo
                   ? 'bg-red-600 hover:bg-red-700 disabled:bg-red-400'
@@ -573,5 +578,6 @@ export default function ModalSalvedadItem({
         </form>
       </div>
     </div>
+    </RegistroIlegiblesContext.Provider>
   )
 }

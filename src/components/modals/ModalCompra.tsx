@@ -92,6 +92,7 @@ import SelectorConAlta from '../productos/SelectorConAlta'
 import type { OpcionCatalogo } from '../productos/SelectorConAlta'
 import type { CategoriaDB } from '../../hooks/queries/useCategoriasQuery'
 import type { MarcaDB } from '../../hooks/queries/useMarcasQuery'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 
 
 const ModalProveedor = lazyWithReload(() => import('./ModalProveedor'))
@@ -553,6 +554,8 @@ export default function ModalCompra(props: ModalCompraProps) {
 }
 
 function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = [], onSave, onClose, onCrearProductoRapido, onCrearProveedor, sucursalId = null, usuarioId = null }: ModalCompraProps) {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   const [state, dispatch] = useReducer(compraReducer, initialState)
   const puedeEscanear = useContext(AuthDataContext)?.isAdminOrEncargado ?? false
   const [modalProveedorOpen, setModalProveedorOpen] = useState(false)
@@ -853,6 +856,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
 
   const handleSubmit = (e: FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault()
+    if (ilegibles.hay) return
     dispatch({ type: 'SET_ERROR', payload: '' })
     // Un cargo de la plantilla sin monto no es un error de carga: es un flete
     // que esta factura no trajo. Se pregunta antes de validar el resto.
@@ -1088,6 +1092,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
   // compra; así esa caja le da toda la altura que la pantalla permite, y un
   // "Importar" al pie de una vista previa larga no queda cortado.
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase
       title="Nueva Compra"
       onClose={onClose}
@@ -1312,7 +1317,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
             <Button
               type="button"
               onClick={handleSubmit}
-              disabled={state.guardando || state.items.length === 0 || pendientesRevision > 0}
+              disabled={state.guardando || state.items.length === 0 || pendientesRevision > 0 || ilegibles.hay}
               loading={state.guardando}
               variant="success"
               size="md"
@@ -1370,6 +1375,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
         </Suspense>
       )}
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   )
 }
 
@@ -1587,6 +1593,8 @@ function ModalCompraEditar({
   compra, productos, proveedores, categorias = [], marcas = [], onClose, onCrearProductoRapido,
   onGuardarEdicion, usuarioId = null, lotes, canCambiarProveedor = false, onCambiarProveedor,
 }: ModalCompraProps & { compra: CompraDBExtended }) {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   // Se hidrata UNA vez, al montar: si la compra se refresca mientras se edita,
   // no se pisa lo tipeado.
   const [hidratada] = useState(() => hidratarCompraGuardada(compra))
@@ -1686,6 +1694,7 @@ function ModalCompraEditar({
   const puedeCambiarProveedor = Boolean(canCambiarProveedor && onCambiarProveedor && compra.estado !== 'cancelada')
 
   const handleGuardar = async () => {
+    if (ilegibles.hay) return
     dispatch({ type: 'SET_ERROR', payload: '' })
     // FRT-1 (#1517): sin los vencimientos de la compra precargados, guardar
     // mandaría la foto vacía (la edición llama a sincronizar_lotes_compra
@@ -1723,6 +1732,7 @@ function ModalCompraEditar({
   }
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase
       title={`Editar Compra #${compra.id}`}
       onClose={onClose}
@@ -1838,7 +1848,7 @@ function ModalCompraEditar({
             <Button
               type="button"
               onClick={handleGuardar}
-              disabled={state.guardando}
+              disabled={state.guardando || ilegibles.hay}
               loading={state.guardando}
               variant="success"
               size="md"
@@ -1851,6 +1861,7 @@ function ModalCompraEditar({
         </div>
       </div>
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   )
 }
 

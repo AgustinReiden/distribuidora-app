@@ -61,11 +61,24 @@ describe('VistaConfiguracion — comisión por defecto', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Guardar comisiones' }))
     expect(onGuardarComisiones).toHaveBeenCalledWith(2.5, 0)
 
+    // H7 de la segunda lente: tipeado, el segundo separador no entra (el campo sin miles filtra
+    // como el de plata); pegado, queda en rojo y no se guarda.
     onGuardarComisiones.mockClear()
     await userEvent.clear(prev)
     await userEvent.type(prev, '2,5,')
+    expect(prev.value).toBe('2,5')
+    await userEvent.clear(prev)
+    await userEvent.click(prev)
+    await userEvent.paste('2,5,')
+    expect(prev).toHaveAttribute('aria-invalid', 'true')
     await userEvent.click(screen.getByRole('button', { name: 'Guardar comisiones' }))
     expect(onGuardarComisiones).not.toHaveBeenCalled()
+  })
+
+  // B20 (D17): lo precargado se ve con coma decimal, como se tipea: con `String`, 2,5 se veía «2.5».
+  it('el porcentaje guardado 2,5 se precarga «2,5»', () => {
+    render(<VistaConfiguracion {...props({ comisionPctPreventista: 2.5 })} />)
+    expect(screen.getByLabelText('Preventistas')).toHaveValue('2,5')
   })
 
   // B20 (D17): los días del aviso de vencimiento son enteros; los miles los pone el campo.

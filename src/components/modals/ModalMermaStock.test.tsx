@@ -189,6 +189,21 @@ describe('ModalMermaStock — validación', () => {
   // llega al handler ya viene recortada, así que el mensaje "No puede dar de
   // baja mas de N unidades (stock actual)" nunca se muestra. Se asevera lo que
   // pasa HOY (se guarda el stock completo, en silencio), no lo que debería.
+  // H4 de la segunda lente (B20): con `commitOnChange`, «1,5» tipeado no deja «1» (ni el valor de
+  // antes) para guardar: el campo queda en rojo y la baja no se registra.
+  it('una cantidad tipeada «1,5» queda en rojo y frena la baja', async () => {
+    const { user, onSave } = renderModal()
+
+    await user.click(screen.getByRole('button', { name: /rotura/i }))
+    await user.clear(inputCantidad())
+    await user.type(inputCantidad(), '1,5')
+    expect(inputCantidad()).toHaveAttribute('aria-invalid', 'true')
+    const registrar = screen.getByRole('button', { name: /registrar baja/i })
+    expect(registrar).toBeDisabled()
+    await user.click(registrar)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
   it('tipear más unidades que el stock guarda el stock completo, sin avisar', async () => {
     const { user, onSave } = renderModal()
 

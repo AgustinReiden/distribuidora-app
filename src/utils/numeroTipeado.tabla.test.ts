@@ -325,10 +325,11 @@ describe('los lectores que quedan leen la tabla igual', () => {
       else expect(leerPlataTipeada(texto)).toBe(leido)
       // normalizarNumero (el import de compras): 0 para lo que no se entiende.
       expect(normalizarNumero(texto)).toBe(leido ?? 0)
-      // parseMonto (gastos y personal) es más estricto —sin signo, hasta dos decimales— pero lo
-      // que acepta lo lee igual (y desde B20 tampoco da Infinity con la tira de 400 nueves).
+      // parseMonto (gastos y personal) es más estricto —sin signo— pero lo que acepta lo lee igual,
+      // al centavo como parsePrecio (decisión del dueño, 17/11: tres decimales tipeados se guardan
+      // al centavo con un aviso amarillo, no son rojo), y desde B20 no da Infinity.
       const monto = parseMonto(texto)
-      if (monto !== null) expect(monto).toBe(leido)
+      if (monto !== null) expect(monto).toBe(redondear(leido as number, 2))
     }
   })
 
@@ -441,7 +442,7 @@ describe('motivoEnteroTipeado y esCeldaIlegible', () => {
     ['', null],
     ['12', null],
     ['1.500', null],
-    ['1,5', 'Las cantidades van sin coma'],
+    ['1,5', 'Van sin coma: para mil escribí 1000 (los puntos de miles los pone el sistema)'],
     ['abc', NUMERO_ILEGIBLE],
   ])('motivoEnteroTipeado(%j) = %j', (texto, motivo) => {
     expect(motivoEnteroTipeado(texto)).toBe(motivo)
@@ -456,6 +457,13 @@ describe('motivoEnteroTipeado y esCeldaIlegible', () => {
     ['1,234,567', true],
     ['abc', true],
     [Infinity, true],
+    // H11 de la segunda lente (import de compras): el signo de pesos adelante se entiende, como en
+    // todo campo; cualquier otro texto pegado al número (un %, «c/u», «ARS») no: la fila se rechaza
+    // con su motivo en vez de adivinar si «10%» es diez o un descuento.
+    ['$ 1.250,50', false],
+    ['10%', true],
+    ['1250 c/u', true],
+    ['1.250 ARS', true],
   ])('esCeldaIlegible(%j) = %s', (celda, ilegible) => {
     expect(esCeldaIlegible(celda as string | number | null)).toBe(ilegible)
   })

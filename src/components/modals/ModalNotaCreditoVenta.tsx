@@ -44,6 +44,7 @@ import { useNotification } from '../../contexts/NotificationContext'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import type { CrearNotaCreditoVentaResult } from '../../hooks/queries/useNotasCreditoVentaQuery'
 import type { PedidoDB } from '../../types'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 
 const ModalImputarCredito = lazyWithReload(() => import('./ModalImputarCredito'))
 
@@ -67,6 +68,8 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
   const { data: notasPedido = [], isLoading } = useNotasCreditoVentaPedidoQuery(pedido.id)
   const crear = useCrearNotaCreditoVentaMutation()
   const { requestId, olvidar } = useRequestIdPersistente()
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
 
   const [cantidades, setCantidades] = useState<CantidadesNC>({})
   const [motivo, setMotivo] = useState<MotivoNCVenta>('producto_vencido')
@@ -85,6 +88,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
   const nada = lineas.every(l => l.disponible <= 0)
 
   const handleConfirmar = async () => {
+    if (ilegibles.hay) return
     const parsed = notaCreditoVentaSchema.safeParse({ motivo, observaciones: observaciones || undefined })
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? 'Datos inválidos')
@@ -188,6 +192,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
   }
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase
       title={TITULO_NC}
       description={`Pedido #${pedido.id} · ${pedido.cliente?.nombre_fantasia ?? ''}`}
@@ -318,7 +323,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
             <Button variant="secondary" onClick={onClose} disabled={crear.isPending}>Cancelar</Button>
             <Button
               onClick={() => { void handleConfirmar() }}
-              disabled={crear.isPending || nada || total <= 0}
+              disabled={crear.isPending || nada || total <= 0 || ilegibles.hay}
               className="gap-1"
             >
               {crear.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
@@ -328,5 +333,6 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
         </div>
       </div>
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   )
 }

@@ -29,6 +29,7 @@ import { adicionalDeCompra, conAdicionalDeCompra, costoEditadoEnFicha } from '..
 import { tipoParaCostoDeProducto } from '../../utils/letraComprobante';
 import { lazyWithReload } from '../../utils/lazyWithReload';
 import { soloLoCambiado } from '../../utils/fichaProductoCambios';
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles';
 
 // Lazy: solo hace falta al editar, y arrastra la query de grupos de precio.
 const ProductoCondicionesMayoristas = lazyWithReload(() => import('../productos/ProductoCondicionesMayoristas'));
@@ -252,6 +253,8 @@ const getCategoryName = (cat: string | CategoriaOption): string => {
 };
 
 const ModalProducto = memo(function ModalProducto({ producto, categorias, subrubros = [], rubrosConFila, rubrosDesactivados, proveedores = [], onSave, onClose, guardando, esAdmin = false, onCrearCondicionMayorista }: ModalProductoProps) {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles();
   // Zod validation hook
   const { errors, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalProductoSchema);
   const errores = errors as ValidationErrors;
@@ -530,6 +533,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
     : '';
 
   const handleSubmit = (): void => {
+    if (ilegibles.hay) return;
     // La etiqueta es accesoria al fardo: sin unidades configuradas no tiene
     // sentido persistirla. Normalizar acá hace de defensa en profundidad por
     // si la UI dejó pasar un valor (ej. autocompletado del browser).
@@ -628,6 +632,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   const claveActualIva = claveCondicionIva(form.condicion_iva, form.porcentaje_iva);
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase title={producto ? 'Editar Producto' : 'Nuevo Producto'} onClose={onClose} maxWidth="max-w-lg">
       <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
         {/* Informacion basica */}
@@ -960,7 +965,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
               <label className="block text-xs font-medium mb-1 text-gray-600">Imp. Internos ($)</label>
               <input
                 type="text"
-                value={(parsePrecio(form.costo_sin_iva) * ((parseFloat(String(form.impuestos_internos)) || 0) / 100)).toFixed(2)}
+                value={numeroConMiles(redondear(parsePrecio(form.costo_sin_iva) * ((parseFloat(String(form.impuestos_internos)) || 0) / 100), 2))}
                 readOnly
                 className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-100"
               />
@@ -971,7 +976,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
               </label>
               <input
                 type="text"
-                value={costosDesdeForm(form).costoReal.toFixed(2)}
+                value={numeroConMiles(redondear(costosDesdeForm(form).costoReal, 2))}
                 readOnly
                 className="w-full px-3 py-2 border-2 border-blue-300 rounded-lg text-sm bg-blue-50 font-semibold"
                 title="Costo unitario final de la última compra: neto + imp. internos (si FC) + flete y cargos prorrateados. La base para fijar precios."
@@ -1222,9 +1227,10 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
             oscuro: el className pisa también dark:text/dark:hover para que
             siga siendo texto oscuro sobre fondo claro, como el <button> original. */}
         <Button variant="ghost" size="md" onClick={onClose} className="text-gray-700 hover:bg-gray-200 dark:text-gray-700 dark:hover:bg-gray-200">Cancelar</Button>
-        <Button variant="primary" size="md" onClick={handleSubmit} disabled={guardando} loading={guardando}>Guardar</Button>
+        <Button variant="primary" size="md" onClick={handleSubmit} disabled={guardando || ilegibles.hay} loading={guardando}>Guardar</Button>
       </div>
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   );
 });
 

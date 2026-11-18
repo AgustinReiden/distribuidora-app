@@ -1,38 +1,56 @@
 /**
  * CampoNumero - Un `<input>` de texto para un número que el padre guarda como texto (D17, #1560).
  *
- * Es lo mismo que `NumberInput` para los formularios que leen el texto al guardar (con
- * `parsePrecio`, `leerPlataTipeada`, `leerEntero` o `parseMonto`) y tienen su propio mensaje de
- * error: el punto y la coma tipeados son decimales (la tecla del punto se ve como coma), el punto
- * de miles lo pone el campo mientras se tipea («150000» se ve «150.000»), lo pegado se lee como se
- * muestra la plata («1.250,50» es 1250,5), y el cursor queda después del mismo dígito.
+ * Es lo mismo que `NumberInput` para los formularios que leen el texto al guardar: el punto y la
+ * coma tipeados son decimales (la tecla del punto se ve como coma), el punto de miles lo pone el
+ * campo mientras se tipea («150000» se ve «150.000»), lo pegado se lee como se muestra la plata
+ * («1.250,50» es 1250,5), y el cursor queda después del mismo dígito.
  *
- * Con `sinMiles` (porcentajes, coordenadas, litros) no hay miles: la tecla del punto es coma y
- * nada más. Lo que no se entiende queda en rojo con el motivo escrito debajo: `motivo` lo pone el
- * padre si tiene una regla propia; si no, se usa el del lector (`esTextoIlegible`). El padre no
- * guarda lo que no se entiende: lee el texto y lo rechaza.
+ * Qué lector decide el rojo (y el formulario tiene que leer con ESE mismo, nunca con otro):
+ * - por defecto, plata: `leerNumero`, sin negativos salvo `negativo` (`motivoPlataTipeada`). Con
+ *   más de `decimales` decimales (2) TIPEADOS no hay rojo: se guarda al centavo y un aviso amarillo
+ *   arriba del campo dice qué se guarda (decisión del dueño, 17/11: «Que guarde 1,50 pero salga un
+ *   aviso en amarillo no grande sobre el campo»);
+ * - `entero`: `leerEntero` (`motivoEnteroTipeado`);
+ * - `sinMiles` (porcentajes, coordenadas, litros): `leerDecimalSinMiles` (`motivoSinMilesTipeado`).
+ *   No hay miles; la tecla del punto es la coma, y sólo entran dígitos, un separador y el menos.
+ * `motivo` lo pone el padre si tiene una regla propia, y reemplaza al del lector.
+ *
+ * Lo que no se entiende queda en rojo con el motivo escrito debajo, y se anota en el registro del
+ * formulario (`useRegistroIlegibles`): el formulario no guarda mientras haya uno.
  *
  * La precarga va con `numeroConMiles` (o `numeroEditable` con `sinMiles`).
  */
-import { useId, type ChangeEvent, type InputHTMLAttributes, type ReactElement } from 'react'
+import { useId, useLayoutEffect, useRef, useState, type ChangeEvent, type InputHTMLAttributes, type ReactElement } from 'react'
+import { CLASES_AVISO_DECIMALES, avisoPlataDecimalesDeMas, avisoSinMilesDecimalesDeMas } from '../../utils/avisoDecimales'
 import { useTecleoNumero } from '../../hooks/useTecleoNumero'
-import { NUMERO_ILEGIBLE, esTextoIlegible, motivoEnteroTipeado, teclearNumero } from '../../utils/normalizarNumero'
+import { useAnotarIlegible } from '../../hooks/useRegistroIlegibles'
+import {
+  motivoEnteroTipeado,
+  motivoPlataTipeada,
+  motivoSinMilesTipeado,
+  teclearNumero,
+} from '../../utils/normalizarNumero'
 
 type PropsHeredadas = Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type' | 'inputMode'>
 
 export interface CampoNumeroProps extends PropsHeredadas {
   value: string
   onChange: (texto: string) => void
-  /** Sin miles: porcentajes, coordenadas, litros. */
+  /** Sin miles: porcentajes, coordenadas, litros. Lo lee `leerDecimalSinMiles`. */
   sinMiles?: boolean
-  /** Cantidades: teclado sin coma (`inputMode="numeric"`). */
+  /** Cantidades: teclado sin coma (`inputMode="numeric"`). Lo lee `leerEntero`. */
   entero?: boolean
-  /** Acepta un menos tipeado al principio. */
+  /** Acepta un menos tipeado al principio (y uno pegado no queda en rojo). */
   negativo?: boolean
   /**
-   * El motivo por el que lo escrito no sirve, si el padre tiene una regla propia (un rango, un
-   * entero). `undefined` usa la del lector: «no se entiende» si `leerNumero` no lo lee, y con
-   * `entero`, además, «las cantidades van sin coma».
+   * Cuántos decimales guarda: por defecto 2 en la plata; con `sinMiles`, sin tope salvo que se
+   * diga. Lo tipeado con más sale con el aviso amarillo de lo que se guarda.
+   */
+  decimales?: number
+  /**
+   * El motivo por el que lo escrito no sirve, si el padre tiene una regla propia (un rango).
+   * `undefined` usa la del lector del campo.
    */
   motivo?: string | null
 }
@@ -40,34 +58,91 @@ export interface CampoNumeroProps extends PropsHeredadas {
 /** El rojo le gana a las clases del campo: el borde oscuro, el anillo del foco y los de color. */
 export const CLASES_CAMPO_ILEGIBLE = '!border-red-500 dark:!border-red-500 !ring-1 !ring-red-500 focus:!ring-2 focus:!ring-red-500'
 
+/** Sin miles: dígitos, un solo separador (el decimal, como coma) y el menos al principio. */
+function filtrarSinMiles(texto: string, negativo: boolean): string {
+  const signo = negativo && texto.trimStart().startsWith('-') ? '-' : ''
+  let s = texto.replace(/[^\d.,]/g, '')
+  const sep = s.search(/[.,]/)
+  if (sep !== -1) s = `${s.slice(0, sep)},${s.slice(sep + 1).replace(/[.,]/g, '')}`
+  return signo + s
+}
+
 export function CampoNumero({
   value,
   onChange,
   sinMiles = false,
   entero = false,
   negativo = false,
+  decimales,
   motivo,
   className,
   ...resto
 }: CampoNumeroProps): ReactElement {
   const tecleo = useTecleoNumero({ negativo })
   const idMensaje = useId()
+  const input = useRef<HTMLInputElement | null>(null)
+  const cursor = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    if (cursor.current !== null && input.current && document.activeElement === input.current) {
+      input.current.setSelectionRange(cursor.current, cursor.current)
+    }
+    cursor.current = null
+  })
+
   const error = motivo !== undefined
     ? motivo
-    : entero ? motivoEnteroTipeado(value) : esTextoIlegible(value) ? NUMERO_ILEGIBLE : null
+    : entero
+      ? motivoEnteroTipeado(value, { negativo })
+      : sinMiles
+        ? motivoSinMilesTipeado(value, { negativo })
+        : motivoPlataTipeada(value, { negativo })
+  useAnotarIlegible(error)
+
+  // El aviso de los decimales de más sale con lo TIPEADO (no con lo precargado ni lo pegado), y
+  // queda a la vista hasta que el valor cambie: `tecleo` es el último texto que entró por el teclado.
+  const [tecleado, setTecleado] = useState<string | null>(null)
+  const avisoDecimales = error || entero || tecleado !== value
+    ? null
+    : sinMiles
+      ? decimales !== undefined ? avisoSinMilesDecimalesDeMas(value, decimales) : null
+      : avisoPlataDecimalesDeMas(value, decimales ?? 2)
+  const anotar = (crudo: string, nuevo: string): void => {
+    setTecleado(crudo.length - value.length > 1 ? null : nuevo)
+    onChange(nuevo)
+  }
 
   const alCambiar = (e: ChangeEvent<HTMLInputElement>): void => {
-    if (sinMiles) onChange(teclearNumero(value, e.target.value, e.target.selectionStart ?? undefined))
-    else onChange(tecleo(value, e))
+    if (!sinMiles) {
+      anotar(e.target.value, tecleo(value, e))
+      return
+    }
+    // Sin miles: la tecla del punto es la coma, y el cursor se repone después del mismo carácter.
+    const crudo = e.target.value
+    const posicion = e.target.selectionStart ?? crudo.length
+    const tecleado = teclearNumero(value, crudo, posicion)
+    // Lo pegado (más de un carácter) entra tal cual, para que el lector lo marque si no lo entiende:
+    // filtrarlo haría de «1.234,5» un 1,2345 callado.
+    if (crudo.length - value.length > 1) {
+      anotar(crudo, tecleado)
+      return
+    }
+    const filtrado = filtrarSinMiles(tecleado, negativo)
+    const antes = filtrarSinMiles(tecleado.slice(0, posicion), negativo).length
+    cursor.current = Math.min(antes, filtrado.length)
+    anotar(crudo, filtrado)
   }
 
   const describedBy = [resto['aria-describedby'], error ? idMensaje : null].filter(Boolean).join(' ') || undefined
 
   return (
     <>
+      {avisoDecimales && (
+        <span role="status" className={CLASES_AVISO_DECIMALES}>{avisoDecimales}</span>
+      )}
       <input
         autoComplete="off"
         {...resto}
+        ref={input}
         type="text"
         inputMode={entero ? 'numeric' : 'decimal'}
         value={value}

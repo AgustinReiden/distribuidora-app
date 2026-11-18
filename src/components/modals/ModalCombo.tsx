@@ -22,7 +22,7 @@ import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { fechaLocalISO, formatPrecio } from '../../utils/formatters'
 import { leerPlataTipeada } from '../../utils/calculations'
-import { leerNumero, numeroConMiles } from '../../utils/normalizarNumero'
+import { leerEntero, numeroConMiles } from '../../utils/normalizarNumero'
 import { CampoNumero } from '../ui/CampoNumero'
 import type { ProductoDB } from '../../types'
 import type { ComboAdmin, ComboFormInput } from '../../hooks/queries/useCombosQuery'
@@ -136,12 +136,13 @@ interface LugarForm {
 }
 
 /**
- * Número de un campo de texto, "" => NaN. Para las cantidades y el tope; el precio va por
- * `leerPlataTipeada`. Lo lee `leerNumero` (B20, D17): los puntos son los miles que pone el campo
- * («1.500» son 1500) y la coma es decimal, que el schema rechaza porque van enteros.
+ * Un entero de un campo de texto, "" o lo que no es un entero => NaN. Para las cantidades y el tope;
+ * el precio va por `leerPlataTipeada`. Lo lee `leerEntero`, el mismo lector que pone el campo en rojo
+ * (H2 de la segunda lente): con `leerNumero`, «1,000» (la tecla del punto) era 1 y el schema lo
+ * dejaba pasar.
  */
 function aNumero(raw: string): number {
-  return leerNumero(raw) ?? NaN
+  return leerEntero(raw) ?? NaN
 }
 
 /** Los lugares de un combo, comparables: para saber si el admin los cambió. */

@@ -10,7 +10,7 @@ import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
 import { Loader2, Settings, AlertTriangle, Percent, CalendarClock, CalendarRange, PackageX, History, Boxes } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { formatCurrency } from '../../utils/formatters';
-import { leerPlataTipeada, parsePrecio } from '../../utils/calculations';
+import { leerPlataTipeada, numeroEditable, parsePrecio } from '../../utils/calculations';
 import { leerDecimalSinMiles, leerEntero, numeroConMiles } from '../../utils/normalizarNumero';
 import { CampoNumero } from '../ui/CampoNumero';
 import { DIAS_ATRAS_FECHA_PEDIDO_MAXIMO, DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO } from '../../utils/fechaPedido';
@@ -120,7 +120,7 @@ function FormAlertasVencimiento({
   // El valor del servidor llega despues del primer render y cambia al cambiar
   // de sucursal.
   useEffect(() => { setAmarillo(numeroConMiles(diasAlerta)); }, [diasAlerta]);
-  useEffect(() => { setRojo(String(diasCritico)); }, [diasCritico]);
+  useEffect(() => { setRojo(numeroConMiles(diasCritico)); }, [diasCritico]);
 
   // Enteros, con los miles que pone el campo (B20, D17): «3.650» son 3650 días; una coma, no.
   const nAmarillo = leerEntero(amarillo) ?? NaN;
@@ -640,11 +640,11 @@ function FormAlertasCombos({
   guardando: boolean;
   onGuardar: (margenMinimoPct: number, descuentoMaximoPct: number) => void;
 }) {
-  const [margen, setMargen] = useState(String(margenMinimo));
-  const [descuento, setDescuento] = useState(String(descuentoMaximo));
+  const [margen, setMargen] = useState(numeroEditable(margenMinimo));
+  const [descuento, setDescuento] = useState(numeroEditable(descuentoMaximo));
 
-  useEffect(() => { setMargen(String(margenMinimo)); }, [margenMinimo]);
-  useEffect(() => { setDescuento(String(descuentoMaximo)); }, [descuentoMaximo]);
+  useEffect(() => { setMargen(numeroEditable(margenMinimo)); }, [margenMinimo]);
+  useEffect(() => { setDescuento(numeroEditable(descuentoMaximo)); }, [descuentoMaximo]);
 
   // Porcentajes: sin miles (B20, D17); la tecla del punto es la coma.
   const nM = leerDecimalSinMiles(margen) ?? NaN;
@@ -768,14 +768,14 @@ function FormComisiones({
   guardando: boolean;
   onGuardar: (pctPreventista: number, pctOtros: number) => void;
 }) {
-  const [prev, setPrev] = useState(String(pctPreventista));
-  const [otros, setOtros] = useState(String(pctOtros));
+  const [prev, setPrev] = useState(numeroEditable(pctPreventista));
+  const [otros, setOtros] = useState(numeroEditable(pctOtros));
   const [error, setError] = useState<string | null>(null);
 
   // El valor del servidor llega después del primer render y cambia al cambiar
   // de sucursal.
-  useEffect(() => { setPrev(String(pctPreventista)); }, [pctPreventista]);
-  useEffect(() => { setOtros(String(pctOtros)); }, [pctOtros]);
+  useEffect(() => { setPrev(numeroEditable(pctPreventista)); }, [pctPreventista]);
+  useEffect(() => { setOtros(numeroEditable(pctOtros)); }, [pctOtros]);
 
   // Porcentajes: sin miles (B20, D17); la tecla del punto es la coma.
   const nPrev = leerDecimalSinMiles(prev) ?? NaN;
@@ -836,6 +836,7 @@ function FormComisiones({
             <CampoNumero
               id="pct-preventista"
               sinMiles
+              decimales={2}
               motivo={null}
               value={prev}
               onChange={(t) => { setPrev(t); setError(null); }}
@@ -855,6 +856,7 @@ function FormComisiones({
             <CampoNumero
               id="pct-otros"
               sinMiles
+              decimales={2}
               motivo={null}
               value={otros}
               onChange={(t) => { setOtros(t); setError(null); }}

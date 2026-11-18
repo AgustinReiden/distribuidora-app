@@ -42,7 +42,11 @@ import {
   ReactElement,
 } from 'react'
 import { numeroEditable, redondear } from '../../utils/calculations'
+import { useAnotarIlegible } from '../../hooks/useRegistroIlegibles'
+import { CLASES_AVISO_DECIMALES, avisoPlataDecimalesDeMas } from '../../utils/avisoDecimales'
 import {
+  MENSAJE_ENTERO_CON_COMA,
+  MENSAJE_NEGATIVO,
   NUMERO_ILEGIBLE,
   formatearTecleo,
   leerDecimalSinMiles,
@@ -86,6 +90,12 @@ export interface NumberInputProps extends InheritedInputProps {
   /** Selecciona el contenido al enfocar (tipear reemplaza). Default true. */
   selectOnFocus?: boolean;
   /**
+   * Cuántos decimales guarda (por defecto 2: la plata, al centavo). Más decimales tipeados se guardan
+   * redondeados, con un aviso amarillo arriba del campo que dice qué se guarda (decisión del dueño,
+   * 17/11). No aplica a `integer` ni a `sinMiles`.
+   */
+  decimales?: number;
+  /**
    * Se llama con `false` cuando lo escrito no se entiende (el campo está en rojo y el padre tiene
    * el valor de antes) y con `true` cuando vuelve a entenderse. Para deshabilitar Guardar.
    */
@@ -106,6 +116,7 @@ export function NumberInput({
   onVaciar,
   commitOnChange = false,
   selectOnFocus = true,
+  decimales = 2,
   onValidez,
   onFocus,
   onBlur,
@@ -117,6 +128,10 @@ export function NumberInput({
   const [draft, setDraft] = useState<string | null>(null)
   // Lo que se avisa después de volver al valor del padre por algo que no se entendía.
   const [aviso, setAviso] = useState<string | null>(null)
+  // El aviso amarillo de los decimales de más (sólo lo TIPEADO: no lo precargado ni lo pegado), que
+  // queda a la vista al salir del campo hasta que el valor cambie.
+  const [avisoGuardado, setAvisoGuardado] = useState<string | null>(null)
+  const [pegado, setPegado] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const idMensaje = useId()
   // Al poner o quitar un punto de miles, React deja el cursor al final: se repone.
@@ -145,15 +160,16 @@ export function NumberInput({
     const n = integer ? leerEntero(t) : sinMiles ? leerDecimalSinMiles(t) : leerNumero(t)
     // Este campo no lleva negativos: un «-50» pegado no le llega al padre (H4).
     if (n === null || n < 0) return null
-    return integer ? n : redondear(n, 2)
+    return integer ? n : redondear(n, decimales)
   }
 
-  /** Por qué lo escrito no se entiende, o null si se entiende (o está vacío). */
+  /** Por qué lo escrito no sirve, o null si sirve (o está vacío). Lo decide el mismo lector que `toNumber`. */
   const motivo = (raw: string | null): string | null => {
-    if (raw === null || raw.trim() === '' || toNumber(raw) !== null) return null
+    if (raw === null || raw.trim() === '') return null
+    if (toNumber(raw) !== null) return null
     const leido = integer ? leerNumero(raw) : sinMiles ? leerDecimalSinMiles(raw) : leerNumero(raw)
-    if (leido !== null && leido < 0) return 'Este campo no lleva números negativos'
-    if (integer && leido !== null) return 'Las cantidades van sin coma'
+    if (leido !== null && leido < 0) return MENSAJE_NEGATIVO
+    if (integer && leido !== null) return MENSAJE_ENTERO_CON_COMA
     return NUMERO_ILEGIBLE
   }
 
@@ -174,6 +190,14 @@ export function NumberInput({
 
   const valorDelPadre = sinMiles ? numeroEditable(value) : numeroConMiles(value)
 
+  // El valor que tenía el padre antes de empezar a tipear (H4 de la segunda lente). Con
+  // `commitOnChange`, mientras lo tipeado no se entiende, el padre vuelve a tener ESTE valor: nunca
+  // el último pedazo legible («1.200» tipeado pasaba por «1», y Guardar guardaba 1).
+  const antesDeTipear = useRef<number | null>(value)
+  const restaurar = (): void => {
+    if (antesDeTipear.current !== null && enviado.current !== antesDeTipear.current) enviar(antesDeTipear.current)
+  }
+
   const handleChange = (e: ChangeEvent<HTMLInputElement>): void => {
     const crudo = e.target.value
     let next: string
@@ -187,27 +211,38 @@ export function NumberInput({
       cursor.current = r.cursor
       next = r.texto
     }
+    if (draft === null) antesDeTipear.current = value
+    // Más de un carácter de una vez es un pegado: con formato de plata no tiene nada que avisar.
+    setPegado(crudo.length - display.length > 1)
     setDraft(next)
     setAviso(null)
+    setAvisoGuardado(null)
     if (commitOnChange) {
       // En vivo mandamos el número crudo (como hacía el parseInt anterior);
       // el clamp/normalización quedan para el blur. El vacío NO empuja 0:
-      // se mantiene el último valor y el campo se ve vacío.
-      const n = toNumber(next)
+      // se mantiene el último valor y el campo se ve vacío. Lo que no sirve no se manda: el padre
+      // vuelve al valor de antes de tipear.
+      const n = motivo(next) === null ? toNumber(next) : null
       if (n !== null) enviar(n)
+      else if (next.trim() !== '') restaurar()
     }
   }
 
   const commit = (): void => {
     if (draft === null) return
-    // Lo que no se entiende no se confirma: el campo vuelve al valor del padre (que es lo que se va
-    // a guardar) y lo dice a la vista.
+    // Lo que no sirve no se confirma. Con un registro alrededor (el formulario no guarda mientras haya
+    // un campo en rojo), queda en rojo para corregirlo. Sin registro, el campo vuelve al valor de antes
+    // de tipear (que es lo que se va a guardar) y lo dice a la vista.
     if (motivo(draft) !== null) {
+      if (commitOnChange) restaurar()
+      if (conRegistro) return
+      const anterior = sinMiles ? numeroEditable(antesDeTipear.current) : numeroConMiles(antesDeTipear.current)
       setDraft(null)
-      setAviso(`No se entendió «${draft}»: el campo volvió a ${valorDelPadre === '' ? 'quedar vacío' : `«${valorDelPadre}»`}`)
+      setAviso(`No se entendió «${draft}»: el campo volvió a ${anterior === '' ? 'quedar vacío' : `«${anterior}»`}`)
       return
     }
     const parsed = toNumber(draft)
+    setAvisoGuardado(avisoDeDecimales(draft))
     setDraft(null)
     if (parsed === null && onVaciar) {
       onVaciar()
@@ -223,6 +258,7 @@ export function NumberInput({
     enviado.current = value
     setDraft(d => (d !== null && toNumber(d) === value ? d : null))
     setAviso(null)
+    setAvisoGuardado(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sólo cuando cambia el valor del padre
   }, [value])
 
@@ -247,8 +283,16 @@ export function NumberInput({
   // El valor del padre se muestra con coma decimal y, salvo `sinMiles`, con los miles («1.500,5»).
   // Con coma, «1,5» con dos ceros más sigue siendo uno y medio (#1560).
   const display = draft !== null ? draft : valorDelPadre
+  /** El aviso de los decimales de más de lo tipeado, si corresponde. */
+  function avisoDeDecimales(raw: string): string | null {
+    if (integer || sinMiles || pegado || motivo(raw) !== null) return null
+    return avisoPlataDecimalesDeMas(raw, decimales)
+  }
+  const avisoDecimales = draft !== null ? avisoDeDecimales(draft) : avisoGuardado
   const error = motivo(draft)
   const invalido = error !== null
+  // En el registro del formulario: no se guarda mientras esté en rojo.
+  const conRegistro = useAnotarIlegible(error)
   const mensaje = error ?? aviso
 
   const avisado = useRef(true)
@@ -262,6 +306,9 @@ export function NumberInput({
 
   return (
     <>
+      {avisoDecimales && !invalido && (
+        <span role="status" className={CLASES_AVISO_DECIMALES}>{avisoDecimales}</span>
+      )}
       <input
         {...rest}
         ref={inputRef}

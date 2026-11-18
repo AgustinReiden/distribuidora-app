@@ -129,6 +129,34 @@ describe('ModalEditarPedido — precio puesto por el admin', () => {
     expect(screen.getByText('$1234.50 c/u')).toBeInTheDocument()
   })
 
+  // H5 de la segunda lente: con el precio abierto y en rojo, el Guardar del pie NO guarda el pedido.
+  it.each(['1..5', '0'])('con el precio abierto en rojo («%s»), Guardar no guarda el pedido', async tipeado => {
+    const user = userEvent.setup()
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const onSaveItems = vi.fn().mockResolvedValue(undefined)
+    render(
+      <ModalEditarPedido
+        productos={productos}
+        pedido={pedido}
+        isAdmin
+        onSave={onSave}
+        onSaveItems={onSaveItems}
+        onClose={vi.fn()}
+        guardando={false}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText('PLACER MANZANA 500 cc')).toBeInTheDocument())
+    await user.click(screen.getByText('$7400.00 c/u'))
+    const input = screen.getByLabelText('Editar precio unitario')
+    await user.clear(input)
+    await user.type(input, tipeado)
+    const boton = screen.getByRole('button', { name: /^Guardar( Todo)?$/ })
+    expect(boton).toBeDisabled()
+    await user.click(boton)
+    expect(onSave).not.toHaveBeenCalled()
+    expect(onSaveItems).not.toHaveBeenCalled()
+  })
+
   // B20 (D17): los miles los pone el campo; lo que no se entiende queda abierto y en rojo.
   it('el precio tipeado «15000» se ve «15.000», y uno que no se entiende no se confirma', async () => {
     const user = userEvent.setup()

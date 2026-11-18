@@ -11,6 +11,7 @@ import { costoCanonicoUnitario } from '../../utils/costoCanonico'
 import { armarCargos } from '../../utils/personal'
 import type { Producto } from '../../types'
 import type { CargoRotura, LineaCargo } from '../../types/personal'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
 // para el incidente de chunk desincronizado que motivó la regla.
@@ -101,11 +102,14 @@ export default function ModalMermaStock({
   const [guardando, setGuardando] = useState<boolean>(false)
   const [error, setError] = useState<string>('')
   const [lineasCargo, setLineasCargo] = useState<LineaCargo[]>([])
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
 
   if (!producto) return null
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault()
+    if (ilegibles.hay) return
     setError('')
 
     // Validar con Zod
@@ -165,6 +169,7 @@ export default function ModalMermaStock({
   // pegado a la X de ModalBase, y un "−" al lado de una "×" se lee como el par
   // minimizar/cerrar de una ventana. El "−" sigue en el botón "Registrar Baja".
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase
       title="Baja de Stock"
       description="Registrar merma o perdida"
@@ -274,7 +279,7 @@ export default function ModalMermaStock({
             type="submit"
             variant="danger"
             size="md"
-            disabled={guardando || !motivo || cantidadNum <= 0}
+            disabled={guardando || !motivo || cantidadNum <= 0 || ilegibles.hay}
             className="flex-1"
           >
             {guardando ? (
@@ -292,5 +297,6 @@ export default function ModalMermaStock({
         </div>
       </form>
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   )
 }

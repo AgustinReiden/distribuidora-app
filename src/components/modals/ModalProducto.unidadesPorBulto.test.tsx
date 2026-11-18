@@ -97,10 +97,13 @@ describe('ModalProducto — unidades sueltas por unidad de stock (#950)', () => 
     await userEvent.type(campo(), '1.5')
     expect(campo().value).toBe('1,5')
     expect(campo()).toHaveAttribute('aria-invalid', 'true')
-    expect(screen.getByRole('alert')).toHaveTextContent('Las cantidades van sin coma')
+    expect(screen.getByRole('alert')).toHaveTextContent('Van sin coma: para mil escribí 1000 (los puntos de miles los pone el sistema)')
+    // B20 (segunda lente, «lo que está en rojo no se guarda»): la ficha no se guarda con el valor
+    // de antes; el campo sigue en rojo hasta que se corrige.
     await guardar()
-    expect(campo().value).toBe('12')
-    expect(onSave.mock.calls[0][0].unidades_por_bulto).toBeUndefined()
+    expect(campo().value).toBe('1,5')
+    expect(campo()).toHaveAttribute('aria-invalid', 'true')
+    expect(onSave).not.toHaveBeenCalled()
   })
 
   it('con miles: «1200» se ve «1.200» y se manda 1200', async () => {

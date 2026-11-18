@@ -15,6 +15,7 @@ import { useRequestIdPersistente } from '../../hooks/useRequestIdPersistente'
 import { cobroPudoHaberEntrado } from '../../utils/requestIdPersistente'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
 import type { ClienteDB, Pedido, Pago, FormaPago, RegistrarPagoFifoInput, RegistrarPagoCombinadoFifoInput, RegistrarPagoFifoResult, PagoFifoAplicacion } from '../../types'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
 // para el incidente de chunk desincronizado que motivó la regla.
@@ -277,6 +278,8 @@ export default function ModalRegistrarPago({
   permitirAdelantoSueldo = false,
   clienteEsEmpleado
 }: ModalRegistrarPagoProps): React.ReactElement | null {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   // Zod validation hook
   const { validate, getFirstError } = useZodValidation(modalPagoSchema)
 
@@ -409,6 +412,7 @@ export default function ModalRegistrarPago({
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault()
+    if (ilegibles.hay) return
     if (enVueloRef.current) return
     setError('')
 
@@ -747,6 +751,7 @@ export default function ModalRegistrarPago({
       </div>
 
       {/* Form */}
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
       <form onSubmit={handleSubmit} className="flex-1 flex flex-col min-h-0">
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
         {error && (
@@ -1086,7 +1091,7 @@ export default function ModalRegistrarPago({
               type="submit"
               variant="success"
               size="touch"
-              disabled={loading || adelantoBloqueado || pasaDeLaBoleta || faltaConfirmarMonto || (pagoDividido ? totalDividido <= 0 : !monto)}
+              disabled={loading || adelantoBloqueado || pasaDeLaBoleta || faltaConfirmarMonto || (pagoDividido ? totalDividido <= 0 : !monto) || ilegibles.hay}
               className="flex-1"
             >
               {loading ? (
@@ -1101,6 +1106,7 @@ export default function ModalRegistrarPago({
           </div>
         </div>
       </form>
+    </RegistroIlegiblesContext.Provider>
     </DialogoPago>
   )
 }

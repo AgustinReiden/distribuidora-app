@@ -26,6 +26,7 @@ import { useState } from 'react'
 import { CalendarClock, Plus, X } from 'lucide-react'
 import type { VencimientoLinea } from '../modals/ModalCompra.reducer'
 import { NumberInput } from '../ui/NumberInput'
+import { useAnotarIlegible } from '../../hooks/useRegistroIlegibles'
 import {
   formatearFechaVencimiento,
   lineaExcedeVencimientos,
@@ -38,6 +39,8 @@ export interface VencimientosLineaCompraProps {
   vencimientos: VencimientoLinea[]
   onChange: (vencimientos: VencimientoLinea[]) => void
 }
+
+const MENSAJE_VENCIMIENTO_SIN_UNIDADES = 'Cada vencimiento lleva 1 unidad o más: poné cuántas o quitalo'
 
 export default function VencimientosLineaCompra({
   cantidadLinea,
@@ -52,6 +55,10 @@ export default function VencimientosLineaCompra({
   const asignado = unidadesEtiquetadas(vencimientos)
   const libre = Math.max(0, (Number(cantidadLinea) || 0) - asignado)
   const excede = lineaExcedeVencimientos(cantidadLinea, vencimientos)
+  // El `min=1` que tenía el `type="number"` (H11 de la segunda lente): un vencimiento con 0
+  // unidades se descartaba sin aviso al guardar. Ahora se dice y frena el guardado de la compra.
+  const sinUnidades = vencimientos.some(v => !(v.cantidad >= 1))
+  useAnotarIlegible(sinUnidades ? MENSAJE_VENCIMIENTO_SIN_UNIDADES : null)
 
   function actualizar(i: number, cambios: Partial<VencimientoLinea>) {
     onChange(vencimientos.map((v, j) => (j === i ? { ...v, ...cambios } : v)))
@@ -102,6 +109,9 @@ export default function VencimientosLineaCompra({
           <span className="text-xs text-red-700 dark:text-red-300">
             Etiquetaste {asignado} u. y la línea tiene {cantidadLinea}
           </span>
+        )}
+        {sinUnidades && (
+          <span role="alert" className="text-xs text-red-700 dark:text-red-300">{MENSAJE_VENCIMIENTO_SIN_UNIDADES}</span>
         )}
       </div>
 

@@ -1,0 +1,19 @@
+[
+  { "archivo": "src/components/containers/PedidosContainer.tsx", "patron": "parseInt(", "cantidad": 2, "motivo": "Ids de pedido y de línea que vienen del estado (String(id)), no un campo tipeado." },
+  { "archivo": "src/components/containers/RecorridosContainer.tsx", "patron": "parseInt(", "cantidad": 1, "motivo": "El id del recorrido, que viene del estado, no un campo tipeado." },
+  { "archivo": "src/components/modals/ModalCambioProducto.tsx", "patron": "parseInt(", "cantidad": 2, "motivo": "Las cantidades vienen de un NumberInput entero (un número); la rama de texto es de antes y no la alimenta ningún campo." },
+  { "archivo": "src/components/modals/ModalCompra.tsx", "patron": "parseFloat(", "cantidad": 1, "motivo": "La alícuota sale de un <select> con valores fijos ('21', '10.5'), no se tipea." },
+  { "archivo": "src/components/modals/ModalConfigDigest.tsx", "patron": "Number(e.target.value", "cantidad": 2, "motivo": "Las horas son un <select>: no se tipean." },
+  { "archivo": "src/components/modals/ModalGasto.tsx", "patron": "Number(e.target.value", "cantidad": 2, "motivo": "La alícuota y la sucursal son <select>: no se tipean." },
+  { "archivo": "src/components/modals/ModalMermaStock.tsx", "patron": "parseInt(", "cantidad": 2, "motivo": "La cantidad viene de un NumberInput entero (un número); la rama de texto es de antes y no la alimenta ningún campo." },
+  { "archivo": "src/components/modals/ModalNotaCredito.tsx", "patron": "parseInt(", "cantidad": 1, "motivo": "handleCantidadChange recibe String(n) de un NumberInput entero, no el texto tipeado." },
+  { "archivo": "src/components/modals/ModalProducto.tsx", "patron": "parseFloat(", "cantidad": 5, "motivo": "La tasa de II y el IVA vienen de un <select> o del encuadre, y los márgenes de un NumberInput (String(n)): ninguno es texto tipeado." },
+  { "archivo": "src/components/modals/ModalSalvedadItem.tsx", "patron": "parseInt(", "cantidad": 4, "motivo": "La cantidad viene de un NumberInput entero o de los botones +/- (un número); la rama de texto es de antes." },
+  { "archivo": "src/components/vistas/reportes/ReporteBonificaciones.tsx", "patron": "Number(e.target.value", "cantidad": 1, "motivo": "El <select> de la sucursal: no se tipea." },
+  { "archivo": "src/components/vistas/reportes/ReporteMermas.tsx", "patron": "Number(e.target.value", "cantidad": 1, "motivo": "El <select> de la sucursal: no se tipea." },
+  { "archivo": "src/components/vistas/reportes/ReporteRechazos.tsx", "patron": "Number(e.target.value", "cantidad": 1, "motivo": "El <select> de la sucursal: no se tipea." },
+  { "archivo": "src/components/vistas/reportes/ReporteStockRed.tsx", "patron": "Number(e.target.value", "cantidad": 1, "motivo": "El <select> de la sucursal: no se tipea." },
+  { "archivo": "src/components/vistas/reportes/ReporteValuacionInventario.tsx", "patron": "Number(e.target.value", "cantidad": 1, "motivo": "El <select> de la sucursal: no se tipea." },
+  { "archivo": "src/components/vistas/reportes-gerenciales/CombosSeccion.tsx", "patron": "Number(e.target.value", "cantidad": 1, "motivo": "El <select> del combo: no se tipea." },
+  { "archivo": "src/components/vistas/VistaReportesGerenciales.tsx", "patron": "Number(e.target.value", "cantidad": 1, "motivo": "El <select> de la sucursal: no se tipea." }
+]

@@ -40,7 +40,9 @@ describe('InputMonto', () => {
     expect(parseMonto(visto)).toBe(leido)
   })
 
-  it('el punto tipeado es la coma decimal: «1.500» se ve «1,500», en rojo (tres decimales)', async () => {
+  // Decisión del dueño (17/11): tres decimales tipeados no son rojo; se guardan al centavo con el
+  // aviso amarillo (lo cubre `numeros.segundaLente.test.tsx`).
+  it('el punto tipeado es la coma decimal: «1.500» se ve «1,500» y vale 1,5, sin rojo', async () => {
     const user = userEvent.setup()
     render(<Campo />)
     const input = screen.getByLabelText('monto')
@@ -48,8 +50,8 @@ describe('InputMonto', () => {
     await user.type(input, '1.500')
 
     expect(input).toHaveValue('1,500')
-    expect(input).toHaveAttribute('aria-invalid', 'true')
-    expect(parseMonto('1,500')).toBeNull()
+    expect(input).not.toHaveAttribute('aria-invalid', 'true')
+    expect(parseMonto('1,500')).toBe(1.5)
   })
 
   it('pegar «1.250,50» se lee 1250,5', async () => {

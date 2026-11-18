@@ -84,25 +84,64 @@ export function esTextoIlegible(texto: string): boolean {
   return texto.trim() !== '' && leerNumero(texto) === null
 }
 
+/** Cuántos decimales trae un texto que `leerNumero` entiende (0 si no trae, o si no se entiende). */
+export function decimalesTipeados(texto: string): number {
+  const js = cuerpoAJs(sinSignoNiMoneda(texto).cuerpo)
+  if (js === null || !js.includes('.')) return 0
+  return js.length - js.indexOf('.') - 1
+}
+
+export const MENSAJE_NEGATIVO = 'Este campo no lleva números negativos'
+
+/**
+ * Por qué un monto tipeado no sirve, o null si sirve (o está vacío): no se entiende, o es negativo
+ * en un campo que no los lleva. Más de dos decimales NO lo pone en rojo (decisión del dueño, 17/11:
+ * «Que guarde 1,50 pero salga un aviso en amarillo»): eso lo dice `avisoPlataDecimalesDeMas`.
+ */
+export function motivoPlataTipeada(texto: string, { negativo = false }: { negativo?: boolean } = {}): string | null {
+  if (texto.trim() === '') return null
+  const n = leerNumero(texto)
+  if (n === null) return NUMERO_ILEGIBLE
+  if (!negativo && n < 0) return MENSAJE_NEGATIVO
+  return null
+}
+
 /**
  * Por qué un precio tipeado no sirve, o null si sirve (o está vacío): no se entiende, o no llega a
  * un centavo (cero o negativo). El texto va a la vista bajo el campo.
  */
 export function motivoPrecioTipeado(texto: string): string | null {
   if (texto.trim() === '') return null
-  const n = leerNumero(texto)
+  const motivo = motivoPlataTipeada(texto, { negativo: true })
+  if (motivo) return motivo
+  return (leerNumero(texto) ?? 0) < 0.005 ? 'El precio tiene que ser mayor que 0' : null
+}
+
+/**
+ * Por qué un número sin miles (porcentaje, coordenada, litros) no sirve, o null: lo decide el mismo
+ * lector que usa el formulario, `leerDecimalSinMiles` (H7 de la segunda lente).
+ */
+export function motivoSinMilesTipeado(texto: string, { negativo = false }: { negativo?: boolean } = {}): string | null {
+  if (texto.trim() === '') return null
+  const n = leerDecimalSinMiles(texto)
   if (n === null) return NUMERO_ILEGIBLE
-  return n < 0.005 ? 'El precio tiene que ser mayor que 0' : null
+  if (!negativo && n < 0) return MENSAJE_NEGATIVO
+  return null
 }
 
 /**
  * Por qué una cantidad tipeada no sirve, o null si sirve (o está vacía): con coma no es una
  * cantidad («1,5»), y lo que no se entiende, no se entiende. El texto va a la vista bajo el campo.
  */
-export function motivoEnteroTipeado(texto: string): string | null {
-  if (texto.trim() === '' || leerEntero(texto) !== null) return null
-  return leerNumero(texto) !== null ? 'Las cantidades van sin coma' : NUMERO_ILEGIBLE
+export function motivoEnteroTipeado(texto: string, { negativo = false }: { negativo?: boolean } = {}): string | null {
+  if (texto.trim() === '') return null
+  const n = leerEntero(texto)
+  if (n !== null) return !negativo && n < 0 ? MENSAJE_NEGATIVO : null
+  return leerNumero(texto) !== null ? MENSAJE_ENTERO_CON_COMA : NUMERO_ILEGIBLE
 }
+
+/** Lo que se dice de un entero con coma: la tecla del punto es la coma, y los miles los pone el campo. */
+export const MENSAJE_ENTERO_CON_COMA = 'Van sin coma: para mil escribí 1000 (los puntos de miles los pone el sistema)'
 
 /**
  * Una cantidad de unidades: un entero, con o sin puntos de miles («1.250»). Una coma —la tecla del

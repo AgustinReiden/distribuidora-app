@@ -280,7 +280,7 @@ describe('ModalLiquidar', () => {
     await user.clear(campoPago())
     await user.type(campoPago(), 'doscientos')
     expect(campoPago().value).toBe('')
-    await user.type(campoPago(), '280,000')
+    await user.type(campoPago(), '280,000,5') // B20: tres decimales ya no es ilegible (se guarda con aviso); dos comas, sí
     await user.click(screen.getByRole('button', { name: 'Confirmar y registrar el pago' }))
     expect(screen.getByRole('alert')).toHaveTextContent('Escribí el monto con números')
     expect(mockLiquidar).not.toHaveBeenCalled()

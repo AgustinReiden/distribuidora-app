@@ -52,6 +52,7 @@ import {
   LEYENDA_VB_ALTA,
   MENSAJE_CLIENTE_NO_HABILITADO_VB,
 } from '../../utils/valeBlanco';
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles';
 
 // Alto del alta en el sheet. Un navegador sin `dvh` (Chrome < 108, Safari <
 // 15.4) descarta el valor inline entero y el sheet crecería más que la pantalla,
@@ -256,6 +257,8 @@ const ModalPedido = memo(function ModalPedido({
   onRestaurarPromoCreacion,
   onGuardarHorarioCliente
 }: ModalPedidoProps) {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles();
   // Solo admin puede reasignar preventista al pedido. La query se habilita
   // condicionalmente para no traer perfiles para preventistas/encargados.
   const { data: preventistasAsignables = [] } = usePreventistasAsignablesQuery();
@@ -2032,12 +2035,12 @@ const ModalPedido = memo(function ModalPedido({
           </button>
           <Button
             type="button"
-            onClick={onGuardar}
+            onClick={() => { if (!ilegibles.hay) void onGuardar() }}
             // `!nuevoPedido.clienteId` (#732): sin cliente el botón quedaba
             // habilitado y sólo lo frenaba un aviso del container. Se mira el
             // id y no `clienteSeleccionado`: un cliente recién creado por el
             // alta rápida tiene id antes de que la lista de clientes refetchee.
-            disabled={guardando || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0 || vbNoHabilitado || motivoDatosPrecio !== null || fechaFueraDeRango !== null}
+            disabled={guardando || ilegibles.hay || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0 || vbNoHabilitado || motivoDatosPrecio !== null || fechaFueraDeRango !== null}
             loading={guardando}
             variant="success"
             size="lg"
@@ -2080,7 +2083,9 @@ const ModalPedido = memo(function ModalPedido({
         {/* El mismo boundary que ModalBase pone alrededor del cuerpo: si algo
             tira adentro, el sheet sigue teniendo título y X. */}
         <CompactErrorBoundary componentName="Nuevo Pedido" onClose={onClose}>
-          {cuerpo}
+          <RegistroIlegiblesContext.Provider value={ilegibles.registro}>
+            {cuerpo}
+          </RegistroIlegiblesContext.Provider>
           {confirmacion}
         </CompactErrorBoundary>
       </BottomSheet>
@@ -2089,7 +2094,9 @@ const ModalPedido = memo(function ModalPedido({
 
   return (
     <ModalBase title="Nuevo Pedido" onClose={onClose} maxWidth="max-w-2xl" headerExtra={tipoFacturaToggle}>
-      {cuerpo}
+      <RegistroIlegiblesContext.Provider value={ilegibles.registro}>
+        {cuerpo}
+      </RegistroIlegiblesContext.Provider>
       {confirmacion}
     </ModalBase>
   );

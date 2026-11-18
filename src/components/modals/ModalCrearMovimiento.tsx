@@ -13,6 +13,7 @@ import { Button } from '../ui/Button'
 import { stockDisponibleParaEnvio } from '../../utils/movimientos'
 import type { MovimientoSucursalDB, MovimientoItemDB } from '../../hooks/queries'
 import type { ProductoDB, SucursalDB } from '../../types'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 
 interface LineaItem {
   productoId: string
@@ -47,6 +48,8 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
   sucursales, productos, guardando, onClose, onConfirmar,
   modo = 'crear', movimiento, itemsIniciales, loadingItems, onGuardarEdicion,
 }: ModalCrearMovimientoProps) {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   const esEditar = modo === 'editar'
   const [destino, setDestino] = useState<string>(esEditar ? String(movimiento?.sucursal_destino_id ?? '') : '')
   const [notas, setNotas] = useState<string>(esEditar ? (movimiento?.notas ?? '') : '')
@@ -105,6 +108,7 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
   const quitar = (id: string) => setLineas(prev => prev.filter(l => l.productoId !== id))
 
   const handleSubmit = async () => {
+    if (ilegibles.hay) return
     setError('')
     if (!esEditar && !destino) { setError('Elegí la sucursal destino.'); return }
     const items = lineas.filter(l => l.cantidad > 0).map(l => ({ producto_id: Number(l.productoId), cantidad: l.cantidad }))
@@ -128,6 +132,7 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
   }
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase
       title={esEditar ? `Editar envío #${movimiento?.id}` : 'Nueva salida de stock'}
       description={esEditar
@@ -247,7 +252,7 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
         </Button>
         <Button
           onClick={() => { void handleSubmit() }}
-          disabled={guardando}
+          disabled={guardando || ilegibles.hay}
           loading={guardando}
           variant="primary"
           size="md"
@@ -256,6 +261,7 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
         </Button>
       </div>
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   )
 })
 

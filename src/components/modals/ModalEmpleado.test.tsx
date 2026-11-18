@@ -179,11 +179,11 @@ describe('ModalEmpleado', () => {
   it('un sueldo que no se entiende no se guarda y dice cómo escribirlo', async () => {
     const { onSave, user } = renderModal()
     await cargarAlta(user)
-    await user.type(screen.getByLabelText(/^Sueldo fijo/), '280,000')
+    await user.type(screen.getByLabelText(/^Sueldo fijo/), '280,000,5') // B20: tres decimales ya no es ilegible (se guarda con aviso); dos comas, sí
     await user.click(screen.getByRole('button', { name: 'Dar de alta' }))
 
     expect(onSave).not.toHaveBeenCalled()
-    expect(await screen.findByText('Escribí el monto con números, por ejemplo 280.000 o 280.000,50')).toBeInTheDocument()
+    expect(await screen.findByText('Escribí el monto con números y hasta dos decimales, por ejemplo 280000 (se ve 280.000) o 280000,50')).toBeInTheDocument()
   })
 
   // B20 (D17, cambió de regla): los miles los pone el campo; «280.000» tipeado sería 280,000.
@@ -206,7 +206,7 @@ describe('ModalEmpleado', () => {
     await user.click(screen.getByRole('button', { name: 'Dar de alta' }))
 
     expect(onSave).not.toHaveBeenCalled()
-    expect(await screen.findByText('Escribí el monto con números, por ejemplo 280.000 o 280.000,50')).toBeInTheDocument()
+    expect(await screen.findByText('Escribí el monto con números y hasta dos decimales, por ejemplo 280000 (se ve 280.000) o 280000,50')).toBeInTheDocument()
   })
 
   it('sueldo 0 y sin comisión no deja guardar, y avisa', async () => {
