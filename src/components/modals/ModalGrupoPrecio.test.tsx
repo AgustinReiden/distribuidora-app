@@ -219,7 +219,9 @@ describe('ModalGrupoPrecio', () => {
 
   it.each([
     ['la cantidad', 'Cant. minima total', '1.5', '850', 'Las cantidades van en unidades enteras, sin coma'],
-    ['el precio', 'Precio c/u', '1.000,50', '12', 'No se entiende un precio'],
+    // N3 de la segunda pasada: el precio es un `CampoNumero`; el motivo lo dice el campo y el
+    // guardado queda frenado por el registro.
+    ['el precio', 'Precio c/u', '1.000,50', '12', 'No se entiende el número'],
   ])('%s que no se entiende no se guarda como otro número', async (_que, campo, texto, otro, mensaje) => {
     const { onSave } = renderModal()
     await userEvent.type(screen.getByPlaceholderText('Ej: Papas Fritas'), 'Fideos Cotella')
@@ -232,6 +234,22 @@ describe('ModalGrupoPrecio', () => {
 
     expect(onSave).not.toHaveBeenCalled()
     expect(screen.getByText(new RegExp(mensaje))).toBeInTheDocument()
+  })
+
+  // N3 de la segunda pasada: el precio de la escala fija el piso de precio para todos los roles.
+  // «1.500» tipeado (se escribe «1,500») se guarda $ 1,50 con el aviso amarillo, no callado.
+  it('«1.500» tipeado en el precio sale con el aviso amarillo y guarda 1,5', async () => {
+    const { onSave } = renderModal()
+    await userEvent.type(screen.getByPlaceholderText('Ej: Papas Fritas'), 'Fideos Cotella')
+    await userEvent.click(screen.getByText('CODITO COTELLA 500GRS'))
+    await userEvent.type(screen.getByPlaceholderText('Cant. minima total'), '12')
+    await userEvent.type(screen.getByPlaceholderText('Precio c/u'), '1.500')
+    expect(screen.getByPlaceholderText('Precio c/u')).not.toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('status')).toHaveTextContent(/Se guarda \$\s1,50\. Para \$\s1\.500,00 escribí 1500\./)
+    await userEvent.click(guardar())
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ escalas: [expect.objectContaining({ cantidadMinima: 12, precioUnitario: 1.5 })] }),
+    )
   })
 
   it('el precio guardado con centavos se precarga con coma', () => {

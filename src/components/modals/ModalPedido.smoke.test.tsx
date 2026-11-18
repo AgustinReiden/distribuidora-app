@@ -29,7 +29,7 @@
  */
 import { useState } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event'
 
 // Fixtures mutables de los hooks mockeados. `vi.mock` se hoistea arriba de los
@@ -1331,6 +1331,78 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
     expect(screen.getByRole('textbox', { name: 'Editar precio unitario' })).toHaveValue('1,,5')
     expect(screen.getByRole('alert')).toHaveTextContent('No se entiende el número')
+  })
+
+  // N2 de la segunda pasada (el H5 de la edición, en el alta): con el precio abierto y en rojo,
+  // Confirmar no guarda el pedido con el precio de antes.
+  it.each(['1..5', '0'])('con el precio abierto en rojo («%s»), Confirmar no guarda el pedido', async tipeado => {
+    const { user, onGuardarSpy, onActualizarPrecioSpy } = montar({ isAdmin: true })
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
+    await user.clear(input)
+    await user.type(input, tipeado)
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(botonConfirmar()).toBeDisabled()
+    await user.click(botonConfirmar())
+    expect(onGuardarSpy).not.toHaveBeenCalled()
+    expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
+  })
+
+  // N3: «1.500» tipeado (que se escribe «1,500») se guarda $ 1,50 con el aviso amarillo.
+  it('«1.500» tipeado en el precio sale con el aviso amarillo y guarda 1,5', async () => {
+    const { user, onActualizarPrecioSpy } = montar({ isAdmin: true })
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
+    await user.clear(input)
+    await user.type(input, '1.500')
+    expect(input).not.toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByText(/Se guarda \$\s1,50\. Para \$\s1\.500,00 escribí 1500\./)).toBeInTheDocument()
+    await user.keyboard('{Enter}')
+    expect(onActualizarPrecioSpy).toHaveBeenCalledWith('1', 1.5)
+  })
+
+  // Punto 8: en un teléfono no hay Escape. La X cancela la edición aunque lo tipeado esté en rojo.
+  it('la X cancela el precio en rojo y deja el de antes', async () => {
+    const { user, onGuardarSpy, onActualizarPrecioSpy } = montar({ isAdmin: true })
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
+    await user.clear(input)
+    await user.type(input, '1..5')
+    await user.click(screen.getByRole('button', { name: 'Cancelar precio' }))
+    expect(screen.queryByRole('textbox', { name: 'Editar precio unitario' })).not.toBeInTheDocument()
+    expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
+    expect(screen.getByText(/1\.250,00 c\/u/)).toBeInTheDocument()
+    expect(botonConfirmar()).toBeEnabled()
+    await user.click(botonConfirmar())
+    expect(onGuardarSpy).toHaveBeenCalledTimes(1)
+  })
+
+  // N4: una cantidad en rojo con el carrito cerrado. Al lado de Confirmar se dice por qué está
+  // frenado, y «Ir al campo» abre el carrito y lleva a la cantidad.
+  it('con una cantidad en rojo y el carrito cerrado, el aviso dice por qué y lleva al campo', async () => {
+    const { user, onGuardarSpy } = montar()
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    const cantidad = screen.getByRole('textbox', { name: 'Cantidad' })
+    await user.click(cantidad)
+    await user.keyboard('1.200')
+    await user.click(botonCarrito())
+    expect(document.getElementById('carrito-drawer')).toHaveAttribute('aria-hidden', 'true')
+    expect(botonConfirmar()).toBeDisabled()
+    expect(screen.getByText('Hay un campo en rojo para corregir')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Ir al campo' }))
+    expect(document.getElementById('carrito-drawer')).toHaveAttribute('aria-hidden', 'false')
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Cantidad' })).toHaveFocus())
+    expect(onGuardarSpy).not.toHaveBeenCalled()
   })
 
   it('sin ser admin el precio no es editable', async () => {

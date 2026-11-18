@@ -7,7 +7,9 @@
 import { useState } from 'react'
 import { parsePrecio } from '../../utils/calculations'
 import { esTextoIlegible, leerEntero, numeroConMiles } from '../../utils/normalizarNumero'
-import { useTecleoNumero } from '../../hooks/useTecleoNumero'
+import { CampoNumero } from '../ui/CampoNumero'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 import { formatPrecio } from '../../utils/formatters'
 import { margenesEscala, descuentoSobreLista } from './margenEscala'
 import { Button } from '../ui/Button'
@@ -45,8 +47,8 @@ export default function FormEscalaMayorista({
 }: FormEscalaMayoristaProps) {
   const [cantidad, setCantidad] = useState(inicial?.cantidadMinima ? numeroConMiles(inicial.cantidadMinima) : '')
   const [precio, setPrecio] = useState(inicial?.precioUnitario ? numeroConMiles(inicial.precioUnitario) : '')
-  // Los miles los pone el campo al tipear, y la tecla del punto es coma (D17).
-  const tecleo = useTecleoNumero()
+  // Su propio registro (N7 de la segunda pasada): un rojo acá frena este Guardar, no el de la ficha.
+  const ilegibles = useRegistroIlegibles()
   const [etiqueta, setEtiqueta] = useState(inicial?.etiqueta ?? '')
   const [error, setError] = useState('')
 
@@ -55,6 +57,7 @@ export default function FormEscalaMayorista({
   const descuento = descuentoSobreLista(precioNum, precioLista)
 
   const submit = (): void => {
+    if (ilegibles.hay) return
     // Una cantidad es entera: «1,5» (o «1.250» tipeado, que se escribe «1,250») no se redondea ni
     // se recorta a 1, como hacía el `parseInt` del `type="number"` (#1560-b3).
     const cantidadNum = leerEntero(cantidad)
@@ -83,19 +86,18 @@ export default function FormEscalaMayorista({
   }
 
   return (
+    <RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <div className="rounded-lg border border-dashed border-stone-300 dark:border-gray-600 p-3 space-y-2">
       <div className="flex flex-wrap items-end gap-2">
         <label className="text-xs text-stone-600 dark:text-gray-400">
           Desde
-          <input
-            // Texto y no `number` (#1560-b3): para el navegador «1.250» es 1,25 y el `parseInt`
-            // lo dejaba en 1. Igual abre el teclado numérico.
-            type="text"
-            inputMode="numeric"
+          {/* Texto y no `number` (#1560-b3): para el navegador «1.250» es 1,25 y el `parseInt`
+              lo dejaba en 1. N3 de la segunda pasada: el `CampoNumero` de la tarjeta. */}
+          <CampoNumero
+            entero
             autoFocus
             value={cantidad}
-            onChange={e => setCantidad(tecleo(cantidad, e))}
-            aria-invalid={cantidad.trim() !== '' && leerEntero(cantidad) === null}
+            onChange={setCantidad}
             onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancelar() }}
             className="mt-0.5 block w-20 px-2 py-1 border rounded text-sm text-center dark:bg-gray-800 dark:border-gray-600 dark:text-white aria-[invalid=true]:!border-red-500 dark:aria-[invalid=true]:!border-red-500 aria-[invalid=true]:!ring-1 aria-[invalid=true]:!ring-red-500"
             aria-label="Cantidad mínima"
@@ -104,12 +106,11 @@ export default function FormEscalaMayorista({
         <span className="pb-1.5 text-xs text-stone-500 dark:text-gray-400">u. a</span>
         <label className="text-xs text-stone-600 dark:text-gray-400">
           Precio c/u
-          <input
-            type="text"
-            inputMode="decimal"
+          {/* N3 de la segunda pasada: fija el piso de precio para todos los roles, así que «1.500»
+              tipeado (que se escribe «1,500») sale con el aviso amarillo de lo que se guarda. */}
+          <CampoNumero
             value={precio}
-            onChange={e => setPrecio(tecleo(precio, e))}
-            aria-invalid={esTextoIlegible(precio)}
+            onChange={setPrecio}
             onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancelar() }}
             className="mt-0.5 block w-28 px-2 py-1 border rounded text-sm text-right dark:bg-gray-800 dark:border-gray-600 dark:text-white aria-[invalid=true]:!border-red-500 dark:aria-[invalid=true]:!border-red-500 aria-[invalid=true]:!ring-1 aria-[invalid=true]:!ring-red-500"
             aria-label="Precio mayorista"
@@ -146,6 +147,7 @@ export default function FormEscalaMayorista({
 
       {error && <p role="alert" className="text-xs text-rose-600 dark:text-rose-400">{error}</p>}
 
+      <AvisoCamposEnRojo />
       <div className="flex justify-end gap-2">
         <Button type="button" onClick={onCancelar} variant="secondary" size="sm">
           Cancelar
@@ -153,7 +155,7 @@ export default function FormEscalaMayorista({
         <Button
           type="button"
           onClick={submit}
-          disabled={guardando}
+          disabled={guardando || ilegibles.hay}
           loading={guardando}
           variant="primary"
           size="sm"
@@ -163,5 +165,6 @@ export default function FormEscalaMayorista({
         </Button>
       </div>
     </div>
+    </RegistroIlegiblesContext.Provider>
   )
 }

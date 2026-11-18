@@ -19,6 +19,9 @@ import { formatPrecio } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
 import { esTextoIlegible, leerEntero, numeroConMiles } from '../../utils/normalizarNumero'
 import { useTecleoNumero } from '../../hooks/useTecleoNumero'
+import { CampoNumero } from '../ui/CampoNumero'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 import { describirReglaEscala } from '../../utils/describirReglaEscala'
 import type { EscalaPrecio } from '../../utils/precioMayorista'
 import type { GrupoPrecioConDetalles, GrupoPrecioFormInput, ProductoDB } from '../../types'
@@ -123,6 +126,8 @@ export default function ModalGrupoPrecio({
   )
   // Cantidades y precios ponen los miles al tipear, y la tecla del punto es coma (D17).
   const tecleo = useTecleoNumero()
+  // N3 de la segunda pasada: los precios son `CampoNumero`; en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   const [escalas, setEscalas] = useState<EscalaForm[]>(() => {
     if (!grupo) return [escalaVacia()]
     return grupo.escalas.map(e => {
@@ -245,6 +250,7 @@ export default function ModalGrupoPrecio({
   }
 
   const handleSubmit = async () => {
+    if (ilegibles.hay) return
     setError('')
 
     if (!nombre.trim()) {
@@ -428,6 +434,7 @@ export default function ModalGrupoPrecio({
   }
 
   return (
+    <RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase
       title={isEditing ? 'Editar condición mayorista' : 'Nueva condición mayorista'}
       description="Definí qué productos comparten la condición y a qué precio se venden por cantidad"
@@ -580,16 +587,17 @@ export default function ModalGrupoPrecio({
                         className="flex-1 px-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white aria-[invalid=true]:!border-red-500 dark:aria-[invalid=true]:!border-red-500 aria-[invalid=true]:!ring-1 aria-[invalid=true]:!ring-red-500"
                         placeholder="Cant. minima total"
                       />
-                      <div className="flex-1 relative">
-                        <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm">$</span>
-                        <input
+                      <div className="flex-1">
+                        {/* N3 de la segunda pasada: este precio es el piso de `precio_fuera_de_politica`
+                            para todos los roles, así que «1.500» (que se escribe «1,500») sale con el
+                            aviso amarillo de lo que se guarda, y en rojo frena el guardado. */}
+                        <CampoNumero
                           ref={el => { precioRefs.current[index] = el }}
-                          type="text"
-                          inputMode="decimal"
+                          prefijo="$"
+                          clasePrefijo="left-3 text-gray-400 text-sm"
                           value={escala.precioUnitario}
-                          aria-invalid={esTextoIlegible(escala.precioUnitario)}
-                          onChange={e => actualizarEscala(index, { precioUnitario: tecleo(escala.precioUnitario, e) })}
-                          className="w-full pl-7 pr-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white aria-[invalid=true]:!border-red-500 dark:aria-[invalid=true]:!border-red-500 aria-[invalid=true]:!ring-1 aria-[invalid=true]:!ring-red-500"
+                          onChange={t => actualizarEscala(index, { precioUnitario: t })}
+                          className="w-full pl-7 pr-3 py-2 border rounded-lg text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                           placeholder={escala.combinada ? 'Precio base (opcional)' : 'Precio c/u'}
                           title={escala.combinada
                             ? 'Opcional si todos los productos tienen precio propio. Sirve de fallback.'
@@ -701,16 +709,14 @@ export default function ModalGrupoPrecio({
                                       className="w-16 px-2 py-1 border rounded text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white aria-[invalid=true]:!border-red-500 dark:aria-[invalid=true]:!border-red-500 aria-[invalid=true]:!ring-1 aria-[invalid=true]:!ring-red-500"
                                       placeholder="Min"
                                     />
-                                    <div className="relative w-24">
-                                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-[10px]">$</span>
-                                      <input
-                                        type="text"
-                                        inputMode="decimal"
+                                    <div className="w-24">
+                                      <CampoNumero
+                                        prefijo="$"
+                                        clasePrefijo="left-2 text-gray-400 text-[10px]"
                                         value={precioValue}
-                                        aria-invalid={esTextoIlegible(precioValue)}
-                                        onChange={e => actualizarPrecioProducto(index, String(p.id), tecleo(precioValue, e))}
+                                        onChange={t => actualizarPrecioProducto(index, String(p.id), t)}
                                         disabled={!tieneCantidad}
-                                        className="w-full pl-5 pr-2 py-1 border rounded text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white aria-[invalid=true]:!border-red-500 dark:aria-[invalid=true]:!border-red-500 aria-[invalid=true]:!ring-1 aria-[invalid=true]:!ring-red-500 disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:cursor-not-allowed"
+                                        className="w-full pl-5 pr-2 py-1 border rounded text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:cursor-not-allowed"
                                         placeholder={tieneCantidad ? 'Base' : ''}
                                         title={tieneCantidad ? 'Dejar vacío para usar el precio base de la escala' : 'Primero ingresá la cantidad mínima'}
                                       />
@@ -744,11 +750,12 @@ export default function ModalGrupoPrecio({
         {error && (
           <p role="alert" className="text-sm text-red-600 dark:text-red-400 mb-3">{error}</p>
         )}
+        <AvisoCamposEnRojo className="mb-2" />
         <div className="flex justify-end gap-3">
           <Button onClick={onClose} variant="ghost" size="md">
             Cancelar
           </Button>
-          <Button onClick={handleSubmit} disabled={guardando} variant="primary" size="md" className="px-6">
+          <Button onClick={handleSubmit} disabled={guardando || ilegibles.hay} variant="primary" size="md" className="px-6">
             {guardando && (
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
             )}
@@ -757,5 +764,6 @@ export default function ModalGrupoPrecio({
         </div>
       </div>
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   )
 }

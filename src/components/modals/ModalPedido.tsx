@@ -1,4 +1,4 @@
-import { useState, useMemo, memo, useRef, useEffect } from 'react';
+import { useState, useMemo, memo, useRef, useEffect, useCallback } from 'react';
 import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle, UserCheck, Percent, Plus, Layers } from 'lucide-react';
 import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
 import { fechaPedidoFueraDeRango, mensajeFechaAnteriorAlPiso, pisoFechaPedido } from '../../utils/fechaPedido';
@@ -6,7 +6,8 @@ import { techoFechaEntregaProgramada } from '../../utils/fechaEntregaProgramada'
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo';
 import { parsePrecio } from '../../utils/calculations';
 import { motivoPrecioTipeado, numeroConMiles } from '../../utils/normalizarNumero';
-import { useTecleoNumero } from '../../hooks/useTecleoNumero';
+import { CampoNumero } from '../ui/CampoNumero';
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { resolverDescuentoPctCliente } from '../../utils/descuentoCliente';
@@ -52,7 +53,7 @@ import {
   LEYENDA_VB_ALTA,
   MENSAJE_CLIENTE_NO_HABILITADO_VB,
 } from '../../utils/valeBlanco';
-import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles';
+import { AbrirSeccionContext, RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles';
 
 // Alto del alta en el sheet. Un navegador sin `dvh` (Chrome < 108, Safari <
 // 15.4) descarta el valor inline entero y el sheet crecería más que la pantalla,
@@ -280,8 +281,6 @@ const ModalPedido = memo(function ModalPedido({
   const categoriasScrollRef = useRef<HTMLDivElement>(null);
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
   const [editingPriceValue, setEditingPriceValue] = useState<string>('');
-  // El precio que edita el admin pone los miles al tipear (D17).
-  const tecleoPrecio = useTecleoNumero();
   // Input de la edición de precio (a lo sumo uno a la vez): el listener de
   // Escape de abajo lo reconoce por acá.
   const precioInputRef = useRef<HTMLInputElement>(null);
@@ -308,6 +307,7 @@ const ModalPedido = memo(function ModalPedido({
     identidad: { direccion: string | null; latitud: number | null; longitud: number | null };
   } | null>(null);
   const [carritoAbierto, setCarritoAbierto] = useState<boolean>(false);
+  const abrirCarrito = useCallback(() => setCarritoAbierto(true), []);
 
   // Escape en la edición de precio cancela SÓLO la edición, no el alta (#853).
   // El cancelar lo hace el onKeyDown del input; esto evita que además cierre el
@@ -1311,6 +1311,8 @@ const ModalPedido = memo(function ModalPedido({
           </div>
 
           {/* Drawer overlay: cubre el área del modal con slide-up */}
+          {/* N4: el aviso de los campos en rojo abre el carrito para llevar al primero. */}
+          <AbrirSeccionContext.Provider value={abrirCarrito}>
           <div
             id="carrito-drawer"
             className={`absolute inset-0 z-20 bg-white dark:bg-gray-800 flex flex-col transition-transform duration-300 ease-out ${
@@ -1442,20 +1444,18 @@ const ModalPedido = memo(function ModalPedido({
                                   <p className="text-xs text-violet-700 dark:text-violet-300">A costo (se calcula al guardar)</p>
                                 ) : isEditingPrice && isAdmin && onActualizarPrecio ? (
                                   <>
-                                  <div className="flex items-center gap-1 mt-0.5">
+                                  <div className="flex flex-wrap items-center gap-1 mt-0.5">
                                     <span className="text-xs text-orange-600">$</span>
-                                    <input
+                                    {/* N2 y N3 de la segunda pasada (#1644): el `CampoNumero` de la tarjeta, como en
+                                        la edición. Lo lee `parsePrecio`; los miles los pone el campo, la tecla del
+                                        punto es la coma, «1.500» sale con el aviso amarillo, y en rojo se anota en
+                                        el registro del alta: Confirmar no guarda el pedido con el precio de antes. */}
+                                    <CampoNumero
                                       ref={precioInputRef}
-                                      // Texto y no `number` (#1560): el `number` deja vacío «1.500,50» y
-                                      // el precio no cambiaba sin aviso. Lo lee `parsePrecio`; el punto
-                                      // de miles lo pone el campo y la tecla del punto es coma (D17).
-                                      type="text"
-                                      inputMode="decimal"
                                       aria-label="Editar precio unitario"
                                       value={editingPriceValue}
-                                      aria-invalid={motivoPrecioTipeado(editingPriceValue) !== null}
-                                      aria-describedby={motivoPrecioTipeado(editingPriceValue) ? 'precio-unitario-motivo' : undefined}
-                                      onChange={e => setEditingPriceValue(tecleoPrecio(editingPriceValue, e))}
+                                      motivo={motivoPrecioTipeado(editingPriceValue)}
+                                      onChange={setEditingPriceValue}
                                       onKeyDown={e => {
                                         if (e.key === 'Enter') {
                                           // Lo que no se entiende queda a la vista para corregirlo.
@@ -1478,16 +1478,25 @@ const ModalPedido = memo(function ModalPedido({
                                         if (newPrice > 0) onActualizarPrecio(item.productoId, newPrice);
                                         setEditingPriceId(null);
                                       }}
-                                      className={`w-24 px-2 py-0.5 text-xs border border-orange-300 rounded bg-orange-50 dark:bg-orange-900/20 dark:border-orange-600 dark:text-white focus:ring-1 focus:ring-orange-500 focus:outline-none ${motivoPrecioTipeado(editingPriceValue) ? '!border-red-500 dark:!border-red-500 !ring-1 !ring-red-500' : ''}`}
+                                      className="w-24 px-2 py-0.5 text-xs border border-orange-300 rounded bg-orange-50 dark:bg-orange-900/20 dark:border-orange-600 dark:text-white focus:ring-1 focus:ring-orange-500 focus:outline-none"
                                       autoFocus
                                     />
                                     <span className="text-xs text-orange-600">c/u</span>
+                                    {/* Punto 8 de la segunda pasada: en un teléfono no hay Escape. La X deja el
+                                        precio como estaba y cierra la edición, aunque lo tipeado esté en rojo. */}
+                                    <button
+                                      type="button"
+                                      aria-label="Cancelar precio"
+                                      onPointerDown={e => e.preventDefault()}
+                                      onClick={() => {
+                                        precioResueltoRef.current = true;
+                                        setEditingPriceId(null);
+                                      }}
+                                      className="p-1 text-stone-500 hover:text-stone-700 dark:text-gray-400 dark:hover:text-gray-200 rounded shrink-0"
+                                    >
+                                      <X className="w-3.5 h-3.5" aria-hidden="true" />
+                                    </button>
                                   </div>
-                                  {motivoPrecioTipeado(editingPriceValue) && (
-                                    <p id="precio-unitario-motivo" role="alert" className="mt-0.5 text-xs font-medium text-red-600 dark:text-red-400">
-                                      {motivoPrecioTipeado(editingPriceValue)}
-                                    </p>
-                                  )}
                                   </>
                                 ) : esOverride ? (
                                   <p
@@ -1959,6 +1968,7 @@ const ModalPedido = memo(function ModalPedido({
               </div>
             </div>
           </div>
+          </AbrirSeccionContext.Provider>
         </div>
 
         {/* Aviso del horario faltante en la barra inferior: el bloque para
@@ -2045,6 +2055,10 @@ const ModalPedido = memo(function ModalPedido({
             {violacionesMOQ.length} producto{violacionesMOQ.length > 1 ? 's no cumplen' : ' no cumple'} el mínimo — revisá el carrito.
           </div>
         )}
+
+        {/* N4: un campo en rojo (aunque esté en el carrito cerrado) frena Confirmar; esto dice por
+            qué y lleva al campo. */}
+        <AvisoCamposEnRojo className="flex-shrink-0 px-4 py-1.5 border-t border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30" />
 
         {/* Barra inferior: toggle del carrito + Confirmar (siempre visibles).
             En el sheet llega al borde de la pantalla: Confirmar necesita aire a

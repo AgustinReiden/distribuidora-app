@@ -24,6 +24,7 @@ import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQ
 import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
 import { motivoPrecioTipeado, numeroConMiles } from '../../utils/normalizarNumero';
 import { CampoNumero } from '../ui/CampoNumero';
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo';
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta';
 import { esTipoVB } from '../../utils/valeBlanco';
 import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente, esDescuentoDeCategoria } from '../../utils/descuentoCliente';
@@ -1450,7 +1451,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                         </div>
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
                           {editingPriceId === item.productoId ? (
-                            <div className="flex items-center gap-1">
+                            <div className="flex flex-wrap items-center gap-1">
                               <span className="text-orange-600">$</span>
                               {/* B20 (D17): los miles los pone el campo y el punto tipeado es la coma. */}
                               <CampoNumero
@@ -1477,6 +1478,18 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                                 className="p-1 text-white bg-orange-500 hover:bg-orange-600 rounded shrink-0"
                               >
                                 <Check className="w-3.5 h-3.5" />
+                              </button>
+                              {/* Punto 8 de la segunda pasada: en un teléfono no hay Escape (y en la compu
+                                  cierra todo el modal). La X deja el precio como estaba, aunque lo tipeado
+                                  esté en rojo. */}
+                              <button
+                                type="button"
+                                aria-label="Cancelar precio"
+                                onPointerDown={e => e.preventDefault()}
+                                onClick={() => setEditingPriceId(null)}
+                                className="p-1 text-stone-500 hover:text-stone-700 dark:text-gray-400 dark:hover:text-gray-200 rounded shrink-0"
+                              >
+                                <X className="w-3.5 h-3.5" aria-hidden="true" />
                               </button>
                               <span className="text-orange-600">c/u</span>
                             </div>
@@ -1996,6 +2009,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </div>
       )}
 
+      {/* N4: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+      <AvisoCamposEnRojo className="px-4 pt-2" />
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50 dark:bg-gray-800">
         <Button onClick={onClose} variant="ghost" size="md">
           Cancelar

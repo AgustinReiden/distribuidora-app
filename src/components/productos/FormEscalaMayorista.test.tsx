@@ -7,6 +7,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import FormEscalaMayorista from './FormEscalaMayorista'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 
 function montar(precioUnitario: number) {
   const onGuardar = vi.fn()
@@ -85,9 +86,11 @@ describe('FormEscalaMayorista · lo tipeado', () => {
     await userEvent.type(screen.getByLabelText('Cantidad mínima'), '1.5')
     expect(screen.getByLabelText('Cantidad mínima')).toHaveValue('1,5')
     await userEvent.type(screen.getByLabelText('Precio mayorista'), '150')
+    // N3 de la segunda pasada: el campo dice el motivo y el Guardar de la escala queda frenado.
+    expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled()
     await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
     expect(onGuardar).not.toHaveBeenCalled()
-    expect(screen.getByRole('alert')).toHaveTextContent('La cantidad va en unidades enteras, sin coma')
+    expect(screen.getByRole('alert')).toHaveTextContent('Van sin coma: para mil escribí 1000')
   })
 
   it.each([
@@ -110,8 +113,41 @@ describe('FormEscalaMayorista · lo tipeado', () => {
     await userEvent.click(screen.getByLabelText('Precio mayorista'))
     await userEvent.paste('1,234,567')
     expect(screen.getByLabelText('Precio mayorista')).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled()
     await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
     expect(onGuardar).not.toHaveBeenCalled()
-    expect(screen.getByRole('alert')).toHaveTextContent('No se entiende el precio')
+    expect(screen.getByRole('alert')).toHaveTextContent('No se entiende el número')
+  })
+})
+
+// N3 y N7 de la segunda pasada de #1644: el precio mayorista es el piso de precio para todos los
+// roles. «1.500» tipeado (se escribe «1,500») se guarda $ 1,50 con el aviso amarillo, y un rojo en
+// esta escala frena SU Guardar, no el de la ficha que la contiene.
+describe('FormEscalaMayorista · la regla de la tarjeta', () => {
+  it('«1.500» tipeado en el precio sale con el aviso amarillo y guarda 1,5', async () => {
+    const onGuardar = montarVacio()
+    await userEvent.type(screen.getByLabelText('Cantidad mínima'), '12')
+    await userEvent.type(screen.getByLabelText('Precio mayorista'), '1.500')
+    expect(screen.getByLabelText('Precio mayorista')).not.toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('status')).toHaveTextContent(/Se guarda \$\s1,50\. Para \$\s1\.500,00 escribí 1500\./)
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+    expect(onGuardar).toHaveBeenCalledWith(expect.objectContaining({ precioUnitario: 1.5 }))
+  })
+
+  it('un rojo adentro no frena el Guardar del formulario de afuera', async () => {
+    function Ficha() {
+      const ilegibles = useRegistroIlegibles()
+      return (
+        <RegistroIlegiblesContext.Provider value={ilegibles.registro}>
+          <FormEscalaMayorista precioLista={200} costoTotal={0} costoReal={0} porcentajeIva={21} onGuardar={vi.fn()} onCancelar={vi.fn()} />
+          <button type="button" disabled={ilegibles.hay}>Guardar ficha</button>
+        </RegistroIlegiblesContext.Provider>
+      )
+    }
+    render(<Ficha />)
+    await userEvent.type(screen.getByLabelText('Cantidad mínima'), '1.5')
+    expect(screen.getByLabelText('Cantidad mínima')).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Guardar ficha' })).toBeEnabled()
   })
 })
