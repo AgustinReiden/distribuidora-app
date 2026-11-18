@@ -316,25 +316,29 @@ export function verificacionConfiable(
   ahora: number = Date.now(),
 ): VerificacionDeAlta {
   if (verificacion.resultado !== 'no_entro' || clave.intentoEn == null) return verificacion
-  // H6 (revisión de B12a): una diferencia negativa es un reloj que volvió atrás
-  // (lo corrigió la red), no un intento en vuelo: vale como margen vencido. Sin
-  // esto, la clave quedaba «sin respuesta» hasta que el reloj la alcanzaba.
+  // H6 e I3 (revisión de B12a): el reloj puede moverse (lo corrige la red). Un
+  // salto grande para atrás no es un intento en vuelo: vale como margen vencido;
+  // sin esto la clave quedaba «sin respuesta» hasta que el reloj la alcanzaba. Uno
+  // chico, justo después de un corte, conserva el margen: se mide en valor absoluto.
   const transcurrido = ahora - clave.intentoEn
-  return transcurrido >= 0 && transcurrido < MARGEN_INTENTO_EN_VUELO_MS ? { resultado: 'sin_respuesta' } : verificacion
+  return Math.abs(transcurrido) < MARGEN_INTENTO_EN_VUELO_MS ? { resultado: 'sin_respuesta' } : verificacion
 }
 
 /**
- * La huella con la que se compara la oferta de la cola (H4 de la revisión de
- * B12a): la del alta sin el estado ni el monto del cobro, que la cola descarta (el
- * pedido encolado nunca declara cobro). Si quien carga pasa el pago a «pendiente»
- * después del fallo, sigue siendo el mismo pedido y la oferta no se va. La clave
- * del alta se sigue acuñando con `huellaDeAlta` entera.
+ * La huella con la que se compara la oferta de la cola (H4 y N3 de la revisión de
+ * B12a): la del alta sin el cobro (estado, monto y forma de pago). El estado y el
+ * monto la cola los descarta (el pedido encolado nunca declara cobro); la forma de
+ * pago sí viaja (`pedidos.forma_pago`), y se encola la NUEVA con la misma clave: la
+ * RPC del alta no compara el contenido, así que la clave garantiza lo mismo (si el
+ * intento había entrado, el replay recibe ese pedido; si no, se crea con la forma
+ * nueva). Tocar el cobro después del fallo no hace otro pedido y la oferta no se
+ * va. La clave del alta se sigue acuñando con `huellaDeAlta` entera.
  */
 export function huellaDeOfertaCola(
   formulario: Record<string, unknown> | object,
   lineas: Parameters<typeof huellaDeAlta>[1],
 ): string {
-  return huellaDeAlta({ ...formulario, estadoPago: undefined, montoPagado: undefined }, lineas)
+  return huellaDeAlta({ ...formulario, estadoPago: undefined, montoPagado: undefined, formaPago: undefined }, lineas)
 }
 
 /**

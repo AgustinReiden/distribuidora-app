@@ -11,12 +11,11 @@
 import { useMemo, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { CloudOff, X } from 'lucide-react'
-import { useSucursal } from '../../contexts/SucursalContext'
+import { useSucursal, type ResultadoCambioSucursal } from '../../contexts/SucursalContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useSucursalesActivasQuery } from '../../hooks/queries/useSucursalesActivasQuery'
 import type { PendientesDeOtraSucursal } from '../../lib/offlineDb'
-import { avisosColaOtraSucursal, firmaColaOtraSucursal, mensajeQuedasteEnSucursal } from '../../utils/colaOtraSucursal'
-import { getSucursalHeader } from '../../lib/supabase'
+import { avisosColaOtraSucursal, firmaColaOtraSucursal, mensajeQuedasteEnSucursal, MENSAJE_CAMBIO_SIN_SENAL } from '../../utils/colaOtraSucursal'
 import { getNoticeRoot } from '../ui/noticeRoot'
 import { Button } from '../ui/Button'
 
@@ -36,6 +35,8 @@ function AvisoConPendientes({ pendientes }: AvisoColaOtraSucursalProps): ReactEl
   const { data: sucursalesActivas } = useSucursalesActivasQuery()
   const [cambiando, setCambiando] = useState(false)
   const [rechazadas, setRechazadas] = useState<ReadonlySet<number>>(() => new Set())
+  // N1: la sucursal cuyo cambio no salió por falta de señal (el botón sigue).
+  const [sinSenalPara, setSinSenalPara] = useState<number | null>(null)
   // La X lo esconde mientras la cuenta sea la misma (H5).
   const [cerradoCon, setCerradoCon] = useState<string | null>(null)
 
@@ -49,16 +50,23 @@ function AvisoConPendientes({ pendientes }: AvisoColaOtraSucursalProps): ReactEl
 
   const cambiar = async (sucursalId: number, nombre: string): Promise<void> => {
     setCambiando(true)
+    setSinSenalPara(null)
+    let resultado: ResultadoCambioSucursal
     try {
-      // Si el cambio falla (sin señal, rechazo), lo avisa SucursalContext.
-      await switchSucursal(sucursalId)
+      // El toast del error lo pone SucursalContext; acá se decide qué ofrecer.
+      resultado = await switchSucursal(sucursalId)
     } finally {
       setCambiando(false)
     }
-    // Rechazado (sucursal inactiva, sin acceso): no se vuelve a ofrecer. El
-    // header lo fija `switchSucursal` sólo cuando el servidor confirmó el cambio.
-    if (getSucursalHeader() !== sucursalId) {
+    // N1: sólo un «no» del servidor (sucursal inactiva, sin acceso) deja de
+    // ofrecer el cambio. Una falla de red no dice nada de la sucursal: el botón
+    // sigue, con el aviso de que no hubo señal.
+    if (resultado === 'rechazado') {
       setRechazadas(prev => new Set([...prev, sucursalId]))
+      return
+    }
+    if (resultado === 'fallo') {
+      setSinSenalPara(sucursalId)
       return
     }
     // La app se queda en esa sucursal (no vuelve sola) y lo dice.
@@ -77,6 +85,9 @@ function AvisoConPendientes({ pendientes }: AvisoColaOtraSucursalProps): ReactEl
           {avisos.map(a => (
             <div key={a.sucursalId}>
               {a.lineas.map(linea => <p key={linea}>{linea}</p>)}
+              {sinSenalPara === a.sucursalId && a.puedeCambiar && (
+                <p>{MENSAJE_CAMBIO_SIN_SENAL}</p>
+              )}
               {a.puedeCambiar && a.nombre && (
                 <Button
                   type="button"

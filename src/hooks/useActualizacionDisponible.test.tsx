@@ -348,6 +348,20 @@ describe('useActualizacionDisponible', () => {
 
       expect(aplicarActualizacionSWMock).toHaveBeenCalledTimes(2)
     })
+
+    it('N4: con la recarga pospuesta, el cartel vuelve enseguida a «Actualizar» habilitado', async () => {
+      aplicarActualizacionSWMock.mockResolvedValueOnce('pospuesto')
+      responderVersion({ buildId: 'otro-build-mas-nuevo' })
+      const { result, rerender } = renderHook(({ ruta }) => useActualizacionDisponible(ruta), {
+        initialProps: { ruta: '/pedidos' },
+      })
+      await waitFor(() => expect(result.current.disponible).toBe(true))
+
+      rerender({ ruta: '/clientes' })
+
+      await waitFor(() => expect(result.current.actualizando).toBe(false))
+      expect(result.current.disponible).toBe(true)
+    })
   })
 
   describe('salto automatico (solo cuando no hay nada que perder)', () => {

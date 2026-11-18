@@ -42,7 +42,7 @@ describe('AvisoColaOtraSucursal (1600-b8)', () => {
     estado.header = 1
     estado.activas = undefined
     // El cambio que confirma el servidor: header y sucursal activa.
-    switchSucursal.mockImplementation(async (id: number) => { estado.header = id; estado.actual = id })
+    switchSucursal.mockImplementation(async (id: number) => { estado.header = id; estado.actual = id; return 'ok' })
   })
 
   it('sin pendientes en otras sucursales no muestra nada', () => {
@@ -89,7 +89,7 @@ describe('AvisoColaOtraSucursal (1600-b8)', () => {
   })
 
   it('si el servidor rechaza el cambio, deja de ofrecerlo y no dice que cambió', async () => {
-    switchSucursal.mockImplementation(async () => { /* rechazado: el header no cambia */ })
+    switchSucursal.mockResolvedValue('rechazado')
     render(<AvisoColaOtraSucursal pendientes={[{ sucursalId: 2, pendientes: 1, fallidos: 0 }]} />)
 
     await userEvent.click(screen.getByRole('button', { name: 'Cambiar a Sucursal Sur' }))
@@ -97,6 +97,20 @@ describe('AvisoColaOtraSucursal (1600-b8)', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: /Cambiar a/ })).toBeNull())
     expect(screen.getByRole('status')).toHaveTextContent(/Avisale al administrador/)
     expect(notify.info).not.toHaveBeenCalled()
+  })
+
+  it('N1: si falla la red, el botón sigue y dice que no hubo señal (no «avisale al administrador»)', async () => {
+    switchSucursal.mockResolvedValueOnce('fallo')
+    render(<AvisoColaOtraSucursal pendientes={[{ sucursalId: 2, pendientes: 1, fallidos: 0 }]} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cambiar a Sucursal Sur' }))
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('No se pudo cambiar de sucursal: no hubo señal'))
+    expect(screen.getByRole('status')).not.toHaveTextContent(/administrador/)
+    expect(notify.info).not.toHaveBeenCalled()
+    // Con señal, el mismo botón lo cambia.
+    await userEvent.click(screen.getByRole('button', { name: 'Cambiar a Sucursal Sur' }))
+    await waitFor(() => expect(notify.info).toHaveBeenCalled())
   })
 
   it('de una sucursal que ya no tiene, no ofrece el cambio', () => {

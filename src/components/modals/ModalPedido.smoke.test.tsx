@@ -822,7 +822,8 @@ describe('ModalPedido — camino feliz', () => {
       expect(onGuardarEnColaSpy).toHaveBeenCalledTimes(1)
     })
 
-    it('Escape (y el «atrás» del teléfono) también piden confirmación', async () => {
+    // El «atrás» del teléfono no está cubierto (N2): navega sin pasar por el modal.
+    it('Escape también pide confirmación', async () => {
       const { user, onCloseSpy } = montar({ onGuardarEnColaSpy: vi.fn() })
 
       await user.keyboard('{Escape}')

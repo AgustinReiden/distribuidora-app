@@ -83,3 +83,7 @@ export function mensajeQuedasteEnSucursal(nombre: string): string {
   return `Ahora estás trabajando en ${nombre}: los pedidos guardados se mandan desde acá. ` +
     'La app se queda en esta sucursal; para volver a la tuya, elegila arriba.'
 }
+
+/** N1: el cambio no salió porque no hubo señal; el botón sigue para reintentar. */
+export const MENSAJE_CAMBIO_SIN_SENAL =
+  'No se pudo cambiar de sucursal: no hubo señal. Probá de nuevo cuando tengas señal.'

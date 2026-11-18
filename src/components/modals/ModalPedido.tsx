@@ -622,8 +622,9 @@ const ModalPedido = memo(function ModalPedido({
 
   // I1 de la revisión de B12a (decisión de pantalla a confirmar por el dueño): con
   // la oferta de la cola en pantalla (D56) el pedido no se guardó en ningún lado;
-  // cerrar (la X, Escape o el «atrás» del teléfono) pide confirmación, DENTRO del
-  // modal como la de quitar una promo. Sin la oferta, cierra como siempre.
+  // cerrar con la X o con Escape pide confirmación, DENTRO del modal como la de
+  // quitar una promo. Sin la oferta, cierra como siempre. El «atrás» del teléfono
+  // NO pasa por acá: navega (no hay `popstate`) y desmonta la pantalla; va aparte.
   const cerrarAlta = (): void => {
     if (!onGuardarEnCola) {
       onClose();

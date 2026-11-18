@@ -168,6 +168,7 @@ vi.mock('../modals/ModalPedido', () => ({
     onAgregarItem: (id: string, cantidad?: number, precio?: number) => void
     onNotasChange: (notas: string) => void
     onEstadoPagoChange: (e: string) => void
+    onFormaPagoChange: (f: string) => void
     onTipoFacturaChange: (t: string) => void
     onGuardar: () => void
     onGuardarEnCola?: () => void
@@ -182,6 +183,7 @@ vi.mock('../modals/ModalPedido', () => ({
       <button type="button" onClick={() => p.onNotasChange('dejar en la puerta')}>Cambiar nota</button>
       <button type="button" onClick={() => p.onNotasChange('')}>Nota igual</button>
       <button type="button" onClick={() => p.onEstadoPagoChange('pagado')}>Pagado</button>
+      <button type="button" onClick={() => p.onFormaPagoChange('transferencia')}>Transferencia</button>
       <button type="button" onClick={() => p.onTipoFacturaChange('VB')}>Vale blanco</button>
       <button type="button" onClick={() => p.onGuardar()}>Confirmar</button>
     </>
@@ -767,6 +769,19 @@ describe('D56 — señal inservible con onLine en true: la cola se ofrece', () =
     await waitFor(() => expect(guardarPedidoOffline).toHaveBeenCalledTimes(1))
     expect(guardarPedidoOffline.mock.calls[0][1]).toMatchObject({ claveDeAlta: claveAnterior })
     expect(guardarPedidoOffline.mock.calls[0][0]).toMatchObject({ estadoPago: 'pendiente' })
+    expect(verificarClave).not.toHaveBeenCalled()
+  })
+
+  it('N3: tocar la forma de pago no hace desaparecer la oferta: encola con la forma NUEVA y la MISMA clave', async () => {
+    const { user, claveAnterior } = await primerIntentoPerdido()
+
+    await user.click(screen.getByRole('button', { name: 'Transferencia' }))
+    expect(screen.getByRole('button', { name: 'Guardar en el teléfono' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Guardar en el teléfono' }))
+
+    await waitFor(() => expect(guardarPedidoOffline).toHaveBeenCalledTimes(1))
+    expect(guardarPedidoOffline.mock.calls[0][1]).toMatchObject({ claveDeAlta: claveAnterior })
+    expect(guardarPedidoOffline.mock.calls[0][0]).toMatchObject({ formaPago: 'transferencia' })
     expect(verificarClave).not.toHaveBeenCalled()
   })
 

@@ -200,9 +200,14 @@ describe('verificacionConfiable (M5)', () => {
     expect(decidirTrasVerificar(verificacionConfiable({ resultado: 'no_entro' }, clave, T), 'h2', '9').paso).toBe('esperar_senal')
   })
 
-  it('H6: con el reloj atrasado después del intento (diferencia negativa), vale como margen vencido', () => {
+  it('H6: con el reloj muy atrasado después del intento (una hora), vale como margen vencido: no traba las altas', () => {
     const clave = { intentoEn: T + 60 * 60 * 1000 }
     expect(verificacionConfiable({ resultado: 'no_entro' }, clave, T)).toEqual({ resultado: 'no_entro' })
+  })
+
+  it('I3: un reloj que vuelve atrás unos segundos justo después de un corte conserva el margen', () => {
+    const clave = { intentoEn: T + 5_000 }
+    expect(verificacionConfiable({ resultado: 'no_entro' }, clave, T)).toEqual({ resultado: 'sin_respuesta' })
   })
 
   it('pasado el margen, el «no entró» vale', () => {
@@ -221,6 +226,8 @@ describe('huellaDeOfertaCola (H4)', () => {
     const base = { clienteId: '9', notas: '', estadoPago: 'pendiente', montoPagado: 0 }
     const lineas = [{ productoId: '7', cantidad: 1, precioUnitario: 10 }]
     expect(huellaDeOfertaCola({ ...base, estadoPago: 'pagado', montoPagado: 10 }, lineas)).toBe(huellaDeOfertaCola(base, lineas))
+    // N3: tampoco la forma de pago.
+    expect(huellaDeOfertaCola({ ...base, formaPago: 'transferencia' }, lineas)).toBe(huellaDeOfertaCola({ ...base, formaPago: 'efectivo' }, lineas))
     expect(huellaDeOfertaCola({ ...base, notas: 'otra' }, lineas)).not.toBe(huellaDeOfertaCola(base, lineas))
     // La clave sigue con la huella entera.
     expect(huellaDeAlta({ ...base, estadoPago: 'pagado' }, lineas)).not.toBe(huellaDeAlta(base, lineas))

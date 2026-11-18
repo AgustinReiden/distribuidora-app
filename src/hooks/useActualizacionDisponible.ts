@@ -119,13 +119,18 @@ export function useActualizacionDisponible(ruta?: string): ActualizacionDisponib
     // el build tarda hasta ~45 s; justo antes de recargar se vuelve a mirar.
     void aplicarActualizacionSW({ puedeRecargar: () => !hayTrabajoEnCurso() })
       .then(resultado => {
-        if (resultado !== 'pospuesto') return
+        if (resultado !== 'pospuesto') {
+          // La recarga la dispara el cambio de controlador: se espera un rato.
+          setTimeout(() => setActualizando(false), 15000)
+          return
+        }
         // No fue un salto que no prosperó: el build quedó listo y el próximo
-        // disparo lo activa enseguida, sin enfriamiento.
+        // disparo lo activa enseguida, sin enfriamiento. El cartel vuelve a su
+        // estado normal (N4): nada se está actualizando, espera a lo que hay en pantalla.
         guardarNumero(CLAVE_AUTO, autoAnterior)
+        setActualizando(false)
         setDisponible(true)
-      })
-      .finally(() => {
+      }, () => {
         setTimeout(() => setActualizando(false), 15000)
       })
     return true
