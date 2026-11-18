@@ -21,9 +21,9 @@
  *
  * La precarga va con `numeroConMiles` (o `numeroEditable` con `sinMiles`).
  */
-import { useId, useLayoutEffect, useRef, useState, type ChangeEvent, type InputHTMLAttributes, type ReactElement } from 'react'
+import { useId, useLayoutEffect, useRef, useState, type ChangeEvent, type InputHTMLAttributes, type ReactElement, type ReactNode, type Ref } from 'react'
 import { CLASES_AVISO_DECIMALES, avisoPlataDecimalesDeMas, avisoSinMilesDecimalesDeMas } from '../../utils/avisoDecimales'
-import { useTecleoNumero } from '../../hooks/useTecleoNumero'
+import { esPegado, useTecleoNumero } from '../../hooks/useTecleoNumero'
 import { useAnotarIlegible } from '../../hooks/useRegistroIlegibles'
 import {
   motivoEnteroTipeado,
@@ -53,6 +53,16 @@ export interface CampoNumeroProps extends PropsHeredadas {
    * `undefined` usa la del lector del campo.
    */
   motivo?: string | null
+  /** El input (para enfocarlo desde el formulario, como los precios del grupo de precio). */
+  ref?: Ref<HTMLInputElement>
+  /**
+   * Lo que va pegado a la izquierda del input («$»), centrado en el input y no en el bloque: puesto
+   * por el formulario, con el aviso arriba o el motivo abajo quedaba corrido (N12). El input deja
+   * lugar con su `pl-*`.
+   */
+  prefijo?: ReactNode
+  /** Las clases del prefijo, si no van las de siempre. */
+  clasePrefijo?: string
 }
 
 /** El rojo le gana a las clases del campo: el borde oscuro, el anillo del foco y los de color. */
@@ -76,6 +86,9 @@ export function CampoNumero({
   decimales,
   motivo,
   className,
+  ref,
+  prefijo,
+  clasePrefijo = 'left-3 text-gray-400',
   ...resto
 }: CampoNumeroProps): ReactElement {
   const tecleo = useTecleoNumero({ negativo })
@@ -96,7 +109,7 @@ export function CampoNumero({
       : sinMiles
         ? motivoSinMilesTipeado(value, { negativo })
         : motivoPlataTipeada(value, { negativo })
-  useAnotarIlegible(error)
+  useAnotarIlegible(error, input)
 
   // El aviso de los decimales de más sale con lo TIPEADO (no con lo precargado ni lo pegado), y
   // queda a la vista hasta que el valor cambie: `tecleo` es el último texto que entró por el teclado.
@@ -106,43 +119,44 @@ export function CampoNumero({
     : sinMiles
       ? decimales !== undefined ? avisoSinMilesDecimalesDeMas(value, decimales) : null
       : avisoPlataDecimalesDeMas(value, decimales ?? 2)
-  const anotar = (crudo: string, nuevo: string): void => {
-    setTecleado(crudo.length - value.length > 1 ? null : nuevo)
+  const anotar = (pegado: boolean, nuevo: string): void => {
+    setTecleado(pegado ? null : nuevo)
     onChange(nuevo)
   }
 
   const alCambiar = (e: ChangeEvent<HTMLInputElement>): void => {
+    const pegado = esPegado(e, value)
     if (!sinMiles) {
-      anotar(e.target.value, tecleo(value, e))
+      anotar(pegado, tecleo(value, e))
       return
     }
     // Sin miles: la tecla del punto es la coma, y el cursor se repone después del mismo carácter.
     const crudo = e.target.value
     const posicion = e.target.selectionStart ?? crudo.length
     const tecleado = teclearNumero(value, crudo, posicion)
-    // Lo pegado (más de un carácter) entra tal cual, para que el lector lo marque si no lo entiende:
+    // Lo pegado (lo dice el evento: `esPegado`) entra tal cual, para que el lector lo marque si no lo entiende:
     // filtrarlo haría de «1.234,5» un 1,2345 callado.
-    if (crudo.length - value.length > 1) {
-      anotar(crudo, tecleado)
+    if (pegado) {
+      anotar(true, tecleado)
       return
     }
     const filtrado = filtrarSinMiles(tecleado, negativo)
     const antes = filtrarSinMiles(tecleado.slice(0, posicion), negativo).length
     cursor.current = Math.min(antes, filtrado.length)
-    anotar(crudo, filtrado)
+    anotar(false, filtrado)
   }
 
   const describedBy = [resto['aria-describedby'], error ? idMensaje : null].filter(Boolean).join(' ') || undefined
 
-  return (
-    <>
-      {avisoDecimales && (
-        <span role="status" className={CLASES_AVISO_DECIMALES}>{avisoDecimales}</span>
-      )}
+  const campo = (
       <input
         autoComplete="off"
         {...resto}
-        ref={input}
+        ref={el => {
+          input.current = el
+          if (typeof ref === 'function') ref(el)
+          else if (ref) ref.current = el
+        }}
         type="text"
         inputMode={entero ? 'numeric' : 'decimal'}
         value={value}
@@ -151,6 +165,19 @@ export function CampoNumero({
         aria-describedby={describedBy}
         className={error ? `${className ?? ''} ${CLASES_CAMPO_ILEGIBLE}` : className}
       />
+  )
+
+  return (
+    <>
+      {avisoDecimales && (
+        <span role="status" className={CLASES_AVISO_DECIMALES}>{avisoDecimales}</span>
+      )}
+      {prefijo !== undefined ? (
+        <span className="relative block">
+          <span className={`absolute top-1/2 -translate-y-1/2 ${clasePrefijo}`} aria-hidden="true">{prefijo}</span>
+          {campo}
+        </span>
+      ) : campo}
       {error && (
         <span id={idMensaje} role="alert" className="block w-full basis-full mt-1 text-xs font-medium text-red-600 dark:text-red-400">
           {error}

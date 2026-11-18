@@ -120,7 +120,7 @@ export function armarCargos(lineas: ReadonlyArray<LineaCargo>): { cargos: CargoR
 }
 
 /** Lo que se le muestra a quien tipeó un importe que `parseMonto` no entiende. */
-export const MENSAJE_MONTO_ILEGIBLE = 'Escribí el monto con números y hasta dos decimales, por ejemplo 280000 (se ve 280.000) o 280000,50'
+export const MENSAJE_MONTO_ILEGIBLE = 'Escribí el monto con números, por ejemplo 280000 (se ve 280.000) o 280000,50'
 
 /** El sueldo se escribe siempre: en blanco no es 0 (un arreglo sin sueldo fijo comisiona y lo dice con un 0). */
 export const MENSAJE_SIN_SUELDO = 'Falta el sueldo: poné 0 si es sólo comisión'

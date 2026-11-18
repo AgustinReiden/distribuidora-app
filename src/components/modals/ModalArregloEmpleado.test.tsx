@@ -197,7 +197,7 @@ describe('ModalArregloEmpleado', () => {
     await user.type(screen.getByLabelText(/^Sueldo fijo/), '280,000,5') // B20: tres decimales ya no es ilegible (se guarda con aviso); dos comas, sí
     await user.click(screen.getByRole('button', { name: 'Guardar arreglo' }))
     expect(onSave).not.toHaveBeenCalled()
-    expect(await screen.findByText('Escribí el monto con números y hasta dos decimales, por ejemplo 280000 (se ve 280.000) o 280000,50')).toBeInTheDocument()
+    expect(await screen.findByText('Escribí el monto con números, por ejemplo 280000 (se ve 280.000) o 280000,50')).toBeInTheDocument()
   })
 
   it('parte del arreglo vigente: sueldo, frecuencia y comisión, y los manda si sólo cambia la fecha', async () => {

@@ -83,7 +83,7 @@ describe('ModalMovimientoEmpleado', () => {
     await user.type(screen.getByLabelText(/^Monto/), '1,234.56')
     await user.click(screen.getByRole('button', { name: 'Registrar movimiento' }))
     expect(onSave).not.toHaveBeenCalled()
-    expect(await screen.findByText('Escribí el monto con números y hasta dos decimales, por ejemplo 280000 (se ve 280.000) o 280000,50')).toBeInTheDocument()
+    expect(await screen.findByText('Escribí el monto con números, por ejemplo 280000 (se ve 280.000) o 280000,50')).toBeInTheDocument()
   })
 
   it('un monto negativo tipeado no se guarda: el signo lo dan los botones', async () => {
@@ -91,7 +91,7 @@ describe('ModalMovimientoEmpleado', () => {
     await user.type(screen.getByLabelText(/^Monto/), '-3000')
     await user.click(screen.getByRole('button', { name: 'Registrar movimiento' }))
     expect(onSave).not.toHaveBeenCalled()
-    expect(await screen.findByText('Escribí el monto con números y hasta dos decimales, por ejemplo 280000 (se ve 280.000) o 280000,50')).toBeInTheDocument()
+    expect(await screen.findByText('Escribí el monto con números, por ejemplo 280000 (se ve 280.000) o 280000,50')).toBeInTheDocument()
   })
 
   it('si guardar falla muestra el error y no cierra', async () => {

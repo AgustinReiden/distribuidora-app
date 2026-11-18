@@ -252,6 +252,63 @@ describe('ModalGasto — rubros que cambian el formulario', () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 
+  // N1 de la segunda pasada: lo que se ve en los meses es lo que se guarda. Antes «1» guardaba 2,
+  // «150» guardaba 120, vaciar guardaba 12 y cambiar de rubro pisaba lo tipeado, todo sin rojo.
+  async function seguroConMeses(user: ReturnType<typeof userEvent.setup>, tipeado: string) {
+    await elegirRubro(user, 'Seguro')
+    await user.selectOptions(screen.getByLabelText(/^Comprobante/), 'Recibo')
+    poner(/Monto total/, '1320000')
+    poner(/^Fecha/, '2026-10-28')
+    const meses = screen.getByLabelText('Meses del reparto')
+    await user.clear(meses)
+    if (tipeado) await user.type(meses, tipeado)
+    return meses
+  }
+
+  it('los meses tipeados «1» se guardan 1 (el schema admite de 1 a 120)', async () => {
+    const { user, onSave } = renderModal()
+    const meses = await seguroConMeses(user, '1')
+    expect(meses).toHaveValue('1')
+    expect(meses).not.toHaveAttribute('aria-invalid', 'true')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ repartir_meses: 1 })
+  })
+
+  it.each([
+    ['0', 'El reparto es de 1 a 120 meses'],
+    ['150', 'El reparto es de 1 a 120 meses'],
+    ['', 'Poné en cuántos meses se reparte (de 1 a 120)'],
+  ])('los meses «%s» quedan en rojo con su motivo y el gasto no se guarda', async (tipeado, motivo) => {
+    const { user, onSave } = renderModal()
+    const meses = await seguroConMeses(user, tipeado)
+    expect(meses).toHaveValue(tipeado)
+    expect(meses).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByText(motivo)).toBeInTheDocument()
+    const guardar = screen.getByRole('button', { name: 'Guardar gasto' })
+    expect(guardar).toBeDisabled()
+    await user.click(guardar)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('cambiar a un rubro que sugiere otros meses no pisa los meses tipeados', async () => {
+    const rubros = [...RUBROS, rubro({ id: 5, nombre: 'Patente', grupo: 'vehiculos', reparto_sugerido_meses: 3 })]
+    const { user, onSave } = renderModal({ rubros })
+    const meses = await seguroConMeses(user, '6')
+    await elegirRubro(user, 'Patente')
+    expect(meses).toHaveValue('6')
+    await user.click(screen.getByRole('button', { name: 'Guardar gasto' }))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ repartir_meses: 6 })
+  })
+
+  it('sin tocar los meses, cambiar de rubro trae la sugerencia del nuevo', async () => {
+    const rubros = [...RUBROS, rubro({ id: 5, nombre: 'Patente', grupo: 'vehiculos', reparto_sugerido_meses: 3 })]
+    const { user } = renderModal({ rubros })
+    await elegirRubro(user, 'Seguro')
+    expect(screen.getByLabelText('Meses del reparto')).toHaveValue('12')
+    await elegirRubro(user, 'Patente')
+    expect(screen.getByLabelText('Meses del reparto')).toHaveValue('3')
+  })
+
   it('Ingresos brutos propone el mes anterior', async () => {
     const { user } = renderModal()
     poner(/^Fecha/, '2026-10-28')
@@ -1472,7 +1529,7 @@ describe('ModalGasto — el vehículo habitual precargado', () => {
 })
 
 describe('ModalGasto — importes tipeados con puntos de miles', () => {
-  const MENSAJE = 'Escribí el monto con números y hasta dos decimales, por ejemplo 280000 (se ve 280.000) o 280000,50'
+  const MENSAJE = 'Escribí el monto con números, por ejemplo 280000 (se ve 280.000) o 280000,50'
 
   it('280.000 en el monto es doscientos ochenta mil, no 280', async () => {
     const { user, onSave } = renderModal()

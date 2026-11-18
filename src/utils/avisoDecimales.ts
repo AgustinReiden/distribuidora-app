@@ -12,19 +12,25 @@ import { decimalesTipeados, leerDecimalSinMiles, leerNumero, numeroConMiles } fr
 import { redondear } from './calculations'
 import { formatPrecio } from './formatters'
 
-/** Los dígitos de lo tipeado, como entero: «1,500» → «1500». */
-const digitosDe = (texto: string): string => texto.replace(/\D/g, '').replace(/^0+(?=\d)/, '')
-
 /**
  * El aviso de la plata con más decimales que los que guarda, o null: «Se guarda $ 1,50. Para
  * $ 1.500 escribí 1500.». Lo que dice que se guarda es el número al centavo (`redondear`, medio
  * hacia afuera), que es lo que guarda el campo.
+ *
+ * La segunda mitad sale sólo cuando lo tipeado parece la costumbre de los miles (N11 de la segunda
+ * pasada de #1644): exactamente tres decimales detrás de uno a tres dígitos («1,500», «280,000»).
+ * Con cuatro decimales («1,0049») o con «0,005» no hay un número de miles que sugerir. El signo se
+ * conserva en los campos que aceptan negativos.
  */
 export function avisoPlataDecimalesDeMas(texto: string, decimales = 2): string | null {
   const n = leerNumero(texto)
   if (n === null || decimalesTipeados(texto) <= decimales) return null
-  const digitos = digitosDe(texto)
-  return `Se guarda ${formatPrecio(redondear(n, decimales))}. Para ${formatPrecio(Number(digitos))} escribí ${digitos}.`
+  const seGuarda = `Se guarda ${formatPrecio(redondear(n, decimales))}.`
+  const costumbre = /^\s*[-−]?\s*\$?\s*-?([1-9]\d{0,2})[.,](\d{3})\s*$/.exec(texto)
+  if (!costumbre) return seGuarda
+  const digitos = `${costumbre[1]}${costumbre[2]}`
+  const signo = n < 0 ? '-' : ''
+  return `${seGuarda} Para ${formatPrecio(Number(signo + digitos))} escribí ${signo}${digitos}.`
 }
 
 /**

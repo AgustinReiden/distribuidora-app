@@ -60,6 +60,8 @@ import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useR
 
 const MENSAJE_SIN_EMPLEADO = 'Elegí qué empleado pagó el gasto'
 const MENSAJE_SIN_RENDICION = 'Elegí de qué rendición salió la plata: el transportista y el día'
+const MENSAJE_MESES_RANGO = 'El reparto es de 1 a 120 meses'
+const MENSAJE_MESES_VACIO = 'Poné en cuántos meses se reparte (de 1 a 120)'
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
 // para el incidente de chunk desincronizado que motivó la regla.
@@ -469,16 +471,27 @@ export default function ModalGasto({
   // ---- Mes y reparto ------------------------------------------------------
   const [mesManual, setMesManual] = useState<string | null>(ini?.mes_imputado ?? null)
   const [repartirManual, setRepartirManual] = useState<boolean | null>(ini ? ini.repartir_meses > 1 : null)
-  const [mesesManual, setMesesManual] = useState<number | null>(ini && ini.repartir_meses > 1 ? ini.repartir_meses : null)
-  // Lo tipeado en los meses (H11 de la segunda lente): «1,5» quedaba 15. Ahora es un entero o rojo.
-  const [mesesTxt, setMesesTxt] = useState<string | null>(null)
+  // Lo tipeado en los meses, o null mientras no se tocaron (se ve la sugerencia del rubro). Lo que
+  // se ve es lo que se guarda (N1 de la segunda lente): fuera de 1 a 120, vacío o con coma, el campo
+  // queda en rojo con su motivo y frena el guardado; nada de topear ni de volver a un default callado.
+  const [mesesTxt, setMesesTxt] = useState<string | null>(ini && ini.repartir_meses > 1 ? String(ini.repartir_meses) : null)
   const [mostrarMes, setMostrarMes] = useState(false)
 
   const sugerencia = rubro?.reparto_sugerido_meses ?? null
   const mesImputado = mesManual ?? mesSugerido(fecha, { sugiere_mes_anterior: rubro?.sugiere_mes_anterior ?? false })
   const repartir = repartirManual ?? sugerencia != null
-  const nMeses = Math.min(120, Math.max(2, mesesManual ?? sugerencia ?? 2))
-  const repartirMeses = repartir ? nMeses : 1
+  // La sugerencia del rubro (o 2 al tildar «Repartir» en uno que no sugiere) es lo que se precarga;
+  // el tope va sobre la sugerencia, nunca sobre lo tipeado.
+  const mesesSugeridos = Math.min(120, Math.max(2, sugerencia ?? 2))
+  const mesesLeidos = mesesTxt === null ? mesesSugeridos : leerEntero(mesesTxt)
+  const motivoMeses = !repartir || mesesTxt === null
+    ? null
+    : mesesTxt.trim() === ''
+      ? MENSAJE_MESES_VACIO
+      : motivoEnteroTipeado(mesesTxt) ?? (mesesLeidos === null || mesesLeidos < 1 || mesesLeidos > 120 ? MENSAJE_MESES_RANGO : null)
+  const mesesValidos = motivoMeses === null && mesesLeidos !== null
+  // Con los meses en rojo no se guarda (lo frena el registro); para la cuenta de la pantalla vale 1.
+  const repartirMeses = repartir && mesesValidos && mesesLeidos !== null ? mesesLeidos : 1
   const bloqueMesAbierto = mostrarMes || repartir || Boolean(rubro?.sugiere_mes_anterior)
   const mesFin = sumarMeses(mesImputado, repartirMeses - 1)
   const rangoMes = rangoMesImputado(fecha)
@@ -518,7 +531,7 @@ export default function ModalGasto({
     // El rubro nuevo trae sus propias sugerencias de mes y de reparto.
     setMesManual(null)
     setRepartirManual(null)
-    setMesesManual(null)
+    // Los meses que el usuario tipeó no se pisan: el rubro nuevo sólo sugiere si no se tocaron.
   }
 
   const crearRubro = async () => {
@@ -654,7 +667,7 @@ export default function ModalGasto({
     }
   }
 
-  const cuotaMensual = repartir ? cuotaDeGasto(costo, repartirMeses, 1) : null
+  const cuotaMensual = repartir && mesesValidos ? cuotaDeGasto(costo, repartirMeses, 1) : null
 
   return (
     <ModalBase
@@ -733,9 +746,9 @@ export default function ModalGasto({
             <label htmlFor={`${id}-monto`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Monto total <span className="text-red-500">*</span>
             </label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">$</span>
+            <div>
               <InputMonto
+                prefijo="$"
                 id={`${id}-monto`}
                 value={montoTxt}
                 onChange={setMontoTxt}
@@ -1127,11 +1140,9 @@ export default function ModalGasto({
                   entero
                   aria-label="Meses del reparto"
                   disabled={!repartir}
-                  value={mesesTxt ?? String(nMeses)}
-                  onChange={t => {
-                    setMesesTxt(t)
-                    setMesesManual(leerEntero(t))
-                  }}
+                  value={mesesTxt ?? String(mesesSugeridos)}
+                  motivo={motivoMeses}
+                  onChange={setMesesTxt}
                   className="w-16 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-md text-right dark:bg-gray-700 dark:text-white disabled:opacity-50"
                 />
                 meses

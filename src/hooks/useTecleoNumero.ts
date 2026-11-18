@@ -13,6 +13,18 @@
 import { useCallback, useLayoutEffect, useRef, type ChangeEvent } from 'react'
 import { formatearTecleo, type OpcionesTecleo } from '../utils/normalizarNumero'
 
+/**
+ * ¿Este cambio es un pegado (o algo soltado), y no una tecla? Lo dice el evento nativo
+ * (`inputType`, N8 de la segunda pasada de #1644): pegar «1,500» sobre «15.000» seleccionado deja un
+ * texto más corto, y medirlo por el largo lo tomaba por tipeo. Sin `inputType` (un `change`
+ * sintético), cuenta el largo: más de un carácter de una vez es un pegado.
+ */
+export function esPegado(e: ChangeEvent<HTMLInputElement>, anterior: string): boolean {
+  const tipo = (e.nativeEvent as InputEvent | undefined)?.inputType
+  if (tipo) return tipo.startsWith('insertFromPaste') || tipo === 'insertFromDrop'
+  return e.target.value.length - anterior.length > 1
+}
+
 export function useTecleoNumero(
   opciones: Pick<OpcionesTecleo, 'negativo'> = {},
 ): (anterior: string, e: ChangeEvent<HTMLInputElement>) => string {

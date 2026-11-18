@@ -43,6 +43,7 @@ import {
 } from 'react'
 import { numeroEditable, redondear } from '../../utils/calculations'
 import { useAnotarIlegible } from '../../hooks/useRegistroIlegibles'
+import { esPegado } from '../../hooks/useTecleoNumero'
 import { CLASES_AVISO_DECIMALES, avisoPlataDecimalesDeMas } from '../../utils/avisoDecimales'
 import {
   MENSAJE_ENTERO_CON_COMA,
@@ -195,7 +196,16 @@ export function NumberInput({
   // el último pedazo legible («1.200» tipeado pasaba por «1», y Guardar guardaba 1).
   const antesDeTipear = useRef<number | null>(value)
   const restaurar = (): void => {
-    if (antesDeTipear.current !== null && enviado.current !== antesDeTipear.current) enviar(antesDeTipear.current)
+    const antes = antesDeTipear.current
+    if (enviado.current === antes) return
+    if (antes !== null) {
+      enviar(antes)
+      return
+    }
+    // Estaba vacío (N9 de la segunda pasada): vuelve a vacío, no se queda con el pedazo legible.
+    enviado.current = null
+    if (onVaciar) onVaciar()
+    else if (emptyValue !== undefined) enviar(emptyValue)
   }
 
   const handleChange = (e: ChangeEvent<HTMLInputElement>): void => {
@@ -212,8 +222,8 @@ export function NumberInput({
       next = r.texto
     }
     if (draft === null) antesDeTipear.current = value
-    // Más de un carácter de una vez es un pegado: con formato de plata no tiene nada que avisar.
-    setPegado(crudo.length - display.length > 1)
+    // Un pegado (lo dice el evento, N8) viene con formato de plata: no tiene nada que avisar.
+    setPegado(esPegado(e, display))
     setDraft(next)
     setAviso(null)
     setAvisoGuardado(null)
@@ -292,7 +302,7 @@ export function NumberInput({
   const error = motivo(draft)
   const invalido = error !== null
   // En el registro del formulario: no se guarda mientras esté en rojo.
-  const conRegistro = useAnotarIlegible(error)
+  const conRegistro = useAnotarIlegible(error, inputRef)
   const mensaje = error ?? aviso
 
   const avisado = useRef(true)
