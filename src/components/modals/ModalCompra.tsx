@@ -1726,8 +1726,8 @@ function ModalCompraEditar({
     if (ilegibles.hay) return
     dispatch({ type: 'SET_ERROR', payload: '' })
     // FRT-1 (#1517): sin los vencimientos de la compra precargados, guardar
-    // mandaría la foto vacía (la edición llama a sincronizar_lotes_compra
-    // siempre) y los borraría. Los lotes llegan del container sólo cuando hay
+    // mandaría la foto vacía (la edición manda siempre la foto de los
+    // vencimientos) y los borraría. Los lotes llegan del container sólo cuando hay
     // una lectura hecha con la edición abierta.
     if (!vencimientosPrecargados.current) {
       dispatch({ type: 'SET_ERROR', payload: 'Todavía no se cargaron los vencimientos de la compra: guardar ahora los borraría. Esperá un momento y volvé a guardar; si no cargan, cerrá la compra y volvé a abrirla.' })

@@ -334,17 +334,18 @@ describe('el payload de p_items al registrar (#1077)', () => {
 describe('editar una compra sincroniza los lotes siempre', () => {
   beforeEach(() => rpc.mockReset())
 
-  it('llama a sincronizar_lotes_compra aunque ninguna línea traiga vencimientos', async () => {
-    // La RPC recibe la FOTO completa de los lotes de la factura: una lista
+  it('manda los lotes aunque ninguna línea traiga vencimientos, en la misma llamada', async () => {
+    // El server recibe la FOTO completa de los lotes de la factura: una lista
     // vacía es la forma de borrar los que había. En el alta, sin vencimientos
-    // ni se llama; en la edición se llama siempre (forzar = true).
-    rpc.mockResolvedValue({ data: { success: true, compra_id: '221' }, error: null })
+    // ni se llama; en la edición van siempre, con la edición (STK-13: una sola
+    // llamada, una sola transacción).
+    rpc.mockResolvedValue({ data: { success: true, compra_id: '221', lotes_sincronizados: true }, error: null })
     const { result } = setup(useActualizarCompraMutation)
 
     await result.current.mutateAsync({ ...edicion, items: [{ ...edicion.items[0], vencimientos: [] }] })
 
-    expect(rpc.mock.calls.map(c => c[0])).toEqual(['actualizar_compra_items', 'sincronizar_lotes_compra'])
-    expect(rpc.mock.calls[1][1]).toEqual({ p_compra_id: '221', p_lotes: [] })
+    expect(rpc.mock.calls.map(c => c[0])).toEqual(['actualizar_compra_items'])
+    expect((rpc.mock.calls[0][1] as { p_lotes: unknown }).p_lotes).toEqual([])
   })
 })
 
