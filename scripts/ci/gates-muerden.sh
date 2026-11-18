@@ -103,6 +103,19 @@ muerde "Mensajes de trigger: un RAISE con el nombre de un cliente leído con NEW
   "CREATE FUNCTION public.zz_gate_trg() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS \$f\$ DECLARE v_n text; BEGIN SELECT razon_social INTO v_n FROM clientes WHERE id = NEW.cliente_id; RAISE EXCEPTION 'El cliente % ya tiene pedido', v_n; END \$f\$" \
   "DROP FUNCTION IF EXISTS public.zz_gate_trg()"
 
+muerde "search_path: una definer con SET search_path TO 'public' (sin pg_temp)" check-search-path.mjs zz_gate_sp \
+  "CREATE FUNCTION public.zz_gate_sp() RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public' AS \$f\$ SELECT EXISTS (SELECT 1 FROM perfiles WHERE id = auth.uid()) \$f\$; REVOKE EXECUTE ON FUNCTION public.zz_gate_sp() FROM PUBLIC, anon, authenticated" \
+  "DROP FUNCTION IF EXISTS public.zz_gate_sp()"
+
+muerde "search_path: una definer con pg_temp, pero no al final" check-search-path.mjs zz_gate_sp_medio \
+  "CREATE FUNCTION public.zz_gate_sp_medio() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path TO 'pg_temp', 'public' AS \$f\$ SELECT 1 \$f\$; REVOKE EXECUTE ON FUNCTION public.zz_gate_sp_medio() FROM PUBLIC, anon, authenticated" \
+  "DROP FUNCTION IF EXISTS public.zz_gate_sp_medio()"
+
+# Lo que el gate tiene que dejar pasar: pg_temp al final (con otro esquema en el medio), y una INVOKER sin search_path.
+no_muerde "search_path: pg_temp al final, o una INVOKER sin search_path, pasan" check-search-path.mjs \
+  "CREATE FUNCTION public.zz_gate_sp_bien() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path TO 'public', 'pg_catalog', 'pg_temp' AS \$f\$ SELECT 1 \$f\$; REVOKE EXECUTE ON FUNCTION public.zz_gate_sp_bien() FROM PUBLIC, anon, authenticated; CREATE FUNCTION public.zz_gate_sp_invoker() RETURNS int LANGUAGE sql AS \$f\$ SELECT 1 \$f\$; REVOKE EXECUTE ON FUNCTION public.zz_gate_sp_invoker() FROM PUBLIC, anon, authenticated" \
+  "DROP FUNCTION IF EXISTS public.zz_gate_sp_bien(); DROP FUNCTION IF EXISTS public.zz_gate_sp_invoker()"
+
 muerde "Cruce por ids: una RPC que cambia un cliente de otra sucursal" check-cruce-ids.mjs zz_gate_cruce \
   "CREATE FUNCTION public.zz_gate_cruce(p_cliente_id bigint) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS \$f\$ BEGIN UPDATE clientes SET direccion = 'tocada' WHERE id = p_cliente_id; END \$f\$; GRANT EXECUTE ON FUNCTION public.zz_gate_cruce(bigint) TO authenticated" \
   "DROP FUNCTION IF EXISTS public.zz_gate_cruce(bigint)"

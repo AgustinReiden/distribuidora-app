@@ -79,6 +79,7 @@ correr "Espejo de motivos de NC de venta"     node scripts/espejo-motivos-nc-ven
 # Los que leen el catálogo directo.
 correr "Realtime"                            node scripts/check-realtime.mjs
 correr "Mensajes de error de los triggers"   node scripts/check-mensajes-trigger.mjs
+correr "search_path de las definer"          node scripts/check-search-path.mjs
 correr "auditoria_integridad() estructural"  node scripts/ci/auditoria-local.mjs
 # Arma datos (que se deshacen): va último.
 correr "Cruce por ids de otra sucursal"      node scripts/check-cruce-ids.mjs

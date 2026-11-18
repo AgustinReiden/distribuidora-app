@@ -135,3 +135,34 @@ export const SQL_ROL_SIN_ACTIVO_SIN_API = String.raw`
       SELECT jsonb_agg(jsonb_build_object('firma', firma, 'definer', definer, 'lectura', lectura)
                        ORDER BY firma, lectura)
         FROM lecturas), '[]'::jsonb))`;
+
+// ------------------------------------------- search_path de las definer ---
+
+/**
+ * El search_path de una SECURITY DEFINER de public (1564-b8 y 1564-g4, plan #1603 B15).
+ * Sin `pg_temp` escrito, Postgres busca PRIMERO en el esquema temporal de la sesión las
+ * tablas, vistas, secuencias y tipos (las funciones y los operadores, no): quien llama crea
+ * una tabla temporal `perfiles` y `es_admin()`, que corre como postgres, la lee (lo reproduce
+ * scripts/test-search-path-ola2-1603.sql). Con `pg_temp` AL FINAL se busca último.
+ * `proconfig` es el array de pg_proc (`["search_path=public, pg_temp", …]`), que Postgres
+ * guarda con los elementos separados por «, ». Devuelve null si está bien, o el motivo.
+ */
+export function problemaDeSearchPath(proconfig) {
+  const sp = (proconfig ?? []).find((c) => c.startsWith('search_path='));
+  if (sp === undefined) return 'no fija search_path: usa el de quien la llama';
+  const valor = sp.slice('search_path='.length);
+  const elementos = valor.split(', ');
+  if (elementos[elementos.length - 1] === 'pg_temp') return null;
+  return elementos.includes('pg_temp')
+    ? `su search_path (${valor}) tiene pg_temp, pero no al final`
+    : `su search_path (${valor}) no termina en pg_temp`;
+}
+
+/** Las SECURITY DEFINER de public con su proconfig. Devuelve un jsonb [{firma, proconfig}]. */
+export const SQL_SEARCH_PATH_DEFINER = String.raw`
+SELECT COALESCE(jsonb_agg(jsonb_build_object('firma', p.oid::regprocedure::text,
+                                             'proconfig', COALESCE(to_jsonb(p.proconfig), '[]'::jsonb))
+                          ORDER BY p.oid::regprocedure::text), '[]'::jsonb)
+  FROM pg_proc p
+ WHERE p.pronamespace = 'public'::regnamespace
+   AND p.prosecdef`;
