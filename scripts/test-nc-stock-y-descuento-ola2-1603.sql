@@ -1,6 +1,6 @@
 -- Ensayo de la tarjeta B22 de la ola 2 del plan #1603: la nota de crédito de venta mueve la mercadería
 -- según su motivo (y anularla lo deshace), y el descuento comercial se carga por monto, sin unidades
--- (pedidos del dueño del 17 y 18/11). Migración: NNN_nc_venta_mercaderia_y_descuento_por_monto.
+-- (pedidos del dueño del 17 y 18/11). Migración: 530_nc_venta_mercaderia_y_descuento_por_monto.
 --
 -- Un único DO con datos propios (una sucursal nueva, su vendedor, un cliente, productos con lotes y
 -- boletas entregadas) que termina SIEMPRE en una excepción: no deja rastro (salvo valores de secuencia).
