@@ -264,10 +264,12 @@ describe('ModalLiquidar', () => {
     expect(mockLiquidar).not.toHaveBeenCalled()
   })
 
-  it("'280.000' se lee como 280000, las letras no entran y un monto ilegible avisa", async () => {
+  // B20 (D17, cambió de regla): «280000» se ve «280.000»; el punto tipeado es la coma decimal.
+  it("'280000' se ve '280.000' y se lee 280000, las letras no entran y un monto ilegible avisa", async () => {
     const { user } = renderModal()
     await user.clear(campoPago())
-    await user.type(campoPago(), '280.000')
+    await user.type(campoPago(), '280000')
+    expect(campoPago().value).toBe('280.000')
     await user.click(screen.getByRole('button', { name: 'Confirmar y registrar el pago' }))
     expect(mockLiquidar).toHaveBeenCalledWith({
       empleadoId: 7,
@@ -278,7 +280,7 @@ describe('ModalLiquidar', () => {
     await user.clear(campoPago())
     await user.type(campoPago(), 'doscientos')
     expect(campoPago().value).toBe('')
-    await user.type(campoPago(), '280,000')
+    await user.type(campoPago(), '280,000,5') // B20: tres decimales ya no es ilegible (se guarda con aviso); dos comas, sí
     await user.click(screen.getByRole('button', { name: 'Confirmar y registrar el pago' }))
     expect(screen.getByRole('alert')).toHaveTextContent('Escribí el monto con números')
     expect(mockLiquidar).not.toHaveBeenCalled()

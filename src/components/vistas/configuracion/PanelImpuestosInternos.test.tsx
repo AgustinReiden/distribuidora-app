@@ -38,6 +38,32 @@ import PanelImpuestosInternos from './PanelImpuestosInternos'
 describe('PanelImpuestosInternos (mig 277)', () => {
   beforeEach(() => vi.clearAllMocks())
 
+  // Punto 9 de la segunda pasada (#1655): lo tipeado y no guardado levanta la marca de trabajo en
+  // curso, y la actualización obligatoria de la app no recarga encima.
+  it('una tasa tipeada sin guardar levanta la marca de trabajo en curso', async () => {
+    const { motivosDeTrabajoEnCurso, _resetTrabajoEnCursoParaTests } = await import('../../../utils/trabajoEnCurso')
+    _resetTrabajoEnCursoParaTests()
+    const user = userEvent.setup()
+    render(<PanelImpuestosInternos esAdmin />)
+    await user.click(screen.getAllByRole('button', { name: 'Cambiar tasa' })[0])
+    expect(motivosDeTrabajoEnCurso()).toEqual([])
+    await user.type(screen.getByLabelText('Tasa nominal (%)'), '10')
+    expect(motivosDeTrabajoEnCurso()).toContain('impuestos internos: tasa sin guardar')
+    await user.clear(screen.getByLabelText('Tasa nominal (%)'))
+    expect(motivosDeTrabajoEnCurso()).toEqual([])
+  })
+
+  it('un encuadre nuevo con el nombre tipeado levanta la marca', async () => {
+    const { motivosDeTrabajoEnCurso, _resetTrabajoEnCursoParaTests } = await import('../../../utils/trabajoEnCurso')
+    _resetTrabajoEnCursoParaTests()
+    const user = userEvent.setup()
+    render(<PanelImpuestosInternos esAdmin />)
+    await user.click(screen.getByRole('button', { name: /Nuevo encuadre/ }))
+    expect(motivosDeTrabajoEnCurso()).toEqual([])
+    await user.type(screen.getByLabelText(/Nombre/), 'Con jugo')
+    expect(motivosDeTrabajoEnCurso()).toContain('impuestos internos: encuadre sin guardar')
+  })
+
   it('muestra la tasa nominal y la efectiva sobre el neto', () => {
     render(<PanelImpuestosInternos esAdmin={false} />)
     expect(screen.getByText('8% nominal')).toBeInTheDocument()

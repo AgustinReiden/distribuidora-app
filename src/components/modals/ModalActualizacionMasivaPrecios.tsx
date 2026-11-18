@@ -3,6 +3,7 @@ import type { ChangeEvent } from 'react'
 import { Percent, Search, AlertTriangle, TrendingUp, TrendingDown } from 'lucide-react'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
+import { leerDecimalSinMiles, teclearNumero } from '../../utils/normalizarNumero'
 import { useActualizarPreciosMasivoMutation } from '../../hooks/queries'
 import { useGruposPrecioQuery } from '../../hooks/queries/useGruposPrecioQuery'
 import { leerPreciosVigentes } from '../../hooks/queries/preciosVigentes'
@@ -78,7 +79,8 @@ export default function ModalActualizacionMasivaPrecios({
     [productosEnCache, frescos]
   )
 
-  const porcentaje = parseFloat(porcentajeStr.replace(',', '.'))
+  // Un porcentaje (B20, D17): sin miles, con menos; la tecla del punto es la coma.
+  const porcentaje = leerDecimalSinMiles(porcentajeStr) ?? NaN
   // Una rebaja del 100 % o más deja el precio en 0 o negativo: no es un porcentaje válido.
   const porcentajeValido = !isNaN(porcentaje) && porcentaje !== 0 && porcentaje > -100
 
@@ -268,8 +270,9 @@ export default function ModalActualizacionMasivaPrecios({
   }, [productosAActualizar, porcentaje, mutation, notify, onClose, aplicarEscalas, escalas.aplicables, multiplo, referencia, grupos, seleccionados])
 
   const handlePorcentajeChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const v = e.target.value
-    // Permitir vacío, signo negativo, dígitos, punto/coma decimal
+    // La tecla del punto se escribe como coma (B20, D17). Permitir vacío, signo negativo, dígitos y
+    // un separador decimal.
+    const v = teclearNumero(porcentajeStr, e.target.value, e.target.selectionStart ?? undefined)
     if (v === '' || /^-?\d*[.,]?\d*$/.test(v)) {
       setPorcentajeStr(v)
     }

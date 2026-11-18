@@ -114,9 +114,10 @@ export default function CargoEmpleados({ costo, value, onChange, usuarioId = nul
                 .filter(e => !tomados.has(e.id))
                 .map(e => <option key={e.id} value={String(e.id)}>{e.nombre}</option>)}
             </Lista>
-            <div className="relative w-36 shrink-0">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">$</span>
+            <div className="w-36 shrink-0">
               <InputMonto
+                prefijo="$"
+                avisoCorto
                 aria-label={`Monto a cargo ${i + 1}`}
                 value={linea.monto}
                 onChange={texto => cambiarMonto(i, texto)}

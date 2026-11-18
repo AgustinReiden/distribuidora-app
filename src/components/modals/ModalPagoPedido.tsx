@@ -45,6 +45,9 @@ import CampoQuienRepartio from './CampoQuienRepartio'
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion'
 import type { EleccionChofer } from '../../utils/choferDeEntrega'
 import type { PedidoDB, PagoDBWithUsuario, PerfilDB } from '../../types'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
+import { useClavesDeRenglones } from '../../hooks/useClavesDeRenglones'
 
 export interface PagoPedidoPayload {
   pedidoId: string
@@ -173,6 +176,8 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   onClose,
   guardando,
 }: ModalPagoPedidoProps) {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   const yaPagado = useMemo(
     () => pagosPrevios.reduce((s, p) => s + (p.monto || 0), 0),
     [pagosPrevios],
@@ -224,6 +229,18 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   // valor prellenado ahi, un pedido a medias cobrar se abria pidiendo el total,
   // en rojo y con el boton muerto: habia que borrar y retipear a mano. El
   // efecto de abajo lo completa cuando los pagos previos ya estan.
+  // N11 de la segunda pasada: «Se registra» no muestra el monto de antes de un renglón en rojo.
+  // Por clave del renglón (T6), no por índice: quitar uno no desfasa los demás.
+  const [lineasEnRojo, setLineasEnRojo] = useState<ReadonlySet<number>>(new Set())
+  const marcarLineaEnRojo = (clave: number, valido: boolean): void => {
+    setLineasEnRojo(prev => {
+      if (valido === !prev.has(clave)) return prev
+      const sig = new Set(prev)
+      if (valido) sig.delete(clave)
+      else sig.add(clave)
+      return sig
+    })
+  }
   const [lineas, setLineas] = useState<LineaPago[]>(
     sinConfirmar
       ? sinConfirmar.pagos.map(p => ({ formaPago: p.formaPago, monto: p.monto.toFixed(2) }))
@@ -285,6 +302,10 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   const excedeSaldo = totalIngresado > saldoPendiente + 0.001
   const algunMontoValido = lineas.some(l => parsePrecio(l.monto) > 0)
 
+  // T6 de la tercera pasada: claves estables por renglón (con el índice, quitar uno le pasaba el
+  // borrador en rojo al de abajo).
+  const clavesLineas = useClavesDeRenglones(lineas.length)
+
   const handleAgregarLinea = (): void => {
     // Auto-sugerir el saldo restante: cliente pidio que el monto del nuevo
     // renglon se prellene con (saldo - sumaActual). Sigue siendo editable.
@@ -293,10 +314,12 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
       ...prev,
       { formaPago: 'transferencia', monto: restante > 0 ? restante.toFixed(2) : '' },
     ])
+    clavesLineas.agregar()
   }
 
   const handleQuitarLinea = (index: number): void => {
     setLineas(prev => prev.filter((_, i) => i !== index))
+    clavesLineas.quitar(index)
   }
 
   const handleLineaChange = (index: number, patch: Partial<LineaPago>): void => {
@@ -304,6 +327,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   }
 
   const handleSubmit = async (): Promise<void> => {
+    if (ilegibles.hay) return
     if (enVueloRef.current) return
     setError('')
     if (pagosPreviosFallaron) {
@@ -447,6 +471,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   }
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase
       title={modoEntregaTransportista ? `Entregar Pedido #${pedido.id}` : `Registrar Pago — Pedido #${pedido.id}`}
       description="Registrar o anular pagos del pedido. Cada forma de pago se guarda como un movimiento separado."
@@ -722,7 +747,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
               </div>
               <div className="space-y-2">
                 {lineas.map((linea, index) => (
-                  <div key={index} className="flex items-center gap-2">
+                  <div key={clavesLineas.de(index)} className="flex items-center gap-2">
                     <select
                       value={linea.formaPago}
                       onChange={e => handleLineaChange(index, { formaPago: e.target.value })}
@@ -741,11 +766,12 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                           commitOnChange
                           value={Number(linea.monto) || 0}
                           onChange={(n) => handleLineaChange(index, { monto: String(n) })}
+                          onValidez={valido => marcarLineaEnRojo(clavesLineas.de(index), valido)}
                           placeholder="0.00"
                           className="w-full pl-6 pr-2 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white font-semibold"
                         />
                       </div>
-                      <MontoLeido monto={parsePrecio(linea.monto)} />
+                      <MontoLeido monto={lineasEnRojo.has(clavesLineas.de(index)) ? 0 : parsePrecio(linea.monto)} />
                     </div>
                     {lineas.length > 1 && (
                       <button
@@ -799,6 +825,8 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
         </div>
       )}
 
+      {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+      <AvisoCamposEnRojo className="mb-2" />
       <div className="flex flex-wrap justify-end gap-2 p-4 border-t bg-gray-50 dark:bg-gray-800">
         <Button variant="ghost" size="md" onClick={onClose}>
           Cancelar
@@ -838,7 +866,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
             variant="primary"
             size="md"
             onClick={() => { void handleSubmit() }}
-            disabled={guardando || loadingPagosPrevios || pagosPreviosFallaron || excedeSaldo || !algunMontoValido || faltaChofer}
+            disabled={guardando || loadingPagosPrevios || pagosPreviosFallaron || excedeSaldo || !algunMontoValido || faltaChofer || ilegibles.hay}
             loading={guardando}
           >
             {modoEntregaTransportista ? 'Entregar y registrar pago' : 'Registrar pago'}
@@ -847,6 +875,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
       </div>
       <ModalConfirmacion config={confirmConfig} onClose={() => setConfirmConfig(null)} />
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   )
 })
 

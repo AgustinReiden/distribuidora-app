@@ -31,6 +31,10 @@ import { useNotification } from '../../contexts/NotificationContext'
 import { bolsaSinVencimiento, formatearFechaVencimiento } from '../../utils/vencimientos'
 import BadgeVencimiento from '../vencimientos/BadgeVencimiento'
 import { Button } from '../ui/Button'
+import { CampoNumero } from '../ui/CampoNumero'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
+import { leerEntero, numeroConMiles } from '../../utils/normalizarNumero'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 
 export interface ProductoLotesProps {
   /** Producto en edición. Sin id (alta nueva) la sección no se muestra. */
@@ -51,6 +55,9 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
 
   const crearLote = useCrearLoteManualMutation()
   const ajustarLote = useAjustarLoteMutation()
+  // Su propio registro (N7 de la segunda pasada): una cantidad de lote en rojo no frena el Guardar
+  // de la ficha del producto. Los guardar de acá releen con `leerEntero`, el lector del rojo.
+  const ilegibles = useRegistroIlegibles()
 
   // Etiquetar es una tarea de depósito: es quien camina el galpón y ve la caja.
   // Corregir un contador es administración. La RPC vuelve a chequear las dos
@@ -72,7 +79,8 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
   const bolsa = bolsaSinVencimiento(stock, asignado)
 
   async function guardarLoteNuevo() {
-    const cantidad = Number(cantidadNueva)
+    // Un entero, con los miles que pone el campo (B20, D17); con coma no es una cantidad.
+    const cantidad = leerEntero(cantidadNueva) ?? NaN
     if (!fechaNueva) {
       notify.error('Falta la fecha de vencimiento')
       return
@@ -97,9 +105,9 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
   }
 
   async function guardarAjuste(loteId: number) {
-    const restante = Number(restanteEditado)
+    const restante = leerEntero(restanteEditado) ?? NaN
     if (!Number.isFinite(restante) || restante < 0) {
-      notify.error('La cantidad no puede ser negativa')
+      notify.error('Escribí las unidades que quedan, sin coma')
       return
     }
     try {
@@ -112,6 +120,7 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
   }
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <section className="border-t dark:border-gray-700 pt-4">
       <div className="flex items-center justify-between gap-2 mb-2">
         <h3 className="text-sm font-medium flex items-center gap-1.5 dark:text-white">
@@ -152,20 +161,20 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
             <label htmlFor="lote-cantidad" className="block text-xs text-stone-500 dark:text-gray-400 mb-0.5">
               Unidades (hay {bolsa})
             </label>
-            <input
+            <CampoNumero
               id="lote-cantidad"
-              type="number"
-              min={1}
-              max={bolsa}
+              entero
               value={cantidadNueva}
-              onChange={e => setCantidadNueva(e.target.value)}
+              onChange={setCantidadNueva}
               className="w-24 px-2 py-1 border rounded text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white"
             />
           </div>
+          {/* T2: lo que frena este Guardar, y «Ir al campo». */}
+          <AvisoCamposEnRojo className="w-full basis-full" />
           <Button
             type="button"
-            onClick={() => void guardarLoteNuevo()}
-            disabled={crearLote.isPending}
+            onClick={() => { if (!ilegibles.hay) void guardarLoteNuevo() }}
+            disabled={crearLote.isPending || ilegibles.hay}
             loading={crearLote.isPending}
             variant="primary"
             size="sm"
@@ -209,19 +218,17 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
               />
               {editando === lote.id ? (
                 <span className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    min={0}
-                    max={lote.cantidad}
+                  <CampoNumero
+                    entero
                     value={restanteEditado}
-                    onChange={e => setRestanteEditado(e.target.value)}
+                    onChange={setRestanteEditado}
                     aria-label="Unidades que quedan"
                     className="w-20 px-2 py-0.5 border rounded text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white"
                   />
                   <button
                     type="button"
-                    onClick={() => void guardarAjuste(lote.id)}
-                    disabled={ajustarLote.isPending}
+                    onClick={() => { if (!ilegibles.hay) void guardarAjuste(lote.id) }}
+                    disabled={ajustarLote.isPending || ilegibles.hay}
                     aria-label="Guardar corrección"
                     className="p-1 text-green-600 hover:text-green-700 disabled:opacity-50"
                   >
@@ -255,7 +262,7 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
                   {puedeCorregir && (
                     <button
                       type="button"
-                      onClick={() => { setEditando(lote.id); setRestanteEditado(String(lote.cantidad_restante)) }}
+                      onClick={() => { setEditando(lote.id); setRestanteEditado(numeroConMiles(Number(lote.cantidad_restante))) }}
                       aria-label={`Corregir el contador del lote que vence el ${formatearFechaVencimiento(lote.fecha_vencimiento)}`}
                       className="p-1 text-stone-400 hover:text-blue-600"
                     >
@@ -280,5 +287,6 @@ export default function ProductoLotes({ productoId, stock }: ProductoLotesProps)
         </span>
       </p>
     </section>
+    </RegistroIlegiblesContext.Provider>
   )
 }

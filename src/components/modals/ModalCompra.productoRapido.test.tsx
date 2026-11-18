@@ -241,3 +241,24 @@ describe('ModalCompra — alta rápida: impuestos internos', () => {
     expect(await screen.findAllByText('4,1667%')).not.toHaveLength(0)
   })
 })
+
+// T1 y T2 de la tercera pasada: el alta rápida tiene su propio registro. Un costo en rojo frena
+// «Crear y Agregar» (antes creaba el producto con el costo de antes) y dice por qué; el Guardar de
+// la compra no se entera.
+describe('ModalCompra — alta rápida: un costo en rojo', () => {
+  it('«1.234.5» en el costo frena «Crear y Agregar» y no crea nada', async () => {
+    const { user, onCrearProductoRapido } = renderModal()
+    await abrirAltaRapida(user)
+    await user.type(screen.getByPlaceholderText('Nombre del producto'), 'PAPEL')
+    const caja = screen.getByText('Crear producto rapido').closest('.bg-blue-50') as HTMLElement
+    const costo = within(caja).getByPlaceholderText('0.00')
+    await user.click(costo)
+    await user.keyboard('1.234.5')
+    expect(costo).toHaveAttribute('aria-invalid', 'true')
+    const crearBoton = screen.getByRole('button', { name: /crear y agregar/i })
+    expect(crearBoton).toBeDisabled()
+    expect(screen.getByText('Hay un campo en rojo para corregir')).toBeInTheDocument()
+    await user.click(crearBoton)
+    expect(onCrearProductoRapido).not.toHaveBeenCalled()
+  })
+})

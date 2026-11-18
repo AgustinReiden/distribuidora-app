@@ -355,7 +355,7 @@ describe("ModalCompra modo 'ver': cargos, costo guardado y variación", () => {
     })
     expect(screen.getByRole('checkbox', { name: /Viene con factura del transportista/ })).toBeChecked()
     const iva = screen.getByLabelText('IVA de la factura')
-    expect(iva).toHaveValue('1890')
+    expect(iva).toHaveValue('1.890')
     expect(iva).toBeDisabled()
     expect(screen.getByLabelText('Transportista')).toHaveValue('Transportes Sintéticos')
     expect(screen.getByLabelText('N° de comprobante')).toHaveValue('A-0001-00000042')

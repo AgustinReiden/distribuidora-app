@@ -31,22 +31,47 @@ function montar() {
 const campoMonto = (): HTMLInputElement => screen.getAllByPlaceholderText('0.00')[0] as HTMLInputElement
 
 describe('ModalRegistrarPago · el monto leído', () => {
+  // D17 (#1560, #1542; cambió de regla): la tecla del punto es la coma decimal y se ve como coma,
+  // así que «150.000» tipeado queda «150,000» y es $150, y el cobrador lo ve en «Se registra». Lo
+  // pegado se lee como la app muestra la plata.
   it.each([
-    ['150.000', /150\.000,00/, 150000],
-    ['1.500,50', /1\.500,50/, 1500.5],
-    ['12.50', /12,50/, 12.5],
-  ])('«%s» se muestra leído y se registra así', async (tipeado, leido, monto) => {
+    ['150000', 'tipea', /150\.000,00/, 150000],
+    ['1500,50', 'tipea', /1\.500,50/, 1500.5],
+    ['12.50', 'tipea', /12,50/, 12.5],
+    ['150.000', 'tipea', /\$\s?150,00/, 150],
+    ['150.000', 'pega', /150\.000,00/, 150000],
+    ['1.500,50', 'pega', /1\.500,50/, 1500.5],
+  ])('«%s» que se %s se muestra leído y se registra así', async (texto, como, leido, monto) => {
     const user = userEvent.setup()
     const { onConfirmar } = montar()
 
     await user.clear(campoMonto())
-    await user.type(campoMonto(), tipeado)
+    if (como === 'tipea') await user.type(campoMonto(), texto)
+    else await user.paste(texto)
 
     expect(screen.getByText(/Se registra:/)).toHaveTextContent(leido)
 
     await user.click(screen.getByRole('button', { name: 'Registrar' }))
     expect(onConfirmar).toHaveBeenCalledTimes(1)
     expect(onConfirmar.mock.calls[0][0]).toMatchObject({ monto })
+  })
+
+  // N11 y N10 de la segunda pasada: con el monto en rojo, «Se registra» no muestra el de antes; y
+  // el botón «Total» limpia el rojo aunque el monto ya fuera el total.
+  it('con el monto en rojo no dice «Se registra» con el de antes, y «Total» lo limpia', async () => {
+    const user = userEvent.setup()
+    const { onConfirmar } = montar()
+    await user.click(screen.getByRole('button', { name: 'Total' }))
+    expect(screen.getByText(/Se registra:/)).toHaveTextContent(/300\.000,00/)
+    await user.click(campoMonto())
+    await user.keyboard('{Control>}a{/Control}1.500.000')
+    expect(campoMonto()).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.queryByText(/Se registra:/)).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Total' }))
+    expect(campoMonto()).not.toHaveAttribute('aria-invalid', 'true')
+    expect(campoMonto()).toHaveValue('300.000')
+    await user.click(screen.getByRole('button', { name: 'Registrar' }))
+    expect(onConfirmar.mock.calls[0][0]).toMatchObject({ monto: 300000 })
   })
 
   it('sin monto no muestra nada', () => {

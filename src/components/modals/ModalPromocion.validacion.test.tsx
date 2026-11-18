@@ -87,6 +87,49 @@ describe('ModalPromocion · las fechas en orden y las reglas enteras', () => {
     expect(onSave.mock.calls[0][0]).toMatchObject({ fechaInicio: '2026-11-10', fechaFin: '2026-11-10' })
   })
 
+  // B20 (D17): dejaron `type="number"`; los miles los pone el campo.
+  it('la cantidad de compra tipeada «1200» se ve «1.200» y se guarda 1200', async () => {
+    const { onSave } = renderModal()
+    await userEvent.type(screen.getByPlaceholderText('Ej: Promo Manaos 12+2'), 'Promo test')
+    await userEvent.click(screen.getByText('PRODUCTO A'))
+    await userEvent.type(screen.getByPlaceholderText('Ej: 12'), '1200')
+    expect(screen.getByPlaceholderText('Ej: 12')).toHaveValue('1.200')
+    await userEvent.type(screen.getByPlaceholderText('Ej: 2'), '2')
+    await userEvent.type(screen.getByPlaceholderText('Buscar producto de regalo...'), 'REGALO')
+    await userEvent.click(await screen.findByRole('button', { name: /PRODUCTO REGALO/ }))
+    await userEvent.click(crear())
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(onSave.mock.calls[0][0])).toContain('1200')
+  })
+
+  // H3 de la segunda lente: un límite de usos o una prioridad que no es un entero no se guarda como
+  // «sin límite» ni como 0: se dice por qué.
+  it.each([
+    ['limite', '1.000', 'El límite de usos es un número entero mayor a 0'],
+    ['prioridad', '1.5', 'La prioridad es un número entero'],
+  ])('el %s tipeado «%s» no se guarda', async (campo, tipeado, mensaje) => {
+    const { onSave } = renderModal()
+    await userEvent.type(screen.getByPlaceholderText('Ej: Promo Manaos 12+2'), 'Promo test')
+    await userEvent.click(screen.getByText('PRODUCTO A'))
+    await userEvent.type(screen.getByPlaceholderText('Ej: 12'), '10')
+    await userEvent.type(screen.getByPlaceholderText('Ej: 2'), '2')
+    await userEvent.type(screen.getByPlaceholderText('Buscar producto de regalo...'), 'REGALO')
+    await userEvent.click(await screen.findByRole('button', { name: /PRODUCTO REGALO/ }))
+    let input: HTMLElement
+    if (campo === 'limite') input = screen.getByPlaceholderText('Sin limite')
+    else {
+      const avanzadas = screen.queryByText(/opciones avanzadas/i)
+      if (avanzadas) await userEvent.click(avanzadas)
+      input = screen.getByPlaceholderText('0')
+      await userEvent.clear(input)
+    }
+    await userEvent.type(input, tipeado)
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    await userEvent.click(crear())
+    expect(await screen.findByText(new RegExp(mensaje))).toBeInTheDocument()
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
   it('no guarda una cantidad de bonificación con decimales', async () => {
     const { onSave } = renderModal()
     await userEvent.type(screen.getByPlaceholderText('Ej: Promo Manaos 12+2'), 'Promo test')

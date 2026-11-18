@@ -8,9 +8,10 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import type { ClienteDB, PerfilDB } from '../../../types'
 
+const setDepositoCoords = vi.hoisted(() => vi.fn())
 vi.mock('../../../hooks/useOptimizarRuta', () => ({
   getDepositoCoords: () => ({ lat: -26.8, lng: -65.2 }),
-  setDepositoCoords: vi.fn(),
+  setDepositoCoords,
 }))
 
 import ModalOptimizarRutaPreventista from '../ModalOptimizarRutaPreventista'
@@ -48,5 +49,33 @@ describe('ModalOptimizarRutaPreventista — asignación (#1314)', () => {
 
     expect(screen.getByRole('option', { name: 'Víctor (2 clientes asignados)' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'Juan (0 clientes asignados)' })).toBeInTheDocument()
+  })
+})
+
+// B20 (D17): una coordenada no lleva miles; la tecla del punto es la coma y el menos entra. Antes
+// era `type="number"` leído con `parseFloat`.
+describe('ModalOptimizarRutaPreventista — la ubicación del depósito', () => {
+  it('tipear «-26.8241» se ve «-26,8241» y se guarda -26.8241', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    render(
+      <ModalOptimizarRutaPreventista
+        preventistas={[]}
+        clientes={[]}
+        onOptimizar={vi.fn()}
+        onClose={vi.fn()}
+        loading={false}
+        rutaOptimizada={null}
+        error={null}
+      />,
+    )
+    await userEvent.click(screen.getByText('Configurar ubicacion del deposito/oficina'))
+    const [lat, lng] = screen.getAllByRole('textbox') as HTMLInputElement[]
+    await userEvent.clear(lat)
+    await userEvent.type(lat, '-26.8241')
+    await userEvent.clear(lng)
+    await userEvent.type(lng, '-65.2226')
+    expect(lat.value).toBe('-26,8241')
+    await userEvent.click(screen.getByRole('button', { name: /guardar/i }))
+    expect(setDepositoCoords).toHaveBeenCalledWith(-26.8241, -65.2226)
   })
 })

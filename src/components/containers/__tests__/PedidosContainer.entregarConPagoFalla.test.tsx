@@ -184,7 +184,7 @@ async function entregarYRegistrarPago() {
   fireEvent.click(await screen.findByRole('button', { name: 'Entregar la boleta' }))
   const boton = await screen.findByRole('button', { name: /^entregar y registrar pago$/i }, ESPERA_MODAL)
   // El modal propone el saldo entero como monto del cobro.
-  await waitFor(() => expect((screen.getAllByPlaceholderText(/0[.,]00/i)[0] as HTMLInputElement).value).toBe('1000'))
+  await waitFor(() => expect((screen.getAllByPlaceholderText(/0[.,]00/i)[0] as HTMLInputElement).value).toBe('1.000'))
   fireEvent.click(boton)
 }
 

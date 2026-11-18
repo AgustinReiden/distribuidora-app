@@ -191,9 +191,9 @@ export default function ModalMovimientoEmpleado({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor={`${id}-monto`} className={CLASE_ETIQUETA}>Monto {requerido}</label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">$</span>
+            <div>
               <InputMonto
+                prefijo="$"
                 id={`${id}-monto`}
                 value={montoTxt}
                 onChange={setMontoTxt}

@@ -141,7 +141,8 @@ describe('ModalPromocion · cambio del factor de fracción', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Volver' }))
     expect(onSave).not.toHaveBeenCalled()
     expect(screen.queryByText(/Cambiás el factor/)).not.toBeInTheDocument()
-    expect(factorInput()).toHaveValue(2)
+    // B20: dejó `type="number"`: el valor es el texto.
+    expect(factorInput()).toHaveValue('2')
   })
 
   it('no confirma nada mientras el preview está cargando', async () => {

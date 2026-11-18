@@ -182,7 +182,8 @@ describe('ModalResolverRendicion — la línea de empleado', () => {
     await user.click(screen.getByRole('button', { name: 'A cargo del empleado' }))
     expect(screen.getByRole('combobox', { name: 'Empleado' })).toHaveValue('Marcos Delgado')
 
-    await user.type(screen.getByLabelText('Monto'), '3.000')
+    // B20 (D17, cambió de regla): los miles los pone el campo.
+    await user.type(screen.getByLabelText('Monto'), '3000')
     await user.type(screen.getByLabelText('Observación (opcional)'), 'Faltó en la caja')
     await user.type(screen.getByLabelText(/¿Cómo se resolvió\?/), 'Se le carga')
     await user.click(screen.getByRole('button', BOTON_RESOLVER))
@@ -376,7 +377,8 @@ describe('ModalResolverRendicion — la cuenta y el tope', () => {
 
     await user.click(screen.getByRole('button', { name: /Agregar línea/ }))
     await user.click(screen.getByRole('button', { name: 'Robo o pérdida' }))
-    await user.type(screen.getByLabelText('Monto'), '50.000,01')
+    await user.type(screen.getByLabelText('Monto'), '50000,01')
+    expect(screen.getByLabelText('Monto')).toHaveValue('50.000,01')
     await user.type(screen.getByLabelText(/¿Cómo se resolvió\?/), 'ok')
 
     expect(screen.getByRole('alert')).toHaveTextContent(MENSAJE_SUPERA)

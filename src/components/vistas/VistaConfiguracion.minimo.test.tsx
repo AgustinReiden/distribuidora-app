@@ -98,8 +98,8 @@ describe('VistaConfiguracion — compra mínima y cargo de envío', () => {
   it('refleja la política vigente que llega del servidor', () => {
     render(<VistaConfiguracion {...props({ modoMinimoActual: 'escalas', montoEnvioGratisActual: 30000, cargoEnvioActual: 2000 })} />)
     expect(screen.getByRole('radio', { name: /Por escalas/ })).toBeChecked()
-    expect((screen.getByLabelText('Cargo de envío') as HTMLInputElement).value).toBe('2000')
-    expect((screen.getByLabelText('Envío gratis desde') as HTMLInputElement).value).toBe('30000')
+    expect((screen.getByLabelText('Cargo de envío') as HTMLInputElement).value).toBe('2.000')
+    expect((screen.getByLabelText('Envío gratis desde') as HTMLInputElement).value).toBe('30.000')
   })
 
   // #1560: los tres montos son plata y se leen con el punto de miles. Con
@@ -134,8 +134,24 @@ describe('VistaConfiguracion — compra mínima y cargo de envío', () => {
 
   it('un monto con decimales de la política se muestra con coma', () => {
     render(<VistaConfiguracion {...props({ montoMinimoActual: 12500.5, modoMinimoActual: 'cargo', cargoEnvioActual: 1500.75 })} />)
-    expect((screen.getByLabelText('Compra mínima por pedido') as HTMLInputElement).value).toBe('12500,5')
-    expect((screen.getByLabelText('Cargo de envío') as HTMLInputElement).value).toBe('1500,75')
+    expect((screen.getByLabelText('Compra mínima por pedido') as HTMLInputElement).value).toBe('12.500,5')
+    expect((screen.getByLabelText('Cargo de envío') as HTMLInputElement).value).toBe('1.500,75')
+  })
+
+  // B20 (D17): tipeado, los miles los pone el campo y el punto es la coma decimal.
+  it('la compra mínima tipeada «15000» se ve «15.000» y «1250.5» se lee 1250,5', async () => {
+    const user = userEvent.setup()
+    const onMontoTipeado = vi.fn()
+    render(<VistaConfiguracion {...props({ onMontoTipeado })} />)
+    const campo = screen.getByLabelText('Compra mínima por pedido') as HTMLInputElement
+    await user.clear(campo)
+    await user.type(campo, '15000')
+    expect(campo.value).toBe('15.000')
+    expect(onMontoTipeado).toHaveBeenLastCalledWith(15000)
+    await user.clear(campo)
+    await user.type(campo, '1250.5')
+    expect(campo.value).toBe('1.250,5')
+    expect(onMontoTipeado).toHaveBeenLastCalledWith(1250.5)
   })
 
   it('con la política sin cambios, Guardar queda deshabilitado', () => {

@@ -8,6 +8,8 @@ import type { FormEvent } from 'react'
 import { z } from 'zod'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
+import { CampoNumero } from '../ui/CampoNumero'
+import { leerEntero, motivoEnteroTipeado } from '../../utils/normalizarNumero'
 import { Badge } from '../ui/Badge'
 import Card from '../ui/Card'
 import { getErrorMessage } from '../../utils/errorHandling'
@@ -72,8 +74,14 @@ export default function ModalFichaVehiculo({
       setError('Escribí los km del tablero')
       return
     }
-    // Los puntos son separadores de miles; la coma, decimal (que el schema rechaza).
-    const resultado = lecturaKmSchema.safeParse({ fecha, km: kmTxt.replace(/\./g, '').replace(',', '.') })
+    // H1 de la segunda lente: el mismo lector que pone el campo en rojo (`leerEntero`). El de antes
+    // (`replace(/\./g, '')` + `Number`) leía «185,000» (la tecla del punto) como 185.
+    const km = leerEntero(kmTxt)
+    if (km === null) {
+      setError(motivoEnteroTipeado(kmTxt) ?? 'Revisá los km del tablero')
+      return
+    }
+    const resultado = lecturaKmSchema.safeParse({ fecha, km })
     if (!resultado.success) {
       setError(resultado.error.issues[0]?.message ?? 'Revisá la lectura')
       return
@@ -226,12 +234,12 @@ export default function ModalFichaVehiculo({
                   </div>
                   <div>
                     <label htmlFor={idKm} className="block text-xs text-gray-500 mb-1">Km del tablero</label>
-                    <input
+                    {/* Los miles los pone el campo (B20, D17); una coma la rechaza el schema. */}
+                    <CampoNumero
                       id={idKm}
-                      type="text"
-                      inputMode="numeric"
+                      entero
                       value={kmTxt}
-                      onChange={e => setKmTxt(e.target.value)}
+                      onChange={setKmTxt}
                       className="w-36 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-right dark:bg-gray-700 dark:text-white"
                     />
                   </div>

@@ -22,6 +22,13 @@ import { fechaLocalISO, fechaHaceDias, formatFecha, formatPrecio } from '../../u
 import { fechaQueFiltra, pedidoEnRangoDeFechas } from '../../utils/filtroFechaPedidos';
 import { pedidosVisiblesRuta, separarPorFiltroFecha } from '../../utils/pedidosVisiblesRuta';
 import type { PedidoDB, PerfilDB, ClienteDB, ProductoDB } from '../../types';
+import { CampoNumero } from '../ui/CampoNumero'
+import { numeroEditable } from '../../utils/calculations';
+import { leerDecimalSinMiles, leerEntero } from '../../utils/normalizarNumero';
+
+/** Una coordenada tipeada (B20, D17): sin miles, con menos; la tecla del punto es la coma. */
+const leerCoordenada = (texto: string): number => leerDecimalSinMiles(texto) ?? NaN;
+
 
 const SIN_RUTAS: RutaEnCurso[] = [];
 
@@ -354,14 +361,14 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
 
   // Cargar coordenadas del deposito en los inputs
   useEffect(() => {
-    setDepositoLat(deposito.lat.toString());
-    setDepositoLng(deposito.lng.toString());
+    setDepositoLat(numeroEditable(deposito.lat));
+    setDepositoLng(numeroEditable(deposito.lng));
   }, [deposito.lat, deposito.lng]);
 
   // Cargar el punto de llegada en los inputs (vacío si no está configurado)
   useEffect(() => {
-    setDestinoLat(destinoRuta?.lat != null ? destinoRuta.lat.toString() : '');
-    setDestinoLng(destinoRuta?.lng != null ? destinoRuta.lng.toString() : '');
+    setDestinoLat(destinoRuta?.lat != null ? numeroEditable(destinoRuta.lat) : '');
+    setDestinoLng(destinoRuta?.lng != null ? numeroEditable(destinoRuta.lng) : '');
   }, [destinoRuta?.lat, destinoRuta?.lng]);
 
   // Cambiar a vista resultado cuando hay ruta optimizada
@@ -715,7 +722,8 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   const repartidoresParam = useMemo((): RepartidorParam[] => {
     return Array.from(repartidoresSel).map(id => {
       const pp = paramsPorChofer[id] ?? { maxParadas: '', zonas: [] };
-      const max = parseInt(pp.maxParadas, 10);
+      // Un entero, con los miles que pone el campo (B20, D17).
+      const max = leerEntero(pp.maxParadas) ?? NaN;
       return {
         transportista_id: id,
         max_paradas: Number.isFinite(max) && max > 0 ? max : null,
@@ -724,8 +732,14 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
     });
   }, [repartidoresSel, paramsPorChofer]);
 
+  // H9 de la segunda lente: un máximo de paradas que no es un entero no viaja como «sin tope».
+  const maxParadasIlegible = Array.from(repartidoresSel).some(id => {
+    const texto = paramsPorChofer[id]?.maxParadas ?? '';
+    return texto.trim() !== '' && leerEntero(texto) === null;
+  });
+
   const ejecutarDividir = (): void => {
-    if (rutasDeLosRepartidoresDesconocidas) return;
+    if (rutasDeLosRepartidoresDesconocidas || maxParadasIlegible) return;
     if (onArmarRutaMulti && repartidoresParam.length > 0 && pedidosSeleccionados.length > 0) {
       onArmarRutaMulti(repartidoresParam, pedidosSeleccionados, fechaEntrega, horaInicio, horaFin);
     }
@@ -768,16 +782,16 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   };
 
   const handleGuardarDeposito = (): void => {
-    const lat = parseFloat(depositoLat);
-    const lng = parseFloat(depositoLng);
+    const lat = leerCoordenada(depositoLat);
+    const lng = leerCoordenada(depositoLng);
     if (isNaN(lat) || isNaN(lng)) return;
 
     // Punto de llegada: ambos vacíos → limpiar (null, vuelve a terminar en el
     // depósito); ambos válidos → guardar; a medias → no tocar.
     const dLatRaw = destinoLat.trim();
     const dLngRaw = destinoLng.trim();
-    const dLat = parseFloat(dLatRaw);
-    const dLng = parseFloat(dLngRaw);
+    const dLat = leerCoordenada(dLatRaw);
+    const dLng = leerCoordenada(dLngRaw);
     const guardarDestino = (): void => {
       if (dLatRaw === '' && dLngRaw === '') {
         setDestinoMut.mutate(null);
@@ -965,24 +979,22 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium mb-1">Latitud</label>
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          step="0.000001"
+                        <CampoNumero
+                          sinMiles
+                          negativo
                           value={depositoLat}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => setDepositoLat(e.target.value)}
+                          onChange={setDepositoLat}
                           className="w-full px-3 py-2 border rounded-lg text-sm"
                           placeholder="-26.8241"
                         />
                       </div>
                       <div>
                         <label className="block text-xs font-medium mb-1">Longitud</label>
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          step="0.000001"
+                        <CampoNumero
+                          sinMiles
+                          negativo
                           value={depositoLng}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => setDepositoLng(e.target.value)}
+                          onChange={setDepositoLng}
                           className="w-full px-3 py-2 border rounded-lg text-sm"
                           placeholder="-65.2226"
                         />
@@ -995,24 +1007,22 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium mb-1">Latitud</label>
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          step="0.000001"
+                        <CampoNumero
+                          sinMiles
+                          negativo
                           value={destinoLat}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => setDestinoLat(e.target.value)}
+                          onChange={setDestinoLat}
                           className="w-full px-3 py-2 border rounded-lg text-sm"
                           placeholder="vacío = vuelve al depósito"
                         />
                       </div>
                       <div>
                         <label className="block text-xs font-medium mb-1">Longitud</label>
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          step="0.000001"
+                        <CampoNumero
+                          sinMiles
+                          negativo
                           value={destinoLng}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => setDestinoLng(e.target.value)}
+                          onChange={setDestinoLng}
                           className="w-full px-3 py-2 border rounded-lg text-sm"
                           placeholder="vacío = vuelve al depósito"
                         />
@@ -1157,12 +1167,10 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                           <div className="mt-2 pl-6 space-y-2">
                             <div className="flex items-center gap-2">
                               <label className="text-xs text-gray-500">Máx paradas</label>
-                              <input
-                                type="number"
-                                min="1"
-                                inputMode="numeric"
+                              <CampoNumero
+                                entero
                                 value={pp.maxParadas}
-                                onChange={(e: ChangeEvent<HTMLInputElement>) => setMaxParadas(t.id, e.target.value)}
+                                onChange={(v) => setMaxParadas(t.id, v)}
                                 placeholder="sin tope"
                                 className="w-28 px-2 py-1 border rounded text-sm"
                               />
@@ -1854,7 +1862,7 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
               modoDividir ? (
                 <Button
                   onClick={handleDividir}
-                  disabled={repartidoresSel.size === 0 || loading || guardando || jornadaInvalida || pedidosSeleccionados.length === 0 || rutasDeLosRepartidoresDesconocidas}
+                  disabled={repartidoresSel.size === 0 || loading || guardando || jornadaInvalida || pedidosSeleccionados.length === 0 || rutasDeLosRepartidoresDesconocidas || maxParadasIlegible}
                   variant="primary"
                   size="lg"
                   loading={loading || guardando}

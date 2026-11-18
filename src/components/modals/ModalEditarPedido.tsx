@@ -21,7 +21,10 @@ import { cadenaDelRegalo, cantidadBaseDeLinea, conservarRepartos, regaloParaEdit
 import { avisosDeCupo, promosConRegalo } from '../../utils/cupoPromo';
 import { AvisoCupoPromo } from '../ui/AvisoCupoPromo';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
-import { calcularNetoVenta, numeroEditable, parsePrecio } from '../../utils/calculations';
+import { calcularNetoVenta, parsePrecio } from '../../utils/calculations';
+import { motivoPrecioTipeado, numeroConMiles } from '../../utils/normalizarNumero';
+import { CampoNumero } from '../ui/CampoNumero';
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo';
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta';
 import { esTipoVB } from '../../utils/valeBlanco';
 import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente, esDescuentoDeCategoria } from '../../utils/descuentoCliente';
@@ -45,6 +48,7 @@ import SugerenciasCombo from '../pedidos/SugerenciasCombo';
 import type { PedidoDB, ProductoDB, PedidoItemDB, ClienteDB } from '../../types';
 import type { CambiarClientePayload } from './ModalCambiarCliente';
 import { lazyWithReload } from '../../utils/lazyWithReload';
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles';
 
 const ModalSustituirRegalo = lazyWithReload(() => import('./ModalSustituirRegalo'));
 const ModalCambiarCliente = lazyWithReload(() => import('./ModalCambiarCliente'));
@@ -168,6 +172,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   onRegaloCambiado,
   guardando
 }: ModalEditarPedidoProps) {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles();
   // Resolver flags de permiso. Si el caller pasa los flags nuevos los usamos;
   // si no, fallback al isAdmin legacy.
   const puedeEditarItems = canEditItems ?? isAdmin;
@@ -221,6 +227,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const [itemsModificados, setItemsModificados] = useState<boolean>(false);
   const [errorStock, setErrorStock] = useState<string | null>(null);
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
+  // T8 de la tercera pasada: tocar la X marca «cancelando» ANTES de que el navegador pueda sacarle el
+  // foco al precio; el blur que venga después no lo guarda. Así cancelar no depende de quién gana.
+  const cancelandoPrecioRef = useRef(false);
   const [editingPriceValue, setEditingPriceValue] = useState<string>('');
 
   // Sustitucion de regalos: el row persistido a editar (id real de pedido_items).
@@ -956,6 +965,10 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // forma confiable, asi que damos una via explicita para commitear el valor.
   const commitEditingPrice = (): void => {
     if (editingPriceId == null) return;
+    if (cancelandoPrecioRef.current) return;
+    // Lo que no se entiende (o un precio 0) queda abierto, en rojo y con el motivo: ni Enter, ni el
+    // botón, ni tocar afuera lo descartan en silencio (B20, como el alta).
+    if (motivoPrecioTipeado(editingPriceValue)) return;
     const newPrice = parsePrecio(editingPriceValue);
     if (newPrice > 0) handlePrecioChange(editingPriceId, newPrice);
     setEditingPriceId(null);
@@ -999,6 +1012,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const handleGuardar = (): Promise<void> => conGuardadoUnico(guardarSinGuard);
 
   const guardarSinGuard = async (): Promise<void> => {
+    // H5 de la segunda lente: con un número en rojo (el precio del admin abierto, una cantidad) no
+    // se guarda el pedido.
+    if (ilegibles.hay) return;
     setErrorValidacion('');
     setErrorStock(null);
 
@@ -1252,6 +1268,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   };
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase
       title={`Editar Pedido #${pedido?.id}`}
       description="Editar items, fechas y notas del pedido. El pago se gestiona desde el menú del pedido."
@@ -1438,16 +1455,17 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                         </div>
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
                           {editingPriceId === item.productoId ? (
-                            <div className="flex items-center gap-1">
+                            <div className="flex flex-wrap items-center gap-1">
                               <span className="text-orange-600">$</span>
-                              <input
-                                type="text"
-                                inputMode="decimal"
+                              {/* B20 (D17): los miles los pone el campo y el punto tipeado es la coma. */}
+                              <CampoNumero
                                 aria-label="Editar precio unitario"
                                 value={editingPriceValue}
-                                onChange={e => setEditingPriceValue(e.target.value)}
+                                onChange={setEditingPriceValue}
+                                motivo={motivoPrecioTipeado(editingPriceValue)}
                                 onKeyDown={e => {
                                   if (e.key === 'Enter') {
+                                    cancelandoPrecioRef.current = false;
                                     commitEditingPrice();
                                   } else if (e.key === 'Escape') {
                                     setEditingPriceId(null);
@@ -1461,10 +1479,22 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                                 type="button"
                                 aria-label="Confirmar precio"
                                 onPointerDown={e => e.preventDefault()}
-                                onClick={commitEditingPrice}
+                                onClick={() => { cancelandoPrecioRef.current = false; commitEditingPrice(); }}
                                 className="p-1 text-white bg-orange-500 hover:bg-orange-600 rounded shrink-0"
                               >
                                 <Check className="w-3.5 h-3.5" />
+                              </button>
+                              {/* Punto 8 de la segunda pasada: en un teléfono no hay Escape (y en la compu
+                                  cierra todo el modal). La X deja el precio como estaba, aunque lo tipeado
+                                  esté en rojo. */}
+                              <button
+                                type="button"
+                                aria-label="Cancelar precio"
+                                onPointerDown={e => { e.preventDefault(); cancelandoPrecioRef.current = true; }}
+                                onClick={() => { cancelandoPrecioRef.current = false; setEditingPriceId(null); }}
+                                className="p-1 text-stone-500 hover:text-stone-700 dark:text-gray-400 dark:hover:text-gray-200 rounded shrink-0"
+                              >
+                                <X className="w-3.5 h-3.5" aria-hidden="true" />
                               </button>
                               <span className="text-orange-600">c/u</span>
                             </div>
@@ -1473,8 +1503,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                               className={`${item.precioOverride ? 'text-orange-600 font-medium' : ''} ${puedeEditarPrecios ? 'cursor-pointer hover:underline' : ''}`}
                               onClick={() => {
                                 if (puedeEditarPrecios) {
+                                  cancelandoPrecioRef.current = false;
                                   setEditingPriceId(item.productoId);
-                                  setEditingPriceValue(numeroEditable(precioResuelto));
+                                  setEditingPriceValue(numeroConMiles(precioResuelto));
                                 }
                               }}
                             >
@@ -1984,13 +2015,15 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </div>
       )}
 
+      {/* N4: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+      <AvisoCamposEnRojo className="px-4 pt-2" />
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50 dark:bg-gray-800">
         <Button onClick={onClose} variant="ghost" size="md">
           Cancelar
         </Button>
         <Button
           onClick={handleGuardar}
-          disabled={guardando || guardandoLocal || sustitucionesCargando || esperandoPromos || bloqueoMOQ.length > 0 || (puedeEditarItems && !pedidoEntregado && items.length === 0)}
+          disabled={ilegibles.hay || guardando || guardandoLocal || sustitucionesCargando || esperandoPromos || bloqueoMOQ.length > 0 || (puedeEditarItems && !pedidoEntregado && items.length === 0)}
           loading={guardando || guardandoLocal}
           variant="primary"
           size="md"
@@ -2062,6 +2095,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </Suspense>
       )}
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   );
 });
 

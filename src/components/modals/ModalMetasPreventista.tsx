@@ -31,6 +31,8 @@ import {
 } from '../../hooks/queries';
 import type { TipoMeta, AvanceMeta } from '../../hooks/queries';
 import { useSucursal } from '../../contexts/SucursalContext';
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo';
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles';
 
 export interface ModalMetasPreventistaProps {
   /** Período 'YYYY-MM-01' del panel; da el mes por defecto del formulario. */
@@ -67,6 +69,8 @@ const ModalMetasPreventista = memo(function ModalMetasPreventista({
   const { data: categorias = [] } = useCategoriasQuery();
   const { data: productos = [] } = useProductosQuery();
   const guardarMut = useGuardarMetaPreventistaMutation();
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles();
 
   const esEdicion = Boolean(edicion);
   const m = edicion?.meta;
@@ -123,6 +127,7 @@ const ModalMetasPreventista = memo(function ModalMetasPreventista({
   };
 
   const handleGuardar = async (): Promise<void> => {
+    if (ilegibles.hay) return;
     if (seleccionados.size === 0) {
       setError('Elegí al menos un preventista');
       return;
@@ -198,6 +203,7 @@ const ModalMetasPreventista = memo(function ModalMetasPreventista({
   };
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase
       title={esEdicion ? 'Editar objetivo' : 'Cargar objetivos'}
       onClose={onClose}
@@ -424,12 +430,13 @@ const ModalMetasPreventista = memo(function ModalMetasPreventista({
           </p>
         )}
 
+        <AvisoCamposEnRojo />
         <Button
           type="button"
           variant="primary"
           size="md"
           onClick={handleGuardar}
-          disabled={guardarMut.isPending}
+          disabled={guardarMut.isPending || ilegibles.hay}
           loading={guardarMut.isPending}
           className="w-full gap-1.5"
         >
@@ -452,6 +459,7 @@ const ModalMetasPreventista = memo(function ModalMetasPreventista({
         </Button>
       </div>
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   );
 });
 

@@ -323,9 +323,9 @@ export default function ModalLiquidar({
                 titulo={<label htmlFor={`${id}-sueldo`}>Sueldo fijo</label>}
                 detalle={v.sueldo.arreglo_desde ? `Arreglo vigente desde el ${fechaCompleta(v.sueldo.arreglo_desde)}` : undefined}
                 importe={(
-                  <div className="relative w-40">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">$</span>
+                  <div className="w-40">
                     <InputMonto
+                      prefijo="$"
                       id={`${id}-sueldo`}
                       value={textoSueldo}
                       onChange={setSueldoTxt}
@@ -449,9 +449,9 @@ export default function ModalLiquidar({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label htmlFor={`${id}-pago`} className={CLASE_ETIQUETA}>Monto que se le paga</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">$</span>
+              <div>
                 <InputMonto
+                  prefijo="$"
                   id={`${id}-pago`}
                   value={textoPago}
                   disabled={sinPagar}

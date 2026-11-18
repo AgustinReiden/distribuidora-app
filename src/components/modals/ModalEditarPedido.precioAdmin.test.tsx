@@ -14,7 +14,7 @@
  * Los ids van como number, como llegan de PostgREST: con strings el bug no se ve.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 // #1191: los combos tienen su propia query (y su sucursal): acá no hay combos.
@@ -124,9 +124,130 @@ describe('ModalEditarPedido — precio puesto por el admin', () => {
 
     await waitFor(() => expect(screen.getByText('PLACER MANZANA 500 cc')).toBeInTheDocument())
     await user.click(screen.getByText('$1234.50 c/u'))
-    expect(screen.getByLabelText('Editar precio unitario')).toHaveValue('1234,5')
+    expect(screen.getByLabelText('Editar precio unitario')).toHaveValue('1.234,5')
     await user.click(screen.getByLabelText('Confirmar precio'))
     expect(screen.getByText('$1234.50 c/u')).toBeInTheDocument()
+  })
+
+  // H5 de la segunda lente: con el precio abierto y en rojo, el Guardar del pie NO guarda el pedido.
+  it.each(['1..5', '0'])('con el precio abierto en rojo («%s»), Guardar no guarda el pedido', async tipeado => {
+    const user = userEvent.setup()
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const onSaveItems = vi.fn().mockResolvedValue(undefined)
+    render(
+      <ModalEditarPedido
+        productos={productos}
+        pedido={pedido}
+        isAdmin
+        onSave={onSave}
+        onSaveItems={onSaveItems}
+        onClose={vi.fn()}
+        guardando={false}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText('PLACER MANZANA 500 cc')).toBeInTheDocument())
+    await user.click(screen.getByText('$7400.00 c/u'))
+    const input = screen.getByLabelText('Editar precio unitario')
+    await user.clear(input)
+    await user.type(input, tipeado)
+    const boton = screen.getByRole('button', { name: /^Guardar( Todo)?$/ })
+    expect(boton).toBeDisabled()
+    await user.click(boton)
+    expect(onSave).not.toHaveBeenCalled()
+    expect(onSaveItems).not.toHaveBeenCalled()
+  })
+
+  // Punto 8 de la segunda pasada: en un teléfono no hay Escape. La X cancela la edición del precio
+  // aunque esté en rojo, deja el de antes y destraba el Guardar.
+  it('la X cancela el precio en rojo y deja el de antes', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const onSaveItems = vi.fn().mockResolvedValue(undefined)
+    const onClose = vi.fn()
+    render(
+      <ModalEditarPedido
+        productos={productos}
+        pedido={pedido}
+        isAdmin
+        onSave={onSave}
+        onSaveItems={onSaveItems}
+        onClose={onClose}
+        guardando={false}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText('PLACER MANZANA 500 cc')).toBeInTheDocument())
+    await user.click(screen.getByText('$7400.00 c/u'))
+    const input = screen.getByLabelText('Editar precio unitario')
+    await user.clear(input)
+    await user.type(input, '1..5')
+    expect(screen.getByText('Hay un campo en rojo para corregir')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Cancelar precio' }))
+    expect(screen.queryByLabelText('Editar precio unitario')).not.toBeInTheDocument()
+    expect(screen.getByText('$7400.00 c/u')).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: /^Guardar( Todo)?$/ })).toBeEnabled()
+  })
+
+  // T8 de la tercera pasada: la X cancela aunque el navegador le saque el foco al precio antes del
+  // click (el onBlur guardaba lo tipeado si se entendía).
+  it('la X cancela aunque el precio pierda el foco antes del click', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const onSaveItems = vi.fn().mockResolvedValue(undefined)
+    render(
+      <ModalEditarPedido
+        productos={productos}
+        pedido={pedido}
+        isAdmin
+        onSave={onSave}
+        onSaveItems={onSaveItems}
+        onClose={vi.fn()}
+        guardando={false}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText('PLACER MANZANA 500 cc')).toBeInTheDocument())
+    await user.click(screen.getByText('$7400.00 c/u'))
+    const input = screen.getByLabelText('Editar precio unitario')
+    await user.clear(input)
+    await user.type(input, '1500')
+    const x = screen.getByRole('button', { name: 'Cancelar precio' })
+    fireEvent.pointerDown(x)
+    fireEvent.blur(input)
+    fireEvent.click(x)
+    expect(screen.getByText('$7400.00 c/u')).toBeInTheDocument()
+  })
+
+  // B20 (D17): los miles los pone el campo; lo que no se entiende queda abierto y en rojo.
+  it('el precio tipeado «15000» se ve «15.000», y uno que no se entiende no se confirma', async () => {
+    const user = userEvent.setup()
+    const onSaveItems = vi.fn().mockResolvedValue(undefined)
+    render(
+      <ModalEditarPedido
+        productos={productos}
+        pedido={pedido}
+        isAdmin
+        onSave={vi.fn().mockResolvedValue(undefined)}
+        onSaveItems={onSaveItems}
+        onClose={vi.fn()}
+        guardando={false}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByText('PLACER MANZANA 500 cc')).toBeInTheDocument())
+    await user.click(screen.getByText('$7400.00 c/u'))
+    const input = screen.getByLabelText('Editar precio unitario')
+    expect(input).toHaveValue('7.400')
+    await user.clear(input)
+    await user.type(input, '1..5')
+    await user.click(screen.getByLabelText('Confirmar precio'))
+    expect(screen.getByLabelText('Editar precio unitario')).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('alert')).toHaveTextContent('No se entiende el número')
+
+    await user.clear(screen.getByLabelText('Editar precio unitario'))
+    await user.type(screen.getByLabelText('Editar precio unitario'), '15000')
+    expect(screen.getByLabelText('Editar precio unitario')).toHaveValue('15.000')
+    await user.click(screen.getByLabelText('Confirmar precio'))
+    expect(screen.getByText('$15000.00 c/u')).toBeInTheDocument()
   })
 
   it('al reabrir, la linea "manual" muestra el precio guardado y no el de lista', async () => {

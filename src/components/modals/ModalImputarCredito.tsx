@@ -34,6 +34,8 @@ import {
 } from '../../hooks/queries/useImputarCreditoQuery'
 import { useRequestIdPersistente } from '../../hooks/useRequestIdPersistente'
 import { useNotification } from '../../contexts/NotificationContext'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 
 // Co-locado a propósito (CLAUDE.md): un modal lazy no valida contra un schema de
 // un chunk compartido que un bundle viejo del PWA podría tener desincronizado.
@@ -68,6 +70,8 @@ export interface ModalImputarCreditoProps {
 }
 
 export default function ModalImputarCredito({ clienteId, credito, onClose, onImputado, inline = false }: ModalImputarCreditoProps) {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   const notify = useNotification()
   const esNC = !!credito.notaCreditoId
   const { data: pedidos = [], isLoading: cargandoPedidos, error: errorPedidos } = usePedidosParaImputarQuery(clienteId)
@@ -113,6 +117,7 @@ export default function ModalImputarCredito({ clienteId, credito, onClose, onImp
   }
 
   const pedirConfirmacion = () => {
+    if (ilegibles.hay) return
     const parsed = imputarCreditoSchema.safeParse({ pagoId: credito.pagoId, pedidoId: pedido?.id ?? '', monto })
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? 'Datos inválidos')
@@ -241,31 +246,36 @@ export default function ModalImputarCredito({ clienteId, credito, onClose, onImp
             <Button variant="secondary" size="sm" disabled={imputar.isPending} onClick={() => setConfirmando(false)}>
               Volver
             </Button>
-            <Button size="sm" disabled={imputar.isPending} loading={imputar.isPending} onClick={() => { void handleImputar() }}>
+            <Button size="sm" disabled={imputar.isPending || ilegibles.hay} loading={imputar.isPending} onClick={() => { if (!ilegibles.hay) void handleImputar() }}>
               Sí, imputar
             </Button>
           </div>
         </div>
       ) : (
+        <>
+        {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+        <AvisoCamposEnRojo className="mb-2" />
         <div className="flex justify-end gap-2 border-t pt-4 dark:border-gray-700">
           <Button variant="secondary" onClick={onClose} disabled={imputar.isPending}>
             {opciones.length === 0 && !cargando ? 'Cerrar' : 'Cancelar'}
           </Button>
           {opciones.length > 0 && !cargando && (
-            <Button onClick={pedirConfirmacion} disabled={imputar.isPending || !preview} className="gap-1">
+            <Button onClick={pedirConfirmacion} disabled={imputar.isPending || !preview || ilegibles.hay} className="gap-1">
               <ArrowRightLeft className="h-4 w-4" />
               Imputar
             </Button>
           )}
         </div>
+        </>
       )}
     </div>
   )
 
-  if (inline) return contenido
+  const conRegistro = <RegistroIlegiblesContext.Provider value={ilegibles.registro}>{contenido}</RegistroIlegiblesContext.Provider>
+  if (inline) return conRegistro
   return (
     <ModalBase title="Imputar crédito a un pedido" description={origenTexto} onClose={onClose} maxWidth="max-w-lg">
-      {contenido}
+      {conRegistro}
     </ModalBase>
   )
 }
