@@ -353,8 +353,8 @@ suelta en `sucursales`.
   CHECK, la RPC y la foto), con espejo en `src/constants/motivosNCVenta.espejo.json` (su test y
   `scripts/espejo-motivos-nc-venta.mjs`): descuentan `cliente_rechaza` y `error_pedido` (plata y
   unidades) y `descuento_comercial` (sólo plata); `error_entrega`, `producto_vencido`,
-  `producto_danado` y `otro`, no. Su `mercaderia` (reingresa / merma / nada) está definida y todavía
-  sin uso: la nota no mueve stock. Qué resta se decide AL CREAR la nota
+  `producto_danado` y `otro`, no. Su `mercaderia` (reingresa / merma / nada) la aplica la nota (B22,
+  ver abajo). Qué resta se decide AL CREAR la nota
   (`trg_notas_credito_venta_foto_vendedor`) y queda anotado: `resta_comision` si la comisión de la
   boleta no estaba liquidada para su vendedor, una fila en `nota_credito_venta_metas` por cada meta
   del vendedor que estaba en su mes y sin cumplir (`_metas_logrado`, la misma cuenta de
@@ -375,6 +375,19 @@ suelta en `sucursales`.
   y por id, las boletas que toca, como `liquidar_empleado` y `anular_liquidacion` (si no, una nota
   emitida o anulada en el medio no se ve y deja un ajuste). Lo prueba
   `scripts/concurrencia/b16-nota-y-liquidacion.sh`.
+  **La nota de crédito de venta mueve la mercadería según su motivo, y anularla lo deshace** (B22,
+  decisión del dueño del 17/11): `reingresa` vuelve al lote de la huella de su línea, `merma` devuelve y
+  merma en el mismo movimiento (una fila de `mermas_stock`), `nada` no toca el stock; la línea y el total de
+  la boleta no cambian. Lo que hizo queda en `nota_credito_venta_items.lotes_devueltos` y `merma_id`
+  (NULL: no movió nada) y lo deshace `_nc_venta_deshacer_mercaderia`, que rechaza la anulación si lo que
+  reingresó ya no está en stock. Las reglas de lotes son las de la salvedad (`migrations/CLAUDE.md`).
+  **El descuento comercial va por monto, sin unidades** (B22, decisión del dueño del 18/11): un renglón
+  con `cantidad = 0` es plata (`subtotal`) imputada a una línea; sobre toda la boleta se prorratea con
+  `prorratear_cargo` por lo que le queda a cada línea (subtotal menos sus notas vigentes), y su neto e IVA
+  salen de la foto de la línea (`_nc_venta_desglose`). Toda nota tiene tope en lo vendido en la boleta
+  (sus líneas de venta, sin el envío) menos las vigentes, y las unidades de una línea con un descuento
+  acreditan lo que le queda por unidad. Un lector nuevo de `nota_credito_venta_items` toma la plata de
+  `subtotal`, nunca de `cantidad × precio`.
   **El envío vive en `pedidos.cargo_envio`, dentro de `total`** (migs 389 y NNN cargo_1–4), y su
   desglose (`cargo_envio_desglose`) dentro de `total_neto`/`total_iva`, no de `total_real`. La plata
   a cobrar (saldo, cobranza, deuda, recorridos, rendiciones, transportista) usa `total`; la venta, la

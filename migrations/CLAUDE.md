@@ -57,6 +57,11 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
     primero, y desde la 349 toda bajada con línea deja huella (el alta desde la 256; la edición
     y el bot recién desde la 349) (#1114). Por eso `registrar_salvedad` devuelve antes de
     recortar o borrar la línea, que con la línea borrada ya no hay huella que mirar.
+    La nota de crédito de venta que reingresa (B22) es una devolución que queda devuelta y no toca la
+    línea: sube con `'nota_credito_venta'` (en la lista blanca) y la línea en `app.stock_pedido_item_id`,
+    y anota en `nota_credito_venta_items.lotes_devueltos`; la de merma va como la salvedad
+    (`'nota_credito_venta_merma'` y `'merma'`, y la huella baja a mano). Anularla saca de los lotes
+    anotados antes de bajar el stock, como `anular_salvedad`.
     Un envío entre sucursales también dice de dónde salió cada unidad: su registro
     (`movimiento_sucursal_item_lotes`, 286). Cancelarlo, denegarlo o achicarlo sube el stock con
     una etiqueta que **no** está en la lista blanca (`'movimiento_*_a_su_lote'`, entra a la
