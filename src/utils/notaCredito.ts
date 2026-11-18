@@ -217,20 +217,110 @@ export function calcularIINotaCredito(
   return 0;
 }
 
+/**
+ * Una nota de crédito de compra anulada (`anular_nota_credito_compra`, mig 523)
+ * sigue en el historial de la compra, pero no cuenta para nada: ni lo acreditado,
+ * ni lo que le queda a la compra, ni el costo efectivo, ni el resumen de la lista.
+ * Es la misma regla que aplica la base (`NOT anulada`). Sin el dato (una
+ * respuesta anterior a la 523) la nota está vigente.
+ */
+export function esNotaVigente(nota: { anulada?: boolean | null }): boolean {
+  return nota.anulada !== true;
+}
+
+/**
+ * Desde cuándo una DEVOLUCIÓN se puede anular: la aplicación de la migración 483
+ * (10/11/2026 19:21:45 UTC), que empezó a devolver a su lote y a corregir el promedio.
+ * Espejo de la constante de `anular_nota_credito_compra` (migs 523 y 526), que rechaza
+ * una devolución anterior: deshacerla desharía movimientos que no existieron. Un
+ * ajuste se anula de cualquier fecha.
+ */
+export const DESDE_DEVOLUCION_ANULABLE = '2026-11-10T19:21:45Z';
+
+/**
+ * Por qué una nota no se puede anular desde el sistema, o `null` si se puede ofrecer.
+ * Es la misma regla de fecha que `anular_nota_credito_compra` (sin `created_at`, la
+ * base usa la fecha de la nota a medianoche UTC). Si el server rechaza por otro
+ * motivo, la pantalla muestra su mensaje igual.
+ */
+export function motivoNotaNoAnulable(nota: {
+  tipo?: 'devolucion' | 'ajuste' | null;
+  created_at?: string | null;
+  fecha?: string | null;
+  anulada?: boolean | null;
+}): string | null {
+  if (!esNotaVigente(nota) || nota.tipo !== 'devolucion') return null;
+  const alta = nota.created_at ?? (nota.fecha ? `${nota.fecha}T00:00:00Z` : null);
+  if (!alta) return null;
+  const t = new Date(alta).getTime();
+  if (!Number.isFinite(t) || t >= new Date(DESDE_DEVOLUCION_ANULABLE).getTime()) return null;
+  return 'Esta devolución es anterior al 10/11/2026, cuando el sistema todavía no guardaba los lotes que tomó: no se puede anular desde el sistema.';
+}
+
+/** Las notas vigentes de una lista, en el mismo orden. */
+export function notasVigentes<T extends { anulada?: boolean | null }>(notas: ReadonlyArray<T>): T[] {
+  return notas.filter(esNotaVigente);
+}
+
+/** Cuántas notas vigentes tiene una compra y cuánto acreditan: el badge de la lista. */
+export interface ResumenNotasCompra {
+  compra_id: string;
+  cantidad: number;
+  total: number;
+}
+
+/** Agrupa por compra las notas VIGENTES (una anulada no aparece en el badge). */
+export function resumirNotasCreditoPorCompra(
+  filas: ReadonlyArray<{ compra_id: unknown; total: unknown; anulada?: boolean | null }>,
+): ResumenNotasCompra[] {
+  const porCompra = new Map<string, ResumenNotasCompra>();
+  for (const fila of notasVigentes(filas)) {
+    const clave = String(fila.compra_id);
+    const actual = porCompra.get(clave) ?? { compra_id: clave, cantidad: 0, total: 0 };
+    actual.cantidad += 1;
+    actual.total += num(fila.total);
+    porCompra.set(clave, actual);
+  }
+  return Array.from(porCompra.values());
+}
+
+/**
+ * Lo que avisa la anulación de una nota (`warnings` de `anular_nota_credito_compra`),
+ * en castellano llano y sin repetir: el código que manda la base no se le muestra a
+ * nadie.
+ */
+export function avisosAnulacionNotaCredito(warnings: unknown): string[] {
+  if (!Array.isArray(warnings)) return [];
+  const textos = new Set<string>();
+  for (const w of warnings) {
+    const codigo = String((w as { warning?: unknown } | null)?.warning ?? '');
+    if (codigo.startsWith('costo_promedio_no_corregido')) {
+      textos.add('El costo promedio no se corrigió: la compra es anterior a que se guardara el promedio previo. Revisalo en la ficha del producto.');
+    } else if (codigo.startsWith('costo_no_restaurado')) {
+      textos.add('El costo de reposición quedó como estaba: no hay otra compra del producto de referencia. Revisalo en la ficha del producto.');
+    } else {
+      textos.add('Revisá el costo del producto en su ficha.');
+    }
+  }
+  return Array.from(textos);
+}
+
 /** Una nota de crédito tal como la lista la compra en modo 'ver'. */
 export interface NotaCreditoParaCosto {
   total: number | string;
   /** 'ajuste' = sin mercadería. Ausente en respuestas anteriores a la mig 280. */
   tipo?: 'devolucion' | 'ajuste' | null;
+  /** mig 523: anulada no cuenta. */
+  anulada?: boolean | null;
 }
 
 /**
  * Costo efectivo de la compra después de los ajustes sin mercadería: el total de
- * la factura menos el total de cada nota de tipo 'ajuste'. Las devoluciones no
- * entran: lo devuelto deja de ser de esta compra, no abarata lo que quedó.
+ * la factura menos el total de cada nota de tipo 'ajuste' vigente. Las devoluciones
+ * no entran: lo devuelto deja de ser de esta compra, no abarata lo que quedó.
  */
 export function costoEfectivoCompra(totalCompra: number | string, notas: NotaCreditoParaCosto[]): number {
-  const ajustes = notas
+  const ajustes = notasVigentes(notas)
     .filter(n => n.tipo === 'ajuste')
     .reduce((acc, n) => acc + num(n.total), 0);
   return redondear(num(totalCompra) - ajustes);
@@ -268,18 +358,18 @@ export function totalesAjusteNotaCredito(a: AjusteNotaCreditoInput): {
 }
 
 /**
- * Cuánto le queda por acreditar a una compra: su total menos todas sus notas de
- * crédito, de devolución y de ajuste (las notas no se anulan). Es el tope de un
- * ajuste sin mercadería, y espeja el de la rama `ajuste` de
+ * Cuánto le queda por acreditar a una compra: su total menos sus notas de crédito
+ * vigentes, de devolución y de ajuste (una anulada no cuenta, mig 523). Es el tope
+ * de un ajuste sin mercadería, y espeja el de la rama `ajuste` de
  * `registrar_nota_credito` (#1557, CMP-2): sobre una compra de 1.210 entraba un
  * ajuste de 50.000. `null` si no se conoce el total de la compra.
  */
 export function restanteAcreditableCompra(
   totalCompra: unknown,
-  notas: ReadonlyArray<{ total?: unknown }>,
+  notas: ReadonlyArray<{ total?: unknown; anulada?: boolean | null }>,
 ): number | null {
   if (totalCompra === null || totalCompra === undefined || totalCompra === '') return null;
   const total = Number(totalCompra);
   if (!Number.isFinite(total)) return null;
-  return redondear(total - notas.reduce((s, n) => s + num(n.total), 0));
+  return redondear(total - notasVigentes(notas).reduce((s, n) => s + num(n.total), 0));
 }

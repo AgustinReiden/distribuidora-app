@@ -94,6 +94,7 @@ import { useStockRedQuery } from './useStockRedQuery'
 import { useValuacionInventarioQuery } from './useValuacionInventarioQuery'
 import {
   useNotasCreditoByCompraQuery, useNotasCreditoResumenQuery, useRegistrarNotaCreditoMutation,
+  useAnularNotaCreditoCompraMutation,
 } from './useNotasCreditoQuery'
 import {
   useNotasCreditoVentaClienteQuery, useNotasCreditoVentaPedidoQuery,
@@ -218,6 +219,7 @@ const casos: Caso[] = [
   mutation('useRegistrarNotaCreditoMutation', () => useRegistrarNotaCreditoMutation(), {
     compraId: '221', subtotal: 100, iva: 21, total: 121, items: [],
   }),
+  mutation('useAnularNotaCreditoCompraMutation', () => useAnularNotaCreditoCompraMutation(), { notaId: '4', motivo: 'cargada en otra compra' }),
   query('useNotasCreditoVentaClienteQuery', () => useNotasCreditoVentaClienteQuery('5')),
   query('useNotasCreditoVentaPedidoQuery', () => useNotasCreditoVentaPedidoQuery('9')),
   mutation('useCrearNotaCreditoVentaMutation', () => useCrearNotaCreditoVentaMutation(), {
