@@ -31,7 +31,7 @@ import { retryWithBackoff, isTransientNetworkError, conPlazoDeRed, PlazoDeRedVen
 import { pareceSesionVencida, renovarSesion } from '../utils/sesionVencida'
 import { esErrorDeJwt } from '../utils/errorDeSupabase'
 import { getErrorMessage } from '../utils/errorHandling'
-import { mismoTotalDelAlta } from '../utils/totalDelAlta'
+import { mismoTotalDelAlta, mensajePedidoQueYaHabiaEntrado } from '../utils/totalDelAlta'
 import type { CamposCombo } from '../utils/combosPedido'
 import type { GpsResult } from './useGeolocationCapture'
 import { registrarGeolocalizacionPedido } from './useRegistrarGeolocalizacionPedido'
@@ -413,9 +413,7 @@ export function avisoPedidoQueYaHabiaEntrado(resultado: unknown, payload: Record
   const r = resultado as RespuestaIdempotente | null
   if (!r || r.idempotente !== true || r.clienteId == null || typeof r.total !== 'number') return null
   if (String(r.clienteId) !== String(payload.clienteId) || mismoTotalEncolado(r, payload)) return null
-  const numero = r.id != null ? ` #${r.id}` : ''
-  return `El pedido${numero} ya estaba cargado (entró en un intento anterior) y después cambió, por ejemplo porque ` +
-    'se editó o se canceló: no se cargó otro. Miralo en la lista de pedidos.'
+  return mensajePedidoQueYaHabiaEntrado(r.id)
 }
 
 /**

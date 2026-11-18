@@ -7,3 +7,41 @@
 export function mismoTotalDelAlta(guardado: number, enviado: number): boolean {
   return Math.abs(Math.round(guardado * 100) - Math.round(enviado * 100)) <= 1
 }
+
+/**
+ * Lo que dice el aviso cuando un pedido propio ya estaba cargado (entró en un intento anterior) y
+ * después cambió. Una sola frase para el replay de la cola y para el alta directa.
+ */
+export function mensajePedidoQueYaHabiaEntrado(id?: string | number | null): string {
+  const numero = id != null ? ` #${id}` : ''
+  return `El pedido${numero} ya estaba cargado (entró en un intento anterior) y después cambió, por ejemplo porque ` +
+    'se editó o se canceló: no se cargó otro. Miralo en la lista de pedidos.'
+}
+
+/** Lo que el alta directa le pregunta a la respuesta del server (`crearPedido`). */
+interface RespuestaDelAlta {
+  id?: string | number | null
+  idempotente?: boolean
+  clienteId?: string | number | null
+  total?: number | null
+  cargoEnvio?: number | null
+}
+
+/**
+ * El alta directa se reintenta con la misma clave (D56). Si el server contesta el pedido que ya tenía
+ * (`idempotente`) y ese pedido es del mismo cliente pero con otro total, es el PROPIO cambiado después
+ * (editado, cancelado, con una salvedad): no se creó nada, y decir «Pedido creado» miente. Devuelve el
+ * aviso, o null si no aplica: no fue la rama idempotente, el pedido no se pudo leer, es de otro cliente
+ * (acá no puede pasar con una clave por intención) o está igual. Un vale blanco no tiene total
+ * comparable (lo precia el server a costo) y no entra.
+ */
+export function avisoAltaQueYaHabiaEntrado(
+  respuesta: RespuestaDelAlta | null | undefined,
+  enviado: { clienteId: string | number | null | undefined; total: number; tipoFactura?: string | null },
+): string | null {
+  if (!respuesta || respuesta.idempotente !== true || enviado.tipoFactura === 'VB') return null
+  if (respuesta.clienteId == null || typeof respuesta.total !== 'number') return null
+  if (String(respuesta.clienteId) !== String(enviado.clienteId)) return null
+  if (mismoTotalDelAlta(respuesta.total - (respuesta.cargoEnvio ?? 0), enviado.total)) return null
+  return mensajePedidoQueYaHabiaEntrado(respuesta.id)
+}

@@ -415,3 +415,49 @@ describe('PedidosContainer — el cobro del alta sigue al saldo a favor mostrado
       .toMatch(/Si cobraste \$\s12\.100,00, \$\s100,00 no quedaron registrados\./)
   })
 })
+
+// I2 de la revisión de B12a: el alta directa se reintenta con la MISMA clave (D56). Si el primer
+// intento sí había entrado y alguien lo cambió (se editó, se canceló) antes del reintento, el server
+// contesta el pedido que ya tenía y la pantalla decía «Pedido creado correctamente»: mentira, no se
+// creó nada. Ahora dice qué pasó, con el mismo texto que el replay de la cola, y no lo da por creado.
+describe('PedidosContainer — el alta directa devuelve un pedido propio que ya había entrado y cambió', () => {
+  const avisos = () => notify.warning.mock.calls.map(c => String(c[0]))
+
+  it('un pedido propio con otro total (se editó) no se anuncia como creado: avisa que ya estaba y cambió', async () => {
+    // El carrito es de 12.000 y el pedido que contestó el server quedó en 8.000 + 500 de envío.
+    mutateAlta.mockResolvedValue({ id: '9', idempotente: true, clienteId: '9', cargoEnvio: 500, total: 8500 })
+    await altaCon([])
+
+    await waitFor(() => expect(avisos().some(t => /ya estaba cargado/.test(t))).toBe(true))
+    const texto = avisos().find(t => /ya estaba cargado/.test(t))!
+    expect(texto).toContain('#9')
+    expect(texto).toMatch(/no se cargó otro/)
+    expect(notify.success).not.toHaveBeenCalled()
+    // El aviso queda en pantalla hasta que se cierra (con el pedido ya cerrado, un toast de 5 s se pierde).
+    expect(notify.warning.mock.calls.find(c => /ya estaba cargado/.test(String(c[0])))?.[1]).toEqual({ persist: true })
+  })
+
+  it('un pedido propio cancelado (total 0) tampoco se anuncia como creado', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', idempotente: true, clienteId: '9', cargoEnvio: 0, total: 0 })
+    await altaCon([])
+
+    await waitFor(() => expect(avisos().some(t => /ya estaba cargado/.test(t))).toBe(true))
+    expect(notify.success).not.toHaveBeenCalled()
+  })
+
+  it('el replay de un pedido propio que no cambió (mismo cliente, mismo total) sigue diciendo que se creó', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', idempotente: true, clienteId: '9', cargoEnvio: 500, total: 12500 })
+    await altaCon([])
+
+    await waitFor(() => expect(notify.success).toHaveBeenCalledWith('Pedido creado correctamente'))
+    expect(avisos().filter(t => /ya estaba cargado/.test(t))).toEqual([])
+  })
+
+  it('un alta nueva (no idempotente) con otro total que el del carrito sigue como siempre', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', cargoEnvio: 500, total: 8500 })
+    await altaCon([])
+
+    await waitFor(() => expect(notify.success).toHaveBeenCalledWith('Pedido creado correctamente'))
+    expect(avisos().filter(t => /ya estaba cargado/.test(t))).toEqual([])
+  })
+})

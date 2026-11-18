@@ -104,6 +104,7 @@ import { filtrosParaStats } from '../../utils/kpiFiltroPedidos'
 import { useRecorridoActivoQuery } from '../../hooks/queries/useRecorridoActivoQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useOfflineSync } from '../../hooks/useOfflineSync'
+import { avisoAltaQueYaHabiaEntrado } from '../../utils/totalDelAlta'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useOptimizarRuta, horarioParaRutear, type RepartidorParam } from '../../hooks/useOptimizarRuta'
 import { barridasEfectivas, clasificarBarrida, intercalarSinCoordenadas, type Barrida } from '../../utils/barridas'
@@ -2164,7 +2165,15 @@ export default function PedidosContainer(): React.ReactElement {
       const avisoSaldoFavor = pedidoCreado?.id
         ? mensajeSaldoAFavorAlta(pedidoCreado.id, saldoAFavorAlta, pedidoCreado.saldoAFavorOtras ?? 0)
         : null
-      if (avisoSaldoFavor) notify.success(`Pedido creado correctamente. ${avisoSaldoFavor}`, { persist: true })
+      // I2 de la revisión de B12a: si el server devolvió el pedido propio que ya había entrado y
+      // cambió, no se creó nada: decir «Pedido creado» mentía. Se dice qué pasó, y queda a la vista.
+      const avisoYaEntro = avisoAltaQueYaHabiaEntrado(pedidoCreado, {
+        clienteId: nuevoPedido.clienteId,
+        total: totalConDescuento,
+        tipoFactura: nuevoPedido.tipoFactura,
+      })
+      if (avisoYaEntro) notify.warning(avisoYaEntro, { persist: true })
+      else if (avisoSaldoFavor) notify.success(`Pedido creado correctamente. ${avisoSaldoFavor}`, { persist: true })
       else notify.success('Pedido creado correctamente')
       // #1503: si se registró menos de lo que se declaró cobrar, quien cobró lo
       // tiene que saber: la diferencia está en su mano y no en el sistema. Si el
