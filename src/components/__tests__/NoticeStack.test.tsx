@@ -86,7 +86,7 @@ function mockActualizacion(disponible: boolean): { actualizar: () => void } {
     actualizando: false,
     buildActual: 'test-build',
     actualizar,
-    posponer: vi.fn(),
+    ocultar: vi.fn(),
   })
   return { actualizar }
 }
@@ -199,7 +199,7 @@ describe('Pila de avisos fijos', () => {
     const alerta = await screen.findByRole('alert')
     const estado = screen.getByRole('status')
 
-    expect(estado).toHaveTextContent('Hay una version nueva')
+    expect(estado).toHaveTextContent('Hay una versión nueva')
     expect(alerta).toHaveTextContent(/1 operación falló/)
 
     expect(pila()).toContainElement(estado)

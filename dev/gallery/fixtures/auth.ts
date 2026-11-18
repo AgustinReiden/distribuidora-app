@@ -130,6 +130,6 @@ export function sucursalContextDeRol(rol: RolUsuario): SucursalContextValue {
     sucursales: SUCURSALES_FIXTURE,
     loading: false,
     hasMultipleSucursales: SUCURSALES_FIXTURE.length > 1,
-    switchSucursal: async () => {},
+    switchSucursal: async () => 'ok' as const,
   }
 }

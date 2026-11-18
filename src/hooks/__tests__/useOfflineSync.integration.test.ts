@@ -41,6 +41,7 @@ vi.mock('../../lib/offlineDb', () => ({
   deletePendingOperations: (...args: unknown[]) => mockDeletePendingOperations(...args),
   getCachedData: () => Promise.resolve(cachePoliticas.valor),
   cacheData: () => Promise.resolve(),
+  contarPendientesDeOtrasSucursales: () => Promise.resolve([]),
 }))
 
 // Mock del cliente Supabase y el contexto de sucursal — necesario porque
@@ -1243,6 +1244,26 @@ describe('useOfflineSync Integration Tests', () => {
       await act(async () => { await result.current.handleSincronizar() })
       await act(async () => { await result.current.handleSincronizar() })
       expect(notify.warning).toHaveBeenCalledTimes(2)
+    })
+
+    it('H2 (revisión de B12a): muestra, persistente, el aviso del pedido que ya estaba cargado y cambió', async () => {
+      const aviso = 'El pedido #42 ya estaba cargado (entró en un intento anterior) y después cambió…'
+      const sincronizarPedidos = vi.fn().mockResolvedValue({ sincronizados: 1, errores: [], sinRespuesta: 0, avisos: [aviso] })
+      const notify = { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }
+      renderHook(() => useSyncManager({
+        isOnline: true,
+        pedidosPendientes: [{ offlineId: 'op_1' }],
+        sincronizando: false,
+        sincronizarPedidos,
+        crearPedido: vi.fn(),
+        refetchPedidos: vi.fn().mockResolvedValue(undefined),
+        refetchProductos: vi.fn().mockResolvedValue(undefined),
+        refetchMetricas: vi.fn().mockResolvedValue(undefined),
+        notify,
+      } as unknown as Parameters<typeof useSyncManager>[0]))
+
+      await waitFor(() => expect(notify.warning).toHaveBeenCalledWith(aviso, { persist: true }))
+      expect(notify.error).not.toHaveBeenCalled()
     })
 
     it('la sesión vencida se renueva y se reintenta sin gastar reintentos', async () => {
