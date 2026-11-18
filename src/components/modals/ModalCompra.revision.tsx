@@ -399,6 +399,7 @@ export default function RevisionEscaneoTabla({
                         id={`revision-upb-${index}`}
                         aria-label={`Unidades por bulto de la línea ${index + 1}`}
                         min={1}
+                        motivoMin="Al menos 1 por bulto"
                         emptyValue={1}
                         value={factor}
                         onChange={n => dispatch({ type: 'SET_CONVERSION_LINEA_ESCANEO', payload: { index, unidadesPorBulto: n > 1 ? n : null } })}

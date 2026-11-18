@@ -654,8 +654,8 @@ describe('NumberInput sinMiles', () => {
     expect(input).toHaveValue('1,25')
   })
 
-  // Un campo con tope 100 es un porcentaje: sin `sinMiles`, «12.125» se lee 12125 y el blur lo
-  // deja en 100 sin avisar. Recorre `src/` y pide la opción a todo NumberInput decimal con
+  // Un campo con tope 100 es un porcentaje: sin `sinMiles`, «12.125» se lee 12125 (antes el blur lo
+  // dejaba en 100 sin avisar; desde B23 queda en rojo, pero el porcentaje que se quiso era 12,13). Recorre `src/` y pide la opción a todo NumberInput decimal con
   // `max={100}`.
   it('todo NumberInput decimal con max={100} lleva sinMiles', () => {
     const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')

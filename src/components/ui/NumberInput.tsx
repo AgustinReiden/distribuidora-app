@@ -11,7 +11,8 @@
  *
  * Mantiene un borrador (string) interno mientras el input está enfocado, de
  * modo que el campo puede quedar vacío o parcial ("12,") mientras se edita.
- * Al confirmar (blur / Enter) parsea, clampa a [min, max] y normaliza.
+ * Al confirmar (blur / Enter) parsea y normaliza; lo que queda fuera de [min, max] no se recorta
+ * (ver abajo).
  *
  * Usa `type="text"` + `inputMode` a propósito: el `type="number"` es lo que
  * impide controlar el string vacío y los ceros a la izquierda. Con `text`

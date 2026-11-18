@@ -926,25 +926,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     }));
   };
 
-  // Setea la cantidad a un valor absoluto (para el input editable), con la
-  // misma validación de MOQ/stock que handleCantidadChange pero clampeando al
-  // máximo disponible en vez de rechazar.
+  // Setea la cantidad tipeada (el input editable). El mínimo de venta y el stock disponible los pone
+  // el campo en rojo, con su motivo (B23): lo que llega ya los cumple, y acá no se recorta nada.
   const handleCantidadSet = (productoId: string, value: number): void => {
     setErrorStock(null);
-    setItems(prev => prev.map(item => {
-      if (item.productoId !== productoId) return item;
-      const moq = moqMap.get(String(productoId));
-      const minCantidad = moq && moq > 1 ? moq : 1;
-      const producto = productos.find(p => p.id === productoId);
-      const cantidadOriginal = itemsOriginales.find(o => o.productoId === productoId)?.cantidad || 0;
-      const stockDisponible = (producto?.stock || 0) + cantidadOriginal;
-      let nueva = Math.max(minCantidad, Math.round(value));
-      if (nueva > stockDisponible) {
-        setErrorStock(`Stock insuficiente para "${item.nombre}". Disponible: ${stockDisponible}`);
-        nueva = stockDisponible;
-      }
-      return { ...item, cantidad: nueva };
-    }));
+    setItems(prev => prev.map(item => (item.productoId === productoId ? { ...item, cantidad: value } : item)));
   };
 
   const handleEliminarItem = (productoId: string): void => {
@@ -1547,8 +1533,10 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                           <NumberInput
                             integer
                             min={moqMap.get(String(item.productoId)) || 1}
+                            motivoMin={(moqMap.get(String(item.productoId)) || 1) > 1 ? `El mínimo de venta es ${moqMap.get(String(item.productoId))}` : undefined}
                             max={stockDisponible}
-                            emptyValue={moqMap.get(String(item.productoId)) || 1}
+                            motivoMax={`Hay ${stockDisponible} disponibles`}
+                            motivoVacio="Poné una cantidad"
                             value={item.cantidad}
                             onChange={(n) => handleCantidadSet(item.productoId, n)}
                             aria-label="Cantidad"

@@ -194,7 +194,7 @@ function ModalCtaCtePendiente({
             min={0}
             commitOnChange
             value={diasMin || null}
-            onChange={n => setDiasMin(Math.max(0, n))}
+            onChange={n => setDiasMin(n)}
             onVaciar={() => setDiasMin(0)}
             aria-label="Días mínimos de deuda"
             placeholder="días"

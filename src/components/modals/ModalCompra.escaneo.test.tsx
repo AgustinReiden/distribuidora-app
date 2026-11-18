@@ -426,6 +426,29 @@ describe('revisión rápida de la factura escaneada', () => {
     ])
   })
 
+  // B23 de #1603: las unidades por bulto en 0 quedan en rojo y la compra no se registra. Antes el
+  // blur del toque en «Registrar Compra» las subía a 1. Vacías valen 1 (sin conversión), a la vista.
+  it('las unidades por bulto en 0 quedan en rojo y no se registra; vacías valen 1, en gris', async () => {
+    const onSave = vi.fn((..._args: unknown[]) => Promise.resolve())
+    const user = await escanearYAplicar(onSave)
+    fila(2).focus()
+    await user.keyboard('{Enter}')
+    await user.click(screen.getByRole('button', { name: 'Omitir la línea 3' }))
+    await user.click(screen.getByRole('button', { name: 'Omitir la línea 4' }))
+    const upb = screen.getByLabelText('Unidades por bulto de la línea 1')
+
+    await user.clear(upb)
+    expect(upb).toHaveAttribute('placeholder', '1')
+    expect(upb).not.toHaveAttribute('aria-invalid', 'true')
+    await user.type(upb, '0')
+    await user.click(registrar())
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(upb).toHaveValue('0')
+    expect(upb).toHaveAttribute('aria-invalid', 'true')
+    expect(within(fila(1)).getByRole('alert')).toHaveTextContent('Al menos 1 por bulto')
+  })
+
   it('"Ver factura" la abre al lado con una URL firmada corta', async () => {
     // INF-7 (#1563): la CSP no deja cargar Storage en un <img>: se baja con la URL
     // firmada y se muestra como blob:. La firmada queda para abrirla en otra pestaña.

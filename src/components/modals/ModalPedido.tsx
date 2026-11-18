@@ -1566,9 +1566,10 @@ const ModalPedido = memo(function ModalPedido({
                                 <NumberInput
                                   integer
                                   min={minCantidad}
-                                  emptyValue={minCantidad}
+                                  motivoMin={minCantidad > 1 ? `El mínimo de venta es ${minCantidad}` : undefined}
+                                  motivoVacio="Poné una cantidad"
                                   value={item.cantidad}
-                                  onChange={(n) => onActualizarCantidad(item.productoId, Math.max(n, minCantidad))}
+                                  onChange={(n) => onActualizarCantidad(item.productoId, n)}
                                   onClick={(e) => e.stopPropagation()}
                                   aria-label="Cantidad"
                                   className="w-12 text-center font-medium text-sm border dark:border-gray-600 rounded px-1 py-0.5 dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"

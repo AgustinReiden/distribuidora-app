@@ -56,6 +56,38 @@ describe('ModalNotaCredito — devolución', () => {
     renderModal()
     expect(guardar()).toBeDisabled()
   })
+
+  // B23 de #1603: más de lo que se puede devolver queda en rojo y no se guarda. Antes el padre lo
+  // recortaba en vivo (con «15» el campo pasaba a 10) y con «100» el blur del Guardar guardaba 10,
+  // con el total de pantalla ya calculado sobre 10.
+  it.each(['15', '100'])('«%s» con 10 para devolver queda en rojo, dice el máximo y no se guarda', async texto => {
+    const onSave = renderModal()
+    const user = userEvent.setup()
+    const input = screen.getByLabelText('Cantidad a acreditar de Agua')
+
+    await user.clear(input)
+    await user.type(input, texto)
+    await user.click(guardar())
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(input).toHaveValue(texto)
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('alert')).toHaveTextContent('Quedan 10 para devolver')
+    expect(screen.getByText('Hay un campo en rojo para corregir')).toBeInTheDocument()
+  })
+
+  it('hasta el máximo guarda lo tipeado, sin salir antes del campo', async () => {
+    const onSave = renderModal()
+    const user = userEvent.setup()
+    const input = screen.getByLabelText('Cantidad a acreditar de Agua')
+
+    await user.clear(input)
+    await user.type(input, '10')
+    await user.click(guardar())
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ items: [expect.objectContaining({ productoId: '10', cantidad: 10 })] })
+  })
 })
 
 describe('ModalNotaCredito — ajuste sin mercadería', () => {
