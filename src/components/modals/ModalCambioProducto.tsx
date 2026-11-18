@@ -377,7 +377,7 @@ export default function ModalCambioProducto({
                 <NumberInput
                   integer
                   min={1}
-                  emptyValue={1}
+                  motivoVacio="Poné una cantidad"
                   commitOnChange
                   value={Number(cantidadDevuelta) || 0}
                   onChange={(n) => setCantidadDevuelta(n)}
@@ -438,7 +438,8 @@ export default function ModalCambioProducto({
                   integer
                   min={1}
                   max={productoEntregado.stock}
-                  emptyValue={1}
+                  motivoMax={`Hay ${productoEntregado.stock} en stock`}
+                  motivoVacio="Poné una cantidad"
                   commitOnChange
                   value={Number(cantidadEntregada) || 0}
                   onChange={(n) => setCantidadEntregada(n)}

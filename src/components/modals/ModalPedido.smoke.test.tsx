@@ -949,8 +949,8 @@ describe('ModalPedido — guardas del confirmar', () => {
   it('las violaciones de mínimo de venta listan el producto y apagan el confirmar', async () => {
     // Se inyecta la violación tal como la reporta `usePromocionPedido`, sin
     // `minimosProducto`, porque HOY NO HAY CAMINO DE UI QUE LA PRODUZCA: el
-    // catálogo agrega ya con el mínimo y en el carrito tanto el − como el input
-    // clampean contra ese mismo piso. El cartel sólo se ve con estado que viene
+    // catálogo agrega ya con el mínimo, en el carrito el − no baja de ese piso, y
+    // el input deja en rojo lo que queda debajo (B23). El cartel sólo se ve con estado que viene
     // de otro lado (un pedido armado sin señal, o un mínimo que subió después).
     estadoMock.violacionesMOQ = [{ productoId: '1', cantidadActual: 1, cantidadMinima: 3 }]
     const { user, onGuardarSpy } = montar()
@@ -1036,6 +1036,55 @@ describe('ModalPedido — guardas del confirmar', () => {
     expect(botonConfirmar()).toBeDisabled()
     await user.click(botonConfirmar())
     expect(onGuardarSpy).not.toHaveBeenCalled()
+  })
+})
+
+// B23 de #1603 (decisión del dueño, 18/11): una cantidad bajo el mínimo de venta queda en rojo, con
+// el mínimo en el motivo, y el pedido no se confirma. Antes el blur del toque en «Confirmar» la subía
+// al mínimo (y el `Math.max` del `onChange` también): se tipeaba 2 y se guardaba 6.
+describe('ModalPedido — la cantidad fuera de su límite (B23)', () => {
+  it.each([
+    ['2, con mínimo de venta 6', '2', 'El mínimo de venta es 6'],
+    ['vacía', '', 'Poné una cantidad'],
+  ])('%s: queda en rojo con su motivo y Confirmar no guarda', async (_caso, texto, motivo) => {
+    estadoMock.minimosProducto = new Map([['1', 6]])
+    const { user, onGuardarSpy } = montar()
+
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    const cantidad = screen.getByRole('textbox', { name: 'Cantidad' })
+    await user.clear(cantidad)
+    if (texto) await user.type(cantidad, texto)
+    await user.click(botonConfirmar())
+
+    expect(onGuardarSpy).not.toHaveBeenCalled()
+    expect(cantidad).toHaveValue(texto)
+    expect(cantidad).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByText(motivo)).toBeInTheDocument()
+    expect(screen.getByText('Hay un campo en rojo para corregir')).toBeInTheDocument()
+    expect(botonConfirmar()).toBeDisabled()
+    // H7: el motivo va debajo de la fila, no entre el campo y el «+».
+    expect(cantidad.nextElementSibling).toHaveTextContent('+')
+    expect(screen.getByTestId('motivo-cantidad')).toHaveTextContent(motivo)
+    expect(cantidad).toHaveAccessibleDescription(motivo)
+  })
+
+  it('sobre el mínimo confirma lo tipeado, sin salir antes del campo', async () => {
+    estadoMock.minimosProducto = new Map([['1', 6]])
+    const { user, onGuardarSpy } = montar()
+
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    const cantidad = screen.getByRole('textbox', { name: 'Cantidad' })
+    await user.clear(cantidad)
+    await user.type(cantidad, '8')
+    await user.click(botonConfirmar())
+
+    expect(onGuardarSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ items: [expect.objectContaining({ productoId: '1', cantidad: 8 })] }),
+    )
   })
 })
 

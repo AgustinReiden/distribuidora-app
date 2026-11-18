@@ -497,6 +497,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
                           integer
                           min={0}
                           max={l.disponible}
+                          motivoMax={`Quedan ${l.disponible} para acreditar`}
                           value={cant}
                           commitOnChange
                           disabled={l.disponible <= 0}
