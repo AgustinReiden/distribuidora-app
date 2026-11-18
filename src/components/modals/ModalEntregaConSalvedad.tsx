@@ -134,11 +134,15 @@ export default function ModalEntregaConSalvedad({
 
   const toggleItem = useCallback((itemId: string) => {
     if (registradas.has(itemId)) return
+    // Un renglón con su cantidad en rojo no se pliega al tocar otro (H4 de la revisión de B23): el
+    // campo se desmontaba, el registro lo olvidaba y «Continuar» seguía con la cantidad de antes. Se
+    // puede destildar (deja de ir en la salvedad) o corregir; el aviso de abajo dice por qué no cambia.
+    if (ilegibles.hay && expandido !== null && expandido !== itemId) return
     setItemsSalvedad(prev => prev.map(i =>
       i.item.id === itemId ? { ...i, seleccionado: !i.seleccionado } : i
     ))
     setExpandido(prev => prev === itemId ? null : itemId)
-  }, [registradas])
+  }, [registradas, ilegibles.hay, expandido])
 
   const updateItemSalvedad = useCallback((itemId: string, data: Partial<Omit<ItemSalvedad, 'item'>>) => {
     if (registradas.has(itemId)) return

@@ -44,6 +44,32 @@ describe('ModalComisionReglas — el porcentaje fuera de su límite (B23)', () =
     expect(screen.getByText('Hay un campo en rojo para corregir')).toBeInTheDocument()
   })
 
+  // Decisión del dueño (18/11): «Sí, hacelo obligatorio». Antes el porcentaje vacío agregaba una
+  // regla de 0 %, que deja sin comisión a todos sin que nadie lo haya decidido.
+  it('vacío queda en rojo («Poné un porcentaje») y la regla no se agrega', async () => {
+    const user = abrir()
+    const input = screen.getByLabelText('Porcentaje')
+
+    await user.clear(input)
+    await user.click(screen.getByRole('button', { name: /agregar regla/i }))
+
+    expect(mutateAsync).not.toHaveBeenCalled()
+    expect(input).toHaveValue('')
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('alert')).toHaveTextContent('Poné un porcentaje')
+  })
+
+  it('0 escrito sí se agrega', async () => {
+    const user = abrir()
+    const input = screen.getByLabelText('Porcentaje')
+
+    await user.clear(input)
+    await user.type(input, '0')
+    await user.click(screen.getByRole('button', { name: /agregar regla/i }))
+
+    expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ porcentaje: 0 }))
+  })
+
   it('dentro del límite agrega lo tipeado, sin salir antes del campo', async () => {
     const user = abrir()
     const input = screen.getByLabelText('Porcentaje')

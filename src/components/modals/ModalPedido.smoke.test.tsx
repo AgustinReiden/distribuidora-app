@@ -1064,6 +1064,10 @@ describe('ModalPedido — la cantidad fuera de su límite (B23)', () => {
     expect(screen.getByText(motivo)).toBeInTheDocument()
     expect(screen.getByText('Hay un campo en rojo para corregir')).toBeInTheDocument()
     expect(botonConfirmar()).toBeDisabled()
+    // H7: el motivo va debajo de la fila, no entre el campo y el «+».
+    expect(cantidad.nextElementSibling).toHaveTextContent('+')
+    expect(screen.getByTestId('motivo-cantidad')).toHaveTextContent(motivo)
+    expect(cantidad).toHaveAccessibleDescription(motivo)
   })
 
   it('sobre el mínimo confirma lo tipeado, sin salir antes del campo', async () => {

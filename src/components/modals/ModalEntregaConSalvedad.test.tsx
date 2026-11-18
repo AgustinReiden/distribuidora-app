@@ -353,6 +353,32 @@ describe('ModalEntregaConSalvedad — la cantidad fuera de su límite (B23)', ()
     expect(onSave).not.toHaveBeenCalled()
   })
 
+  // H4 de la revisión de B23 (ya pasaba): tocar otro renglón plegaba el de la cantidad en rojo, el
+  // campo se desmontaba y «Continuar» confirmaba la cantidad de antes (5).
+  it('con la cantidad en rojo, tocar otro renglón no pliega éste ni libera «Continuar»', async () => {
+    const { user, onSave } = renderModal()
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
+    await user.clear(inputCantidadAfectada())
+    await user.type(inputCantidadAfectada(), '44')
+
+    await tildarItem(user, 'Fideos 500g')
+
+    expect(inputCantidadAfectada()).toHaveValue('44')
+    expect(inputCantidadAfectada()).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByText('Hay un campo en rojo para corregir')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /continuar/i })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: /continuar/i }))
+    expect(screen.queryByText(/ud\. con problema/)).toBeNull()
+    expect(onSave).not.toHaveBeenCalled()
+
+    // Corregida, ya se puede pasar al otro renglón.
+    await user.clear(inputCantidadAfectada())
+    await user.type(inputCantidadAfectada(), '4')
+    await tildarItem(user, 'Fideos 500g')
+    expect(screen.getAllByRole('textbox')[0]).toHaveValue('3')
+  })
+
   it('dentro del límite continúa con lo tipeado, sin salir antes del campo', async () => {
     const { user } = renderModal()
     await tildarItem(user, 'Aceite Girasol 900ml')

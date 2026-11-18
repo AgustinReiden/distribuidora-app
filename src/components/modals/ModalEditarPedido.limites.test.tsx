@@ -91,6 +91,9 @@ describe('ModalEditarPedido — la cantidad fuera de su límite (B23)', () => {
     expect(screen.getByText('Hay un campo en rojo para corregir')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Guardar( Todo)?$/ })).toBeDisabled()
     expect(onSaveItems).not.toHaveBeenCalled()
+    // H7: el motivo va debajo de la fila, no adentro de la píldora − campo +.
+    expect(input.nextElementSibling?.tagName).toBe('BUTTON')
+    expect(screen.getByTestId('motivo-cantidad')).toHaveTextContent(motivo)
   })
 
   it('dentro del límite guarda lo tipeado, sin salir antes del campo', async () => {

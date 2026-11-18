@@ -110,6 +110,8 @@ describe('ModalCliente — crédito y descuentos fuera de su límite (B23)', () 
   it('los días de crédito vacíos valen 0, y el campo lo muestra en gris', async () => {
     const user = abrir()
     const input = screen.getByLabelText('Días de crédito')
+    // Decisión del dueño (18/11): vacío es contado, y la ayuda lo dice.
+    expect(screen.getByText(/0 = contado/)).toBeInTheDocument()
 
     await user.clear(input)
     expect(input).toHaveAttribute('placeholder', '0')

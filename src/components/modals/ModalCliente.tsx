@@ -1222,7 +1222,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
                   onChange={(n) => handleFieldChange('diasCredito', n)}
                   className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                 />
-                <p className="text-xs text-gray-500 mt-1">Plazo de pago en días</p>
+                <p className="text-xs text-gray-500 mt-1">Plazo de pago en días (0 = contado)</p>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1 dark:text-gray-200">Descuento (%)</label>

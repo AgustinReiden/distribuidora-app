@@ -85,14 +85,60 @@ describe('un número fuera de su límite no se recorta (B23)', () => {
     expect(fuente).not.toMatch(/\bclamp\(/)
   })
 
-  it('ningún formulario recorta lo que le manda un NumberInput en su onChange', () => {
+  /**
+   * El cuerpo de la función `nombre` declarada en el mismo archivo (`const nombre = (…) => {…}`,
+   * `const nombre = useCallback((…) => {…})` o `function nombre(…) {…}`), o null si no está ahí.
+   */
+  function cuerpoDe(texto: string, nombre: string): string | null {
+    const decl = new RegExp(`(?:const\\s+${nombre}\\s*=|function\\s+${nombre}\\s*\\()`).exec(texto)
+    if (!decl) return null
+    const resto = texto.slice(decl.index)
+    if (decl[0].startsWith('const')) {
+      const flecha = resto.indexOf('=>')
+      if (flecha === -1) return null
+      // Una flecha con expresión (sin llaves): hasta la próxima sentencia con la misma sangría.
+      if (!/^=>\s*\{/.test(resto.slice(flecha))) {
+        const sangria = /[ \t]*$/.exec(texto.slice(0, decl.index))?.[0] ?? ''
+        const fin = resto.slice(flecha).search(new RegExp(`\\n${sangria}(?![ \\t])\\S`))
+        return fin === -1 ? resto.slice(flecha) : resto.slice(flecha, flecha + fin)
+      }
+    }
+    // Con llaves: la primera `{` después de `=>` (una flecha) o de `)` (una función).
+    const inicio = decl[0].startsWith('const') ? resto.indexOf('=>') : resto.search(/\)\s*(?::[^{]*)?\{/)
+    if (inicio === -1) return null
+    const desde = decl.index + resto.indexOf('{', inicio)
+    let profundidad = 0
+    for (let i = desde; i < texto.length; i++) {
+      if (texto[i] === '{') profundidad++
+      else if (texto[i] === '}' && --profundidad === 0) return texto.slice(desde, i + 1)
+    }
+    return null
+  }
+
+  // Lo que mide: un Math.max / Math.min escrito en el onChange del NumberInput, o en el cuerpo de la
+  // función del mismo archivo que ese onChange llama (`handleCantidadSet(id, n)`, un setter con
+  // nombre). Lo que NO ve: un recorte dos llamadas más abajo, en otro archivo (el container, un
+  // hook, un reducer) o con otro nombre (un `if (n > tope) n = tope`). Eso lo cubren los tests que
+  // tipean en cada formulario y tocan Guardar sin salir del campo (`*.limites.test.tsx` y los
+  // casos B23 de los tests de cada modal).
+  it('ningún formulario recorta lo que le manda un NumberInput en su onChange ni en el handler que llama', () => {
     const recortan: string[] = []
     for (const ruta of archivos(SRC)) {
       const texto = fs.readFileSync(ruta, 'utf-8')
       for (const m of texto.matchAll(/<NumberInput\b[\s\S]*?\/>/g)) {
         const onChange = /onChange=\{([\s\S]*?)\}\s*(?:\n|\/>|[a-zA-Z-]+=)/.exec(m[0])?.[1] ?? ''
-        if (/Math\.(max|min)\(/.test(onChange)) {
-          recortan.push(`${relativa(ruta)}:${texto.slice(0, m.index).split('\n').length}`)
+        const linea = `${relativa(ruta)}:${texto.slice(0, m.index).split('\n').length}`
+        if (/Math\.(max|min)\(/.test(onChange)) recortan.push(linea)
+        for (const [, nombre] of onChange.matchAll(/\b([a-zA-Z_]\w*)\s*\(/g)) {
+          if (nombre === 'Math' || /^set[A-Z]/.test(nombre)) continue
+          const cuerpo = cuerpoDe(texto, nombre)
+          if (cuerpo && /Math\.(max|min)\(/.test(cuerpo)) recortan.push(`${linea} (en ${nombre})`)
+        }
+        // `onChange={handler}` sin llamarlo.
+        const suelto = /^\s*([a-zA-Z_]\w*)\s*$/.exec(onChange)?.[1]
+        if (suelto && !/^set[A-Z]/.test(suelto)) {
+          const cuerpo = cuerpoDe(texto, suelto)
+          if (cuerpo && /Math\.(max|min)\(/.test(cuerpo)) recortan.push(`${linea} (en ${suelto})`)
         }
       }
     }

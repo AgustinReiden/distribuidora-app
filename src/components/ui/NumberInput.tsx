@@ -49,6 +49,7 @@ import {
   KeyboardEvent,
   ReactElement,
 } from 'react'
+import { createPortal } from 'react-dom'
 import { numeroEditable, redondear } from '../../utils/calculations'
 import { useAnotarIlegible } from '../../hooks/useRegistroIlegibles'
 import { esPegado } from '../../hooks/useTecleoNumero'
@@ -99,6 +100,12 @@ export interface NumberInputProps extends InheritedInputProps {
   /** El motivo de un campo obligatorio vacío («Poné una cantidad»). Si está, el campo es obligatorio. */
   motivoVacio?: string;
   /**
+   * Dónde va el motivo en rojo, si no al lado del campo: un campo angosto entre botones (− campo +)
+   * lo pone debajo de su fila, con el ancho de la fila, para no correr los botones (H7 de la revisión
+   * de B23). Sin esto, o mientras devuelva null, va debajo del campo.
+   */
+  contenedorMotivo?: () => HTMLElement | null;
+  /**
    * Para un campo donde vacío no es un número (L3, #1603: el stock mínimo vacío
    * usa el de siempre, y 0 apaga la alerta): si está, confirmar el campo vacío la
    * llama en vez de confirmar `emptyValue`.
@@ -135,6 +142,7 @@ export function NumberInput({
   motivoMax,
   emptyValue,
   motivoVacio,
+  contenedorMotivo,
   onVaciar,
   commitOnChange = false,
   selectOnFocus = true,
@@ -350,6 +358,16 @@ export function NumberInput({
   }, [invalido, onValidez])
 
   const describedBy = [rest['aria-describedby'], mensaje ? idMensaje : null].filter(Boolean).join(' ') || undefined
+  const spanMensaje = mensaje ? (
+    <span
+      id={idMensaje}
+      role="alert"
+      className="block w-full basis-full mt-1 text-xs font-medium text-red-600 dark:text-red-400"
+    >
+      {mensaje}
+    </span>
+  ) : null
+  const dondeMensaje = spanMensaje && contenedorMotivo ? contenedorMotivo() : null
 
   return (
     <>
@@ -372,15 +390,7 @@ export function NumberInput({
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
       />
-      {mensaje && (
-        <span
-          id={idMensaje}
-          role="alert"
-          className="block w-full basis-full mt-1 text-xs font-medium text-red-600 dark:text-red-400"
-        >
-          {mensaje}
-        </span>
-      )}
+      {dondeMensaje ? createPortal(spanMensaje, dondeMensaje) : spanMensaje}
     </>
   )
 }

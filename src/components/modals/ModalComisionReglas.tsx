@@ -224,7 +224,8 @@ export default function ModalComisionReglas({
                 min={0}
                 max={100}
                 motivoMax="No puede pasar de 100 %"
-                emptyValue={0}
+                // Obligatorio (decisión del dueño, 18/11): vacío agregaba una regla de 0 %. El 0 se escribe.
+                motivoVacio="Poné un porcentaje"
                 value={porcentaje}
                 onChange={setPorcentaje}
                 commitOnChange

@@ -598,6 +598,32 @@ describe('NumberInput fuera de su límite, en un formulario con registro', () =>
     expect(onChange).not.toHaveBeenCalledWith(50)
   })
 
+  it('con contenedorMotivo el motivo va ahí (debajo de la fila), y sin él al lado del campo', async () => {
+    const user = userEvent.setup()
+    const abajo = document.createElement('div')
+    document.body.appendChild(abajo)
+    const { unmount } = render(
+      <div>
+        <NumberInput aria-label="num" integer min={6} value={6} onChange={vi.fn()} contenedorMotivo={() => abajo} />
+        <button type="button">+</button>
+      </div>,
+    )
+    const input = screen.getByLabelText('num')
+    await user.clear(input)
+    await user.type(input, '2')
+
+    expect(input.nextElementSibling).toHaveTextContent('+')
+    expect(abajo).toHaveTextContent('El mínimo es 6')
+    expect(input).toHaveAccessibleDescription('El mínimo es 6')
+    unmount()
+    abajo.remove()
+
+    render(<NumberInput aria-label="otro" integer min={6} value={6} onChange={vi.fn()} contenedorMotivo={() => null} />)
+    await user.clear(screen.getByLabelText('otro'))
+    await user.type(screen.getByLabelText('otro'), '2')
+    expect(screen.getByLabelText('otro').nextElementSibling).toHaveTextContent('El mínimo es 6')
+  })
+
   it('el límite que cambia (otro producto, otro stock) cambia el rojo del borrador', async () => {
     const user = userEvent.setup()
     const { rerender } = render(<NumberInput aria-label="num" integer min={1} max={5} value={3} onChange={vi.fn()} />)
