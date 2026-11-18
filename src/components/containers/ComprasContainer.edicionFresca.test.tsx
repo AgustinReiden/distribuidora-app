@@ -37,6 +37,7 @@ vi.mock('../../hooks/queries', () => ({
   useCrearProductoMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCrearProveedorMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useRegistrarNotaCreditoMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useAnularNotaCreditoCompraMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useActualizarProductoMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCategoriasQuery: () => ({ data: [] }),
   useMarcasQuery: () => ({ data: [] }),

@@ -91,7 +91,14 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
     del contenedor (M3-1, ola 2 de #1603): lo que la cancelación le devolvió a un lote del contenedor
     vuelve a la bolsa, y el bloque que cierra el alta hereda esos lotes en sus `lotes_pendientes` (la
     parte `{"lote_id": null}`); lo que no se vuelve a cerrar vuelve a su lote. La edición
-    (`actualizar_pedido_items`) todavía no lo hace.
+    (`actualizar_pedido_items`), la sustitución (`sustituir_regalo_pedido`) y el reparto
+    (`dividir_regalo_pedido`) no deshacen y rehacen la barra: pasan lo que le restan y le suman a
+    cada barra por `_barra_mover_neto`, que llama al motor una vez por promo y producto con la
+    diferencia (primero lo que baja) y, si un fardo se abre en una barra y se cierra en otra del
+    mismo contenedor, el bloque nuevo hereda su lote (el molde M3-1). La edición que no cambia el
+    regalo no toca la barra, los bloques ni el contenedor (B19, ola 2 de #1603). Un camino nuevo que
+    en la misma operación baje una barra y suba otra pasa por ese helper; los que sólo suben (el
+    alta, el bot) o sólo bajan (la cancelación, la eliminación, la salvedad) llaman al motor directo.
   - El gate es el check **STK-F** de `auditoria_integridad()`: falla si una función de `public`
     sube `productos.stock` de forma incremental sin mencionar `app.stock_origen`. **No tiene
     excepciones** (#1594): `registrar_ingreso_sucursal` ya no existe y `registrar_compra_completa`

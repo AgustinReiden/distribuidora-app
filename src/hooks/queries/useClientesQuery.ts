@@ -11,6 +11,7 @@ import { useAuthData } from '../../contexts/AuthDataContext'
 import { esClienteOperable } from '../../utils/clienteOperable'
 import type { ClienteDB, TipoComprobanteVenta } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
+import { documentoParaGuardar, type TipoDocumentoCliente } from '../../utils/documentoCliente'
 import {
   cambiaIdentidadDuplicado,
   mensajeDuplicado,
@@ -253,6 +254,11 @@ interface ClienteCreateInput {
   aclaracion_direccion?: string | null
   telefono?: string | null
   cuit?: string | null
+  /**
+   * No hace falta mandarlo: sale de `cuit` (`documentoParaGuardar`, B17). Antes no
+   * viajaba nunca y todo cliente quedaba 'CUIT', también los DNI.
+   */
+  tipo_documento?: TipoDocumentoCliente
   zona_id?: string | null
   latitud?: number | null
   longitud?: number | null
@@ -339,7 +345,9 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
       direccion: clienteFields.direccion,
       aclaracion_direccion: clienteFields.aclaracion_direccion ?? null,
       telefono: clienteFields.telefono || null,
-      cuit: clienteFields.cuit || null,
+      // El documento con su tipo, que sale del valor (B17, #1561): esta lista nombra
+      // las columnas una por una, y sin el tipo todo cliente nacía 'CUIT'.
+      ...documentoParaGuardar(clienteFields.cuit),
       // zona_id es la FK canónica. '' (string vacío) y undefined → null para limpiar la FK.
       zona_id: clienteFields.zona_id ? clienteFields.zona_id : null,
       latitud: clienteFields.latitud || null,
@@ -399,6 +407,12 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
   const payload: Partial<ClienteCreateInput> = { ...clienteFields }
   if ('zona_id' in payload) {
     payload.zona_id = payload.zona_id ? payload.zona_id : null
+  }
+  // Si la edición trae el documento, viaja con su tipo (B17, #1561): el patch de
+  // ClientesContainer nunca lo mandaba y un DNI quedaba 'CUIT'. Un patch sin
+  // documento (el del preventista, la baja lógica) no lo toca.
+  if ('cuit' in payload) {
+    Object.assign(payload, documentoParaGuardar(payload.cuit))
   }
 
   // Mismo guard que createCliente, para la edición. ModalCliente ya lo llama

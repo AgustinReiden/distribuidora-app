@@ -102,6 +102,11 @@ export const errorDeCuit = (cuit: string, original?: string | null): string | nu
   if (digitos.length === 0) return null;
   if (original && digitos === original.replace(/\D/g, '')) return null;
   if (digitos.length !== 11) return 'El CUIT debe tener 11 dígitos';
+  // Ningún CUIT empieza con 00: era un número inventado rellenado con ceros, de cuando el
+  // campo era obligatorio, o un DNI (B17, #1561).
+  if (digitos.startsWith('00')) {
+    return 'Un CUIT no empieza con 00. Si es un DNI, elegí «DNI» en el tipo de documento; si el cliente no tiene documento, dejá el campo vacío.';
+  }
   if (!validarCuit(digitos)) {
     return 'El CUIT no es válido: el dígito verificador no coincide. Revisá los números.';
   }
@@ -110,7 +115,8 @@ export const errorDeCuit = (cuit: string, original?: string | null): string | nu
 
 /**
  * Error del documento de un cliente según su tipo, o null si se puede guardar.
- * CUIT: 11 dígitos y dígito verificador (D37 de #1561); DNI: 7 u 8 dígitos.
+ * CUIT: 11 dígitos y dígito verificador (D37 de #1561); DNI: 7 u 8 cifras, sin
+ * contar los ceros de adelante (la base rechaza un número corto rellenado, B17).
  * Vacío se permite. `original` es el documento con el que se abrió la ficha.
  */
 export const errorDeDocumento = (
@@ -121,7 +127,8 @@ export const errorDeDocumento = (
   const digitos = (numero || '').replace(/\D/g, '');
   if (digitos.length === 0) return null;
   if (tipo === 'CUIT') return errorDeCuit(numero, original);
-  return digitos.length >= 7 && digitos.length <= 8 ? null : 'El DNI debe tener 7 u 8 dígitos';
+  const cifras = digitos.replace(/^0+/, '').length;
+  return digitos.length <= 8 && cifras >= 7 ? null : 'El DNI debe tener 7 u 8 dígitos';
 };
 
 /**
