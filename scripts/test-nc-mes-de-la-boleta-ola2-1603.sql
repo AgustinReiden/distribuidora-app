@@ -1,4 +1,4 @@
--- Ensayo de la tarjeta B16 de la ola 2 del plan #1603 (v3): la nota de crédito de venta se imputa al mes
+-- Ensayo de la tarjeta B16 de la ola 2 del plan #1603 (v5): la nota de crédito de venta se imputa al mes
 -- de su boleta; tiene motivos, y le descuenta al vendedor según el motivo y sin ir hacia atrás
 -- (decisiones del dueño del 16/11 en #1545 y #1551, y del 17/11 en la ficha B16 v3).
 -- Migración: NNN_nc_mes_de_la_boleta.
@@ -49,6 +49,9 @@
 --     L3 T3 con una nota de rechazo que se anula antes de liquidar: vuelve a 1.000.
 --     L4 lo que queda por liquidar es sólo T3 (1.000) y no hay ningún ajuste.
 --     L5 (v4) anulada la liquidación que congelaba T2 (con su nota anulada), la nota deja de restar: 1.000.
+--     L6 (v5, decisión del dueño del 18/11) anulada la liquidación de L1: su nota vigente, que no restaba
+--        por estar liquidada, pasa a restar (800); una de vencido no (1.000), ni una de rechazo anulada
+--        (1.000). Al volver a liquidar queda así y no queda nada pendiente.
 --   G · (v4) una nota no cambia de motivo ni vuelve a estar vigente (los dos UPDATE se rechazan).
 --   Las carreras de la nota y la liquidación (H1 de la revisión de la v3) piden dos sesiones: las prueba
 --   scripts/concurrencia/b16-nota-y-liquidacion.sh.
@@ -90,6 +93,10 @@ DECLARE
   v_x       jsonb;
   v_t       text;
   v_t2      text;
+  v_pl1     bigint;
+  v_pv      bigint;
+  v_pa      bigint;
+  v_nca     bigint;
   v_n       numeric;
   v_k       int;
   v_mot     text;
@@ -434,7 +441,14 @@ BEGIN
   INSERT INTO empleado_arreglos (empleado_id, vigente_desde, sueldo, frecuencia, comisiona, creado_por)
     VALUES (v_emp, v_mes - 31, 0, 'mensual', true, v_adm);
   v_p := pg_temp.bol(v_v4, v_c1, v_f);
+  v_pl1 := v_p;
+  -- Para L6: dos boletas más en la misma liquidación.
+  v_pv := pg_temp.bol(v_v4, v_c1, v_f);
+  v_pa := pg_temp.bol(v_v4, v_c1, v_f);
   PERFORM pg_temp.congelar(v_emp, v_mes, v_finmes, interval '3 hours');
+  PERFORM pg_temp.nc(v_pv, 2, 'producto_vencido');
+  v_nca := (pg_temp.nc(v_pa, 2, 'cliente_rechaza')->>'nota_credito_id')::bigint;
+  PERFORM pg_temp.anular(v_nca);
   v_r := pg_temp.nc(v_p, 2, 'cliente_rechaza');
   IF (v_r->>'resta_comision')::boolean IS DISTINCT FROM false OR NOT pg_temp.igual(pg_temp.base(v_p), 1000) THEN
     v_fallas := v_fallas || format('L1 con la comisión liquidada la nota no resta: %s, base %s', v_r->>'resta_comision', pg_temp.base(v_p));
@@ -470,6 +484,35 @@ BEGIN
      OR NOT pg_temp.igual(pg_temp.base(v_p2), 1000) THEN
     v_fallas := v_fallas || format('L5 anulada la liquidación, la nota anulada que congelaba deja de restar: %s, base %s',
       (SELECT resta_comision FROM notas_credito_venta WHERE id = v_nc2), pg_temp.base(v_p2));
+  END IF;
+
+  -- L6 (v5, decisión del dueño del 18/11: «Sí, vuelve a descontar»): se anula la liquidación del mes de F
+  -- (la de L1). Cada nota de sus boletas queda como si se hubiera creado con la boleta sin liquidar: la
+  -- de rechazo vigente de L1, que no restaba por estar liquidada, pasa a restar (800); la de vencido sigue
+  -- sin restar (1.000); la de rechazo anulada, tampoco (1.000). La vista previa lo trae así, y al volver
+  -- a liquidar queda congelado sin ningún ajuste después.
+  PERFORM pg_temp.como(v_adm, v_s, format('SELECT public.anular_liquidacion(%s, %L)::text',
+    (SELECT max(id) FROM empleado_liquidaciones WHERE empleado_id = v_emp AND anulada_at IS NULL), 'ensayo B16'));
+  SELECT jsonb_object_agg(CASE l.pedido_id WHEN v_pl1 THEN 'rechazo' WHEN v_pv THEN 'vencido' WHEN v_pa THEN 'anulada' END,
+                          round(l.base, 2))
+    INTO v_x
+    FROM (SELECT l.pedido_id, sum(l.base) AS base
+            FROM public._liquidacion_lineas((SELECT e FROM empleados e WHERE e.id = v_emp), v_finmes + 1) l
+           WHERE l.pedido_id IN (v_pl1, v_pv, v_pa) AND l.tipo = 'inicial'
+           GROUP BY l.pedido_id) l;
+  v_t := format('%s / %s / %s',
+    (SELECT resta_comision FROM notas_credito_venta WHERE pedido_id = v_pl1),
+    (SELECT resta_comision FROM notas_credito_venta WHERE pedido_id = v_pv),
+    (SELECT resta_comision FROM notas_credito_venta WHERE pedido_id = v_pa));
+  PERFORM pg_temp.congelar(v_emp, v_mes, v_finmes + 1, interval '1 hour');
+  IF v_t IS DISTINCT FROM 't / f / f'
+     OR v_x IS DISTINCT FROM jsonb_build_object('rechazo', 800.00, 'vencido', 1000.00, 'anulada', 1000.00)
+     OR (SELECT round(sum(l.base), 2) FROM empleado_liquidacion_lineas l WHERE l.pedido_id = v_pl1 AND l.vigente) IS DISTINCT FROM 800.00
+     OR EXISTS (SELECT 1 FROM public._liquidacion_lineas((SELECT e FROM empleados e WHERE e.id = v_emp), v_finmes + 1) l) THEN
+    v_fallas := v_fallas || format('L6 anulada la liquidación, la nota vigente que no restaba por estar liquidada resta (resta_comision rechazo/vencido/anulada: %s; vista previa %s); al volver a liquidar, %s y nada pendiente (%s)',
+      v_t, v_x,
+      (SELECT round(sum(l.base), 2) FROM empleado_liquidacion_lineas l WHERE l.pedido_id = v_pl1 AND l.vigente),
+      (SELECT count(*) FROM public._liquidacion_lineas((SELECT e FROM empleados e WHERE e.id = v_emp), v_finmes + 1) l));
   END IF;
 
   -- ============================================ G · la foto no se rehace (v4, H6)
@@ -508,7 +551,7 @@ BEGIN
   END;
 
   IF cardinality(v_fallas) = 0 THEN
-    RAISE EXCEPTION 'ENSAYO OK · B16 v4: la NC se imputa al mes de su boleta; motivos, foto del vendedor (comisión, metas y Rendimiento) y nada hacia atrás (también al anular una liquidación)';
+    RAISE EXCEPTION 'ENSAYO OK · B16 v5: la NC se imputa al mes de su boleta; motivos, foto del vendedor (comisión, metas y Rendimiento) y nada hacia atrás (al anular una liquidación, cada nota como si la boleta no se hubiera liquidado)';
   END IF;
   RAISE EXCEPTION E'ENSAYO FALLÓ · % caso(s):\n  - %', cardinality(v_fallas), array_to_string(v_fallas, E'\n  - ');
 END

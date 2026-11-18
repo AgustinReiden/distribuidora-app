@@ -111,6 +111,37 @@ BEGIN
   RETURN v_aviso;
 END $f$;
 
+-- Anula la última liquidación vigente del empleado del escenario (como el admin).
+CREATE FUNCTION b16c.anular_liq() RETURNS text LANGUAGE sql AS $f$
+  SELECT 'liquidación ' || l.id || ' anulada' || COALESCE(b16c.como(b16c.adm(), b16c.fx('s')::bigint,
+           format('SELECT public.anular_liquidacion(%s, %L)::text', l.id, 'conc B16')), '')
+    FROM empleado_liquidaciones l
+   WHERE l.empleado_id = b16c.fx('e')::bigint AND l.anulada_at IS NULL
+   ORDER BY l.id DESC LIMIT 1
+$f$;
+
+-- Cómo quedó tras anular la liquidación (E5 a E8): no queda nada liquidado de la boleta, y la nota está
+-- como si se hubiera creado con la boleta sin liquidar (decisión del dueño del 18/11): anulada, no resta y
+-- la próxima liquidación trae la boleta por 1.000; vigente, resta y la trae por 800.
+CREATE FUNCTION b16c.veredicto_sin_liquidar() RETURNS text LANGUAGE sql AS $f$
+  WITH n AS (SELECT * FROM notas_credito_venta WHERE pedido_id = b16c.fx('p1')::bigint),
+  lib AS (SELECT count(*) AS k FROM empleado_liquidacion_lineas l WHERE l.pedido_id = b16c.fx('p1')::bigint AND l.vigente),
+  prox AS (SELECT COALESCE(sum(l.base) FILTER (WHERE l.pedido_id = b16c.fx('p1')::bigint), 0) AS base,
+                  string_agg(DISTINCT l.tipo, ',') AS tipos
+             FROM public._liquidacion_lineas((SELECT e FROM empleados e WHERE e.id = b16c.fx('e')::bigint),
+                                             (b16c.mes() + interval '2 month')::date) l)
+  SELECT CASE WHEN (SELECT count(*) FROM n) = 1
+               AND (SELECT n.resta_comision = NOT n.anulada FROM n)
+               AND lib.k = 0
+               AND round(prox.base, 2) = CASE WHEN (SELECT n.anulada FROM n) THEN 1000 ELSE 800 END
+               AND prox.tipos = 'inicial'
+              THEN 'OK' ELSE 'FALLA' END
+         || format(' · nota anulada=%s resta_comision=%s · líneas vigentes de la boleta %s · la próxima liquidación la trae por %s (%s)',
+                   (SELECT string_agg(n.anulada::text, ',') FROM n), (SELECT string_agg(n.resta_comision::text, ',') FROM n),
+                   lib.k, round(prox.base, 2), prox.tipos)
+    FROM lib, prox
+$f$;
+
 -- Cómo quedó: la nota, el libro, y lo que traería la próxima liquidación. «OK» si no queda ningún ajuste
 -- pendiente y lo liquidado de la primera boleta es lo que la nota dice (800 si resta, 1.000 si no).
 CREATE FUNCTION b16c.veredicto() RETURNS text LANGUAGE sql AS $f$

@@ -354,14 +354,19 @@ suelta en `sucursales`.
   emite dentro del mes de su boleta (decisión del dueño del 18/11: una nota de octubre sobre una boleta
   de septiembre no cambia el Rendimiento de septiembre). Anular la nota devuelve sólo lo que no quedó
   congelado: lo liquidado, la meta cumplida o fuera de su mes y el Rendimiento de un mes cerrado
-  siguen restando aunque la nota esté anulada (decisión del dueño del 18/11); si después se anula la
-  liquidación que la congelaba, deja de restar
-  (`anular_liquidacion`). Una nota no cambia de motivo ni vuelve a estar vigente (lo rechaza la tabla).
+  siguen restando aunque la nota esté anulada (decisión del dueño del 18/11). Anular una liquidación
+  (`anular_liquidacion`) deja cada nota de las boletas que dejan de estar liquidadas como si se hubiera
+  creado sin liquidar: la anulada que había quedado congelada deja de restar, y la vigente que no restaba
+  por estar liquidada pasa a restar si su motivo descuenta (decisión del dueño del 18/11: «Sí, vuelve a
+  descontar»); las metas y Rendimiento no cambian. Una nota no cambia de motivo ni vuelve a estar vigente
+  (lo rechaza la tabla).
   Una meta creada después de la nota no la ve; si la boleta cambia de vendedor, la comisión sigue a la
   boleta y las metas del anterior dejan de contarla. Un camino nuevo que lea lo del vendedor sale de
   `_nc_resta_comision` (comisión), `_metas_logrado` (metas) o `_nc_rendimiento` (desempeño), no de
-  `_ventas_nc` pelado. Y un camino nuevo que congele comisiones toma antes las boletas que congela, como
-  `liquidar_empleado` (si no, una nota emitida en el medio no se ve y deja un ajuste).
+  `_ventas_nc` pelado. Y un camino nuevo que congele o descongele comisiones toma antes, `FOR KEY SHARE`
+  y por id, las boletas que toca, como `liquidar_empleado` y `anular_liquidacion` (si no, una nota
+  emitida o anulada en el medio no se ve y deja un ajuste). Lo prueba
+  `scripts/concurrencia/b16-nota-y-liquidacion.sh`.
   **El envío vive en `pedidos.cargo_envio`, dentro de `total`** (migs 389 y NNN cargo_1–4), y su
   desglose (`cargo_envio_desglose`) dentro de `total_neto`/`total_iva`, no de `total_real`. La plata
   a cobrar (saldo, cobranza, deuda, recorridos, rendiciones, transportista) usa `total`; la venta, la

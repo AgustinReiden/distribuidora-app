@@ -94,11 +94,15 @@
 --     toda nota (bot_ventas_periodo, bot_mis_ventas y el resumen del
 --     preventista).
 --   · La foto y la liquidación no se cruzan: `liquidar_empleado` toma las
---     boletas que congela FOR KEY SHARE antes de calcular, y
---     `anular_nota_credito_venta` toma también la boleta de la nota. Si se anula
---     una liquidación, la nota anulada que había quedado congelada por ella deja
---     de restar (`anular_liquidacion`). Con eso, una nota no produce ajustes en
---     el libro. `_liquidacion_lineas` no cambia.
+--     boletas que puede congelar FOR KEY SHARE antes de calcular,
+--     `anular_liquidacion` toma las suyas, y `anular_nota_credito_venta` toma
+--     también la boleta de la nota. Si se anula una liquidación, cada nota de
+--     las boletas que dejan de estar liquidadas queda como si se hubiera creado
+--     sin liquidar: la anulada que había quedado congelada deja de restar, y la
+--     vigente que no restaba por estar liquidada pasa a restar si su motivo
+--     descuenta (decisión del dueño del 18/11). Con eso, una nota no produce
+--     ajustes en el libro y el resultado no depende del orden.
+--     `_liquidacion_lineas` no cambia.
 --   · Una nota no cambia de motivo ni vuelve a estar vigente: la foto se decidió
 --     con ellos (lo rechaza la tabla; ninguna RPC lo hace).
 -- =========================================================================
@@ -123,7 +127,7 @@ END
 $lf$;
 
 -- ---------------------------------------------------------------------------
--- Premisas: los cuerpos vivos de producción en la 527. reporte_gerencial va sin
+-- Premisas: los cuerpos vivos de producción en la 528. reporte_gerencial va sin
 -- md5 (otras tarjetas le parchan el tramo de compras): se exige que las anclas
 -- de su tramo aparezcan una vez.
 -- ---------------------------------------------------------------------------
@@ -145,6 +149,7 @@ BEGIN
     ('public.liquidar_empleado(bigint,jsonb)', 'c29edc547e9b788a1e30e89a7f37b51f'),
     ('public.anular_liquidacion(bigint,text)', '2d5dfd976973cda9540d0cc6e822580f'),
     ('public._liquidacion_lineas(empleados,date)', NULL),
+    ('public._empleado_dia_de_entrega(timestamp with time zone,date)', NULL),
     ('public._tablero_hoy()', NULL)
   ) AS t(f, h) LOOP
     IF to_regprocedure(r.f) IS NULL THEN
@@ -439,14 +444,22 @@ AS $function$
        -- 3XB: el vale blanco no cuenta para ninguna meta.
        AND p.tipo_factura IS DISTINCT FROM 'VB'
   ),
+  -- Los renglones de cada boleta por su índice, boleta por boleta (LATERAL con
+  -- OFFSET 0): sin estadísticas, el planner estimaba `ped` en una fila y
+  -- recorría todos los renglones contra todas las boletas (N2 de la revisión de
+  -- la v4: crear una nota tardaba de 8 a 27 s con 8.000 boletas).
   it AS MATERIALIZED (
     SELECT ped.usuario_id, ped.sucursal_id, ped.fecha, pi.cantidad, pi.subtotal,
            pi.producto_id, prod.categoria_id, prod.marca_id
       FROM ped
-      JOIN pedido_items pi ON pi.pedido_id = ped.id
+      CROSS JOIN LATERAL (
+        SELECT x.cantidad, x.subtotal, x.producto_id
+          FROM pedido_items x
+         WHERE x.pedido_id = ped.id AND x.es_bonificacion IS NOT TRUE
+        OFFSET 0
+      ) pi
       -- #1262: LEFT. La línea de un producto borrado suma a las metas globales.
       LEFT JOIN productos prod ON prod.id = pi.producto_id
-     WHERE pi.es_bonificacion IS NOT TRUE
   ),
   -- La boleta de la nota se busca por id, nota por nota, y se le piden las
   -- condiciones de ped con el período de la meta: el LIMIT hace que el planner
@@ -1067,13 +1080,20 @@ $bot$;
 -- 7 · La foto y la liquidación no se cruzan (H1 y H2 de la revisión de la v3)
 -- =========================================================================
 
--- liquidar_empleado: las boletas que va a congelar, tomadas FOR KEY SHARE por
+-- liquidar_empleado: las boletas que puede congelar, tomadas FOR KEY SHARE por
 -- id ANTES de calcular. Una nota que ya tiene la boleta (la RPC la toma FOR
 -- UPDATE) hace esperar a la liquidación, que después la ve; una nota que llega
 -- después espera a que la liquidación confirme y lee el libro escrito («ya
 -- liquidada»). Sin esto, la nota y la liquidación no se veían y la siguiente
 -- liquidación traía un ajuste por la nota. El orden es empleados → pedidos; la
 -- nota sólo toma pedidos.
+-- Cuáles: las del vendedor entregadas, sin liquidar y con entrega hasta el fin
+-- del período: las candidatas a `iniciales` de `_liquidacion_lineas` (su CTE
+-- `entran`, sin mirar el arreglo: un poco más, nunca menos). Se leen sin
+-- calcular comisiones (N3 de la revisión de la v4: la v4 recorría
+-- `_liquidacion_lineas` una vez más). Las ya liquidadas (los ajustes) no hacen
+-- falta: la foto de una nota sobre ellas las ve liquidadas y no resta, y
+-- anularla no cambia lo que restaba.
 DO $liq$
 DECLARE
   v_def text := pg_temp.def('public.liquidar_empleado(bigint,jsonb)');
@@ -1082,9 +1102,14 @@ BEGIN
 $a$  v_j := public._liquidacion_json(v_e, v_desde, v_hasta, v_sueldo);$a$,
 $n$  -- B16 (H1 de la revisión): las boletas que esta liquidación congela, antes de
   -- calcular (ver migrations NNN_nc_mes_de_la_boleta).
-  PERFORM 1 FROM pedidos
-   WHERE id IN (SELECT l.pedido_id FROM public._liquidacion_lineas(v_e, v_hasta) l)
-   ORDER BY id
+  PERFORM 1 FROM pedidos p
+   WHERE p.usuario_id = v_e.usuario_id
+     AND (p.sucursal_id = v_e.sucursal_id OR v_e.de_las_dos)
+     AND p.estado = 'entregado'
+     AND public._empleado_dia_de_entrega(p.fecha_entrega, p.fecha) <= v_hasta
+     AND NOT EXISTS (SELECT 1 FROM empleado_liquidacion_lineas l
+                      WHERE l.pedido_id = p.id AND l.usuario_id = p.usuario_id AND l.vigente)
+   ORDER BY p.id
      FOR KEY SHARE;
   v_j := public._liquidacion_json(v_e, v_desde, v_hasta, v_sueldo);$n$, 'liquidar · boletas');
   EXECUTE v_def;
@@ -1092,23 +1117,44 @@ END
 $liq$;
 
 -- anular_liquidacion: si con la liquidación anulada una boleta deja de estar
--- liquidada para su vendedor, la nota ANULADA que había quedado congelada por esa
--- liquidación (resta_comision) ya no lo está: deja de restar (H2). Las vigentes
--- quedan como están.
+-- liquidada para su vendedor, cada nota de esa boleta queda como si se hubiera
+-- creado con la boleta sin liquidar: la ANULADA que había quedado congelada por
+-- esa liquidación deja de restar (H2), y la VIGENTE que no restaba por estar
+-- liquidada pasa a restar si su motivo descuenta (decisión del dueño del 18/11,
+-- N4 de la revisión de la v4: «Sí, vuelve a descontar»). Así el resultado no
+-- depende de si la nota se cargó antes o después de anular. Las metas y
+-- Rendimiento no cambian: su foto depende del mes, no de la liquidación. Antes, sus boletas FOR KEY SHARE por id (N1 de la revisión
+-- de la v4): sin eso, anular la nota y la liquidación a la vez dejaba la nota
+-- anulada restando. El orden es empleados → pedidos (como liquidar_empleado), y
+-- va antes de las rendiciones de los movimientos.
 DO $anliq$
 DECLARE
   v_def text := pg_temp.def('public.anular_liquidacion(bigint,text)');
 BEGIN
   v_def := pg_temp.parche(v_def,
+$a$  FOR v_m IN SELECT * FROM empleado_movimientos WHERE liquidacion_id = v_l.id AND revierte_id IS NULL ORDER BY id LOOP$a$,
+$n$  -- B16 (N1 de la revisión de la v4): las boletas de la liquidación, antes de
+  -- tocar el libro y las notas.
+  PERFORM 1 FROM pedidos
+   WHERE id IN (SELECT l.pedido_id FROM empleado_liquidacion_lineas l WHERE l.liquidacion_id = v_l.id)
+   ORDER BY id
+     FOR KEY SHARE;
+  FOR v_m IN SELECT * FROM empleado_movimientos WHERE liquidacion_id = v_l.id AND revierte_id IS NULL ORDER BY id LOOP$n$,
+    'anular liquidación · boletas');
+  v_def := pg_temp.parche(v_def,
 $a$  UPDATE empleado_liquidacion_lineas SET vigente = false WHERE liquidacion_id = v_l.id;$a$,
 $n$  UPDATE empleado_liquidacion_lineas SET vigente = false WHERE liquidacion_id = v_l.id;
-  -- B16 (H2 de la revisión): lo que no quedó congelado vuelve.
+  -- B16: cada nota de una boleta que deja de estar liquidada queda como si se
+  -- hubiera creado con la boleta sin liquidar (la regla de la foto al crear):
+  -- la vigente cuyo motivo descuenta, con vendedor, resta (decisión del dueño
+  -- del 18/11: «Sí, vuelve a descontar»); la anulada que había quedado congelada
+  -- por esta liquidación deja de restar (H2 de la revisión de la v3).
   UPDATE notas_credito_venta n
-     SET resta_comision = false
-    FROM pedidos p
+     SET resta_comision = COALESCE(NOT n.anulada AND mot.descuenta_vendedor AND p.usuario_id IN (SELECT id FROM perfiles), false)
+    FROM pedidos p, public.nc_venta_motivos() mot
    WHERE p.id = n.pedido_id
-     AND n.anulada
-     AND n.resta_comision
+     AND mot.motivo = n.motivo
+     AND n.resta_comision IS DISTINCT FROM COALESCE(NOT n.anulada AND mot.descuenta_vendedor AND p.usuario_id IN (SELECT id FROM perfiles), false)
      AND n.pedido_id IN (SELECT l.pedido_id FROM empleado_liquidacion_lineas l WHERE l.liquidacion_id = v_l.id)
      AND NOT EXISTS (SELECT 1 FROM empleado_liquidacion_lineas l
                       WHERE l.pedido_id = n.pedido_id AND l.usuario_id = p.usuario_id AND l.vigente);$n$,
@@ -1157,7 +1203,9 @@ BEGIN
     ('public.bot_ventas_periodo(date,date,bigint,integer)', '_ventas_nc', true),
     ('public.bot_mis_ventas(uuid,date,date,bigint,integer)', '_ventas_nc', true),
     ('public.liquidar_empleado(bigint,jsonb)', 'FOR KEY SHARE', true),
-    ('public.anular_liquidacion(bigint,text)', 'SET resta_comision = false', true),
+    ('public.anular_liquidacion(bigint,text)', 'SET resta_comision = COALESCE(NOT n.anulada AND mot.descuenta_vendedor', true),
+    ('public.anular_liquidacion(bigint,text)', 'WHERE id IN (SELECT l.pedido_id FROM empleado_liquidacion_lineas l WHERE l.liquidacion_id = v_l.id)', true),
+    ('public.liquidar_empleado(bigint,jsonb)', '_empleado_dia_de_entrega(p.fecha_entrega, p.fecha) <= v_hasta', true),
     ('public.anular_nota_credito_venta(bigint,text)', 'OR id = (SELECT n.pedido_id FROM notas_credito_venta n', true),
     ('public.notas_credito_venta_foto_vendedor()', 'NEW.resta_rendimiento := OLD.resta_rendimiento', true),
     ('public._nc_rendimiento(bigint[],date,date)', 'WHERE n.resta_rendimiento', false)
