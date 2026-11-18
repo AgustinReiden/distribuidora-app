@@ -48,3 +48,30 @@ BEGIN
   END LOOP;
 END
 $semilla$;
+
+-- Los 18 rubros de gastos de la migración 411 y «Faltantes de caja» (con su clave, de la 446 y la 488): la base de CI nace sin datos y
+-- varios ensayos de gastos (test-gastos-1, test-gastos-personal-1521…) piden los 19 como en prod.
+INSERT INTO public.gasto_rubros (nombre, grupo, palabras_busqueda, pide_litros_km, reparto_sugerido_meses, sugiere_mes_anterior)
+VALUES
+  ('Combustible',              'vehiculos',      'nafta gasoil gnc',     true,  NULL, false),
+  ('Seguro',                   'vehiculos',      NULL,                   false, 12,   false),
+  ('Patente',                  'vehiculos',      NULL,                   false, NULL, false),
+  ('Mantenimiento y service',  'vehiculos',      'taller mecanico',      false, NULL, false),
+  ('Peajes y estacionamiento', 'vehiculos',      NULL,                   false, NULL, false),
+  ('Alquiler',                 'inmueble',       NULL,                   false, NULL, false),
+  ('Expensas',                 'inmueble',       NULL,                   false, NULL, false),
+  ('Luz, agua y gas',          'inmueble',       'servicios',            false, NULL, false),
+  ('Ingresos brutos',          'impuestos',      'iibb rentas dgr',      false, NULL, true),
+  ('Tasa municipal',           'impuestos',      'cisi',                 false, NULL, false),
+  ('Librería',                 'administracion', 'papeleria',            false, NULL, false),
+  ('Teléfono e internet',      'administracion', 'celular',              false, NULL, false),
+  ('Limpieza',                 'administracion', NULL,                   false, NULL, false),
+  ('Honorarios del contador',  'administracion', 'estudio contable',     false, NULL, false),
+  ('Oficina central (parte de la distribuidora)', 'administracion', NULL, false, NULL, false),
+  ('Vehículo',                 'bienes_de_uso',  'camioneta utilitario', false, 60,   false),
+  ('Equipos y muebles',        'bienes_de_uso',  'heladera estanteria',  false, 36,   false),
+  ('Varios',                   'otros',          NULL,                   false, NULL, false)
+ON CONFLICT ((lower(btrim(nombre)))) DO NOTHING;
+INSERT INTO public.gasto_rubros (nombre, grupo, palabras_busqueda, pide_litros_km, reparto_sugerido_meses, sugiere_mes_anterior, clave)
+VALUES ('Faltantes de caja', 'otros', 'faltante robo perdida', false, NULL, false, 'faltantes_caja')
+ON CONFLICT ((lower(btrim(nombre)))) DO NOTHING;
