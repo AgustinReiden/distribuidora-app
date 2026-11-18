@@ -1006,10 +1006,12 @@ export async function fetchPedidosNoEntregados(sucursalId: number | null): Promi
 
   let perfilesMap: Record<string, PerfilDB> = {}
   if (transportistaIds.size > 0) {
-    const { data: perfiles } = await supabase
+    const { data: perfiles, error: errorPerfiles } = await supabase
       .from('perfiles')
       .select('id, nombre, email')
       .in('id', Array.from(transportistaIds))
+    // 1598-b7: sin perfiles el chofer salía en blanco, sin aviso.
+    if (errorPerfiles) throw errorDeSupabase(errorPerfiles, 'Sin conexión: no se pudo cargar quién reparte cada pedido. Revisá la señal e intentá de nuevo.')
 
     if (perfiles) {
       perfilesMap = Object.fromEntries(
@@ -1073,10 +1075,12 @@ export async function fetchPedidosParaEntregaYPago(sucursalId: number | null): P
 
   let perfilesMap: Record<string, PerfilDB> = {}
   if (transportistaIds.size > 0) {
-    const { data: perfiles } = await supabase
+    const { data: perfiles, error: errorPerfiles } = await supabase
       .from('perfiles')
       .select('id, nombre, email')
       .in('id', Array.from(transportistaIds))
+    // 1598-b7: sin perfiles el chofer salía en blanco, sin aviso.
+    if (errorPerfiles) throw errorDeSupabase(errorPerfiles, 'Sin conexión: no se pudo cargar quién reparte cada pedido. Revisá la señal e intentá de nuevo.')
 
     if (perfiles) {
       perfilesMap = Object.fromEntries(
@@ -1339,10 +1343,12 @@ export async function fetchPedidosNoPagados(sucursalId: number | null): Promise<
 
   let perfilesMap: Record<string, PerfilDB> = {}
   if (transportistaIds.size > 0) {
-    const { data: perfiles } = await supabase
+    const { data: perfiles, error: errorPerfiles } = await supabase
       .from('perfiles')
       .select('id, nombre, email')
       .in('id', Array.from(transportistaIds))
+    // 1598-b7: sin perfiles el chofer salía en blanco, sin aviso.
+    if (errorPerfiles) throw errorDeSupabase(errorPerfiles, 'Sin conexión: no se pudo cargar quién reparte cada pedido. Revisá la señal e intentá de nuevo.')
 
     if (perfiles) {
       perfilesMap = Object.fromEntries(
