@@ -42,6 +42,7 @@ import {
 } from '../../utils/valeBlanco'
 import { puedeVerDeudaCliente, puedeCrearNotaCreditoVenta } from '../../lib/permisos'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
+import { useTrabajoEnCurso } from '../../hooks/useTrabajoEnCurso'
 import { cobrarRecordandoSinConfirmar, guardarClavesDeAlta, leerClavesDeAlta } from '../../utils/requestIdPersistente'
 import {
   nuevoRequestId,
@@ -57,8 +58,10 @@ import {
   verificacionConfiable,
   ofrecerColaTrasFallo,
   huellaDeAlta,
+  huellaDeOfertaCola,
   MENSAJE_ALTA_EN_DUDA_ENCOLADA,
   MENSAJE_VB_EN_DUDA_ENCOLADO,
+  PLAZO_ALTA_DIRECTA_MS,
   type ClaveDeAlta,
 } from '../../utils/idempotencia'
 import { verificarClaveDeAlta } from '../../hooks/queries/usePedidosQuery'
@@ -117,7 +120,7 @@ import { motivoSinGpsDeHoy, recordarMotivoSinGps } from '../../utils/motivoSinGp
 import { supabase } from '../../hooks/supabase/base'
 import { traerTodoVerificado } from '../../utils/paginacion'
 import { usePagos } from '../../hooks/supabase/usePagos'
-import { isTransientNetworkError } from '../../utils/retryWithBackoff'
+import { isTransientNetworkError, conPlazoDeRed } from '../../utils/retryWithBackoff'
 import { escrituraIdempotente } from '../../utils/escrituraIdempotente'
 import { importConRecarga, lazyWithReload } from '../../utils/lazyWithReload'
 import { cambioDeVersionDe, versionTrasCambioPropio } from '../../utils/versionPedido'
@@ -639,8 +642,16 @@ export default function PedidosContainer(): React.ReactElement {
   const [altaParaCola, setAltaParaCola] = useState<{
     gps: GpsResult | null
     motivoOmision?: string
+    /** La clave en duda del intento que falló: la cola va con ésa. */
+    claveId: string
+    /** `huellaDeOfertaCola` del intento: el pedido sin lo que la cola descarta (el cobro). */
     huella: string
   } | null>(null)
+
+  // D57 / H1 de la revisión de B12a: con un alta o un cobro en vuelo, o con la
+  // oferta de la cola en pantalla, la actualización obligatoria no recarga encima.
+  useTrabajoEnCurso(guardando, 'alta o cobro en curso')
+  useTrabajoEnCurso(altaParaCola !== null, 'alta sin confirmar (oferta de la cola)')
 
   /** Deja el formulario del alta en blanco. La clave del alta la maneja quien llama. */
   const limpiarFormularioAlta = useCallback(() => {
@@ -737,7 +748,14 @@ export default function PedidosContainer(): React.ReactElement {
     // `intentoEn` (M5, #1603): mientras el intento pueda seguir corriendo en el
     // servidor, un «no entró» no se cree (`verificacionConfiable`).
     if (clave && clave.id === input.offlineId) fijarAltaId({ ...clave, enDuda: true, intentoEn: Date.now() })
-    const alta = crearPedido.mutateAsync(input)
+    // H3 (revisión de B12a): con señal que no pasa datos el `fetch` puede quedar
+    // colgado y la oferta de la cola (D56) no aparecer nunca. Con plazo, el corte es
+    // «sin respuesta» (`PlazoDeRedVencido`): la clave queda en duda y se ofrece la
+    // cola. Un alta cortada PUEDE haber entrado: la clave sigue protegiendo igual.
+    const alta = conPlazoDeRed(
+      signal => crearPedido.mutateAsync({ ...input, signal }),
+      PLAZO_ALTA_DIRECTA_MS,
+    )
     // El fallo sigue su camino al llamador (el `await` de abajo): acá sólo se
     // anota si la clave queda en duda, antes de que el llamador lo vea.
     alta.catch((e: unknown) => {
@@ -1759,10 +1777,15 @@ export default function PedidosContainer(): React.ReactElement {
     gps: GpsResult | null,
     motivoOmision?: string,
     // D56: quien carga eligió guardar en la cola el alta que quedó en duda por la red.
-    opciones: { aCola?: boolean } = {},
+    opciones: { aCola?: { claveId: string } } = {},
   ) => {
     // Sin red, o porque quien carga lo eligió con la señal inservible (D56): a la cola.
-    const encolar = !isOnline || opciones.aCola === true
+    const encolar = !isOnline || opciones.aCola != null
+    // D56 / H4: la cola va con la clave en duda de la oferta, aunque se haya tocado
+    // el cobro (que la cola descarta y cambia la huella): es el mismo pedido.
+    const claveDeLaOferta = opciones.aCola && altaIdRef.current?.id === opciones.aCola.claveId
+      ? altaIdRef.current.id
+      : null
     try {
       // Use promo+wholesale-resolved items and total (includes bonificaciones)
       const tipoFactura = nuevoPedido.tipoFactura || 'ZZ'
@@ -1777,7 +1800,7 @@ export default function PedidosContainer(): React.ReactElement {
       if (esTipoVB(tipoFactura)) {
         const itemsVB = itemsVBParaCrear(nuevoPedido.items)
         // Un VB no declara cobro: el aviso de "ya había entrado" no menciona el cobro.
-        const altaIdVB = await acuniarIdDeAlta(huellaDelAlta, String(nuevoPedido.clienteId), false)
+        const altaIdVB = claveDeLaOferta ?? await acuniarIdDeAlta(huellaDelAlta, String(nuevoPedido.clienteId), false)
         if (altaIdVB === null) {
           setGuardando(false)
           return
@@ -1906,7 +1929,7 @@ export default function PedidosContainer(): React.ReactElement {
       // Se acuña en el primer intento y sobrevive a los reintentos: es lo que
       // impide que un corte de señal después del COMMIT cree el pedido dos veces.
       // Con la anterior en duda y el contenido cambiado, primero se pregunta (#1543).
-      const altaId = await acuniarIdDeAlta(huellaDelAlta, String(nuevoPedido.clienteId), nuevoPedido.estadoPago !== 'pendiente')
+      const altaId = claveDeLaOferta ?? await acuniarIdDeAlta(huellaDelAlta, String(nuevoPedido.clienteId), nuevoPedido.estadoPago !== 'pendiente')
       if (altaId === null) {
         setGuardando(false)
         return
@@ -2165,7 +2188,7 @@ export default function PedidosContainer(): React.ReactElement {
       // con esta misma clave. Volver a tocar Confirmar reintenta con la misma.
       const enDuda = altaIdRef.current
       if (!encolar && enDuda && ofrecerColaTrasFallo(e, enDuda)) {
-        setAltaParaCola({ gps, motivoOmision, huella: enDuda.huella })
+        setAltaParaCola({ gps, motivoOmision, claveId: enDuda.id, huella: huellaDeOfertaCola(nuevoPedido, itemsFinales) })
         setGuardando(false)
         return
       }
@@ -2183,14 +2206,16 @@ export default function PedidosContainer(): React.ReactElement {
   }, [nuevoPedido, motivoDatosAlta, itemsFinales, preciosResueltos, lineasConCombos, totalConCombos, descuentoClientePct, descuentoPorCategoria, mandarAlta, user, resetNuevoPedido, acuniarIdDeAlta, notify, productos, registrarGpsPedido, registrarPago, requestIdAlta, isOnline, guardarPedidoOffline, clienteNuevoPedido, regaloMueveStockPorPromo, queryClient, politicas, clientesOperativos, perfil?.rol])
 
   // D56: la oferta vale mientras el formulario sea el del intento que falló.
-  const huellaFormularioAlta = useMemo(() => huellaDeAlta(nuevoPedido, itemsFinales), [nuevoPedido, itemsFinales])
+  // Sin el cobro (H4): la cola lo descarta, así que tocarlo no hace otro pedido.
+  const huellaFormularioAlta = useMemo(() => huellaDeOfertaCola(nuevoPedido, itemsFinales), [nuevoPedido, itemsFinales])
   const ofrecerColaAlta = altaParaCola !== null && altaParaCola.huella === huellaFormularioAlta
   const handleGuardarAltaEnCola = useCallback(async () => {
     const oferta = altaParaCola
     if (!oferta) return
-    setAltaParaCola(null)
+    // La oferta se limpia sólo si el encolado sale bien (`resetNuevoPedido`): si
+    // falla (stock local, mínimo, almacenamiento), sigue ahí con su error (H4).
     setGuardando(true)
-    await ejecutarCreacionPedido(oferta.gps, oferta.motivoOmision, { aCola: true })
+    await ejecutarCreacionPedido(oferta.gps, oferta.motivoOmision, { aCola: { claveId: oferta.claveId } })
   }, [altaParaCola, ejecutarCreacionPedido])
 
   // Handler que arranca el flujo: captura GPS si preventista, decide si bloquear,

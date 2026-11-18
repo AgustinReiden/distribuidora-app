@@ -620,6 +620,29 @@ const ModalPedido = memo(function ModalPedido({
   // silencio. Mismo patrón que ModalEditarPedido.
   const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null);
 
+  // I1 de la revisión de B12a (decisión de pantalla a confirmar por el dueño): con
+  // la oferta de la cola en pantalla (D56) el pedido no se guardó en ningún lado;
+  // cerrar (la X, Escape o el «atrás» del teléfono) pide confirmación, DENTRO del
+  // modal como la de quitar una promo. Sin la oferta, cierra como siempre.
+  const cerrarAlta = (): void => {
+    if (!onGuardarEnCola) {
+      onClose();
+      return;
+    }
+    setConfirmConfig({
+      visible: true,
+      tipo: 'warning',
+      titulo: 'Salir sin guardar',
+      mensaje: 'El pedido no se guardó. ¿Salir igual?',
+      textoConfirmar: 'Salir igual',
+      textoCancelar: 'Seguir con el pedido',
+      onConfirm: () => {
+        setConfirmConfig(null);
+        onClose();
+      },
+    });
+  };
+
   // Promos quitadas a mano → se excluyen de la resolución (display y submit).
   const promosEliminadasSet = useMemo(
     () => new Set((promosEliminadas ?? []).map(p => p.promoId)),
@@ -2069,7 +2092,7 @@ const ModalPedido = memo(function ModalPedido({
     return (
       <BottomSheet
         open
-        onClose={onClose}
+        onClose={cerrarAlta}
         title="Nuevo Pedido"
         headerExtra={tipoFacturaToggle}
         // Igual que ModalBase: un toque al costado no tira el pedido a medio
@@ -2097,7 +2120,7 @@ const ModalPedido = memo(function ModalPedido({
   }
 
   return (
-    <ModalBase title="Nuevo Pedido" onClose={onClose} maxWidth="max-w-2xl" headerExtra={tipoFacturaToggle}>
+    <ModalBase title="Nuevo Pedido" onClose={cerrarAlta} maxWidth="max-w-2xl" headerExtra={tipoFacturaToggle}>
       {cuerpo}
       {confirmacion}
     </ModalBase>

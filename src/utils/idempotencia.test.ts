@@ -21,6 +21,7 @@ import {
   MARGEN_INTENTO_EN_VUELO_MS,
   clienteDeLaHuella,
   huellaDeAlta,
+  huellaDeOfertaCola,
   ofrecerColaTrasFallo,
   type ClaveDeAlta,
 } from './idempotencia'
@@ -199,6 +200,11 @@ describe('verificacionConfiable (M5)', () => {
     expect(decidirTrasVerificar(verificacionConfiable({ resultado: 'no_entro' }, clave, T), 'h2', '9').paso).toBe('esperar_senal')
   })
 
+  it('H6: con el reloj atrasado después del intento (diferencia negativa), vale como margen vencido', () => {
+    const clave = { intentoEn: T + 60 * 60 * 1000 }
+    expect(verificacionConfiable({ resultado: 'no_entro' }, clave, T)).toEqual({ resultado: 'no_entro' })
+  })
+
   it('pasado el margen, el «no entró» vale', () => {
     const clave = { intentoEn: T - MARGEN_INTENTO_EN_VUELO_MS }
     expect(verificacionConfiable({ resultado: 'no_entro' }, clave, T)).toEqual({ resultado: 'no_entro' })
@@ -207,6 +213,17 @@ describe('verificacionConfiable (M5)', () => {
   it('«entró» vale siempre, y una clave sin hora (de antes) se cree como antes', () => {
     expect(verificacionConfiable({ resultado: 'entro', pedidoId: '5' }, { intentoEn: T }, T)).toEqual({ resultado: 'entro', pedidoId: '5' })
     expect(verificacionConfiable({ resultado: 'no_entro' }, {}, T)).toEqual({ resultado: 'no_entro' })
+  })
+})
+
+describe('huellaDeOfertaCola (H4)', () => {
+  it('no cambia si sólo cambia el cobro (que la cola descarta), y sí si cambia el pedido', () => {
+    const base = { clienteId: '9', notas: '', estadoPago: 'pendiente', montoPagado: 0 }
+    const lineas = [{ productoId: '7', cantidad: 1, precioUnitario: 10 }]
+    expect(huellaDeOfertaCola({ ...base, estadoPago: 'pagado', montoPagado: 10 }, lineas)).toBe(huellaDeOfertaCola(base, lineas))
+    expect(huellaDeOfertaCola({ ...base, notas: 'otra' }, lineas)).not.toBe(huellaDeOfertaCola(base, lineas))
+    // La clave sigue con la huella entera.
+    expect(huellaDeAlta({ ...base, estadoPago: 'pagado' }, lineas)).not.toBe(huellaDeAlta(base, lineas))
   })
 })
 

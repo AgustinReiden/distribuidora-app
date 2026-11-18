@@ -303,7 +303,10 @@ export async function getPendingOperations(
 /** Cuántos pedidos sin sincronizar tiene el usuario en una sucursal que no es la activa. */
 export interface PendientesDeOtraSucursal {
   sucursalId: number
-  cantidad: number
+  /** Los que se mandan solos desde esa sucursal (lo que ahí entra al contador). */
+  pendientes: number
+  /** Los que agotaron sus reintentos: ahí hay que reintentarlos o eliminarlos a mano. */
+  fallidos: number
 }
 
 /**
@@ -313,10 +316,11 @@ export interface PendientesDeOtraSucursal {
  * veían ni se reenviaban, y el contador marcaba 0. Esto los cuenta para avisarlo
  * y ofrecer el cambio de sucursal.
  *
- * Cuenta todo lo que no se completó (pendiente, procesando o fallido): al
- * cambiar, lo pendiente entra al contador y lo fallido al panel de fallidas.
- * Mismo dueño que la cola de la sesión (`esDelUsuarioActivo`); las que no tienen
- * sucursal no son de ninguna (el replay las marca fallidas).
+ * Pendientes y fallidos van aparte (H5 de la revisión de B12a): al cambiar, los
+ * pendientes se mandan solos, y los fallidos hay que revisarlos en el panel de
+ * fallidas. Pendiente es lo mismo que cuenta `getPendingOperations`. Mismo dueño
+ * que la cola de la sesión (`esDelUsuarioActivo`); las que no tienen sucursal no
+ * son de ninguna (el replay las marca fallidas).
  */
 export async function contarPendientesDeOtrasSucursales(
   userId: string | null | undefined,
@@ -330,14 +334,16 @@ export async function contarPendientesDeOtrasSucursales(
     .and(op => op.sucursalId != null && op.sucursalId !== sucursalId)
     .and(op => esDelUsuarioActivo(op, userId, null))
     .toArray()
-  const porSucursal = new Map<number, number>()
+  const porSucursal = new Map<number, PendientesDeOtraSucursal>()
   for (const op of ops) {
     const suc = op.sucursalId as number
-    porSucursal.set(suc, (porSucursal.get(suc) ?? 0) + 1)
+    const fila = porSucursal.get(suc) ?? { sucursalId: suc, pendientes: 0, fallidos: 0 }
+    const agotada = op.status === 'failed' && op.retryCount >= op.maxRetries
+    if (agotada) fila.fallidos++
+    else fila.pendientes++
+    porSucursal.set(suc, fila)
   }
-  return [...porSucursal.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([id, cantidad]) => ({ sucursalId: id, cantidad }))
+  return [...porSucursal.values()].sort((a, b) => a.sucursalId - b.sucursalId)
 }
 
 /**

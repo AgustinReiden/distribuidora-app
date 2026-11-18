@@ -12,7 +12,7 @@
  */
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -190,7 +190,7 @@ vi.mock('../modals/ModalPedido', () => ({
 
 import PedidosContainer from './PedidosContainer'
 import { fijarUsuarioRequestIds } from '../../utils/requestIdPersistente'
-import { MARGEN_INTENTO_EN_VUELO_MS, MENSAJE_ALTA_EN_DUDA_ENCOLADA } from '../../utils/idempotencia'
+import { MARGEN_INTENTO_EN_VUELO_MS, MENSAJE_ALTA_EN_DUDA_ENCOLADA, PLAZO_ALTA_DIRECTA_MS } from '../../utils/idempotencia'
 
 /** Lo que tira de verdad `crearPedido` cuando la respuesta se pierde. */
 const respuestaPerdida = () =>
@@ -746,6 +746,30 @@ describe('D56 — señal inservible con onLine en true: la cola se ofrece', () =
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Guardar en el teléfono' })).toBeNull())
   })
 
+  // H4 (revisión de B12a): que no quede un estado en el que no se puede ni encolar ni mandar.
+  it('si el encolado falla, la oferta sigue ahí con su error (no queda sólo Confirmar)', async () => {
+    const { user } = await primerIntentoPerdido()
+    guardarPedidoOffline.mockResolvedValueOnce({ success: false, error: 'Stock insuficiente para algunos productos' })
+
+    await user.click(screen.getByRole('button', { name: 'Guardar en el teléfono' }))
+
+    await waitFor(() => expect(notify.error).toHaveBeenCalled())
+    expect(screen.getByRole('button', { name: 'Guardar en el teléfono' })).toBeTruthy()
+  })
+
+  it('tocar el estado de pago (que la cola descarta) no hace desaparecer la oferta, y encola con la MISMA clave', async () => {
+    const { user, claveAnterior } = await primerIntentoPerdido()
+
+    await user.click(screen.getByRole('button', { name: 'Pagado' }))
+    expect(screen.getByRole('button', { name: 'Guardar en el teléfono' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Guardar en el teléfono' }))
+
+    await waitFor(() => expect(guardarPedidoOffline).toHaveBeenCalledTimes(1))
+    expect(guardarPedidoOffline.mock.calls[0][1]).toMatchObject({ claveDeAlta: claveAnterior })
+    expect(guardarPedidoOffline.mock.calls[0][0]).toMatchObject({ estadoPago: 'pendiente' })
+    expect(verificarClave).not.toHaveBeenCalled()
+  })
+
   it('un rechazo del servidor no ofrece la cola: avisa el error', async () => {
     const user = userEvent.setup()
     montar()
@@ -758,6 +782,41 @@ describe('D56 — señal inservible con onLine en true: la cola se ofrece', () =
     await waitFor(() => expect(notify.error).toHaveBeenCalled())
     expect(screen.queryByRole('button', { name: 'Guardar en el teléfono' })).toBeNull()
     expect(guardarPedidoOffline).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * H3 de la revisión de B12a (ya pasaba; dejaba a D56 a medias): el alta directa no
+ * tenía plazo. Con señal que no pasa datos el `fetch` queda colgado sin fallar, y
+ * la oferta de la cola no aparecía nunca.
+ */
+describe('H3 — el alta directa tiene plazo', () => {
+  afterEach(() => { vi.useRealTimers() })
+
+  it('plazo vencido → queda en duda y se ofrece la cola → se encola con la MISMA clave', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    montar()
+    await user.click(await screen.findByRole('button', { name: 'Nuevo pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Armar' }))
+    // Señal que no pasa datos: el alta no contesta nunca.
+    mutateAlta.mockImplementationOnce(() => new Promise(() => {}))
+
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+    await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(1))
+    const intento = mutateAlta.mock.calls[0][0] as { offlineId: string; signal?: AbortSignal }
+    expect(screen.queryByRole('button', { name: 'Guardar en el teléfono' })).toBeNull()
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(PLAZO_ALTA_DIRECTA_MS) })
+
+    // El request colgado se corta, y el corte es «sin respuesta»: oferta, sin error.
+    expect(intento.signal?.aborted).toBe(true)
+    await user.click(await screen.findByRole('button', { name: 'Guardar en el teléfono' }))
+    expect(notify.error).not.toHaveBeenCalled()
+    await waitFor(() => expect(guardarPedidoOffline).toHaveBeenCalledTimes(1))
+    // Un alta cortada pudo haber entrado: la cola va con su clave, y el replay
+    // recibe ese pedido de la rama idempotente (no se duplica).
+    expect(guardarPedidoOffline.mock.calls[0][1]).toMatchObject({ claveDeAlta: intento.offlineId })
   })
 })
 

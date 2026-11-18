@@ -44,7 +44,7 @@ export interface SyncDependencies {
   sincronizarPedidos: (
     crearPedidoFn: (...args: unknown[]) => Promise<unknown>,
     productosActuales?: ProductoDB[]
-  ) => Promise<{ sincronizados: number; errores: Array<{ error: string }>; conflictos?: StockConflict[]; sinRespuesta?: number }>
+  ) => Promise<{ sincronizados: number; errores: Array<{ error: string }>; conflictos?: StockConflict[]; sinRespuesta?: number; avisos?: string[] }>
 
   // Funciones de API
   crearPedido: (...args: unknown[]) => Promise<unknown>
@@ -108,6 +108,11 @@ export function useSyncManager({
           await refetchPedidos()
           await refetchProductos()
           refetchMetricas()
+        }
+
+        // H2 (revisión de B12a): pedidos que ya estaban cargados y cambiaron después.
+        for (const aviso of resultadoPedidos.avisos ?? []) {
+          notifyRef.current.warning(aviso, { persist: true })
         }
 
         // Notificar los pedidos que el servidor rechazó por stock

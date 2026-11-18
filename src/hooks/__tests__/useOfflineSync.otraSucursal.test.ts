@@ -44,7 +44,7 @@ describe('1600-b8: la cola encolada en otra sucursal', () => {
     await queueOperation('CREATE_PEDIDO', pedido(3), 'user-A', 5, 2)
 
     const { result } = renderHook(() => useOfflineSync())
-    await waitFor(() => expect(result.current.pendientesOtrasSucursales).toEqual([{ sucursalId: 2, cantidad: 2 }]))
+    await waitFor(() => expect(result.current.pendientesOtrasSucursales).toEqual([{ sucursalId: 2, pendientes: 2, fallidos: 0 }]))
     expect(result.current.cantidadPendientes).toBe(1)
 
     const crear = vi.fn(async (_input: Input) => ({ id: 1 }))
@@ -54,14 +54,14 @@ describe('1600-b8: la cola encolada en otra sucursal', () => {
     expect(crear).toHaveBeenCalledTimes(1)
     expect(crear.mock.calls[0][0]).toMatchObject({ offlineId: 'u-1', sucursalId: 1 })
     // Los de la 2 siguen esperando, y se siguen avisando.
-    expect(result.current.pendientesOtrasSucursales).toEqual([{ sucursalId: 2, cantidad: 2 }])
+    expect(result.current.pendientesOtrasSucursales).toEqual([{ sucursalId: 2, pendientes: 2, fallidos: 0 }])
   })
 
   it('al cambiar a su sucursal se ven en el contador y se mandan con ella', async () => {
     await queueOperation('CREATE_PEDIDO', pedido(2), 'user-A', 5, 2)
 
     const { result, rerender } = renderHook(() => useOfflineSync())
-    await waitFor(() => expect(result.current.pendientesOtrasSucursales).toEqual([{ sucursalId: 2, cantidad: 1 }]))
+    await waitFor(() => expect(result.current.pendientesOtrasSucursales).toEqual([{ sucursalId: 2, pendientes: 1, fallidos: 0 }]))
     expect(result.current.cantidadPendientes).toBe(0)
 
     sesion.sucursalId = 2

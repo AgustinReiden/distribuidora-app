@@ -30,6 +30,7 @@ import {
   suscribirActualizacionSW,
 } from '../utils/serviceWorker'
 import { saltarAlBuildNuevo, type DisparadorActualizacion } from '../utils/actualizacionObligatoria'
+import { hayTrabajoEnCurso } from '../utils/trabajoEnCurso'
 
 /** Cada cuanto se pregunta, con la pestania visible. */
 const INTERVALO_MS = 15 * 60 * 1000
@@ -54,15 +55,6 @@ function guardarNumero(clave: string, valor: number): void {
   } catch {
     /* modo privado o storage bloqueado: el cartel igual funciona */
   }
-}
-
-/** Hay un modal abierto o un campo en edicion: recargar le borraria algo. */
-function hayTrabajoEnCurso(): boolean {
-  if (typeof document === 'undefined') return false
-  if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return true
-  const el = document.activeElement as HTMLElement | null
-  if (!el) return false
-  return el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)
 }
 
 /**
@@ -120,10 +112,24 @@ export function useActualizacionDisponible(ruta?: string): ActualizacionDisponib
       recienAbierta: performance.now() < VENTANA_ARRANQUE_MS,
     })
     if (!salta) return false
+    const autoAnterior = leerNumero(CLAVE_AUTO)
     guardarNumero(CLAVE_AUTO, Date.now())
-    actualizar()
+    setActualizando(true)
+    // H1: lo que había en pantalla al dispararse no alcanza. Bajar e instalar
+    // el build tarda hasta ~45 s; justo antes de recargar se vuelve a mirar.
+    void aplicarActualizacionSW({ puedeRecargar: () => !hayTrabajoEnCurso() })
+      .then(resultado => {
+        if (resultado !== 'pospuesto') return
+        // No fue un salto que no prosperó: el build quedó listo y el próximo
+        // disparo lo activa enseguida, sin enfriamiento.
+        guardarNumero(CLAVE_AUTO, autoAnterior)
+        setDisponible(true)
+      })
+      .finally(() => {
+        setTimeout(() => setActualizando(false), 15000)
+      })
     return true
-  }, [actualizar])
+  }, [])
 
   const chequear = useCallback(async (disparador: DisparadorActualizacion) => {
     if (!activo) return

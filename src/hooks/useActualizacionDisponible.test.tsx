@@ -12,7 +12,7 @@ const aplicarActualizacionSWMock = vi.fn()
 let avisarActualizacionSW: (() => void) | null = null
 
 vi.mock('../utils/serviceWorker', () => ({
-  aplicarActualizacionSW: () => aplicarActualizacionSWMock(),
+  aplicarActualizacionSW: (...args: unknown[]) => aplicarActualizacionSWMock(...args),
   hayActualizacionSWEsperando: () => false,
   suscribirActualizacionSW: (escucha: () => void) => {
     avisarActualizacionSW = escucha
@@ -21,6 +21,7 @@ vi.mock('../utils/serviceWorker', () => ({
 }))
 
 import { useActualizacionDisponible } from './useActualizacionDisponible'
+import { marcarTrabajoEnCurso, _resetTrabajoEnCursoParaTests } from '../utils/trabajoEnCurso'
 
 // El build id que vite inyecta en el bundle bajo test (define en vite.config.js).
 const BUILD_DE_ESTA_PESTANIA = __APP_BUILD_ID__
@@ -57,6 +58,7 @@ describe('useActualizacionDisponible', () => {
     vi.unstubAllEnvs()
     vi.clearAllMocks()
     avisarActualizacionSW = null
+    _resetTrabajoEnCursoParaTests()
   })
 
   // El otro camino: el service worker termino de bajar el build nuevo y lo
@@ -286,6 +288,65 @@ describe('useActualizacionDisponible', () => {
       irseYVolver(visibilidad)
 
       expect(aplicarActualizacionSWMock).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  // H1 / H7 de la revisión de B12a: el salto mira lo que hay en curso al
+  // dispararse Y justo antes de recargar (bajar el build tarda hasta ~45 s), y
+  // además del modal o el campo con foco, lo que las pantallas declaran.
+  describe('H1/H7: no recarga encima de trabajo en curso', () => {
+    type Opciones = { puedeRecargar?: () => boolean }
+    const opcionesDelSalto = (n = 0): Opciones => aplicarActualizacionSWMock.mock.calls[n][0] as Opciones
+
+    it('le pasa al salto una pregunta que mira lo que hay en pantalla en el momento de recargar', async () => {
+      responderVersion({ buildId: 'otro-build-mas-nuevo' })
+      const { result, rerender } = renderHook(({ ruta }) => useActualizacionDisponible(ruta), {
+        initialProps: { ruta: '/pedidos' },
+      })
+      await waitFor(() => expect(result.current.disponible).toBe(true))
+
+      rerender({ ruta: '/clientes' })
+      expect(aplicarActualizacionSWMock).toHaveBeenCalledTimes(1)
+      const { puedeRecargar } = opcionesDelSalto()
+      expect(puedeRecargar?.()).toBe(true)
+
+      // Mientras baja el build, se abre «Nuevo pedido».
+      document.body.innerHTML = '<div role="dialog">Nuevo pedido</div>'
+      expect(puedeRecargar?.()).toBe(false)
+    })
+
+    it('una pantalla con cambios sin guardar (sin modal ni foco) frena el salto y la recarga', async () => {
+      responderVersion({ buildId: 'otro-build-mas-nuevo' })
+      const { result, rerender } = renderHook(({ ruta }) => useActualizacionDisponible(ruta), {
+        initialProps: { ruta: '/configuracion' },
+      })
+      await waitFor(() => expect(result.current.disponible).toBe(true))
+
+      const soltar = marcarTrabajoEnCurso('monto tipeado sin guardar')
+      rerender({ ruta: '/pedidos' })
+      expect(aplicarActualizacionSWMock).not.toHaveBeenCalled()
+
+      soltar()
+      rerender({ ruta: '/clientes' })
+      expect(aplicarActualizacionSWMock).toHaveBeenCalledTimes(1)
+      const soltarOtra = marcarTrabajoEnCurso('alta en vuelo')
+      expect(opcionesDelSalto().puedeRecargar?.()).toBe(false)
+      soltarOtra()
+    })
+
+    it('si la recarga se pospuso, el próximo disparo vuelve a saltar enseguida (no es un salto que no prosperó)', async () => {
+      aplicarActualizacionSWMock.mockResolvedValueOnce('pospuesto')
+      responderVersion({ buildId: 'otro-build-mas-nuevo' })
+      const { result, rerender } = renderHook(({ ruta }) => useActualizacionDisponible(ruta), {
+        initialProps: { ruta: '/pedidos' },
+      })
+      await waitFor(() => expect(result.current.disponible).toBe(true))
+
+      rerender({ ruta: '/clientes' })
+      await flush()
+      rerender({ ruta: '/productos' })
+
+      expect(aplicarActualizacionSWMock).toHaveBeenCalledTimes(2)
     })
   })
 

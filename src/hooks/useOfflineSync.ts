@@ -15,6 +15,7 @@ import {
   type PendientesDeOtraSucursal
 } from '../lib/offlineDb'
 import { logger } from '../utils/logger'
+import { useTrabajoEnCurso } from './useTrabajoEnCurso'
 import type { ProductoDB, TipoComprobanteVenta } from '../types'
 import type { OrigenPrecioItem } from '../utils/origenPrecio'
 import { useSucursal } from '../contexts/SucursalContext'
@@ -30,6 +31,7 @@ import { retryWithBackoff, isTransientNetworkError, conPlazoDeRed, PlazoDeRedVen
 import { pareceSesionVencida, renovarSesion } from '../utils/sesionVencida'
 import { esErrorDeJwt } from '../utils/errorDeSupabase'
 import { getErrorMessage } from '../utils/errorHandling'
+import { mismoTotalDelAlta } from '../utils/totalDelAlta'
 import type { CamposCombo } from '../utils/combosPedido'
 import type { GpsResult } from './useGeolocationCapture'
 import { registrarGeolocalizacionPedido } from './useRegistrarGeolocalizacionPedido'
@@ -203,6 +205,11 @@ export interface SyncResult {
    * pedido, y para no avisar uno por sync cada 30 s.
    */
   sinRespuesta: number;
+  /**
+   * H2: pedidos que la cola dio por entrados porque ya estaban cargados y
+   * cambiaron después (ver `avisoPedidoQueYaHabiaEntrado`). Se muestran tal cual.
+   */
+  avisos?: string[];
 }
 
 /**
@@ -322,6 +329,33 @@ export function claveIdempotencia(op: PendingOperation): string {
   return `${op.userId || idDeInstalacion()}:op_${op.id}`
 }
 
+/** Una clave de las que la cola acuña (un UUID por intención), no una heredada `<dueño>:op_<n>`. */
+function esClavePorIntencion(clave: string | undefined): boolean {
+  return typeof clave === 'string' && clave.length > 0 && !/:op_\d+$/.test(clave)
+}
+
+interface RespuestaIdempotente {
+  id?: string | number | null
+  idempotente?: boolean
+  clienteId?: string | number | null
+  total?: number | null
+  cargoEnvio?: number | null
+}
+
+/**
+ * El total del pedido que contestó la rama idempotente, ¿es el encolado? Una sola
+ * comparación para el replay y el alta directa (H2 de la revisión de B12a):
+ * `mismoTotalDelAlta`, con el centavo de tolerancia del alta. Con `< 0.01` el replay
+ * daba por «otro pedido» uno propio que el alta directa aceptaba. El total encolado
+ * es el de productos y el servidor guarda productos + cargo de envío, así que se
+ * compara `total - cargo`. Un vale blanco se encola sin total (lo precia el
+ * servidor a costo): no hay con qué comparar, alcanza con el cliente.
+ */
+function mismoTotalEncolado(r: RespuestaIdempotente, payload: Record<string, unknown>): boolean {
+  return payload.tipoFactura === 'VB'
+    || mismoTotalDelAlta((r.total as number) - (r.cargoEnvio ?? 0), Number(payload.total) || 0)
+}
+
 /**
  * Segunda defensa: una respuesta `idempotente: true` dice "ya tenía un pedido
  * con esa clave", pero no que ese pedido sea el nuestro. Antes de dar la
@@ -331,17 +365,22 @@ export function claveIdempotencia(op: PendingOperation): string {
  * pedido del servidor es efectivamente este. `terminal` distingue el caso
  * probado —es de otro, reintentar no lo va a cambiar— del no verificable, que
  * puede ser una lectura que falló y sí merece otro intento.
+ *
+ * H2 (revisión de B12a): con una clave por intención (`clave`, un UUID), el mismo
+ * cliente con otro total es el pedido PROPIO cambiado después (editado, cancelado,
+ * con una salvedad): la RPC sólo le contesta la rama idempotente a quien lo cargó
+ * (1559-b4, mig 519) y un UUID no se repite. Ése cuenta como entrado
+ * (`avisoPedidoQueYaHabiaEntrado` dice qué pasó); marcarlo «otro pedido» invitaba a
+ * cargarlo de nuevo a mano, y ahí sí se duplicaba. «Otro pedido» queda para otro
+ * cliente, o para una clave heredada `…:op_<n>`, que sí puede repetirse en el
+ * mismo teléfono.
  */
 export function verificarRespuestaIdempotente(
   resultado: unknown,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  clave?: string
 ): { motivo: string; terminal: boolean } | null {
-  const r = resultado as {
-    idempotente?: boolean
-    clienteId?: string | number | null
-    total?: number | null
-    cargoEnvio?: number | null
-  } | null
+  const r = resultado as RespuestaIdempotente | null
 
   if (!r || r.idempotente !== true) return null
 
@@ -353,13 +392,8 @@ export function verificarRespuestaIdempotente(
   }
 
   const mismoCliente = String(r.clienteId) === String(payload.clienteId)
-  // Un vale blanco se encola sin total (lo calcula el servidor a costo): no hay
-  // total encolado con qué comparar, alcanza con el cliente.
-  // El total encolado es el de productos; el servidor guarda productos + cargo
-  // de envío, así que se compara `total - cargo`.
-  const mismoTotal = payload.tipoFactura === 'VB'
-    || Math.abs((r.total - (r.cargoEnvio ?? 0)) - (Number(payload.total) || 0)) < 0.01
-  if (mismoCliente && mismoTotal) return null
+  if (mismoCliente && mismoTotalEncolado(r, payload)) return null
+  if (mismoCliente && esClavePorIntencion(clave)) return null
 
   // Sin el cliente ni el total del otro pedido (lente de B12b, 1600-b4): el motivo
   // va al log (consola y Sentry) y al panel, y ninguno de los dos lleva datos de
@@ -368,6 +402,20 @@ export function verificarRespuestaIdempotente(
     motivo: 'La clave de sincronización de este pedido ya la tiene otro pedido en el servidor, de otro cliente o con otro total. No se sincronizó para no pisarlo.',
     terminal: true
   }
+}
+
+/**
+ * H2: el aviso cuando la cola da por entrado un pedido propio que ya estaba
+ * cargado y cambió después (ver `verificarRespuestaIdempotente`). null si no hay
+ * nada que avisar: no fue la rama idempotente, o el pedido está igual.
+ */
+export function avisoPedidoQueYaHabiaEntrado(resultado: unknown, payload: Record<string, unknown>): string | null {
+  const r = resultado as RespuestaIdempotente | null
+  if (!r || r.idempotente !== true || r.clienteId == null || typeof r.total !== 'number') return null
+  if (String(r.clienteId) !== String(payload.clienteId) || mismoTotalEncolado(r, payload)) return null
+  const numero = r.id != null ? ` #${r.id}` : ''
+  return `El pedido${numero} ya estaba cargado (entró en un intento anterior) y después cambió, por ejemplo porque ` +
+    'se editó o se canceló: no se cargó otro. Miralo en la lista de pedidos.'
 }
 
 /**
@@ -399,6 +447,8 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   const [pedidosPendientes, setPedidosPendientes] = useState<PedidoOffline[]>([])
   const [pendientesOtrasSucursales, setPendientesOtrasSucursales] = useState<PendientesDeOtraSucursal[]>([])
   const [sincronizando, setSincronizando] = useState<boolean>(false)
+  // D57 / H1: con la cola mandando, la actualización obligatoria no recarga encima.
+  useTrabajoEnCurso(sincronizando, 'sincronizando la cola')
 
   // Multi-tenant: track the active sucursal so we can tag queued operations
   // (the replay sends each op with its own sucursal, per request).
@@ -720,6 +770,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
     const conflictos: StockConflict[] = []
     let sincronizados = 0
     let sinRespuesta = 0
+    const avisos: string[] = []
 
     try {
       // El flag y la lectura de la cola van adentro del try: si IndexedDB falla
@@ -831,7 +882,7 @@ export function useOfflineSync(): UseOfflineSyncReturn {
             { shouldRetry: error => isTransientNetworkError(error) && !(error instanceof PlazoDeRedVencido) },
           )
 
-          const sospecha = verificarRespuestaIdempotente(resultado, payload)
+          const sospecha = verificarRespuestaIdempotente(resultado, payload, input.offlineId)
           if (sospecha) {
             await markAsFailed(op.id!, sospecha.motivo, { terminal: sospecha.terminal })
             logger.error(`[useOfflineSync] Pedido ${pedido.offlineId}: ${sospecha.motivo}`)
@@ -841,6 +892,8 @@ export function useOfflineSync(): UseOfflineSyncReturn {
 
           await markAsCompleted(op.id!)
           sincronizados++
+          const aviso = avisoPedidoQueYaHabiaEntrado(resultado, payload)
+          if (aviso) avisos.push(aviso)
 
           // #1602: el check-in GPS del pedido encolado, con la sucursal de la
           // operación. Como en el alta online, no frena nada ni lanza, y la RPC
@@ -913,7 +966,8 @@ export function useOfflineSync(): UseOfflineSyncReturn {
       sincronizados,
       errores,
       conflictos: conflictos.length > 0 ? conflictos : undefined,
-      sinRespuesta
+      sinRespuesta,
+      ...(avisos.length > 0 ? { avisos } : {})
     }
   }, [isOnline, loadPendingOperations, validarStockParaSincronizacion])
 

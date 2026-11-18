@@ -292,6 +292,20 @@ export function decidirAltaRecuperada(verificacion: VerificacionDeAlta): Decisio
 export const MARGEN_INTENTO_EN_VUELO_MS = 30_000
 
 /**
+ * Plazo del alta directa (H3 de la revisión de B12a). Con señal que no pasa datos
+ * el `fetch` queda colgado sin fallar, y sin plazo la oferta de la cola (D56) no
+ * aparecía. 20 s, como cada intento del replay (`PLAZO_INTENTO_REPLAY_MS`): sobra
+ * para una respuesta real, porque la base corta el alta a los 8 s.
+ *
+ * Relación con `MARGEN_INTENTO_EN_VUELO_MS`: el corte vuelve a fechar `intentoEn`
+ * (la clave queda en duda en ese momento), así que el margen de 30 s corre DESPUÉS
+ * del corte, no desde el envío. Un intento cortado a los 20 s que todavía estuviera
+ * en el servidor terminó (8 s de sentencia más la espera de conexión) mucho antes
+ * de que un «no entró» vuelva a valer, a los 50 s del envío.
+ */
+export const PLAZO_ALTA_DIRECTA_MS = 20_000
+
+/**
  * La respuesta del servidor sobre `clave`, tal como se la puede creer: un «no
  * entró» dentro del margen del último intento vale como «sin respuesta» (no se
  * olvida la clave ni se acuña otra). «Entró» vale siempre.
@@ -302,7 +316,25 @@ export function verificacionConfiable(
   ahora: number = Date.now(),
 ): VerificacionDeAlta {
   if (verificacion.resultado !== 'no_entro' || clave.intentoEn == null) return verificacion
-  return ahora - clave.intentoEn < MARGEN_INTENTO_EN_VUELO_MS ? { resultado: 'sin_respuesta' } : verificacion
+  // H6 (revisión de B12a): una diferencia negativa es un reloj que volvió atrás
+  // (lo corrigió la red), no un intento en vuelo: vale como margen vencido. Sin
+  // esto, la clave quedaba «sin respuesta» hasta que el reloj la alcanzaba.
+  const transcurrido = ahora - clave.intentoEn
+  return transcurrido >= 0 && transcurrido < MARGEN_INTENTO_EN_VUELO_MS ? { resultado: 'sin_respuesta' } : verificacion
+}
+
+/**
+ * La huella con la que se compara la oferta de la cola (H4 de la revisión de
+ * B12a): la del alta sin el estado ni el monto del cobro, que la cola descarta (el
+ * pedido encolado nunca declara cobro). Si quien carga pasa el pago a «pendiente»
+ * después del fallo, sigue siendo el mismo pedido y la oferta no se va. La clave
+ * del alta se sigue acuñando con `huellaDeAlta` entera.
+ */
+export function huellaDeOfertaCola(
+  formulario: Record<string, unknown> | object,
+  lineas: Parameters<typeof huellaDeAlta>[1],
+): string {
+  return huellaDeAlta({ ...formulario, estadoPago: undefined, montoPagado: undefined }, lineas)
 }
 
 /**

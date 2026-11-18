@@ -40,7 +40,7 @@ describe('offlineDb', () => {
   describe('contarPendientesDeOtrasSucursales (1600-b8)', () => {
     const pedido = { clienteId: '7', items: [], total: 1 }
 
-    it('cuenta por sucursal lo del usuario en las otras, pendiente o fallido, y no lo de la activa', async () => {
+    it('cuenta por sucursal lo del usuario en las otras, pendientes y fallidos aparte (H5), y no lo de la activa', async () => {
       await queueOperation('CREATE_PEDIDO', { ...pedido, n: 1 }, 'user-A', 5, 1)
       await queueOperation('CREATE_PEDIDO', { ...pedido, n: 2 }, 'user-A', 5, 2)
       await queueOperation('CREATE_PEDIDO', { ...pedido, n: 3 }, 'user-A', 5, 2)
@@ -48,8 +48,8 @@ describe('offlineDb', () => {
       await markAsFailed(fallida, 'rechazo', { terminal: true })
 
       expect(await contarPendientesDeOtrasSucursales('user-A', 1)).toEqual([
-        { sucursalId: 2, cantidad: 2 },
-        { sucursalId: 3, cantidad: 1 },
+        { sucursalId: 2, pendientes: 2, fallidos: 0 },
+        { sucursalId: 3, pendientes: 0, fallidos: 1 },
       ])
     })
 
