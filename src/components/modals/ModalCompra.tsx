@@ -3002,7 +3002,7 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
             <NumberInput
               integer
               min={1}
-              emptyValue={1}
+              motivoVacio="Poné una cantidad"
               value={item.cantidad}
               onChange={(n) => onActualizarItem(index, 'cantidad', n)}
               commitOnChange
@@ -3016,8 +3016,10 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
               sinMiles
               min={0}
               max={100}
+              motivoMax="No puede pasar de 100 %"
               emptyValue={0}
               value={item.bonificacion}
+              aria-label={`Bonificación de ${item.productoNombre}`}
               onChange={(n) => onActualizarItem(index, 'bonificacion', n)}
               commitOnChange
               className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
@@ -3066,7 +3068,7 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
           <NumberInput
             integer
             min={1}
-            emptyValue={1}
+            motivoVacio="Poné una cantidad"
             value={item.cantidad}
             onChange={(n) => onActualizarItem(index, 'cantidad', n)}
             commitOnChange
@@ -3079,8 +3081,10 @@ function ItemRow({ item, index, onActualizarItem, onCondicionItem, onEliminarIte
             sinMiles
             min={0}
             max={100}
+            motivoMax="No puede pasar de 100 %"
             emptyValue={0}
             value={item.bonificacion}
+            aria-label={`Bonificación de ${item.productoNombre}`}
             onChange={(n) => onActualizarItem(index, 'bonificacion', n)}
             commitOnChange
             className="w-full px-2 py-1 text-center border dark:border-gray-600 rounded focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white text-sm"
@@ -4566,6 +4570,8 @@ function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSection
   const tipoCosto = tipoParaCosto(state.tipoFactura, state.letraComprobante)
   const conCredito = tipoCosto === 'FC'
   const [bonifGlobal, setBonifGlobal] = useState(0)
+  // En rojo (sobre 100 % o ilegible), «Aplicar» aplicaría el valor de antes (B23).
+  const [bonifGlobalValida, setBonifGlobalValida] = useState(true)
   const [mostrarControl, setMostrarControl] = useState(false)
   const ctrl = state.controlFactura
   const percepcionesCalc = percepcionIva + percepcionIibb
@@ -4617,15 +4623,19 @@ function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSection
             sinMiles
             min={0}
             max={100}
+            motivoMax="No puede pasar de 100 %"
             emptyValue={0}
             value={bonifGlobal}
             onChange={setBonifGlobal}
+            onValidez={setBonifGlobalValida}
+            aria-label="Bonificación global (%)"
             commitOnChange
             className="w-16 px-2 py-1 text-center border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
           />
           <Button
             type="button"
             onClick={() => dispatch({ type: 'APLICAR_BONIF_GLOBAL', payload: bonifGlobal })}
+            disabled={!bonifGlobalValida}
             variant="success"
             size="sm"
           >

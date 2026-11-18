@@ -22,6 +22,8 @@ import { AlertTriangle, Ban, CheckCircle, ExternalLink, FileText, ListChecks, Pl
 import { Button } from '../ui/Button'
 import { Combobox } from '../ui/Combobox'
 import NumberInput from '../ui/NumberInput'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
+import { useCamposEnRojo } from '../../hooks/useRegistroIlegibles'
 import { formatPrecio } from '../../utils/formatters'
 import { tipoDeArchivoFactura, urlLocalDeArchivo } from '../../utils/archivoLocal'
 import { buscarEnCatalogo, prepararCatalogo } from '../../utils/matchEscaneo'
@@ -230,6 +232,7 @@ export default function RevisionEscaneoTabla({
   const [crearEn, setCrearEn] = useState<number | null>(null)
   const [confirmarLote, setConfirmarLote] = useState(false)
   const [verFactura, setVerFactura] = useState(false)
+  const hayRojo = (useCamposEnRojo()?.motivos.length ?? 0) > 0
 
   // Foco: las filas son la unidad de navegación. Tras resolver una línea, el
   // foco va a la próxima pendiente; se pide con un ref y lo cumple el efecto
@@ -399,6 +402,7 @@ export default function RevisionEscaneoTabla({
                         id={`revision-upb-${index}`}
                         aria-label={`Unidades por bulto de la línea ${index + 1}`}
                         min={1}
+                        motivoMin="Al menos 1 por bulto"
                         emptyValue={1}
                         value={factor}
                         onChange={n => dispatch({ type: 'SET_CONVERSION_LINEA_ESCANEO', payload: { index, unidadesPorBulto: n > 1 ? n : null } })}
@@ -481,10 +485,14 @@ export default function RevisionEscaneoTabla({
           Aceptar todas las sugeridas ≥ {Math.round(UMBRAL_ACEPTAR_TODAS * 100)}% ({estado.aceptablesEnLote.length})
         </Button>
         {pendientes === 0 && (
-          <Button type="button" size="sm" variant="success" className="gap-1" onClick={() => dispatch({ type: 'CERRAR_REVISION_ESCANEO' })}>
+          // Con un campo en rojo (unas unidades por bulto en 0) no se termina: la tabla se desmontaba y
+          // la compra quedaba con el valor de antes de tipear (H3 de la revisión de B23).
+          <Button type="button" size="sm" variant="success" className="gap-1" disabled={hayRojo}
+                  onClick={() => { if (!hayRojo) dispatch({ type: 'CERRAR_REVISION_ESCANEO' }) }}>
             <CheckCircle className="h-4 w-4" />Terminar revisión
           </Button>
         )}
+        {pendientes === 0 && <AvisoCamposEnRojo />}
       </div>
 
       {confirmarLote && (

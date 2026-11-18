@@ -292,10 +292,12 @@ export default function ModalSalvedadItem({
                 <Minus className="w-6 h-6" />
               </button>
               <NumberInput
+                aria-label="Cantidad con problema"
                 integer
                 min={1}
                 max={item.cantidad}
-                emptyValue={1}
+                motivoMax={`La línea tiene ${item.cantidad}`}
+                motivoVacio="Poné una cantidad"
                 commitOnChange
                 value={Number(cantidad) || 0}
                 onChange={(n) => setCantidad(n)}

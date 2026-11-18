@@ -176,11 +176,13 @@ suelta en `sucursales`.
   el campo equivocado (`leerNumero` en un entero) no lo ve, y eso lo cubre un test que tipee en el
   formulario. **Lo que se ve es lo que se guarda:** un formulario nuevo no topea, no pone un piso
   ni un default callado sobre lo tipeado (los meses de un gasto guardaban 2 con «1» a la vista); lo
-  que no vale va en rojo con su motivo (`motivo` de `CampoNumero`). **La excepción que queda es el
-  recorte de `NumberInput`:** `min`, `max` y `emptyValue` se aplican al salir del campo, y tocar
-  Guardar sale del campo y guarda en el mismo toque un valor recortado sin que se vea (una cantidad
-  bajo el mínimo de venta en el alta, sobre el stock en la edición, un descuento de 150 %). Ya pasaba
-  antes de B20; se corrige en una tarjeta aparte, con una decisión del dueño. **Lo que está en rojo
+  que no vale va en rojo con su motivo (`motivo` de `CampoNumero`). **Fuera del límite, también en
+  rojo** (B23, decisión del dueño del 18/11: «Que quede en rojo y no guarde»): el `min` y el `max` de
+  `NumberInput` no recortan; lo que queda afuera va en rojo con el dato del límite (`motivoMin`,
+  `motivoMax`: «El mínimo de venta es 6», «Hay 100 en stock»), y un `min` mayor que 0 sin
+  `emptyValue` es obligatorio (vacío en rojo, `motivoVacio`). Con `emptyValue` es opcional y vacío
+  vale eso, que el campo muestra en gris. El formulario no recorta en su `onChange`
+  (`numeroFueraDeLimite.contract.test.tsx`). **Lo que está en rojo
   no se guarda:** ni el valor de antes, ni un pedazo, ni 0, ni `null`. Los tres campos se anotan
   solos en el registro del formulario (`useRegistroIlegibles`): el formulario pone el `Provider`
   alrededor de sus campos, frena con `ilegibles.hay` TODO botón que guarda o encola (no sólo el

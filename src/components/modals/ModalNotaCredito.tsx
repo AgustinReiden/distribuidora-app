@@ -191,11 +191,11 @@ export default function ModalNotaCredito({
 
   const handleCantidadChange = (lineaId: string, value: string) => {
     const num = parseInt(value, 10)
-    const max = maxCreditable[lineaId] || 0
     if (isNaN(num) || num < 0) {
       setCantidades(prev => ({ ...prev, [lineaId]: 0 }))
     } else {
-      setCantidades(prev => ({ ...prev, [lineaId]: Math.min(num, max) }))
+      // El máximo lo pone el campo en rojo (B23): acá no se recorta.
+      setCantidades(prev => ({ ...prev, [lineaId]: num }))
     }
   }
 
@@ -353,6 +353,7 @@ export default function ModalNotaCredito({
                           integer
                           min={0}
                           max={max}
+                          motivoMax={`Quedan ${max} para devolver`}
                           emptyValue={0}
                           commitOnChange
                           value={cant}

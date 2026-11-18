@@ -134,11 +134,15 @@ export default function ModalEntregaConSalvedad({
 
   const toggleItem = useCallback((itemId: string) => {
     if (registradas.has(itemId)) return
+    // Un renglón con su cantidad en rojo no se pliega al tocar otro (H4 de la revisión de B23): el
+    // campo se desmontaba, el registro lo olvidaba y «Continuar» seguía con la cantidad de antes. Se
+    // puede destildar (deja de ir en la salvedad) o corregir; el aviso de abajo dice por qué no cambia.
+    if (ilegibles.hay && expandido !== null && expandido !== itemId) return
     setItemsSalvedad(prev => prev.map(i =>
       i.item.id === itemId ? { ...i, seleccionado: !i.seleccionado } : i
     ))
     setExpandido(prev => prev === itemId ? null : itemId)
-  }, [registradas])
+  }, [registradas, ilegibles.hay, expandido])
 
   const updateItemSalvedad = useCallback((itemId: string, data: Partial<Omit<ItemSalvedad, 'item'>>) => {
     if (registradas.has(itemId)) return
@@ -176,6 +180,9 @@ export default function ModalEntregaConSalvedad({
   }
 
   const handleContinuar = () => {
+    // Un campo en rojo no pasa a la confirmación: al desmontarse, el paso siguiente confirmaba con el
+    // valor de antes de tipear (B23).
+    if (ilegibles.hay) return
     setError('')
     if (!validarDatos()) return
     setPaso('confirmacion')
@@ -390,7 +397,8 @@ export default function ModalEntregaConSalvedad({
                               integer
                               min={1}
                               max={itemSalv.item.cantidad}
-                              emptyValue={1}
+                              motivoMax={`La línea tiene ${itemSalv.item.cantidad}`}
+                              motivoVacio="Poné una cantidad"
                               commitOnChange
                               value={itemSalv.cantidadAfectada}
                               onChange={(n) => updateItemSalvedad(itemSalv.item.id, { cantidadAfectada: n })}
@@ -600,7 +608,7 @@ export default function ModalEntregaConSalvedad({
               </Button>
               <button
                 onClick={handleContinuar}
-                disabled={itemsConSalvedad.length === 0}
+                disabled={itemsConSalvedad.length === 0 || ilegibles.hay}
                 className="flex-1 px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white rounded-lg flex items-center justify-center gap-2"
               >
                 Continuar

@@ -442,7 +442,9 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
       descuentosPorCategoria: prev.descuentosPorCategoria.map((row, i) => {
         if (i !== index) return row;
         if (field === 'porcentaje') {
-          const num = value === '' ? 0 : Math.max(0, Math.min(100, Math.trunc(Number(value)) || 0));
+          // Llega como String(n) de un NumberInput entero que ya pone el 0–100 en rojo (B23): acá no
+          // se recorta nada.
+          const num = value === '' ? 0 : Number(value) || 0;
           return { ...row, porcentaje: num };
         }
         return { ...row, categoria: value };
@@ -1209,24 +1211,27 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
               <div>
                 <label className="block text-sm font-medium mb-1 dark:text-gray-200">Días de Crédito</label>
                 <NumberInput
+                  aria-label="Días de crédito"
                   integer
                   min={0}
                   max={365}
+                  motivoMax="El plazo es de hasta 365 días"
                   emptyValue={0}
                   commitOnChange
                   value={Number(form.diasCredito) || 0}
                   onChange={(n) => handleFieldChange('diasCredito', n)}
                   className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                  placeholder="30"
                 />
-                <p className="text-xs text-gray-500 mt-1">Plazo de pago en días</p>
+                <p className="text-xs text-gray-500 mt-1">Plazo de pago en días (0 = contado)</p>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1 dark:text-gray-200">Descuento (%)</label>
                 <NumberInput
+                  aria-label="Descuento general (%)"
                   sinMiles
                   min={0}
                   max={100}
+                  motivoMax="No puede pasar de 100 %"
                   emptyValue={0}
                   commitOnChange
                   value={Number(form.descuentoPorcentaje) || 0}
@@ -1286,9 +1291,11 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
                       />
                       <div className="relative w-24">
                         <NumberInput
+                          aria-label="Descuento de la categoría (%)"
                           integer
                           min={0}
                           max={100}
+                          motivoMax="No puede pasar de 100 %"
                           emptyValue={0}
                           commitOnChange
                           value={Number(row.porcentaje) || 0}

@@ -217,9 +217,11 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
                   integer
                   min={0}
                   max={l.stock}
+                  motivoMax={`Hay ${l.stock} disponibles`}
                   emptyValue={0}
                   commitOnChange
                   value={l.cantidad}
+                  aria-label={`Cantidad de ${l.nombre}`}
                   onChange={(n) => setCantidad(l.productoId, n)}
                   className="w-20 px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                 />

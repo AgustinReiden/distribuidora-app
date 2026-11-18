@@ -116,6 +116,7 @@ export default function ModalComisionReglas({
   }, [reglas])
 
   const handleAgregar = async (): Promise<void> => {
+    if (ilegibles.hay) return
     if (!(porcentaje >= 0 && porcentaje <= 100)) {
       notify.error('El porcentaje debe estar entre 0 y 100')
       return
@@ -222,7 +223,9 @@ export default function ModalComisionReglas({
                 sinMiles
                 min={0}
                 max={100}
-                emptyValue={0}
+                motivoMax="No puede pasar de 100 %"
+                // Obligatorio (decisión del dueño, 18/11): vacío agregaba una regla de 0 %. El 0 se escribe.
+                motivoVacio="Poné un porcentaje"
                 value={porcentaje}
                 onChange={setPorcentaje}
                 commitOnChange

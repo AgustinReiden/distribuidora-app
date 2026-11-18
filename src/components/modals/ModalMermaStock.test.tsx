@@ -183,12 +183,6 @@ describe('ModalMermaStock — validación', () => {
     expect(screen.getByRole('button', { name: /registrar baja/i })).toBeEnabled()
   })
 
-  // BUG: la guarda "no exceder stock" del handler es inalcanzable con el mouse.
-  // `NumberInput` tiene `max={producto.stock}` y clampa en el blur, y el click
-  // sobre "Registrar Baja" produce ese blur ANTES del submit: la cantidad que
-  // llega al handler ya viene recortada, así que el mensaje "No puede dar de
-  // baja mas de N unidades (stock actual)" nunca se muestra. Se asevera lo que
-  // pasa HOY (se guarda el stock completo, en silencio), no lo que debería.
   // H4 de la segunda lente (B20): con `commitOnChange`, «1,5» tipeado no deja «1» (ni el valor de
   // antes) para guardar: el campo queda en rojo y la baja no se registra.
   it('una cantidad tipeada «1,5» queda en rojo y frena la baja', async () => {
@@ -204,7 +198,10 @@ describe('ModalMermaStock — validación', () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 
-  it('tipear más unidades que el stock guarda el stock completo, sin avisar', async () => {
+  // B23 (cambió de regla; antes era un BUG documentado): `NumberInput` recortaba al stock en el
+  // blur que produce el click en «Registrar Baja», y se guardaba el stock entero sin avisar. Ahora
+  // lo que pasa del stock queda en rojo, con el stock en el motivo, y la baja no se registra.
+  it('tipear más unidades que el stock queda en rojo, dice el stock y no registra la baja', async () => {
     const { user, onSave } = renderModal()
 
     await user.click(screen.getByRole('button', { name: /rotura/i }))
@@ -212,9 +209,35 @@ describe('ModalMermaStock — validación', () => {
     await user.type(inputCantidad(), '500')
     await user.click(screen.getByRole('button', { name: /registrar baja/i }))
 
+    expect(onSave).not.toHaveBeenCalled()
+    expect(inputCantidad()).toHaveValue('500')
+    expect(inputCantidad()).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('alert')).toHaveTextContent('Hay 100 en stock')
+    expect(screen.getByText('Hay un campo en rojo para corregir')).toBeInTheDocument()
+  })
+
+  it('la cantidad vacía queda en rojo y no se completa con 1', async () => {
+    const { user, onSave } = renderModal()
+
+    await user.click(screen.getByRole('button', { name: /rotura/i }))
+    await user.clear(inputCantidad())
+    await user.click(screen.getByRole('button', { name: /registrar baja/i }))
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(inputCantidad()).toHaveValue('')
+    expect(screen.getByRole('alert')).toHaveTextContent('Poné una cantidad')
+  })
+
+  it('una cantidad dentro del stock se registra como se tipeó, sin salir antes del campo', async () => {
+    const { user, onSave } = renderModal()
+
+    await user.click(screen.getByRole('button', { name: /rotura/i }))
+    await user.clear(inputCantidad())
+    await user.type(inputCantidad(), '100')
+    await user.click(screen.getByRole('button', { name: /registrar baja/i }))
+
     expect(onSave).toHaveBeenCalledTimes(1)
     expect(onSave.mock.calls[0][0]).toMatchObject({ cantidad: 100 })
-    expect(screen.queryByText(/no puede dar de baja mas de/i)).toBeNull()
   })
 
   it('muestra el mensaje del servidor cuando el guardado falla y no cierra', async () => {

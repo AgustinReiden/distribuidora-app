@@ -426,6 +426,55 @@ describe('revisión rápida de la factura escaneada', () => {
     ])
   })
 
+  // B23 de #1603: las unidades por bulto en 0 quedan en rojo y la compra no se registra. Antes el
+  // blur del toque en «Registrar Compra» las subía a 1. Vacías valen 1 (sin conversión), a la vista.
+  it('las unidades por bulto en 0 quedan en rojo y no se registra; vacías valen 1, en gris', async () => {
+    const onSave = vi.fn((..._args: unknown[]) => Promise.resolve())
+    const user = await escanearYAplicar(onSave)
+    fila(2).focus()
+    await user.keyboard('{Enter}')
+    await user.click(screen.getByRole('button', { name: 'Omitir la línea 3' }))
+    await user.click(screen.getByRole('button', { name: 'Omitir la línea 4' }))
+    const upb = screen.getByLabelText('Unidades por bulto de la línea 1')
+
+    await user.clear(upb)
+    expect(upb).toHaveAttribute('placeholder', '1')
+    expect(upb).not.toHaveAttribute('aria-invalid', 'true')
+    await user.type(upb, '0')
+    await user.click(registrar())
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(upb).toHaveValue('0')
+    expect(upb).toHaveAttribute('aria-invalid', 'true')
+    expect(within(fila(1)).getByRole('alert')).toHaveTextContent('Al menos 1 por bulto')
+  })
+
+  // H3 de la revisión de B23: «Terminar revisión» desmontaba la tabla con el rojo adentro y la compra
+  // quedaba con las unidades por bulto de antes (12) y un 0 tipeado que se perdía sin aviso.
+  it('con unas unidades por bulto en rojo, «Terminar revisión» no termina y dice por qué', async () => {
+    const user = await escanearYAplicar()
+    fila(2).focus()
+    await user.keyboard('{Enter}')
+    await user.click(within(fila(2)).getByRole('button', { name: 'Convertir a unidades: 12 por bulto' }))
+    await user.click(screen.getByRole('button', { name: 'Omitir la línea 3' }))
+    await user.click(screen.getByRole('button', { name: 'Omitir la línea 4' }))
+    const upb = screen.getByLabelText('Unidades por bulto de la línea 2')
+
+    await user.clear(upb)
+    await user.type(upb, '0')
+    const terminar = screen.getByRole('button', { name: /Terminar revisión/ })
+    expect(terminar).toBeDisabled()
+    await user.click(terminar)
+
+    expect(screen.getByRole('table', { name: 'Líneas de la factura' })).toBeInTheDocument()
+    expect(upb).toHaveValue('0')
+    expect(screen.getAllByText('Hay un campo en rojo para corregir').length).toBeGreaterThan(0)
+
+    await user.clear(upb)
+    await user.type(upb, '12')
+    expect(screen.getByRole('button', { name: /Terminar revisión/ })).toBeEnabled()
+  })
+
   it('"Ver factura" la abre al lado con una URL firmada corta', async () => {
     // INF-7 (#1563): la CSP no deja cargar Storage en un <img>: se baja con la URL
     // firmada y se muestra como blob:. La firmada queda para abrirla en otra pestaña.

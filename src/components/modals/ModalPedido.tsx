@@ -279,6 +279,9 @@ const ModalPedido = memo(function ModalPedido({
   const [busquedaProducto, setBusquedaProducto] = useState<string>('');
   const [busquedaCliente, setBusquedaCliente] = useState<string>('');
   const categoriasScrollRef = useRef<HTMLDivElement>(null);
+  // Dónde va el motivo en rojo de la cantidad de cada renglón: debajo de la fila, no entre el campo
+  // y el «+» (H7 de la revisión de B23).
+  const motivosCantidadRef = useRef(new Map<string, HTMLDivElement>());
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
   const [editingPriceValue, setEditingPriceValue] = useState<string>('');
   // Input de la edición de precio (a lo sumo uno a la vez): el listener de
@@ -1566,9 +1569,11 @@ const ModalPedido = memo(function ModalPedido({
                                 <NumberInput
                                   integer
                                   min={minCantidad}
-                                  emptyValue={minCantidad}
+                                  motivoMin={minCantidad > 1 ? `El mínimo de venta es ${minCantidad}` : undefined}
+                                  motivoVacio="Poné una cantidad"
+                                  contenedorMotivo={() => motivosCantidadRef.current.get(String(item.productoId)) ?? null}
                                   value={item.cantidad}
-                                  onChange={(n) => onActualizarCantidad(item.productoId, Math.max(n, minCantidad))}
+                                  onChange={(n) => onActualizarCantidad(item.productoId, n)}
                                   onClick={(e) => e.stopPropagation()}
                                   aria-label="Cantidad"
                                   className="w-12 text-center font-medium text-sm border dark:border-gray-600 rounded px-1 py-0.5 dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -1577,6 +1582,13 @@ const ModalPedido = memo(function ModalPedido({
                                 {!esVB && <p className="w-20 text-right font-semibold text-sm dark:text-white">{formatPrecio(subtotal)}</p>}
                               </div>
                             </div>
+                            <div
+                              data-testid="motivo-cantidad"
+                              ref={el => {
+                                if (el) motivosCantidadRef.current.set(String(item.productoId), el);
+                                else motivosCantidadRef.current.delete(String(item.productoId));
+                              }}
+                            />
                             {warning && <p className={`text-xs mt-1 ${warning.tipo === 'error' ? 'text-red-600' : 'text-yellow-600'}`}>{warning.mensaje}</p>}
                           </div>
                         );

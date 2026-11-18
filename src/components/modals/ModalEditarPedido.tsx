@@ -29,6 +29,7 @@ import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta';
 import { esTipoVB } from '../../utils/valeBlanco';
 import { aplicarDescuentoClienteItems, resolverDescuentoPctCliente, esDescuentoDeCategoria } from '../../utils/descuentoCliente';
 import { cantidadesPorProducto, moqQueBloqueaLaEdicion, obtenerMOQ } from '../../utils/precioMayorista';
+import { motivoPisoDeVentaEnLaEdicion, pisoDeVentaEnLaEdicion } from '../../utils/minimoVentaEdicion';
 import { esProductoMostrable } from '../../utils/productosOperativos';
 import { tienePrecioDeVenta } from '../../utils/precioVenta';
 import { factorDeLaLinea } from '../../utils/unidadesRegalo';
@@ -230,6 +231,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // T8 de la tercera pasada: tocar la X marca «cancelando» ANTES de que el navegador pueda sacarle el
   // foco al precio; el blur que venga después no lo guarda. Así cancelar no depende de quién gana.
   const cancelandoPrecioRef = useRef(false);
+  // Dónde va el motivo en rojo de la cantidad de cada renglón: debajo de la fila, no adentro de la
+  // píldora − campo + (H7 de la revisión de B23).
+  const motivosCantidadRef = useRef(new Map<string, HTMLDivElement>());
   const [editingPriceValue, setEditingPriceValue] = useState<string>('');
 
   // Sustitucion de regalos: el row persistido a editar (id real de pedido_items).
@@ -695,12 +699,17 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // #1559 (CAT-3): la política rige el alta. Un producto que el pedido ya tenía
   // debajo de un mínimo que subió después no traba la edición mientras no baje;
   // el nuevo y el que baja, sí. Es la regla del server (validar_minimo_venta_item).
+  const cantidadesOriginales = cantidadesPorProducto(itemsOriginales);
   const bloqueoMOQ = puedeEditarItems && !pedidoEntregado
     ? moqQueBloqueaLaEdicion(
         violacionesMOQ,
-        cantidadesPorProducto(itemsOriginales),
+        cantidadesOriginales,
       )
     : [];
+  // El piso de la cantidad de cada producto sale de esa misma regla (H1 de la revisión de B23): un
+  // renglón viejo debajo del mínimo de hoy no se pone en rojo mientras no baje de lo que tenía.
+  const pisoDeVenta = (productoId: string): number =>
+    pisoDeVentaEnLaEdicion(productoId, moqMap.get(String(productoId)) || 1, cantidadesOriginales);
 
   // Quitar una promo del pedido (con alerta). Se aplica al guardar: la promo
   // excluida no genera bonificación y el RPC borra su regalo + restaura stock.
@@ -908,9 +917,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     setErrorStock(null);
     setItems(prev => prev.map(item => {
       if (item.productoId === productoId) {
-        const moq = moqMap.get(String(productoId));
-        const minCantidad = moq && moq > 1 ? moq : 1;
-        const nuevaCantidad = Math.max(minCantidad, item.cantidad + delta);
+        const nuevaCantidad = Math.max(pisoDeVenta(productoId), item.cantidad + delta);
         // Verificar stock disponible
         const producto = productos.find(p => p.id === productoId);
         const cantidadOriginal = itemsOriginales.find(o => o.productoId === productoId)?.cantidad || 0;
@@ -926,25 +933,11 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     }));
   };
 
-  // Setea la cantidad a un valor absoluto (para el input editable), con la
-  // misma validación de MOQ/stock que handleCantidadChange pero clampeando al
-  // máximo disponible en vez de rechazar.
+  // Setea la cantidad tipeada (el input editable). El mínimo de venta y el stock disponible los pone
+  // el campo en rojo, con su motivo (B23): lo que llega ya los cumple, y acá no se recorta nada.
   const handleCantidadSet = (productoId: string, value: number): void => {
     setErrorStock(null);
-    setItems(prev => prev.map(item => {
-      if (item.productoId !== productoId) return item;
-      const moq = moqMap.get(String(productoId));
-      const minCantidad = moq && moq > 1 ? moq : 1;
-      const producto = productos.find(p => p.id === productoId);
-      const cantidadOriginal = itemsOriginales.find(o => o.productoId === productoId)?.cantidad || 0;
-      const stockDisponible = (producto?.stock || 0) + cantidadOriginal;
-      let nueva = Math.max(minCantidad, Math.round(value));
-      if (nueva > stockDisponible) {
-        setErrorStock(`Stock insuficiente para "${item.nombre}". Disponible: ${stockDisponible}`);
-        nueva = stockDisponible;
-      }
-      return { ...item, cantidad: nueva };
-    }));
+    setItems(prev => prev.map(item => (item.productoId === productoId ? { ...item, cantidad: value } : item)));
   };
 
   const handleEliminarItem = (productoId: string): void => {
@@ -1435,7 +1428,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                   return (
                     <div
                       key={item.productoId}
-                      className={`p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between ${
+                      className={`p-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between ${
                         item.esNuevo ? 'bg-green-50 dark:bg-green-900/10' :
                           cambio !== 0 ? 'bg-yellow-50 dark:bg-yellow-900/10' : ''
                       }`}
@@ -1537,7 +1530,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                         <div className="flex items-center border dark:border-gray-600 rounded-lg">
                           <Button
                             onClick={() => handleCantidadChange(item.productoId, -1)}
-                            disabled={item.cantidad <= (moqMap.get(String(item.productoId)) || 1)}
+                            disabled={item.cantidad <= pisoDeVenta(item.productoId)}
                             variant="ghost"
                             size="iconSm"
                             className="rounded-l-lg rounded-r-none"
@@ -1546,9 +1539,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                           </Button>
                           <NumberInput
                             integer
-                            min={moqMap.get(String(item.productoId)) || 1}
+                            min={pisoDeVenta(item.productoId)}
+                            motivoMin={motivoPisoDeVentaEnLaEdicion(moqMap.get(String(item.productoId)) || 1, pisoDeVenta(item.productoId))}
                             max={stockDisponible}
-                            emptyValue={moqMap.get(String(item.productoId)) || 1}
+                            motivoMax={`Hay ${stockDisponible} disponibles`}
+                            motivoVacio="Poné una cantidad"
+                            contenedorMotivo={() => motivosCantidadRef.current.get(String(item.productoId)) ?? null}
                             value={item.cantidad}
                             onChange={(n) => handleCantidadSet(item.productoId, n)}
                             aria-label="Cantidad"
@@ -1580,6 +1576,15 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                           <Trash2 className="w-4 h-4" />
                         </Button>
                       </div>
+                      {/* El motivo en rojo de la cantidad, con el ancho de la fila (vacío no ocupa lugar). */}
+                      <div
+                        data-testid="motivo-cantidad"
+                        className="basis-full empty:hidden"
+                        ref={el => {
+                          if (el) motivosCantidadRef.current.set(String(item.productoId), el);
+                          else motivosCantidadRef.current.delete(String(item.productoId));
+                        }}
+                      />
                     </div>
                   );
                 })

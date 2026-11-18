@@ -184,6 +184,27 @@ describe('VistaReportesGerenciales › comisión por vendedor', () => {
     expect(within(filaDe('Jony')).getByText($$(0))).toBeInTheDocument();
   });
 
+  // B23 de #1603: un % sobre 100 no se simula recortado a 100. Queda en rojo con su motivo y la
+  // simulación sigue con el % de antes; al salir del campo vuelve a él y lo dice.
+  it('un % del simulador sobre 100 queda en rojo y no se simula recortado', async () => {
+    const user = userEvent.setup();
+    renderVista();
+    await abrirDetalle(user);
+
+    const input = screen.getByLabelText('Porcentaje de comisión a simular');
+    await user.clear(input);
+    await user.type(input, '150');
+
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('alert')).toHaveTextContent('No puede pasar de 100 %');
+    expect(screen.getByText(/Simulado 2%/)).toBeInTheDocument();
+    expect(screen.queryByText(/Simulado 100%/)).toBeNull();
+
+    await user.tab();
+    expect(input).toHaveValue('2');
+    expect(screen.getByRole('alert')).toHaveTextContent('No puede pasar de 100 %: el campo volvió a «2»');
+  });
+
   // Es lo que hacía que la pantalla se contradijera consigo misma.
   it('el pie de la columna real cuadra con el KPI, no con el simulado', async () => {
     const user = userEvent.setup();
