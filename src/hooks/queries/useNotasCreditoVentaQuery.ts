@@ -10,8 +10,10 @@
  *
  * Escritura sólo por RPC: `crear_nota_credito_venta` (wrapper idempotente con
  * `client_request_id`, mismo ledger que los pagos) y `anular_nota_credito_venta`.
- * Ninguna de las dos toca el pedido ni el stock; mueven el saldo del cliente a
- * través del pago de crédito, por eso invalidan clientes, pagos y pedidos. Desde la
+ * Ninguna de las dos toca el pedido; mueven el saldo del cliente a través del pago
+ * de crédito, por eso invalidan clientes, pagos y pedidos. Desde B22 según el motivo
+ * mueven mercadería (reingreso o merma, y anular lo deshace): invalidan también el
+ * stock (productos, lotes y mermas). Desde la
  * mig 479 crear aplica el crédito a las boletas abiertas (la de origen y, con lo que
  * sobra, las otras) y anular lo desimputa todo: las boletas vuelven a deber eso.
  */
@@ -70,10 +72,19 @@ export function useNotasCreditoVentaPedidoQuery(pedidoId: string | undefined, en
   })
 }
 
+/**
+ * Un renglón de la nota: por unidades (lo de siempre), o por monto (B22: el descuento
+ * comercial, `{monto}` sobre toda la boleta o `{pedido_item_id, monto}` sobre un renglón).
+ */
+export type ItemNotaCreditoVentaInput =
+  | { pedido_item_id: number; cantidad: number }
+  | { monto: number }
+  | { pedido_item_id: number; monto: number }
+
 export interface CrearNotaCreditoVentaInput {
   pedidoId: string
   clienteId: string
-  items: Array<{ pedido_item_id: number; cantidad: number }>
+  items: ItemNotaCreditoVentaInput[]
   motivo: MotivoNCVenta
   observaciones?: string | null
   clientRequestId: string
@@ -91,6 +102,13 @@ export interface CrearNotaCreditoVentaResult {
   resta_comision?: boolean
   metas_restadas?: number
   /**
+   * B22: por unidades o por monto, y qué pasó con la mercadería (`nada` si no se movió) y
+   * cuántas unidades. Opcionales: un server anterior no los manda.
+   */
+  modo?: 'unidades' | 'monto'
+  mercaderia?: 'reingresa' | 'merma' | 'nada'
+  unidades_movidas?: number
+  /**
    * Adónde fue el crédito (mig 479, COB-1): lo que bajó la boleta de origen, lo que fue
    * FIFO a otras boletas abiertas del cliente y lo que quedó suelto. Opcionales: un PWA viejo
    * contra un server nuevo, o al revés, no los trae; `reparticionCreditoNC` los lee.
@@ -106,6 +124,8 @@ export interface AnularNotaCreditoVentaResult {
   credito_desimputado?: number
   /** Las boletas que la NC pagaba y que vuelven a deber ese crédito. */
   pedidos_desimputados?: number[]
+  /** B22: las unidades cuyo movimiento se deshizo (lo que reingresó volvió a salir, o la merma se anuló). */
+  unidades_revertidas?: number
 }
 
 const MENSAJE_NC_SIN_CONFIRMAR = 'Sin conexión: no se pudo confirmar la nota de crédito. Revisá la ficha del cliente antes de reintentar.'
@@ -154,6 +174,10 @@ function useInvalidarTrasNC() {
     queryClient.invalidateQueries({ queryKey: ['notas_credito_venta'] })
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+    // B22: según el motivo, la nota (o su anulación) mueve el stock, los lotes y las mermas.
+    queryClient.invalidateQueries({ queryKey: ['productos'] })
+    queryClient.invalidateQueries({ queryKey: ['lotes'] })
+    queryClient.invalidateQueries({ queryKey: ['mermas'] })
     // 1544-b1: crear o anular una nota mueve la deuda de la boleta; la lista de mora quedaba vieja.
     invalidarMora(queryClient)
   }

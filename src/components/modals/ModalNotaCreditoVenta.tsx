@@ -5,13 +5,19 @@
  * se le reconoce un crédito en su cuenta corriente. Desde la mig 479 (COB-1) el
  * crédito baja primero este pedido, si sigue impago, y lo que sobra va FIFO a las
  * otras boletas abiertas del cliente; sólo queda de saldo a favor lo que no
- * alcanza a ninguna. La NC NO modifica el pedido (ni total, ni ítems, ni estado)
- * y no mueve stock. Se imputa al día del pedido; según el motivo le descuenta o no
- * al vendedor, y el modal lo dice al elegirlo (B16, decisiones del dueño del 16/11
- * y del 17/11).
+ * alcanza a ninguna. La NC NO modifica el pedido (ni total, ni ítems, ni estado).
+ * Se imputa al día del pedido; según el motivo le descuenta o no al vendedor, y el
+ * modal lo dice al elegirlo (B16, decisiones del dueño del 16/11 y del 17/11).
+ *
+ * B22 (decisiones del dueño del 17 y 18/11): según el motivo, la mercadería
+ * reingresa al stock (a su lote), queda como merma o no se mueve, y el modal lo dice.
+ * Con «descuento comercial» la carga es por MONTO, sin unidades: sobre toda la
+ * boleta (en plata o en %, que la pantalla convierte y muestra), prorrateado entre
+ * los renglones en proporción a lo que vale hoy cada uno; o, en «avanzado», un
+ * monto por producto.
  *
  * La cuenta es la de `utils/notaCreditoVenta`; el servidor la rehace con el
- * precio del pedido y revalida las cantidades.
+ * precio del pedido, revalida las cantidades y los topes, y prorratea.
  *
  * Tras emitir, el modal NO se cierra: dice adónde fue el crédito y, si algo quedó
  * suelto, ofrece imputarlo ya mismo a otro pedido del cliente (nunca al de origen)
@@ -29,14 +35,24 @@ import {
   LEYENDA_NC_COMISION,
   MOTIVOS_NC_VENTA,
   diaEmisionNotaCreditoVenta,
+  esMotivoPorMonto,
+  itemsDescuentoParaRPC,
+  leyendaMercaderiaNCVenta,
   leyendaMotivoNCVenta,
   itemsNotaCreditoParaRPC,
   lineasAcreditables,
   lineasReparticionCreditoNC,
+  montoDePorcentaje,
+  montoDisponibleBoleta,
+  montoUnidadesNC,
   reparticionCreditoNC,
+  repartoDescuentoNC,
+  totalDescuentoNC,
   totalNotaCreditoVenta,
+  validarDescuentoNC,
   validarNotaCreditoVenta,
   type CantidadesNC,
+  type MontosNC,
   type MotivoNCVenta,
 } from '../../utils/notaCreditoVenta'
 import {
@@ -70,6 +86,16 @@ export const notaCreditoVentaSchema = z.object({
   observaciones: z.string().max(500, { message: 'Máximo 500 caracteres' }).optional(),
 })
 
+// B22: el descuento comercial por monto. Co-locado por la misma razón. El tope (lo que le
+// queda a la boleta o al renglón) lo mira validarDescuentoNC, y el server de nuevo.
+// eslint-disable-next-line react-refresh/only-export-components
+export const descuentoNCVentaSchema = z.object({
+  modo: z.enum(['boleta', 'productos']),
+  total: z.number().finite().positive({ message: 'El descuento tiene que ser mayor a $0' }),
+})
+
+type ModoDescuento = 'boleta' | 'productos'
+
 export interface ModalNotaCreditoVentaProps {
   pedido: PedidoDB
   onClose: () => void
@@ -83,6 +109,11 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
 
   const [cantidades, setCantidades] = useState<CantidadesNC>({})
   const [motivo, setMotivo] = useState<MotivoNCVenta>('producto_vencido')
+  // B22: el descuento comercial por monto.
+  const [modoDescuento, setModoDescuento] = useState<ModoDescuento>('boleta')
+  const [enPorcentaje, setEnPorcentaje] = useState(false)
+  const [valorDescuento, setValorDescuento] = useState<number | null>(null)
+  const [montos, setMontos] = useState<MontosNC>({})
   const [observaciones, setObservaciones] = useState('')
   const [error, setError] = useState<string | null>(null)
   // Paso final: la NC ya está emitida. `imputando` muestra la imputación inline.
@@ -93,9 +124,19 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
     () => lineasAcreditables(pedido.items ?? [], notasPedido),
     [pedido.items, notasPedido],
   )
-  const total = totalNotaCreditoVenta(lineas, cantidades)
+  const porMonto = esMotivoPorMonto(motivo)
+  const quedaBoleta = montoDisponibleBoleta(lineas)
+  const montoBoleta = enPorcentaje ? montoDePorcentaje(lineas, valorDescuento ?? 0) : (valorDescuento ?? 0)
+  const montosDescuento = modoDescuento === 'productos' ? montos : null
+  const reparto = useMemo(
+    () => (porMonto && modoDescuento === 'boleta' && montoBoleta > 0 && montoBoleta <= quedaBoleta + 0.005
+      ? repartoDescuentoNC(lineas, montoBoleta)
+      : []),
+    [porMonto, modoDescuento, montoBoleta, quedaBoleta, lineas],
+  )
+  const total = porMonto ? totalDescuentoNC(montoBoleta, montosDescuento) : totalNotaCreditoVenta(lineas, cantidades)
   const notasVigentes = notasPedido.filter(n => !n.anulada)
-  const nada = lineas.every(l => l.disponible <= 0)
+  const nada = porMonto ? quedaBoleta <= 0 : lineas.every(l => l.disponible <= 0)
 
   const handleConfirmar = async () => {
     const parsed = notaCreditoVentaSchema.safeParse({ motivo, observaciones: observaciones || undefined })
@@ -103,13 +144,24 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
       setError(parsed.error.issues[0]?.message ?? 'Datos inválidos')
       return
     }
-    const invalido = validarNotaCreditoVenta(lineas, cantidades)
+    const invalido = porMonto
+      ? validarDescuentoNC(lineas, montoBoleta, montosDescuento)
+      : validarNotaCreditoVenta(lineas, cantidades)
     if (invalido) {
       setError(invalido)
       return
     }
+    if (porMonto) {
+      const desc = descuentoNCVentaSchema.safeParse({ modo: modoDescuento, total })
+      if (!desc.success) {
+        setError(desc.error.issues[0]?.message ?? 'Datos inválidos')
+        return
+      }
+    }
     setError(null)
-    const items = itemsNotaCreditoParaRPC(lineas, cantidades)
+    const items = porMonto
+      ? itemsDescuentoParaRPC(lineas, montoBoleta, montosDescuento)
+      : itemsNotaCreditoParaRPC(lineas, cantidades)
     // Mismo UUID mientras no cambie lo que se emite: un reintento tras una
     // respuesta perdida no crea una segunda NC (ledger de pagos, mig 167), aunque
     // se cierre el modal o se recargue la app (#1410).
@@ -213,7 +265,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
           <div>
             <p className="font-semibold">{LEYENDA_NC_COMISION}</p>
             <p>
-              El pedido no se modifica y no se mueve stock. El crédito baja primero este pedido,
+              El pedido no se modifica. El crédito baja primero este pedido,
               si todavía debe algo, y lo que sobra va a las otras boletas abiertas del cliente,
               de la más vieja a la más nueva. Sólo queda de saldo a favor lo que no alcanza a ninguna.
             </p>
@@ -235,6 +287,113 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
           <div className="flex items-center gap-2 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
             <AlertTriangle className="h-4 w-4 shrink-0" />
             No queda nada por acreditar en este pedido.
+          </div>
+        ) : porMonto ? (
+          <div className="space-y-3 rounded-lg border p-3 dark:border-gray-700">
+            <fieldset className="flex flex-wrap gap-4 text-sm">
+              <legend className="sr-only">Sobre qué va el descuento</legend>
+              <label className="flex cursor-pointer items-center gap-2 dark:text-gray-200">
+                <input
+                  type="radio"
+                  name="modo-descuento"
+                  checked={modoDescuento === 'boleta'}
+                  onChange={() => setModoDescuento('boleta')}
+                />
+                Sobre toda la boleta
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 dark:text-gray-200">
+                <input
+                  type="radio"
+                  name="modo-descuento"
+                  checked={modoDescuento === 'productos'}
+                  onChange={() => setModoDescuento('productos')}
+                />
+                Sobre productos (avanzado)
+              </label>
+            </fieldset>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Queda por acreditar de la boleta: <strong>{formatPrecio(quedaBoleta)}</strong>. Sin unidades: no se mueve mercadería.
+            </p>
+
+            {modoDescuento === 'boleta' ? (
+              <>
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <fieldset className="flex gap-3">
+                    <legend className="sr-only">En plata o en porcentaje</legend>
+                    <label className="flex cursor-pointer items-center gap-1 dark:text-gray-200">
+                      <input type="radio" name="unidad-descuento" checked={!enPorcentaje}
+                        onChange={() => { setEnPorcentaje(false); setValorDescuento(null) }} />
+                      $
+                    </label>
+                    <label className="flex cursor-pointer items-center gap-1 dark:text-gray-200">
+                      <input type="radio" name="unidad-descuento" checked={enPorcentaje}
+                        onChange={() => { setEnPorcentaje(true); setValorDescuento(null) }} />
+                      %
+                    </label>
+                  </fieldset>
+                  <NumberInput
+                    min={0}
+                    max={enPorcentaje ? 100 : quedaBoleta}
+                    sinMiles={enPorcentaje}
+                    value={valorDescuento}
+                    commitOnChange
+                    onChange={v => setValorDescuento(v)}
+                    aria-label={enPorcentaje ? 'Porcentaje del descuento' : 'Monto del descuento'}
+                    className="w-32 rounded border px-2 py-1 text-right dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  />
+                  {enPorcentaje && montoBoleta > 0 && (
+                    <span className="text-gray-700 dark:text-gray-300">= {formatPrecio(montoBoleta)}</span>
+                  )}
+                </div>
+                {reparto.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <p className="mb-1 text-xs font-medium text-gray-600 dark:text-gray-400">Cómo se reparte</p>
+                    <table className="w-full text-sm">
+                      <tbody className="divide-y dark:divide-gray-700">
+                        {reparto.map(r => (
+                          <tr key={r.pedidoItemId}>
+                            <td className="py-1 text-gray-900 dark:text-white">{r.nombre}</td>
+                            <td className="py-1 text-right tabular-nums text-gray-900 dark:text-white">{formatPrecio(r.monto)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-gray-600 dark:text-gray-400">
+                    <tr>
+                      <th className="px-2 py-1 text-left">Producto</th>
+                      <th className="px-2 py-1 text-right">Le queda</th>
+                      <th className="px-2 py-1 text-right">A descontar</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y dark:divide-gray-700">
+                    {lineas.map(l => (
+                      <tr key={l.pedidoItemId}>
+                        <td className="px-2 py-1 text-gray-900 dark:text-white">{l.nombre}</td>
+                        <td className="px-2 py-1 text-right tabular-nums text-gray-700 dark:text-gray-300">{formatPrecio(l.montoDisponible)}</td>
+                        <td className="px-2 py-1 text-right">
+                          <NumberInput
+                            min={0}
+                            max={l.montoDisponible}
+                            value={montos[l.pedidoItemId] ?? 0}
+                            commitOnChange
+                            disabled={l.montoDisponible <= 0}
+                            onChange={v => setMontos(prev => ({ ...prev, [l.pedidoItemId]: v }))}
+                            aria-label={`Monto a descontar de ${l.nombre}`}
+                            className="w-28 rounded border px-2 py-1 text-right dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto rounded-lg border dark:border-gray-700">
@@ -278,7 +437,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
                         />
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums text-gray-900 dark:text-white">
-                        {cant > 0 ? formatPrecio(cant * l.precioUnitario) : '—'}
+                        {cant > 0 ? formatPrecio(montoUnidadesNC(l, cant)) : '—'}
                       </td>
                     </tr>
                   )
@@ -301,6 +460,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
               ))}
             </select>
             <span className="mt-1 block text-xs text-gray-600 dark:text-gray-400">{leyendaMotivoNCVenta(motivo)}</span>
+            <span className="mt-0.5 block text-xs text-gray-600 dark:text-gray-400">{leyendaMercaderiaNCVenta(motivo)}</span>
           </label>
           <label className="block text-sm">
             <span className="mb-1 block font-medium text-gray-700 dark:text-gray-300">Observaciones</span>

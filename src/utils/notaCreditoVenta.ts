@@ -9,7 +9,13 @@
  * cliente, de la más vieja a la más nueva; sólo queda de saldo a favor lo que no
  * alcanza a ninguna. Anular la NC (COB-3) quita todo su crédito, suelto y ya
  * aplicado: las boletas que pagaba vuelven a deber eso. La NC es un documento aparte: NO toca el
- * pedido (ni total, ni ítems, ni estado) y no mueve stock.
+ * pedido (ni total, ni ítems, ni estado).
+ *
+ * B22 (decisiones del dueño del 17 y 18/11): según el motivo, la mercadería de la nota
+ * reingresa al stock (al lote del que salió), queda como merma o no se mueve, y anular la
+ * nota lo deshace. Y el descuento comercial se carga por MONTO, sin unidades: sobre toda la
+ * boleta (el server lo prorratea en proporción a lo que vale hoy cada línea, al centavo, con
+ * `prorratear_cargo`; acá se muestra con su espejo) o sobre uno o más renglones.
  *
  * Decisiones del dueño del 16/11 y del 17/11 (B16 de #1603, en #1545): la nota se
  * imputa al día de su boleta (`fecha` es la de la boleta, la que cuenta para los
@@ -31,6 +37,8 @@
  */
 
 import { diaArgentino, formatFecha, formatPrecio } from './formatters'
+import { redondearSQL } from './calculations'
+import { prorratearCargo } from './prorrateoCompra'
 
 export const LEYENDA_NC_COMISION =
   'Se imputa al mes de la boleta. Según el motivo, le descuenta o no al vendedor'
@@ -69,7 +77,7 @@ export interface MotivoNCVentaInfo {
   descuentaVendedor: boolean
   /** Además de la plata, resta unidades (metas de unidades, Rendimiento). */
   descuentaUnidades: boolean
-  /** Qué pasa con lo acreditado. Definido y todavía sin uso: la nota no mueve stock. */
+  /** Qué pasa con la mercadería acreditada (B22): vuelve al stock, queda como merma o nada. */
   mercaderia: 'reingresa' | 'merma' | 'nada'
 }
 
@@ -102,12 +110,30 @@ export function leyendaMotivoNCVenta(motivo: string | null | undefined): string 
   return `Este motivo le descuenta al vendedor ${que}: de su comisión, si todavía no se liquidó, y de sus metas del mes que todavía no cumplió.`
 }
 
+/**
+ * Qué pasa con la mercadería de la nota según su motivo (B22), en una línea para el modal.
+ * La regla la aplica el server (`nc_venta_motivos().mercaderia`).
+ */
+export function leyendaMercaderiaNCVenta(motivo: string | null | undefined): string {
+  const m = MOTIVOS_NC_VENTA.find(x => x.value === motivo)
+  if (m?.mercaderia === 'reingresa') return 'Las unidades vuelven al stock, al lote del que salieron.'
+  if (m?.mercaderia === 'merma') return 'Las unidades vuelven pero no se pueden vender: quedan como merma.'
+  return 'No se mueve mercadería.'
+}
+
+/** El descuento comercial se carga por monto, sin unidades (B22). Es el único motivo que va así. */
+export function esMotivoPorMonto(motivo: string | null | undefined): boolean {
+  return motivo === 'descuento_comercial'
+}
+
 /** Lo mínimo de un `pedido_items` que hace falta para acreditar. */
 export interface ItemPedidoParaNC {
   id: string | number
-  producto_id: string | number
+  producto_id: string | number | null
   cantidad: number
   precio_unitario: number | string
+  /** Sin él, cantidad × precio. */
+  subtotal?: number | string | null
   es_bonificacion?: boolean | null
   producto?: { nombre?: string | null } | null
 }
@@ -115,7 +141,12 @@ export interface ItemPedidoParaNC {
 /** Lo mínimo de una NC ya emitida sobre el mismo pedido. */
 export interface NCExistente {
   anulada?: boolean | null
-  items?: ReadonlyArray<{ pedido_item_id?: string | number | null; cantidad: number }> | null
+  items?: ReadonlyArray<{
+    pedido_item_id?: string | number | null
+    cantidad: number
+    /** La plata del renglón (un descuento por monto tiene cantidad 0). Sin ella, cantidad × precio. */
+    subtotal?: number | string | null
+  }> | null
 }
 
 export interface LineaAcreditable {
@@ -125,9 +156,13 @@ export interface LineaAcreditable {
   entregada: number
   precioUnitario: number
   yaAcreditada: number
-  /** Lo que todavía se puede acreditar de esta línea. */
+  /** Las unidades que todavía se pueden acreditar de esta línea. */
   disponible: number
+  /** La plata que le queda a la línea: su subtotal menos lo que ya acreditaron las notas vigentes. */
+  montoDisponible: number
 }
+
+const centavos = (n: number): number => Math.round(n * 100) / 100
 
 /**
  * Las líneas que se pueden acreditar de un pedido, con lo que queda disponible
@@ -138,32 +173,57 @@ export function lineasAcreditables(
   items: ReadonlyArray<ItemPedidoParaNC>,
   notasExistentes: ReadonlyArray<NCExistente> = [],
 ): LineaAcreditable[] {
+  const precioDe = new Map(items.map(it => [String(it.id), Number(it.precio_unitario) || 0]))
   const acreditado = new Map<string, number>()
+  const acreditadoMonto = new Map<string, number>()
   for (const nc of notasExistentes) {
     if (nc.anulada) continue
     for (const it of nc.items ?? []) {
       if (it.pedido_item_id == null) continue
       const key = String(it.pedido_item_id)
-      acreditado.set(key, (acreditado.get(key) ?? 0) + (Number(it.cantidad) || 0))
+      const cant = Number(it.cantidad) || 0
+      const monto = it.subtotal != null ? Number(it.subtotal) || 0 : cant * (precioDe.get(key) ?? 0)
+      acreditado.set(key, (acreditado.get(key) ?? 0) + cant)
+      acreditadoMonto.set(key, (acreditadoMonto.get(key) ?? 0) + monto)
     }
   }
 
   return items
-    .filter(it => !it.es_bonificacion && (Number(it.precio_unitario) || 0) > 0)
+    // Un regalo (o una línea a precio 0) no se cobró: no se acredita. Una línea sin producto
+    // (borrado antes de la FK) tampoco: el server la rechaza por unidades y la saltea por monto.
+    .filter(it => !it.es_bonificacion && (Number(it.precio_unitario) || 0) > 0 && it.producto_id != null)
     .map(it => {
       const key = String(it.id)
       const entregada = Number(it.cantidad) || 0
+      const precioUnitario = Number(it.precio_unitario) || 0
+      const subtotal = it.subtotal != null ? Number(it.subtotal) || 0 : entregada * precioUnitario
       const yaAcreditada = acreditado.get(key) ?? 0
       return {
         pedidoItemId: key,
         productoId: String(it.producto_id),
         nombre: it.producto?.nombre || `Producto #${it.producto_id}`,
         entregada,
-        precioUnitario: Number(it.precio_unitario) || 0,
+        precioUnitario,
         yaAcreditada,
         disponible: Math.max(0, entregada - yaAcreditada),
+        montoDisponible: Math.max(0, centavos(subtotal - (acreditadoMonto.get(key) ?? 0))),
       }
     })
+}
+
+/**
+ * Lo que acreditan `cant` unidades de una línea. Espejo de `crear_nota_credito_venta_impl`:
+ * sin descuento previo en la línea es cantidad × precio; si la línea ya tiene un descuento
+ * por monto (B22), cada unidad acredita lo que le queda a la línea por unidad y la última, lo
+ * que quede.
+ */
+export function montoUnidadesNC(l: LineaAcreditable, cant: number): number {
+  if (!(cant > 0)) return 0
+  if (l.disponible <= 0 || Math.abs(l.montoDisponible - l.disponible * l.precioUnitario) < 0.005) {
+    return cant * l.precioUnitario
+  }
+  if (cant >= l.disponible) return l.montoDisponible
+  return Math.max(0, redondearSQL(cant * l.montoDisponible / l.disponible, 2))
 }
 
 export type CantidadesNC = Readonly<Record<string, number>>
@@ -173,11 +233,8 @@ export function totalNotaCreditoVenta(
   lineas: ReadonlyArray<LineaAcreditable>,
   cantidades: CantidadesNC,
 ): number {
-  const total = lineas.reduce((sum, l) => {
-    const cant = cantidades[l.pedidoItemId] ?? 0
-    return cant > 0 ? sum + cant * l.precioUnitario : sum
-  }, 0)
-  return Math.round(total * 100) / 100
+  const total = lineas.reduce((sum, l) => sum + montoUnidadesNC(l, cantidades[l.pedidoItemId] ?? 0), 0)
+  return centavos(total)
 }
 
 /** `null` si se puede emitir; si no, el primer motivo en castellano. */
@@ -210,6 +267,103 @@ export function itemsNotaCreditoParaRPC(
   return lineas
     .filter(l => (cantidades[l.pedidoItemId] ?? 0) > 0)
     .map(l => ({ pedido_item_id: Number(l.pedidoItemId), cantidad: cantidades[l.pedidoItemId] }))
+}
+
+// ---------------------------------------------------------------------------
+// B22 · el descuento comercial por monto
+// ---------------------------------------------------------------------------
+
+/** Lo que le queda a la boleta para acreditar: la suma de lo que le queda a cada línea. */
+export function montoDisponibleBoleta(lineas: ReadonlyArray<LineaAcreditable>): number {
+  return centavos(lineas.reduce((s, l) => s + l.montoDisponible, 0))
+}
+
+/** Un porcentaje de lo que le queda a la boleta, en plata (la pantalla lo muestra antes de emitir). */
+export function montoDePorcentaje(lineas: ReadonlyArray<LineaAcreditable>, pct: number): number {
+  if (!Number.isFinite(pct) || pct <= 0) return 0
+  return redondearSQL(montoDisponibleBoleta(lineas) * pct / 100, 2)
+}
+
+/**
+ * Cómo se reparte un descuento sobre toda la boleta: en proporción a lo que le queda a cada
+ * línea, al centavo, y el residuo a la de más peso. Es la cuenta del server
+ * (`prorratear_cargo`), con su espejo `prorratearCargo`. Las partes en 0 no aparecen.
+ */
+export function repartoDescuentoNC(
+  lineas: ReadonlyArray<LineaAcreditable>,
+  monto: number,
+): Array<{ pedidoItemId: string; nombre: string; monto: number }> {
+  if (!(monto > 0)) return []
+  const pesos: Record<number, number> = {}
+  for (const l of lineas) if (l.montoDisponible > 0) pesos[Number(l.pedidoItemId)] = l.montoDisponible
+  const partes = prorratearCargo(redondearSQL(monto, 2), pesos)
+  return lineas
+    .filter(l => (partes[Number(l.pedidoItemId)] ?? 0) > 0)
+    .map(l => ({ pedidoItemId: l.pedidoItemId, nombre: l.nombre, monto: partes[Number(l.pedidoItemId)] }))
+}
+
+export type MontosNC = Readonly<Record<string, number>>
+
+/**
+ * `null` si el descuento se puede emitir; si no, el primer motivo en castellano. `montos` es
+ * `null` para toda la boleta (va `monto`) o, en el avanzado, el monto de cada renglón.
+ */
+export function validarDescuentoNC(
+  lineas: ReadonlyArray<LineaAcreditable>,
+  monto: number,
+  montos: MontosNC | null,
+): string | null {
+  const queda = montoDisponibleBoleta(lineas)
+  if (montos == null) {
+    if (!Number.isFinite(monto) || redondearSQL(monto, 2) <= 0) return 'Escribí el monto del descuento'
+    if (redondearSQL(monto, 2) > queda + 0.005) {
+      return `El descuento (${formatPrecio(monto)}) pasa lo que le queda a la boleta (${formatPrecio(queda)})`
+    }
+    return null
+  }
+  let alguno = false
+  for (const l of lineas) {
+    const m = montos[l.pedidoItemId] ?? 0
+    if (m === 0) continue
+    if (!Number.isFinite(m) || m < 0) return `Monto inválido para ${l.nombre}`
+    if (redondearSQL(m, 2) > l.montoDisponible + 0.005) {
+      return `${l.nombre}: le quedan ${formatPrecio(l.montoDisponible)} por acreditar`
+    }
+    alguno = true
+  }
+  if (!alguno) return 'Elegí al menos un producto y su monto'
+  return null
+}
+
+/** Payload de `p_items` para un descuento: `[{monto}]` sobre toda la boleta, o un renglón por producto. */
+export function itemsDescuentoParaRPC(
+  lineas: ReadonlyArray<LineaAcreditable>,
+  monto: number,
+  montos: MontosNC | null,
+): Array<{ monto: number } | { pedido_item_id: number; monto: number }> {
+  if (montos == null) return [{ monto: redondearSQL(monto, 2) }]
+  return lineas
+    .filter(l => (montos[l.pedidoItemId] ?? 0) > 0)
+    .map(l => ({ pedido_item_id: Number(l.pedidoItemId), monto: redondearSQL(montos[l.pedidoItemId], 2) }))
+}
+
+/** Total del descuento que se va a emitir. */
+export function totalDescuentoNC(monto: number, montos: MontosNC | null): number {
+  if (montos == null) return monto > 0 ? redondearSQL(monto, 2) : 0
+  return centavos(Object.values(montos).reduce((s, m) => s + (m > 0 ? redondearSQL(m, 2) : 0), 0))
+}
+
+/**
+ * Lo que la nota hizo con la mercadería, para la ficha: si algún renglón reingresó o quedó como
+ * merma (el server lo anota en `lotes_devueltos` / `merma_id`). `null` si no movió nada.
+ */
+export function mercaderiaDeNotaNC(nc: {
+  motivo?: string | null
+  items?: ReadonlyArray<{ lotes_devueltos?: unknown; merma_id?: string | number | null }> | null
+}): 'reingresa' | 'merma' | null {
+  const movio = (nc.items ?? []).some(it => it.lotes_devueltos != null || it.merma_id != null)
+  if (!movio) return null
+  return MOTIVOS_NC_VENTA.find(m => m.value === nc.motivo)?.mercaderia === 'merma' ? 'merma' : 'reingresa'
 }
 
 /** Suma de las NCs vigentes (no anuladas) de una lista. */

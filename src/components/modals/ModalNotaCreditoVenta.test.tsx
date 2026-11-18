@@ -26,7 +26,7 @@ vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => ({ success: vi.fn(), error: vi.fn() }),
 }))
 
-import ModalNotaCreditoVenta, { notaCreditoVentaSchema } from './ModalNotaCreditoVenta'
+import ModalNotaCreditoVenta, { descuentoNCVentaSchema, notaCreditoVentaSchema } from './ModalNotaCreditoVenta'
 import type { PedidoDB } from '../../types'
 
 const pedido = {
@@ -181,5 +181,81 @@ describe('ModalNotaCreditoVenta', () => {
   it('el schema co-locado acepta los motivos de la tabla', () => {
     expect(notaCreditoVentaSchema.safeParse({ motivo: 'producto_vencido' }).success).toBe(true)
     expect(notaCreditoVentaSchema.safeParse({ motivo: 'devolucion' }).success).toBe(false)
+    expect(descuentoNCVentaSchema.safeParse({ modo: 'boleta', total: 100 }).success).toBe(true)
+    expect(descuentoNCVentaSchema.safeParse({ modo: 'boleta', total: 0 }).success).toBe(false)
+  })
+
+  // B22 (17/11): según el motivo, la mercadería reingresa, queda como merma o no se mueve.
+  // Cambió de regla: antes el modal decía «no se mueve stock» para todo motivo.
+  it('dice qué pasa con la mercadería según el motivo', () => {
+    render(<ModalNotaCreditoVenta pedido={pedido} onClose={() => {}} />)
+    expect(screen.queryByText(/no se mueve stock/)).toBeNull()
+    expect(screen.getByText(/quedan como merma/)).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'cliente_rechaza' } })
+    expect(screen.getByText('Las unidades vuelven al stock, al lote del que salieron.')).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'otro' } })
+    expect(screen.getByText('No se mueve mercadería.')).toBeInTheDocument()
+  })
+
+  // B22 (18/11): el descuento comercial va por monto, sin unidades, sobre toda la boleta
+  // (prorrateado) por defecto.
+  describe('descuento comercial por monto', () => {
+    // Fideos 1 × 11.100 y Arroz 2 × 5.600: le quedan 22.300 a la boleta.
+    function elegirDescuento() {
+      render(<ModalNotaCreditoVenta pedido={pedido} onClose={() => {}} />)
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: 'descuento_comercial' } })
+    }
+
+    it('cambia la carga: monto sobre toda la boleta, sin cantidades, y dice cuánto queda', () => {
+      elegirDescuento()
+      expect(screen.queryByLabelText('Cantidad a acreditar de Fideos')).toBeNull()
+      expect(screen.getByLabelText('Sobre toda la boleta')).toBeChecked()
+      expect(screen.getByText(/Queda por acreditar de la boleta/)).toHaveTextContent(/22\.300/)
+    })
+
+    it('muestra cómo se reparte y manda un solo monto a la RPC', async () => {
+      elegirDescuento()
+      fireEvent.change(screen.getByLabelText('Monto del descuento'), { target: { value: '1000' } })
+      // 1.000 × 11.100 / 22.300 = 497,76; el resto (502,24) a Arroz, que pesa más.
+      expect(screen.getByText('Cómo se reparte')).toBeInTheDocument()
+      expect(screen.getByText(/497,76/)).toBeInTheDocument()
+      expect(screen.getByText(/502,24/)).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /Emitir nota de crédito/ }))
+      await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+      expect(mutateAsync.mock.calls[0][0]).toMatchObject({ motivo: 'descuento_comercial', items: [{ monto: 1000 }] })
+    })
+
+    it('un porcentaje se convierte a plata y la pantalla lo muestra', async () => {
+      elegirDescuento()
+      fireEvent.click(screen.getByLabelText('%'))
+      fireEvent.change(screen.getByLabelText('Porcentaje del descuento'), { target: { value: '10' } })
+      expect(screen.getByText(/= .*2\.230/)).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /Emitir nota de crédito/ }))
+      await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+      expect(mutateAsync.mock.calls[0][0].items).toEqual([{ monto: 2230 }])
+    })
+
+    it('no deja pasar lo que le queda a la boleta', () => {
+      elegirDescuento()
+      fireEvent.change(screen.getByLabelText('Monto del descuento'), { target: { value: '22300,01' } })
+      fireEvent.click(screen.getByRole('button', { name: /Emitir nota de crédito/ }))
+      expect(screen.getByRole('alert')).toHaveTextContent(/pasa lo que le queda a la boleta/)
+      expect(mutateAsync).not.toHaveBeenCalled()
+    })
+
+    it('en avanzado manda un monto por producto', async () => {
+      elegirDescuento()
+      fireEvent.click(screen.getByLabelText('Sobre productos (avanzado)'))
+      fireEvent.change(screen.getByLabelText('Monto a descontar de Arroz'), { target: { value: '500' } })
+      fireEvent.click(screen.getByRole('button', { name: /Emitir nota de crédito/ }))
+      await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+      expect(mutateAsync.mock.calls[0][0].items).toEqual([{ pedido_item_id: 23808, monto: 500 }])
+    })
+
+    it('lo que ya descontó otra nota no se vuelve a ofrecer', () => {
+      notasPedido = [{ id: '1', fecha: '2026-09-29', anulada: false, items: [{ pedido_item_id: '23807', cantidad: 0, subtotal: 11100 }] }]
+      elegirDescuento()
+      expect(screen.getByText(/Queda por acreditar de la boleta/)).toHaveTextContent(/11\.200/)
+    })
   })
 })

@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MOTIVOS_NC_VENTA,
   diaEmisionNotaCreditoVenta,
+  esMotivoPorMonto,
+  itemsDescuentoParaRPC,
+  leyendaMercaderiaNCVenta,
+  mercaderiaDeNotaNC,
+  montoDePorcentaje,
+  montoDisponibleBoleta,
+  montoUnidadesNC,
+  repartoDescuentoNC,
+  totalDescuentoNC,
+  validarDescuentoNC,
   fechasNotaCreditoVenta,
   itemsNotaCreditoParaRPC,
   lineasAcreditables,
@@ -151,5 +162,103 @@ describe('fechas de una nota (B16)', () => {
   it('sin created_at: la fecha de la nota', () => {
     expect(diaEmisionNotaCreditoVenta({ fecha: '2026-09-15' })).toBe('2026-09-15')
     expect(fechasNotaCreditoVenta({ fecha: '2026-09-15', created_at: null })).toBe('15/9')
+  })
+})
+
+// B22 (decisiones del dueño del 17 y 18/11): la mercadería según el motivo y el
+// descuento comercial por monto. Los números del descuento son los del ensayo del server
+// (scripts/test-nc-stock-y-descuento-ola2-1603.sql, D1, D5 y D6): la pantalla tiene que
+// mostrar el mismo reparto que hace prorratear_cargo.
+describe('B22 · la mercadería según el motivo', () => {
+  it('dice qué pasa con la mercadería de cada motivo', () => {
+    expect(leyendaMercaderiaNCVenta('cliente_rechaza')).toMatch(/vuelven al stock, al lote del que salieron/)
+    expect(leyendaMercaderiaNCVenta('error_entrega')).toMatch(/vuelven al stock/)
+    expect(leyendaMercaderiaNCVenta('producto_vencido')).toMatch(/quedan como merma/)
+    expect(leyendaMercaderiaNCVenta('producto_danado')).toMatch(/quedan como merma/)
+    expect(leyendaMercaderiaNCVenta('descuento_comercial')).toBe('No se mueve mercadería.')
+    expect(leyendaMercaderiaNCVenta('otro')).toBe('No se mueve mercadería.')
+  })
+
+  it('sólo el descuento comercial va por monto', () => {
+    expect(MOTIVOS_NC_VENTA.filter(m => esMotivoPorMonto(m.value)).map(m => m.value)).toEqual(['descuento_comercial'])
+  })
+
+  it('la ficha dice si la nota movió mercadería (por la anotación del server)', () => {
+    expect(mercaderiaDeNotaNC({ motivo: 'cliente_rechaza', items: [{ lotes_devueltos: [] }] })).toBe('reingresa')
+    expect(mercaderiaDeNotaNC({ motivo: 'producto_vencido', items: [{ lotes_devueltos: [], merma_id: '7' }] })).toBe('merma')
+    // Una nota anterior a B22 (sin anotación) o un descuento no movió nada.
+    expect(mercaderiaDeNotaNC({ motivo: 'cliente_rechaza', items: [{ lotes_devueltos: null, merma_id: null }] })).toBeNull()
+    expect(mercaderiaDeNotaNC({ motivo: 'descuento_comercial', items: [{}] })).toBeNull()
+  })
+})
+
+describe('B22 · el descuento comercial por monto', () => {
+  // FC: G21 3 × 121, G105 2 × 110,50 y EX 1 × 100 = 684.
+  const fc = [
+    { id: 1, producto_id: 21, cantidad: 3, precio_unitario: 121, subtotal: 363, producto: { nombre: 'G21' } },
+    { id: 2, producto_id: 105, cantidad: 2, precio_unitario: 110.5, subtotal: 221, producto: { nombre: 'G105' } },
+    { id: 3, producto_id: 1, cantidad: 1, precio_unitario: 100, subtotal: 100, producto: { nombre: 'EX' } },
+    { id: 4, producto_id: 9, cantidad: 2, precio_unitario: 0, es_bonificacion: true, producto: { nombre: 'Regalo' } },
+  ]
+
+  it('lo que le queda a cada línea descuenta los renglones por monto (cantidad 0) y por unidades', () => {
+    const lineas = lineasAcreditables(fc, [
+      { anulada: false, items: [{ pedido_item_id: 1, cantidad: 0, subtotal: 53.07 }, { pedido_item_id: 2, cantidad: 1, subtotal: '110.50' }] },
+      { anulada: true, items: [{ pedido_item_id: 3, cantidad: 0, subtotal: 50 }] },
+    ])
+    expect(lineas.map(l => [l.pedidoItemId, l.disponible, l.montoDisponible])).toEqual([
+      ['1', 3, 309.93], ['2', 1, 110.5], ['3', 1, 100],
+    ])
+    expect(montoDisponibleBoleta(lineas)).toBe(520.43)
+  })
+
+  it('una línea sin producto (borrado) no se ofrece', () => {
+    expect(lineasAcreditables([{ id: 5, producto_id: null, cantidad: 1, precio_unitario: 100 }])).toEqual([])
+  })
+
+  it('reparte 100 sobre toda la boleta como el server: 53,07 / 32,31 / 14,62 (D1)', () => {
+    const reparto = repartoDescuentoNC(lineasAcreditables(fc), 100)
+    expect(reparto.map(r => [r.nombre, r.monto])).toEqual([['G21', 53.07], ['G105', 32.31], ['EX', 14.62]])
+    expect(reparto.reduce((s, r) => s + r.monto, 0)).toBeCloseTo(100, 10)
+  })
+
+  it('un centavo va entero a la línea de más peso, y las partes en 0 no aparecen (D5)', () => {
+    expect(repartoDescuentoNC(lineasAcreditables(fc), 0.01)).toEqual([{ pedidoItemId: '1', nombre: 'G21', monto: 0.01 }])
+  })
+
+  it('un porcentaje se convierte a plata sobre lo que le queda a la boleta', () => {
+    expect(montoDePorcentaje(lineasAcreditables(fc), 10)).toBe(68.4)
+    expect(montoDePorcentaje(lineasAcreditables(fc), 0)).toBe(0)
+  })
+
+  it('las unidades después de un descuento acreditan lo que le queda a la línea (D6: 103,31 y 206,61)', () => {
+    const [g21] = lineasAcreditables(fc, [{ anulada: false, items: [
+      { pedido_item_id: 1, cantidad: 0, subtotal: 53.07 }, { pedido_item_id: 1, cantidad: 0, subtotal: 0.01 },
+    ] }])
+    expect(g21.montoDisponible).toBe(309.92)
+    expect(montoUnidadesNC(g21, 1)).toBe(103.31)
+    expect(montoUnidadesNC(g21, 3)).toBe(309.92)
+    // Sin descuento en la línea, cantidad × precio, como siempre.
+    expect(montoUnidadesNC(lineasAcreditables(fc)[0], 2)).toBe(242)
+  })
+
+  it('valida el tope de la boleta y el de cada renglón', () => {
+    const lineas = lineasAcreditables(fc)
+    expect(validarDescuentoNC(lineas, 0, null)).toMatch(/Escribí el monto/)
+    expect(validarDescuentoNC(lineas, 684.01, null)).toMatch(/pasa lo que le queda a la boleta/)
+    expect(validarDescuentoNC(lineas, 684, null)).toBeNull()
+    expect(validarDescuentoNC(lineas, 0, {})).toMatch(/al menos un producto/)
+    expect(validarDescuentoNC(lineas, 0, { '3': 100.01 })).toMatch(/EX: le quedan/)
+    expect(validarDescuentoNC(lineas, 0, { '2': 50, '3': 20 })).toBeNull()
+  })
+
+  it('arma el payload de la RPC: {monto} sobre la boleta, o un renglón por producto', () => {
+    const lineas = lineasAcreditables(fc)
+    expect(itemsDescuentoParaRPC(lineas, 100.004, null)).toEqual([{ monto: 100 }])
+    expect(itemsDescuentoParaRPC(lineas, 0, { '2': 50, '3': 20, '1': 0 })).toEqual([
+      { pedido_item_id: 2, monto: 50 }, { pedido_item_id: 3, monto: 20 },
+    ])
+    expect(totalDescuentoNC(0, { '2': 50, '3': 20 })).toBe(70)
+    expect(totalDescuentoNC(12.345, null)).toBe(12.35)
   })
 })
