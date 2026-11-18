@@ -1,7 +1,9 @@
--- Ensayo de la migración «Limpieza del documento de los clientes» (tarjeta B17 de la ola 2 de #1603, punto
--- 1561-b11 de #1561).
+-- Ensayo de la migración 528 (migrations/528_clientes_documento_limpieza.sql, «Limpieza del documento de los
+-- clientes»; tarjeta B17 de la ola 2 de #1603, punto 1561-b11 de #1561).
 --
---   D0 · Sin nada que limpiar, no toca nada y no mira los rangos (la foto del CI, una base vacía).
+--   D0 · Sin nada que limpiar, no toca nada y no mira los rangos. El ensayo no depende de que `clientes` esté
+--        vacía: primero limpia lo que la base ya tuviera (adentro de esta transacción, que se deshace) y suma a sus
+--        rangos lo que quedó de cada grupo.
 --   D1 · Premisa: un grupo fuera de su rango aborta sin tocar nada.
 --   D2 · Premisa: lo que no es de ningún grupo aborta: un 00 con 7 cifras (la frontera), uno de 10 dígitos, uno
 --        de 8 cifras que no termina en 0, y un valor sin forma que no empieza con 00.
@@ -31,6 +33,9 @@ DECLARE
   v_def   text;
   v_zona  bigint;
   v_r     jsonb;
+  v_base  jsonb;
+  v_resp0 bigint;
+  v_mios  bigint[];
   v_n     int;
   v_id    bigint;
   v_t     text;
@@ -59,10 +64,13 @@ BEGIN
   END IF;
 
   -- ── D0 · sin nada que limpiar ─────────────────────────────────────────────
-  v_r := public._clientes_documento_limpiar('{"inventado": [100, 200]}'::jsonb);
-  IF (v_r->>'actualizados')::int <> 0 THEN
-    f := f || format('D0: la base ya tenía documentos para limpiar: %s', v_r);
+  -- Lo que la base ya tuviera para limpiar se limpia acá (se deshace al final).
+  PERFORM public._clientes_documento_limpiar(NULL);
+  v_base := public._clientes_documento_limpiar('{"inventado": [100, 200]}'::jsonb);
+  IF (v_base->>'actualizados')::int <> 0 THEN
+    f := f || format('D0: sin nada que limpiar tocó algo, o miró los rangos: %s', v_base);
   END IF;
+  SELECT count(*) INTO v_resp0 FROM public.clientes_documento_respaldo;
 
   -- ── El estado de prod: todo con tipo CUIT ─────────────────────────────────
   SELECT pg_get_constraintdef(oid) INTO v_def FROM pg_constraint
@@ -125,11 +133,12 @@ BEGIN
     PERFORM public._clientes_documento_limpiar('{"inventado": [0, 1]}'::jsonb);
     f := f || 'D1: con inventado fuera de su rango no abortó'::text;
   EXCEPTION WHEN raise_exception THEN
-    IF SQLERRM NOT LIKE 'B17 · los grupos no son los que se midieron: inventado=16 %' THEN
+    IF SQLERRM NOT LIKE format('B17 · los grupos no son los que se midieron: inventado=%s %%',
+                               (v_base->>'inventado')::int + 16) THEN
       f := f || format('D1: abortó con otro mensaje: %s', SQLERRM);
     END IF;
   END;
-  IF EXISTS (SELECT 1 FROM public.clientes_documento_respaldo)
+  IF (SELECT count(*) FROM public.clientes_documento_respaldo) <> v_resp0
      OR (SELECT cuit FROM public.clientes WHERE id = c_inv1) <> '00-00000123-4' THEN
     f := f || 'D1: el aborto dejó algo tocado'::text;
   END IF;
@@ -158,10 +167,11 @@ BEGIN
   END LOOP;
 
   -- ── D3 · la limpieza ──────────────────────────────────────────────────────
-  v_r := public._clientes_documento_limpiar(jsonb_build_object(
-    'inventado', jsonb_build_array(16, 16), 'dni_almacenamiento', jsonb_build_array(4, 4),
-    'relleno_ceros', jsonb_build_array(18, 18), 'cuit_valido', jsonb_build_array(1, 1),
-    'cuit_verificador_malo', jsonb_build_array(1, 1), 'vacio', jsonb_build_array(1, 1)));
+  -- Los rangos: lo del ensayo más lo que la base ya tenía de cada grupo.
+  SELECT jsonb_object_agg(k, jsonb_build_array((v_base->>k)::int + n, (v_base->>k)::int + n)) INTO v_r
+    FROM (VALUES ('inventado', 16), ('dni_almacenamiento', 4), ('relleno_ceros', 18), ('cuit_valido', 1),
+                 ('cuit_verificador_malo', 1), ('vacio', 1)) AS t(k, n);
+  v_r := public._clientes_documento_limpiar(v_r);
   IF (v_r->>'actualizados')::int <> 37 OR (v_r->>'vaciados')::int <> 34
      OR (v_r->>'inactivos_actualizados')::int <> 4 THEN
     f := f || format('D3: la limpieza devolvió %s (esperado 37 actualizados, 34 vaciados, 4 inactivos)', v_r);
@@ -190,7 +200,9 @@ BEGIN
   END LOOP;
 
   -- El respaldo: una fila por cliente tocado, con el antes y el después.
-  SELECT array_agg(cliente_id ORDER BY cliente_id) INTO v_ids FROM public.clientes_documento_respaldo;
+  v_mios := v_tocados || ARRAY[c_ya_dni, c_cuit, c_cuit_malo, c_null, c_vacio];
+  SELECT array_agg(cliente_id ORDER BY cliente_id) INTO v_ids FROM public.clientes_documento_respaldo
+   WHERE cliente_id = ANY (v_mios);
   IF v_ids IS DISTINCT FROM (SELECT array_agg(x ORDER BY x) FROM unnest(v_tocados) x) THEN
     f := f || format('D3: el respaldo tiene a %s', v_ids);
   END IF;
@@ -236,7 +248,7 @@ BEGIN
 
   -- ── D5 · otra vez no toca nada ────────────────────────────────────────────
   v_r := public._clientes_documento_limpiar('{"inventado": [100, 200]}'::jsonb);
-  IF (v_r->>'actualizados')::int <> 0 OR (SELECT count(*) FROM public.clientes_documento_respaldo) <> 37 THEN
+  IF (v_r->>'actualizados')::int <> 0 OR (SELECT count(*) FROM public.clientes_documento_respaldo) <> v_resp0 + 37 THEN
     f := f || format('D5: la segunda corrida tocó algo: %s', v_r);
   END IF;
 
