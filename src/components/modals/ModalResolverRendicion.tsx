@@ -23,6 +23,7 @@ import { lazyWithReload } from '../../utils/lazyWithReload'
 import { noCerrarConBuscadorAbierto } from '../../utils/escapeConBuscador'
 import { gastosVistos } from '../../utils/rendicionGastos'
 import { MENSAJE_MONTO_ILEGIBLE, parseMonto } from '../../utils/personal'
+import { InputMonto } from '../ui/InputMonto'
 import {
   ETIQUETA_CAUSAL,
   MENSAJE_SIN_EMPLEADOS,
@@ -328,12 +329,11 @@ const ModalResolverRendicion = memo(function ModalResolverRendicion({
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div>
                           <label className="block text-xs text-gray-500 mb-1" htmlFor={`${l.clave}-monto`}>Monto</label>
-                          <input
+                          {/* B20 (D17): los miles los pone el campo y el punto tipeado es la coma. */}
+                          <InputMonto
                             id={`${l.clave}-monto`}
-                            type="text"
-                            inputMode="decimal"
                             value={l.monto}
-                            onChange={e => cambiar(l.clave, { monto: e.target.value })}
+                            onChange={monto => cambiar(l.clave, { monto })}
                             className={CLASE_INPUT}
                           />
                           {l.monto.trim() !== '' && parseMonto(l.monto) === null && (

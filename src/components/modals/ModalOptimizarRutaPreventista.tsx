@@ -6,6 +6,13 @@ import { Button } from '../ui/Button';
 import { getDepositoCoords, setDepositoCoords } from '../../hooks/useOptimizarRuta';
 import type { ClienteDB, PerfilDB } from '../../types';
 import type { RutaPreventistaResponse } from '../../hooks/useOptimizarRutaPreventista';
+import { CampoNumero } from '../ui/CampoNumero'
+import { numeroEditable } from '../../utils/calculations';
+import { leerDecimalSinMiles } from '../../utils/normalizarNumero';
+
+/** Una coordenada tipeada (B20, D17): sin miles, con menos; la tecla del punto es la coma. */
+const leerCoordenada = (texto: string): number => leerDecimalSinMiles(texto) ?? NaN;
+
 
 // =============================================================================
 // TIPOS
@@ -43,8 +50,8 @@ const ModalOptimizarRutaPreventista = memo(function ModalOptimizarRutaPreventist
   // Load depot coords on mount
   useEffect(() => {
     const coords = getDepositoCoords();
-    setDepositoLat(coords.lat.toString());
-    setDepositoLng(coords.lng.toString());
+    setDepositoLat(numeroEditable(coords.lat));
+    setDepositoLng(numeroEditable(coords.lng));
   }, []);
 
   // Filter clients assigned to selected preventista. La asignación es
@@ -87,8 +94,8 @@ const ModalOptimizarRutaPreventista = memo(function ModalOptimizarRutaPreventist
   };
 
   const handleGuardarDeposito = (): void => {
-    const lat = parseFloat(depositoLat);
-    const lng = parseFloat(depositoLng);
+    const lat = leerCoordenada(depositoLat);
+    const lng = leerCoordenada(depositoLng);
     if (!isNaN(lat) && !isNaN(lng)) {
       setDepositoCoords(lat, lng);
       setDepositoGuardado(true);
@@ -124,24 +131,22 @@ const ModalOptimizarRutaPreventista = memo(function ModalOptimizarRutaPreventist
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium mb-1 dark:text-gray-300">Latitud</label>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    step="0.000001"
+                  <CampoNumero
+                    sinMiles
+                    negativo
                     value={depositoLat}
-                    onChange={(e: ChangeEvent<HTMLInputElement>) => setDepositoLat(e.target.value)}
+                    onChange={setDepositoLat}
                     className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700 dark:text-white"
                     placeholder="-26.8241"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-medium mb-1 dark:text-gray-300">Longitud</label>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    step="0.000001"
+                  <CampoNumero
+                    sinMiles
+                    negativo
                     value={depositoLng}
-                    onChange={(e: ChangeEvent<HTMLInputElement>) => setDepositoLng(e.target.value)}
+                    onChange={setDepositoLng}
                     className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700 dark:text-white"
                     placeholder="-65.2226"
                   />

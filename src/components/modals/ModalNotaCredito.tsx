@@ -4,6 +4,8 @@ import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { formatPrecio } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
+import { motivoPlataTipeada } from '../../utils/normalizarNumero'
+import { CampoNumero } from '../ui/CampoNumero'
 import { normalizarLetra, tipoParaCosto } from '../../utils/letraComprobante'
 import type { CondicionIva, NotaCreditoDB, NotaCreditoFormInput } from '../../types'
 import {
@@ -14,6 +16,8 @@ import {
   restanteAcreditableCompra,
   totalesAjusteNotaCredito,
 } from '../../utils/notaCredito'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 
 interface CompraItem {
   /** `compra_items.id`: la clave de la línea. Ver `LineaCompraNC`. */
@@ -62,6 +66,8 @@ export default function ModalNotaCredito({
   onSave,
   onClose,
 }: ModalNotaCreditoProps): React.ReactElement {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   const [saving, setSaving] = useState(false)
   const [modo, setModo] = useState<ModoNota>('devolucion')
   const [motivo, setMotivo] = useState('')
@@ -78,7 +84,8 @@ export default function ModalNotaCredito({
   // Arranca vacío y hay que cargarlo (0 si la nota no lleva).
   const [ajNeto, setAjNeto] = useState(0)
   const [ajIvaTexto, setAjIvaTexto] = useState('')
-  const ajIvaCargado = /\d/.test(ajIvaTexto)
+  // Cargado y legible (B20): lo que no se entiende no se guarda como un IVA 0.
+  const ajIvaCargado = ajIvaTexto.trim() !== '' && motivoPlataTipeada(ajIvaTexto) === null
   const [ajII, setAjII] = useState(0)
   const [ajTotalZZ, setAjTotalZZ] = useState(0)
   // Todo lo que indexa las líneas va por `compra_items.id` y no por
@@ -193,7 +200,7 @@ export default function ModalNotaCredito({
   }
 
   const handleGuardar = async () => {
-    if (!puedeGuardar) return
+    if (!puedeGuardar || ilegibles.hay) return
     setSaving(true)
     try {
       const data: NotaCreditoFormInput = modo === 'devolucion'
@@ -228,6 +235,7 @@ export default function ModalNotaCredito({
     : compra.proveedor?.nombre || compra.proveedor_nombre || `Compra #${compra.id}`
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
         {/* Header */}
@@ -460,6 +468,8 @@ export default function ModalNotaCredito({
         </div>
 
         {/* Footer */}
+        {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+        <AvisoCamposEnRojo className="mb-2" />
         <div className="flex gap-3 p-4 border-t dark:border-gray-700">
           <Button variant="secondary" size="md" onClick={onClose} className="flex-1">
             Cancelar
@@ -468,7 +478,7 @@ export default function ModalNotaCredito({
             variant="primary"
             size="md"
             onClick={handleGuardar}
-            disabled={saving || !puedeGuardar}
+            disabled={saving || !puedeGuardar || ilegibles.hay}
             className="flex-1"
           >
             {saving ? 'Guardando...' : 'Guardar'}
@@ -476,6 +486,7 @@ export default function ModalNotaCredito({
         </div>
       </div>
     </div>
+    </RegistroIlegiblesContext.Provider>
   )
 }
 
@@ -517,14 +528,13 @@ function AjusteSinMercaderia({ esZZ, leyenda, neto, iva, ii, totalZZ, onNeto, on
       </div>
       <div>
         <label htmlFor="nc-aj-iva" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">IVA</label>
-        <input
+        {/* B20 (D17): los miles los pone el campo y el punto tipeado es la coma, como en el Neto. */}
+        <CampoNumero
           id="nc-aj-iva"
-          type="text"
-          inputMode="decimal"
           required
           placeholder="0 si no lleva"
           value={iva}
-          onChange={(e) => onIva(e.target.value.replace(/[^\d.,]/g, ''))}
+          onChange={onIva}
           className={inputClase}
         />
         {!/\d/.test(iva) && (

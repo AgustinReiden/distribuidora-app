@@ -29,7 +29,7 @@
  */
 import { useState } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event'
 
 // Fixtures mutables de los hooks mockeados. `vi.mock` se hoistea arriba de los
@@ -1121,8 +1121,12 @@ describe('ModalPedido — deuda previa del cliente', () => {
   })
 
   // #1560: el monto del pago parcial es plata: «1.000,50» no puede quedar en 0 (el
-  // `type="number"` lo dejaba vacío) y «1.000» es mil.
-  it('el pago parcial se lee con el punto de miles', async () => {
+  // `type="number"` lo dejaba vacío). D17 (cambió de regla): tipeado, el punto es la coma
+  // decimal; pegado, «1.000,50» es mil y cincuenta centavos.
+  it.each([
+    ['1000,50', 'tipea'],
+    ['1.000,50', 'pega'],
+  ])('el pago parcial lee %j cuando se %s', async (texto, como) => {
     const { user } = montar({ puedeVerDeuda: true })
 
     await elegirCliente(user, 'Despensa Saldo Favor')
@@ -1131,8 +1135,23 @@ describe('ModalPedido — deuda previa del cliente', () => {
     await user.selectOptions(screen.getByDisplayValue('Pendiente'), 'parcial')
     const monto = screen.getByPlaceholderText('Ingrese el monto pagado')
     await user.clear(monto)
-    await user.type(monto, '1.000,50')
+    if (como === 'tipea') await user.type(monto, texto)
+    else await user.paste(texto)
     expect(screen.getByText('Se registran sólo $ 850,00: el resto ya lo cubre el saldo a favor.')).toBeInTheDocument()
+  })
+
+  it('el pago parcial tipeado «1.000» se ve «1,000» y es un peso', async () => {
+    const { user } = montar({ puedeVerDeuda: true })
+
+    await elegirCliente(user, 'Despensa Saldo Favor')
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.selectOptions(screen.getByDisplayValue('Pendiente'), 'parcial')
+    const monto = screen.getByPlaceholderText('Ingrese el monto pagado')
+    await user.clear(monto)
+    await user.type(monto, '1.000')
+    expect(monto).toHaveValue('1,000')
+    expect(screen.getByText(/Resta por pagar: \$\s849,00/)).toBeInTheDocument()
   })
 
   it('sin permiso para ver el saldo, ni el aviso ni el descuento del cobro', async () => {
@@ -1250,25 +1269,184 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
   })
 
   // #1560: el campo era `type="number"`, que deja vacío «1.500,50»: el precio no cambiaba y
-  // nadie avisaba. Ahora es texto y lo lee `parsePrecio`, con el punto de miles.
+  // nadie avisaba. Ahora es texto y lo lee `parsePrecio`. D17: la tecla del punto es la coma
+  // decimal (cambió de regla: «1.500» tipeado era mil quinientos y ahora es uno y medio, y se ve
+  // «1,500»); pegado, «1.500,50» sigue siendo mil quinientos y cincuenta.
   it.each([
-    ['1.500,50', 1500.5],
-    ['1.500', 1500],
-    ['1250,5', 1250.5],
-  ])('el admin tipea %j y el precio queda en %d', async (tipeado, esperado) => {
+    ['1500,50', 'tipea', 1500.5],
+    ['150000', 'tipea', 150000],
+    ['1.500', 'tipea', 1.5],
+    ['1250,5', 'tipea', 1250.5],
+    ['1.500,50', 'pega', 1500.5],
+    ['1.500', 'pega', 1500],
+  ])('el admin %2$s %1$j y el precio queda en %3$d', async (texto, como, esperado) => {
     const { user, onActualizarPrecioSpy } = montar({ isAdmin: true })
 
     await agregarProducto(user, 'Gaseosa')
     await user.click(botonCarrito())
     await user.click(screen.getByText(/1\.250,00 c\/u/))
     const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
-    // El precio vigente se precarga con coma decimal (`numeroEditable`), no con punto.
-    expect(input).toHaveValue('1250')
+    // El precio vigente se precarga con los miles que pone el campo (`numeroConMiles`).
+    expect(input).toHaveValue('1.250')
     await user.clear(input)
-    await user.type(input, tipeado)
+    if (como === 'tipea') await user.type(input, texto)
+    else await user.paste(texto)
     await user.keyboard('{Enter}')
 
     expect(onActualizarPrecioSpy).toHaveBeenCalledWith('1', esperado)
+  })
+
+  // #1560-b2: «1.500,50» tipeado queda «1,500,50», que no se entiende: el precio no cambia y el
+  // campo sigue abierto, marcado, en vez de cerrarse como si nada.
+  it('un precio que no se entiende queda a la vista y no se guarda', async () => {
+    const { user, onActualizarPrecioSpy } = montar({ isAdmin: true })
+
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
+    await user.clear(input)
+    await user.type(input, '1.500,50')
+    expect(input).toHaveValue('1,500,50')
+    await user.keyboard('{Enter}')
+
+    expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
+    expect(screen.getByRole('textbox', { name: 'Editar precio unitario' })).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('alert')).toHaveTextContent('No se entiende el número')
+  })
+
+  // H6 de la lente de #1644: tocar afuera (lo normal en el celular) hace lo mismo que Enter: no
+  // descarta en silencio lo que no se entiende.
+  it('salir del precio con algo que no se entiende lo deja abierto, en rojo y con el motivo', async () => {
+    const { user, onActualizarPrecioSpy } = montar({ isAdmin: true })
+
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
+    await user.clear(input)
+    await user.type(input, '1..5')
+    await user.tab()
+
+    expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
+    expect(screen.getByRole('textbox', { name: 'Editar precio unitario' })).toHaveValue('1,,5')
+    expect(screen.getByRole('alert')).toHaveTextContent('No se entiende el número')
+  })
+
+  // N2 de la segunda pasada (el H5 de la edición, en el alta): con el precio abierto y en rojo,
+  // Confirmar no guarda el pedido con el precio de antes.
+  it.each(['1..5', '0'])('con el precio abierto en rojo («%s»), Confirmar no guarda el pedido', async tipeado => {
+    const { user, onGuardarSpy, onActualizarPrecioSpy } = montar({ isAdmin: true })
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
+    await user.clear(input)
+    await user.type(input, tipeado)
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(botonConfirmar()).toBeDisabled()
+    await user.click(botonConfirmar())
+    expect(onGuardarSpy).not.toHaveBeenCalled()
+    expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
+  })
+
+  // N3: «1.500» tipeado (que se escribe «1,500») se guarda $ 1,50 con el aviso amarillo.
+  it('«1.500» tipeado en el precio sale con el aviso amarillo y guarda 1,5', async () => {
+    const { user, onActualizarPrecioSpy } = montar({ isAdmin: true })
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
+    await user.clear(input)
+    await user.type(input, '1.500')
+    expect(input).not.toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByText(/Se guarda \$\s1,50\. Para \$\s1\.500,00 escribí 1500\./)).toBeInTheDocument()
+    await user.keyboard('{Enter}')
+    expect(onActualizarPrecioSpy).toHaveBeenCalledWith('1', 1.5)
+  })
+
+  // Punto 8: en un teléfono no hay Escape. La X cancela la edición aunque lo tipeado esté en rojo.
+  it('la X cancela el precio en rojo y deja el de antes', async () => {
+    const { user, onGuardarSpy, onActualizarPrecioSpy } = montar({ isAdmin: true })
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
+    await user.clear(input)
+    await user.type(input, '1..5')
+    await user.click(screen.getByRole('button', { name: 'Cancelar precio' }))
+    expect(screen.queryByRole('textbox', { name: 'Editar precio unitario' })).not.toBeInTheDocument()
+    expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
+    expect(screen.getByText(/1\.250,00 c\/u/)).toBeInTheDocument()
+    expect(botonConfirmar()).toBeEnabled()
+    await user.click(botonConfirmar())
+    expect(onGuardarSpy).toHaveBeenCalledTimes(1)
+  })
+
+  // N4: una cantidad en rojo con el carrito cerrado. Al lado de Confirmar se dice por qué está
+  // frenado, y «Ir al campo» abre el carrito y lleva a la cantidad.
+  it('con una cantidad en rojo y el carrito cerrado, el aviso dice por qué y lleva al campo', async () => {
+    const { user, onGuardarSpy } = montar()
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    const cantidad = screen.getByRole('textbox', { name: 'Cantidad' })
+    await user.click(cantidad)
+    await user.keyboard('1.200')
+    await user.click(botonCarrito())
+    expect(document.getElementById('carrito-drawer')).toHaveAttribute('aria-hidden', 'true')
+    expect(botonConfirmar()).toBeDisabled()
+    expect(screen.getByText('Hay un campo en rojo para corregir')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Ir al campo' }))
+    expect(document.getElementById('carrito-drawer')).toHaveAttribute('aria-hidden', 'false')
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Cantidad' })).toHaveFocus())
+    expect(onGuardarSpy).not.toHaveBeenCalled()
+  })
+
+  // T8 de la tercera pasada: la X cancela aunque el navegador le saque el foco al precio antes del
+  // click (el onBlur guardaba lo tipeado si se entendía).
+  it('la X cancela aunque el precio pierda el foco antes del click', async () => {
+    const { user, onActualizarPrecioSpy } = montar({ isAdmin: true })
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    await user.click(screen.getByText(/1\.250,00 c\/u/))
+    const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
+    await user.clear(input)
+    await user.type(input, '1500')
+    const x = screen.getByRole('button', { name: 'Cancelar precio' })
+    fireEvent.pointerDown(x)
+    fireEvent.blur(input)
+    fireEvent.click(x)
+    expect(onActualizarPrecioSpy).not.toHaveBeenCalled()
+    expect(screen.queryByRole('textbox', { name: 'Editar precio unitario' })).not.toBeInTheDocument()
+  })
+
+  // T1 de la tercera pasada: con la oferta de la cola a la vista (alta en duda), un campo en rojo
+  // también frena «Guardar en el teléfono»: si no, encolaba el pedido con el valor de antes.
+  it.each([
+    ['el precio', '1..5'],
+    ['la cantidad', '1.200'],
+  ])('con %s en rojo, «Guardar en el teléfono» no encola', async (que, tipeado) => {
+    const onGuardarEnColaSpy = vi.fn()
+    const { user } = montar({ isAdmin: true, onGuardarEnColaSpy })
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(botonCarrito())
+    if (que === 'el precio') {
+      await user.click(screen.getByText(/1\.250,00 c\/u/))
+      const input = screen.getByRole('textbox', { name: 'Editar precio unitario' })
+      await user.clear(input)
+      await user.type(input, tipeado)
+    } else {
+      await user.click(screen.getByRole('textbox', { name: 'Cantidad' }))
+      await user.keyboard(tipeado)
+    }
+    const enCola = screen.getByRole('button', { name: 'Guardar en el teléfono' })
+    expect(enCola).toBeDisabled()
+    await user.click(enCola)
+    expect(onGuardarEnColaSpy).not.toHaveBeenCalled()
   })
 
   it('sin ser admin el precio no es editable', async () => {

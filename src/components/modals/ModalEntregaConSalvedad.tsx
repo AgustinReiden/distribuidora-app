@@ -16,6 +16,8 @@ import ModalBase from './ModalBase'
 import NumberInput from '../ui/NumberInput'
 import { Button } from '../ui/Button'
 import type { PedidoDB, PedidoItemDB, MotivoSalvedad, RegistrarSalvedadInput, RegistrarSalvedadResult } from '../../types'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 
 interface MotivoOption {
   value: MotivoSalvedad;
@@ -75,6 +77,8 @@ export default function ModalEntregaConSalvedad({
   onMarcarEntregado,
   onClose
 }: ModalEntregaConSalvedadProps): React.ReactElement {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   const [itemsSalvedad, setItemsSalvedad] = useState<ItemSalvedad[]>(
     (pedido.items || []).map(item => ({
       item,
@@ -178,6 +182,7 @@ export default function ModalEntregaConSalvedad({
   }
 
   const handleConfirmar = async () => {
+    if (ilegibles.hay) return
     setError('')
     setGuardando(true)
 
@@ -282,6 +287,7 @@ export default function ModalEntregaConSalvedad({
   // habría doble scroll y el footer con los botones se iría con la lista,
   // fuera de la pantalla del transportista.
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase
       title="Entrega con Salvedad"
       onClose={onClose}
@@ -584,6 +590,8 @@ export default function ModalEntregaConSalvedad({
         </div>
 
         {/* Footer: fijo abajo, fuera del scroll */}
+        {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+        <AvisoCamposEnRojo className="mb-2" />
         <div className="p-4 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex gap-3 flex-shrink-0">
           {paso === 'seleccion' ? (
             <>
@@ -604,7 +612,7 @@ export default function ModalEntregaConSalvedad({
               <Button onClick={() => setPaso('seleccion')} disabled={guardando} variant="secondary" size="md" className="flex-1">
                 Volver
               </Button>
-              <Button onClick={handleConfirmar} disabled={guardando} variant="success" size="md" className="flex-1">
+              <Button onClick={handleConfirmar} disabled={guardando || ilegibles.hay} variant="success" size="md" className="flex-1">
                 {guardando ? (
                   <>
                     <span className="animate-spin">...</span>
@@ -622,5 +630,6 @@ export default function ModalEntregaConSalvedad({
         </div>
       </div>
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   )
 }

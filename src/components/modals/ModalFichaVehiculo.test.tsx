@@ -72,7 +72,9 @@ describe('ModalFichaVehiculo', () => {
     const { user, onRegistrarKm } = renderFicha()
     await user.click(screen.getByRole('button', { name: '+ Registrar km' }))
     fireEvent.change(screen.getByLabelText('Fecha'), { target: { value: '2026-10-28' } })
-    await user.type(screen.getByLabelText('Km del tablero'), '185.400')
+    // B20 (D17, cambió de regla): los miles los pone el campo; «185.400» tipeado sería 185,4.
+    await user.type(screen.getByLabelText('Km del tablero'), '185400')
+    expect(screen.getByLabelText('Km del tablero')).toHaveValue('185.400')
     await user.click(screen.getByRole('button', { name: 'Guardar lectura' }))
 
     expect(onRegistrarKm).toHaveBeenCalledTimes(1)
@@ -91,7 +93,20 @@ describe('ModalFichaVehiculo', () => {
     await user.type(screen.getByLabelText('Km del tablero'), '185400,5')
     await user.click(screen.getByRole('button', { name: 'Guardar lectura' }))
     expect(onRegistrarKm).not.toHaveBeenCalled()
-    expect(screen.getByText('Los km del tablero tienen que ser un número entero')).toBeInTheDocument()
+    // B20: el motivo lo dice el campo (y el submit), con el mismo lector que el rojo.
+    expect(screen.getAllByText(/Van sin coma: para mil escribí 1000/).length).toBeGreaterThan(0)
+  })
+
+  // H1 de la segunda lente: «185.000» tipeado (el punto de miles de antes) se ve «185,000», en rojo,
+  // y NO se guarda. Antes se guardaba 185.
+  it.each(['185.000', '50.000'])('km tipeados «%s» con el punto de miles: en rojo y no se mandan', async tipeado => {
+    const { user, onRegistrarKm } = renderFicha()
+    await user.click(screen.getByRole('button', { name: '+ Registrar km' }))
+    fireEvent.change(screen.getByLabelText('Fecha'), { target: { value: '2026-10-28' } })
+    await user.type(screen.getByLabelText('Km del tablero'), tipeado)
+    expect(screen.getByLabelText('Km del tablero')).toHaveAttribute('aria-invalid', 'true')
+    await user.click(screen.getByRole('button', { name: 'Guardar lectura' }))
+    expect(onRegistrarKm).not.toHaveBeenCalled()
   })
 
   it('el rechazo del server se muestra', async () => {

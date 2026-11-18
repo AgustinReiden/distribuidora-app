@@ -12,6 +12,14 @@ import type { ProductoDB } from '../../types'
 import type { PromocionConDetalles, PromocionFormInput } from '../../hooks/queries/usePromocionesQuery'
 import { usePreviewCambioFactorQuery, usePromoPedidosAbiertosQuery } from '../../hooks/queries/usePromocionesQuery'
 import { stockPorBloqueDelFormulario } from '../../utils/promocionFormulario'
+import { CampoNumero } from '../ui/CampoNumero'
+import { leerEntero } from '../../utils/normalizarNumero'
+
+/**
+ * Un entero tipeado, o NaN (B20, D17): los miles los pone el campo («1.500» son 1500) y una coma
+ * no es una cantidad. Era `parseInt`/`Number` sobre un `type="number"`.
+ */
+const entero = (texto: string): number => leerEntero(texto) ?? NaN
 
 export interface ModalPromocionProps {
   promocion: PromocionConDetalles | null
@@ -153,7 +161,7 @@ export default function ModalPromocion({
 
   // No es un campo visible: la promo conserva el que tiene, y una nueva nace con 1.
   const stockBloque = stockPorBloqueDelFormulario(promocion?.stock_por_bloque)
-  const factorNuevo = parseInt(unidadesPorBloque)
+  const factorNuevo = entero(unidadesPorBloque)
   // Al pasar a fracción la barra arranca en 0 (trg_promo_tipo_reinicia_barra): no
   // hay bloques que cerrar, y el contador de unidad entera no es una barra.
   const factorCambia = isEditing
@@ -192,16 +200,29 @@ export default function ModalPromocion({
       setError('Selecciona al menos un producto')
       return
     }
-    // #1515 (PRM-4): enteros. parseInt('2.5') daba 2 sin avisar, y el server ya no acepta
+    // #1515 (PRM-4): enteros. entero('2.5') daba 2 sin avisar, y el server ya no acepta
     // fracciones (promocion_reglas_valor_entero).
-    const compra = Number(cantidadCompra)
-    const bonif = Number(cantidadBonificacion)
+    const compra = entero(cantidadCompra)
+    const bonif = entero(cantidadBonificacion)
     if (!Number.isInteger(compra) || compra <= 0) {
       setError('Ingresa la cantidad de compra (un número entero mayor a 0)')
       return
     }
     if (!Number.isInteger(bonif) || bonif <= 0) {
       setError('Ingresa la cantidad de bonificacion (un número entero mayor a 0)')
+      return
+    }
+    // H3 de la segunda lente: un límite o una prioridad que no es un entero no se guarda como «sin
+    // límite» ni como 0: se dice por qué.
+    if (limiteUsos.trim() !== '') {
+      const limite = entero(limiteUsos)
+      if (!Number.isInteger(limite) || limite <= 0) {
+        setError('El límite de usos es un número entero mayor a 0 (vacío es sin límite)')
+        return
+      }
+    }
+    if (prioridad.trim() !== '' && !Number.isInteger(entero(prioridad))) {
+      setError('La prioridad es un número entero')
       return
     }
 
@@ -214,7 +235,7 @@ export default function ModalPromocion({
         setError('Seleccioná el producto del que se descuenta el stock (ej: el fardo contenedor)')
         return
       }
-      const unidBloque = parseInt(unidadesPorBloque)
+      const unidBloque = entero(unidadesPorBloque)
       if (!unidBloque || unidBloque <= 0) {
         setError('Ingresá cuántas subunidades forman una unidad del producto contenedor (ej: 6 botellas = 1 fardo)')
         return
@@ -241,8 +262,8 @@ export default function ModalPromocion({
   }
 
   const guardar = async () => {
-    const compra = parseInt(cantidadCompra)
-    const bonif = parseInt(cantidadBonificacion)
+    const compra = entero(cantidadCompra)
+    const bonif = entero(cantidadBonificacion)
     // Derivados segun tipo de regalo.
     // - Fraccion: ajuste_automatico=true (descuenta fardo al cerrar bloque),
     //   regalo_mueve_stock=false (no descuenta al entregar la botella suelta).
@@ -254,9 +275,9 @@ export default function ModalPromocion({
 
     setConfirmandoFactor(false)
     setSaving(true)
-    const limite = limiteUsos ? parseInt(limiteUsos) : null
-    const prio = parseInt(prioridad)
-    const unidBloque = parseInt(unidadesPorBloque)
+    const limite = limiteUsos ? entero(limiteUsos) : null
+    const prio = entero(prioridad)
+    const unidBloque = entero(unidadesPorBloque)
     // stock_por_bloque (stockBloque, arriba) no es un campo visible: va el que la
     // promo ya tiene, o 1. El backend lo usa al cerrar un bloque.
     // En fracción el "producto de regalo" canónico es el fardo contenedor:
@@ -347,21 +368,18 @@ export default function ModalPromocion({
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Límite de usos: unidades de regalo (opcional)
             </label>
-            <input
-              type="number"
-              inputMode="numeric"
-              step="1"
-              min="1"
+            <CampoNumero
+              entero
               value={limiteUsos}
-              onChange={e => setLimiteUsos(e.target.value)}
+              onChange={setLimiteUsos}
               placeholder="Sin limite"
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm"
             />
             <p data-testid="limite-usos-ayuda" className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               {tipoRegalo === 'fraccion'
                 ? <>Cuenta subunidades regaladas (ej: botellas sueltas), no unidades del producto contenedor:{' '}
-                    {parseInt(unidadesPorBloque) > 0
-                      ? `con ${parseInt(unidadesPorBloque)} por unidad, un límite de ${parseInt(unidadesPorBloque) * 10} son 10 unidades del contenedor.`
+                    {entero(unidadesPorBloque) > 0
+                      ? `con ${entero(unidadesPorBloque)} por unidad, un límite de ${entero(unidadesPorBloque) * 10} son 10 unidades del contenedor.`
                       : 'con 6 botellas por fardo, un límite de 60 son 10 fardos.'}</>
                 : 'Cuenta las unidades de regalo de los pedidos no cancelados (ej: 1 fardo regalado = 1).'}
               {' '}Un pedido que lo pase no se puede guardar, ni siquiera como admin, y al llegar al límite la promo se desactiva.
@@ -580,13 +598,10 @@ export default function ModalPromocion({
                       <label className="block text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">
                         Unidades regaladas por promoción
                       </label>
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        step="1"
-                        min="1"
+                      <CampoNumero
+                        entero
                         value={cantidadBonificacion}
-                        onChange={e => setCantidadBonificacion(e.target.value)}
+                        onChange={setCantidadBonificacion}
                         placeholder="Ej: 2"
                         className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
                       />
@@ -598,13 +613,10 @@ export default function ModalPromocion({
                       <label className="block text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">
                         Subunidades por unidad
                       </label>
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        step="1"
-                        min="1"
+                      <CampoNumero
+                        entero
                         value={unidadesPorBloque}
-                        onChange={e => setUnidadesPorBloque(e.target.value)}
+                        onChange={setUnidadesPorBloque}
                         placeholder="Ej: 6"
                         className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
                       />
@@ -621,13 +633,10 @@ export default function ModalPromocion({
                       <label className="block text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">
                         Cantidad compra
                       </label>
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        step="1"
-                        min="1"
+                      <CampoNumero
+                        entero
                         value={cantidadCompra}
-                        onChange={e => setCantidadCompra(e.target.value)}
+                        onChange={setCantidadCompra}
                         placeholder="Ej: 5"
                         className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
                       />
@@ -638,8 +647,8 @@ export default function ModalPromocion({
                   </div>
 
                   {cantidadCompra && cantidadBonificacion && unidadesPorBloque
-                    && parseInt(cantidadCompra) > 0 && parseInt(cantidadBonificacion) > 0
-                    && parseInt(unidadesPorBloque) > 0 && (
+                    && entero(cantidadCompra) > 0 && entero(cantidadBonificacion) > 0
+                    && entero(unidadesPorBloque) > 0 && (
                     <p className="text-xs text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/40 rounded px-2 py-1.5">
                       Resumen: cada {cantidadCompra} unidades compradas → {cantidadBonificacion} {descripcionRegalo.trim() || 'subunidad(es)'} gratis. Cada {unidadesPorBloque} subunidades regaladas se descuenta 1 del stock del producto contenedor.
                     </p>
@@ -655,32 +664,26 @@ export default function ModalPromocion({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs text-purple-600 dark:text-purple-400 mb-1">Cantidad compra</label>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    step="1"
-                    min="1"
+                  <CampoNumero
+                    entero
                     value={cantidadCompra}
-                    onChange={e => setCantidadCompra(e.target.value)}
+                    onChange={setCantidadCompra}
                     placeholder="Ej: 12"
                     className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm"
                   />
                 </div>
                 <div>
                   <label className="block text-xs text-purple-600 dark:text-purple-400 mb-1">Cantidad gratis</label>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    step="1"
-                    min="1"
+                  <CampoNumero
+                    entero
                     value={cantidadBonificacion}
-                    onChange={e => setCantidadBonificacion(e.target.value)}
+                    onChange={setCantidadBonificacion}
                     placeholder="Ej: 2"
                     className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm"
                   />
                 </div>
               </div>
-              {cantidadCompra && cantidadBonificacion && parseInt(cantidadCompra) > 0 && parseInt(cantidadBonificacion) > 0 && (
+              {cantidadCompra && cantidadBonificacion && entero(cantidadCompra) > 0 && entero(cantidadBonificacion) > 0 && (
                 <p className="text-xs text-purple-600 mt-2">
                   Cada {cantidadCompra} unidades compradas → {cantidadBonificacion} gratis (acumulable)
                 </p>
@@ -804,12 +807,11 @@ export default function ModalPromocion({
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Prioridad (desempate entre excluyentes)
                 </label>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  step="1"
+                <CampoNumero
+                  entero
+                  negativo
                   value={prioridad}
-                  onChange={e => setPrioridad(e.target.value)}
+                  onChange={setPrioridad}
                   placeholder="0"
                   className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-purple-500 focus:outline-none text-sm"
                 />

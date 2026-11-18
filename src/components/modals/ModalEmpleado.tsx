@@ -510,9 +510,9 @@ export default function ModalEmpleado({
               <label htmlFor={`${id}-sueldo`} className={CLASE_ETIQUETA}>
                 Sueldo fijo {requerido}
               </label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">$</span>
+              <div>
                 <InputMonto
+                  prefijo="$"
                   id={`${id}-sueldo`}
                   value={sueldoTxt}
                   onChange={setSueldoTxt}
@@ -563,9 +563,9 @@ export default function ModalEmpleado({
                 <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 sm:items-end">
                   <div>
                     <label htmlFor={`${id}-saldo`} className={CLASE_ETIQUETA}>Saldo al empezar</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">$</span>
+                    <div>
                       <InputMonto
+                        prefijo="$"
                         id={`${id}-saldo`}
                         value={saldoTxt}
                         onChange={setSaldoTxt}

@@ -19,6 +19,8 @@ import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { Combobox } from '../ui/Combobox'
 import { InputMonto } from '../ui/InputMonto'
+import { CampoNumero } from '../ui/CampoNumero'
+import { leerEntero, motivoEnteroTipeado, numeroConMiles } from '../../utils/normalizarNumero'
 import { cn } from '../../lib/utils'
 import { useKmDelGastoQuery } from '../../hooks/queries/useGastosQuery'
 import { getErrorMessage } from '../../utils/errorHandling'
@@ -54,9 +56,13 @@ import type {
   Vehiculo,
 } from '../../types/gastos'
 import type { EmpleadoParaElegir } from '../../types/personal'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 
 const MENSAJE_SIN_EMPLEADO = 'Elegí qué empleado pagó el gasto'
 const MENSAJE_SIN_RENDICION = 'Elegí de qué rendición salió la plata: el transportista y el día'
+const MENSAJE_MESES_RANGO = 'El reparto es de 1 a 120 meses'
+const MENSAJE_MESES_VACIO = 'Poné en cuántos meses se reparte (de 1 a 120)'
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
 // para el incidente de chunk desincronizado que motivó la regla.
@@ -320,6 +326,8 @@ export default function ModalGasto({
   esAdmin, usuarioId, tieneTodasLasSucursales = false, onCrearRubro,
   transportistas, desdeCierre, avisoDeGuardado = 'Se guarda cuando confirmes el cierre.', empleados, rubrosCargando = false, vehiculoInicialId = null, borrador, onSave, onClose,
 }: ModalGastoProps): React.ReactElement {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   const edicion = Boolean(gasto) || Boolean(borrador)
   const ini = valoresIniciales(gasto, borrador)
   const id = useId()
@@ -405,7 +413,8 @@ export default function ModalGasto({
   const [renglonesTxt, setRenglonesTxt] = useState(() => String(
     ini?.renglones_factura ?? (ini && daCreditoFiscal(ini.comprobante) ? renglonesParaIva(ini) : 1)))
   const [renglonesTocados, setRenglonesTocados] = useState(false)
-  const renglones = /^\s*\d+\s*$/.test(renglonesTxt) ? Number(renglonesTxt) : Number.NaN
+  // Un entero, con los miles que pone el campo (B20, D17); con coma no es una cantidad.
+  const renglones = leerEntero(renglonesTxt) ?? Number.NaN
   const mostrarRenglones = conCredito
     && (renglonesTocados || renglones !== 1 || Math.round(iva * 100) > topeIvaGastoCentavos(desglose))
 
@@ -424,7 +433,7 @@ export default function ModalGasto({
   const [kmEditado, setKmEditado] = useState<string | null>(null)
   // Un borrador trae sus km: no hay lectura que pedir.
   const kmInicial = borrador ? (borrador.km_tablero ?? null) : (kmPrevio ?? null)
-  const kmTxt = kmEditado ?? (kmInicial != null ? String(kmInicial) : '')
+  const kmTxt = kmEditado ?? (kmInicial != null ? numeroConMiles(kmInicial) : '')
   const [mostrarLitrosManual, setMostrarLitros] = useState(Boolean(ini?.litros))
   const mostrarLitros = mostrarLitrosManual || kmInicial != null
   const pideVehiculo = rubro?.grupo === 'vehiculos'
@@ -463,14 +472,27 @@ export default function ModalGasto({
   // ---- Mes y reparto ------------------------------------------------------
   const [mesManual, setMesManual] = useState<string | null>(ini?.mes_imputado ?? null)
   const [repartirManual, setRepartirManual] = useState<boolean | null>(ini ? ini.repartir_meses > 1 : null)
-  const [mesesManual, setMesesManual] = useState<number | null>(ini && ini.repartir_meses > 1 ? ini.repartir_meses : null)
+  // Lo tipeado en los meses, o null mientras no se tocaron (se ve la sugerencia del rubro). Lo que
+  // se ve es lo que se guarda (N1 de la segunda lente): fuera de 1 a 120, vacío o con coma, el campo
+  // queda en rojo con su motivo y frena el guardado; nada de topear ni de volver a un default callado.
+  const [mesesTxt, setMesesTxt] = useState<string | null>(ini && ini.repartir_meses > 1 ? String(ini.repartir_meses) : null)
   const [mostrarMes, setMostrarMes] = useState(false)
 
   const sugerencia = rubro?.reparto_sugerido_meses ?? null
   const mesImputado = mesManual ?? mesSugerido(fecha, { sugiere_mes_anterior: rubro?.sugiere_mes_anterior ?? false })
   const repartir = repartirManual ?? sugerencia != null
-  const nMeses = Math.min(120, Math.max(2, mesesManual ?? sugerencia ?? 2))
-  const repartirMeses = repartir ? nMeses : 1
+  // La sugerencia del rubro (o 2 al tildar «Repartir» en uno que no sugiere) es lo que se precarga;
+  // el tope va sobre la sugerencia, nunca sobre lo tipeado.
+  const mesesSugeridos = Math.min(120, Math.max(2, sugerencia ?? 2))
+  const mesesLeidos = mesesTxt === null ? mesesSugeridos : leerEntero(mesesTxt)
+  const motivoMeses = !repartir || mesesTxt === null
+    ? null
+    : mesesTxt.trim() === ''
+      ? MENSAJE_MESES_VACIO
+      : motivoEnteroTipeado(mesesTxt) ?? (mesesLeidos === null || mesesLeidos < 1 || mesesLeidos > 120 ? MENSAJE_MESES_RANGO : null)
+  const mesesValidos = motivoMeses === null && mesesLeidos !== null
+  // Con los meses en rojo no se guarda (lo frena el registro); para la cuenta de la pantalla vale 1.
+  const repartirMeses = repartir && mesesValidos && mesesLeidos !== null ? mesesLeidos : 1
   const bloqueMesAbierto = mostrarMes || repartir || Boolean(rubro?.sugiere_mes_anterior)
   const mesFin = sumarMeses(mesImputado, repartirMeses - 1)
   const rangoMes = rangoMesImputado(fecha)
@@ -510,7 +532,7 @@ export default function ModalGasto({
     // El rubro nuevo trae sus propias sugerencias de mes y de reparto.
     setMesManual(null)
     setRepartirManual(null)
-    setMesesManual(null)
+    // Los meses que el usuario tipeó no se pisan: el rubro nuevo sólo sugiere si no se tocaron.
   }
 
   const crearRubro = async () => {
@@ -541,6 +563,7 @@ export default function ModalGasto({
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError('')
+    if (ilegibles.hay) return // un número en rojo: el motivo ya está a la vista
     if (errorKm) return // el mensaje ya está a la vista y el botón deshabilitado
 
     if (importeIlegible) {
@@ -550,10 +573,14 @@ export default function ModalGasto({
     const pideLitrosKm = pideVehiculo && pideLitros
     // Los litros no llevan miles: «38.512», como lo muestra el surtidor, son 38,51 (#1560).
     const litros = pideLitrosKm && litrosTxt.trim() ? parseDecimal(litrosTxt) : null
-    // En los km, los puntos son separadores de miles; la coma es decimal y el schema la
-    // rechaza: los km son enteros. Igual que la ficha del vehículo.
-    const kmLimpio = kmTxt.trim().replace(/\./g, '').replace(',', '.')
-    const km = pideLitrosKm && kmLimpio ? Number(kmLimpio) : null
+    // H1 de la segunda lente: los km se leen con el mismo lector que pone el campo en rojo
+    // (`leerEntero`). El de antes (`replace(/\./g, '')` + `Number`) leía «185,000» (la tecla del
+    // punto) como 185. Lo que no es un entero no se guarda.
+    const km = pideLitrosKm && kmTxt.trim() ? leerEntero(kmTxt) : null
+    if (pideLitrosKm && kmTxt.trim() && km === null) {
+      setError(motivoEnteroTipeado(kmTxt) ?? 'Revisá los km del tablero')
+      return
+    }
     // El número sólo viaja si el comprobante elegido muestra el campo.
     const tieneCampoNumero = conCredito
       || ((comprobante === 'factura_b' || comprobante === 'factura_c' || comprobante === 'recibo') && mostrarNumero)
@@ -641,7 +668,7 @@ export default function ModalGasto({
     }
   }
 
-  const cuotaMensual = repartir ? cuotaDeGasto(costo, repartirMeses, 1) : null
+  const cuotaMensual = repartir && mesesValidos ? cuotaDeGasto(costo, repartirMeses, 1) : null
 
   return (
     <ModalBase
@@ -650,6 +677,7 @@ export default function ModalGasto({
       maxWidth="max-w-xl"
       onEscapeKeyDown={handleEscapeKeyDown}
     >
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
       <form onSubmit={handleSubmit} className="p-4 space-y-4">
         {/* Rubro */}
         <div>
@@ -719,9 +747,9 @@ export default function ModalGasto({
             <label htmlFor={`${id}-monto`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Monto total <span className="text-red-500">*</span>
             </label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">$</span>
+            <div>
               <InputMonto
+                prefijo="$"
                 id={`${id}-monto`}
                 value={montoTxt}
                 onChange={setMontoTxt}
@@ -802,12 +830,11 @@ export default function ModalGasto({
                   <label htmlFor={`${id}-renglones`} className="text-xs text-gray-600 dark:text-gray-400">
                     Renglones de la factura
                   </label>
-                  <input
+                  <CampoNumero
                     id={`${id}-renglones`}
-                    type="text"
-                    inputMode="numeric"
+                    entero
                     value={renglonesTxt}
-                    onChange={e => { setRenglonesTxt(e.target.value); setRenglonesTocados(true) }}
+                    onChange={t => { setRenglonesTxt(t); setRenglonesTocados(true) }}
                     className={cn(CLASE_CAMPO_IVA, 'w-20')}
                   />
                   <span className="text-xs text-gray-500">
@@ -901,22 +928,22 @@ export default function ModalGasto({
             )}
             {pideLitros && (mostrarLitros ? (
               <div className="mt-2 grid grid-cols-2 gap-2">
-                <input
-                  type="text"
-                  inputMode="decimal"
+                {/* Los litros no llevan miles (B20, D17): la tecla del punto es la coma. */}
+                <CampoNumero
+                  sinMiles
                   aria-label="Litros"
                   placeholder="Litros"
                   value={litrosTxt}
-                  onChange={e => setLitrosTxt(e.target.value)}
+                  onChange={setLitrosTxt}
                   className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-right text-sm dark:bg-gray-700 dark:text-white"
                 />
-                <input
-                  type="text"
-                  inputMode="numeric"
+                {/* Los miles los pone el campo (B20, D17); una coma la rechaza el schema. */}
+                <CampoNumero
+                  entero
                   aria-label="Km del tablero"
                   placeholder="Km del tablero"
                   value={kmTxt}
-                  onChange={e => setKmEditado(e.target.value)}
+                  onChange={setKmEditado}
                   className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-right text-sm dark:bg-gray-700 dark:text-white"
                 />
               </div>
@@ -1110,16 +1137,13 @@ export default function ModalGasto({
                 Repartir en
               </label>
               <span className="inline-flex items-center gap-1 text-gray-700 dark:text-gray-300">
-                <input
-                  type="text"
-                  inputMode="numeric"
+                <CampoNumero
+                  entero
                   aria-label="Meses del reparto"
                   disabled={!repartir}
-                  value={String(nMeses)}
-                  onChange={e => {
-                    const n = parseInt(e.target.value.replace(/\D/g, ''), 10)
-                    setMesesManual(Number.isFinite(n) ? n : null)
-                  }}
+                  value={mesesTxt ?? String(mesesSugeridos)}
+                  motivo={motivoMeses}
+                  onChange={setMesesTxt}
                   className="w-16 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-md text-right dark:bg-gray-700 dark:text-white disabled:opacity-50"
                 />
                 meses
@@ -1166,11 +1190,13 @@ export default function ModalGasto({
           </div>
         )}
 
+        {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+        <AvisoCamposEnRojo className="mb-2" />
         <div className="flex gap-3 pt-2">
           <Button type="button" variant="secondary" size="md" onClick={onClose} className="flex-1">
             Cancelar
           </Button>
-          <Button type="submit" variant="primary" size="md" loading={guardando} disabled={guardando || cargandoKm || errorKm || rubrosCargando} className="flex-1">
+          <Button type="submit" variant="primary" size="md" loading={guardando} disabled={guardando || cargandoKm || errorKm || rubrosCargando || ilegibles.hay} className="flex-1">
             {desdeCierre ? (edicion ? 'Aplicar cambios' : 'Agregar a la rendición') : 'Guardar gasto'}
           </Button>
         </div>
@@ -1178,6 +1204,7 @@ export default function ModalGasto({
           <p className="text-xs text-gray-500 text-center">{avisoDeGuardado}</p>
         )}
       </form>
+    </RegistroIlegiblesContext.Provider>
     </ModalBase>
   )
 }

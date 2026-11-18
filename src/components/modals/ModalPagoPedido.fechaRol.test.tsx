@@ -71,7 +71,7 @@ describe('ModalPagoPedido — la fecha del cobro según el rol (FRV-2)', () => {
   it('el cobro de quien no es admin viaja con la fecha de hoy', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     renderModal({ isAdmin: false, onConfirmar })
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
 
     await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
@@ -81,7 +81,7 @@ describe('ModalPagoPedido — la fecha del cobro según el rol (FRV-2)', () => {
   it('al entregar y cobrar, quien no es admin fecha la entrega por su cuenta y el cobro va con hoy', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     renderModal({ isAdmin: false, diasAtrasFechaEntrega: 7, onConfirmar })
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     expect(inputFechaCobro().disabled).toBe(true)
     expect(inputFechaCobro().value).toBe(fechaLocalISO())
     expect(inputFechaEntrega().disabled).toBe(false)
@@ -96,7 +96,7 @@ describe('ModalPagoPedido — la fecha del cobro según el rol (FRV-2)', () => {
   it('al entregar y cobrar, una entrega fuera del rango no se confirma, con el motivo del server', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     renderModal({ isAdmin: false, diasAtrasFechaEntrega: 0, onConfirmar })
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     fireEvent.change(inputFechaEntrega(), { target: { value: ayer() } })
     fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
 
@@ -108,7 +108,7 @@ describe('ModalPagoPedido — la fecha del cobro según el rol (FRV-2)', () => {
   it('con la fecha de la entrega vacía no se confirma: se exige', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     renderModal({ isAdmin: true, onConfirmar })
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     fireEvent.change(inputFechaEntrega(), { target: { value: '' } })
     fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
 
@@ -120,7 +120,7 @@ describe('ModalPagoPedido — la fecha del cobro según el rol (FRV-2)', () => {
   it('el admin cambia sólo el cobro: la entrega lo sigue', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     renderModal({ isAdmin: true, onConfirmar })
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     fireEvent.change(inputFechaCobro(), { target: { value: diasAtras(2) } })
     expect(inputFechaEntrega().value).toBe(diasAtras(2))
     fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
@@ -133,7 +133,7 @@ describe('ModalPagoPedido — la fecha del cobro según el rol (FRV-2)', () => {
   it('el admin cambia el cobro y después la entrega: quedan distintas, y no se vuelven a pisar', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     renderModal({ isAdmin: true, onConfirmar })
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     fireEvent.change(inputFechaCobro(), { target: { value: diasAtras(1) } })
     fireEvent.change(inputFechaEntrega(), { target: { value: diasAtras(4) } })
     expect(inputFechaCobro().value).toBe(diasAtras(1))
@@ -151,7 +151,7 @@ describe('ModalPagoPedido — la fecha del cobro según el rol (FRV-2)', () => {
   it('quien no es admin no puede cambiar el cobro y no queda trabado: elige la entrega y cobra hoy', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     renderModal({ isAdmin: false, diasAtrasFechaEntrega: 7, onConfirmar })
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     expect(inputFechaCobro().disabled).toBe(true)
     fireEvent.change(inputFechaEntrega(), { target: { value: diasAtras(3) } })
     expect(inputFechaCobro().value).toBe(fechaLocalISO())
@@ -165,7 +165,7 @@ describe('ModalPagoPedido — la fecha del cobro según el rol (FRV-2)', () => {
   it('el admin: la fecha del cobro acompaña a la de la entrega hasta que la toca', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     renderModal({ isAdmin: true, onConfirmar })
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     fireEvent.change(inputFechaEntrega(), { target: { value: diasAtras(3) } })
     expect(inputFechaCobro().value).toBe(diasAtras(3))
     fireEvent.change(inputFechaCobro(), { target: { value: diasAtras(1) } })
@@ -186,7 +186,7 @@ describe('ModalPagoPedido — la fecha del cobro según el rol (FRV-2)', () => {
     expect(input.max).toBe(fechaLocalISO())
     expect(screen.queryByText(/solo podés registrar el cobro con la fecha de hoy/i)).toBeNull()
 
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     fireEvent.change(input, { target: { value: ayer() } })
     fireEvent.click(screen.getByRole('button', { name: /^registrar pago$/i }))
 
@@ -256,7 +256,7 @@ describe('ModalPagoPedido — el día cambia con el modal abierto (L7)', () => {
     vi.setSystemTime(new Date('2026-11-16T23:59:00-03:00'))
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     renderModal({ isAdmin: false, onConfirmar, modoEntregaTransportista: false, onEntregarSinPago: undefined })
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     expect(inputFecha().value).toBe('2026-11-16')
 
     vi.setSystemTime(new Date('2026-11-17T00:01:00-03:00'))

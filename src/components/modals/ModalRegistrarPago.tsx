@@ -15,6 +15,9 @@ import { useRequestIdPersistente } from '../../hooks/useRequestIdPersistente'
 import { cobroPudoHaberEntrado } from '../../utils/requestIdPersistente'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
 import type { ClienteDB, Pedido, Pago, FormaPago, RegistrarPagoFifoInput, RegistrarPagoCombinadoFifoInput, RegistrarPagoFifoResult, PagoFifoAplicacion } from '../../types'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
+import { useClavesDeRenglones } from '../../hooks/useClavesDeRenglones'
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): ver ModalCambioProducto.tsx
 // para el incidente de chunk desincronizado que motivó la regla.
@@ -277,10 +280,28 @@ export default function ModalRegistrarPago({
   permitirAdelantoSueldo = false,
   clienteEsEmpleado
 }: ModalRegistrarPagoProps): React.ReactElement | null {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   // Zod validation hook
   const { validate, getFirstError } = useZodValidation(modalPagoSchema)
 
   const [monto, setMonto] = useState<string>('')
+  // N10 y N11 de la segunda pasada: un preset (Total, 50 %) limpia el borrador en rojo aunque el
+  // monto ya fuera ése (vuelve a montar el campo), y «Se registra» no muestra el monto de antes
+  // mientras el campo está en rojo.
+  const [vueltaMonto, setVueltaMonto] = useState(0)
+  const [montoEnRojo, setMontoEnRojo] = useState(false)
+  const [pagosEnRojo, setPagosEnRojo] = useState<ReadonlySet<number>>(new Set())
+  // Por clave del renglón (T6), no por índice: quitar uno no desfasa los demás.
+  const marcarPagoEnRojo = (clave: number, valido: boolean): void => {
+    setPagosEnRojo(prev => {
+      if (valido === !prev.has(clave)) return prev
+      const sig = new Set(prev)
+      if (valido) sig.delete(clave)
+      else sig.add(clave)
+      return sig
+    })
+  }
   const [formaPago, setFormaPago] = useState<string>('efectivo')
   const [referencia, setReferencia] = useState<string>('')
   const [notas, setNotas] = useState<string>('')
@@ -379,13 +400,19 @@ export default function ModalRegistrarPago({
   const adelantoComprobando = adelantoElegido && clienteEsEmpleado == null
   const adelantoBloqueado = adelantoSinEmpleado || adelantoComprobando
 
+  // T6 de la tercera pasada: claves estables por renglón (con el índice, quitar uno le pasaba el
+  // borrador en rojo al de abajo).
+  const clavesPagos = useClavesDeRenglones(pagos.length)
+
   const handleAddPago = () => {
     setPagos(prev => [...prev, { monto: '', formaPago: 'efectivo' }])
+    clavesPagos.agregar()
   }
 
   const handleRemovePago = (index: number) => {
     if (pagos.length <= 2) return
     setPagos(prev => prev.filter((_, i) => i !== index))
+    clavesPagos.quitar(index)
   }
 
   const handlePagoChange = (index: number, field: keyof PagoDividido, value: string) => {
@@ -409,6 +436,7 @@ export default function ModalRegistrarPago({
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault()
+    if (ilegibles.hay) return
     if (enVueloRef.current) return
     setError('')
 
@@ -584,6 +612,7 @@ export default function ModalRegistrarPago({
   const handleMontoPreset = (porcentaje: number): void => {
     if (baseMedida && !saldoCargando) {
       setMonto((baseMedida * porcentaje / 100).toFixed(2))
+      setVueltaMonto(v => v + 1)
     }
   }
 
@@ -747,6 +776,7 @@ export default function ModalRegistrarPago({
       </div>
 
       {/* Form */}
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
       <form onSubmit={handleSubmit} className="flex-1 flex flex-col min-h-0">
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
         {error && (
@@ -844,7 +874,7 @@ export default function ModalRegistrarPago({
             {/* Pagos divididos */}
             <div className="space-y-3">
               {pagos.map((pago, index) => (
-                <div key={index} className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                <div key={clavesPagos.de(index)} className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                   <div className="flex-1">
                     <div className="relative">
                       <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -854,11 +884,12 @@ export default function ModalRegistrarPago({
                         commitOnChange
                         value={Number(pago.monto) || 0}
                         onChange={(n) => handlePagoChange(index, 'monto', String(n))}
+                        onValidez={valido => marcarPagoEnRojo(clavesPagos.de(index), valido)}
                         placeholder="0.00"
                         className="w-full pl-7 pr-2 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-semibold"
                       />
                     </div>
-                    <MontoLeido monto={parsePrecio(pago.monto)} />
+                    <MontoLeido monto={pagosEnRojo.has(clavesPagos.de(index)) ? 0 : parsePrecio(pago.monto)} />
                   </div>
                   <select
                     value={pago.formaPago}
@@ -921,17 +952,19 @@ export default function ModalRegistrarPago({
               <div className="relative">
                 <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <NumberInput
+                  key={vueltaMonto}
                   min={0}
                   emptyValue={0}
                   commitOnChange
                   value={Number(monto) || 0}
                   onChange={(n) => setMonto(String(n))}
+                  onValidez={valido => setMontoEnRojo(!valido)}
                   placeholder="0.00"
                   className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-lg font-semibold"
                   required
                 />
               </div>
-              <MontoLeido monto={parsePrecio(monto)} />
+              <MontoLeido monto={montoEnRojo ? 0 : parsePrecio(monto)} />
               {baseMedida > 0 && !saldoCargando && (
                 <div className="flex gap-2 mt-2">
                   <button
@@ -1076,6 +1109,8 @@ export default function ModalRegistrarPago({
               Entregar a cuenta corriente (sin cobrar)
             </button>
           )}
+          {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+          <AvisoCamposEnRojo className="mb-2" />
           <div className="flex gap-3">
             {/* size="touch" (48px), no "lg": iguala al botón ámbar crudo de
                 arriba (py-3 = 48px) para no desnivelar el footer. */}
@@ -1086,7 +1121,7 @@ export default function ModalRegistrarPago({
               type="submit"
               variant="success"
               size="touch"
-              disabled={loading || adelantoBloqueado || pasaDeLaBoleta || faltaConfirmarMonto || (pagoDividido ? totalDividido <= 0 : !monto)}
+              disabled={loading || adelantoBloqueado || pasaDeLaBoleta || faltaConfirmarMonto || (pagoDividido ? totalDividido <= 0 : !monto) || ilegibles.hay}
               className="flex-1"
             >
               {loading ? (
@@ -1101,6 +1136,7 @@ export default function ModalRegistrarPago({
           </div>
         </div>
       </form>
+    </RegistroIlegiblesContext.Provider>
     </DialogoPago>
   )
 }

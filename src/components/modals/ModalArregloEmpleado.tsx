@@ -147,9 +147,9 @@ export default function ModalArregloEmpleado({
 
         <div>
           <label htmlFor={`${id}-sueldo`} className={CLASE_ETIQUETA}>Sueldo fijo {requerido}</label>
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">$</span>
+          <div>
             <InputMonto
+              prefijo="$"
               id={`${id}-sueldo`}
               value={sueldoTxt}
               onChange={setSueldoTxt}

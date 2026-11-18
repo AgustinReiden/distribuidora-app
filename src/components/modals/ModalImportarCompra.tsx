@@ -11,7 +11,7 @@ import { Button } from '../ui/Button';
 const loadExcelUtils = () => import('../../utils/excel');
 import { alicuotaIvaCompra } from '../../utils/condicionIva';
 import { validateExcelFile, validateAndSanitizeExcelData, FILE_LIMITS } from '../../utils/fileValidation';
-import { normalizarNumero } from '../../utils/normalizarNumero';
+import { esCeldaIlegible, normalizarNumero } from '../../utils/normalizarNumero';
 import { redondearSQL } from '../../utils/calculations';
 import { parsearCantidadExcel } from '../../utils/parsearCantidadExcel';
 import { parsearFechaVencimientoExcel } from '../../utils/parsearFechaVencimientoExcel';
@@ -150,8 +150,19 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
       // celda (=10000/2400 → 4,1666…) el renglón no cerraba contra su subtotal y
       // la 499 rechazaba la compra entera. La vista previa y el campo muestran
       // el costo ya redondeado.
-      const costoUnitario = redondearSQL(normalizarNumero(encontrarValor(fila, COLUMNAS.costoUnitario)), 2);
-      const bonificacion = normalizarNumero(encontrarValor(fila, COLUMNAS.bonificacion));
+      // B20: una celda que no es un número («1,234,567») no se carga como 0: la fila se rechaza.
+      const costoCelda = encontrarValor(fila, COLUMNAS.costoUnitario);
+      const bonificacionCelda = encontrarValor(fila, COLUMNAS.bonificacion);
+      if (esCeldaIlegible(costoCelda)) {
+        erroresTemp.push(`Fila ${index + 2} (${codigo}): el costo «${costoCelda}» no es un número. Escribilo como 1250,50 o 1.250,50`);
+        return;
+      }
+      if (esCeldaIlegible(bonificacionCelda)) {
+        erroresTemp.push(`Fila ${index + 2} (${codigo}): la bonificación «${bonificacionCelda}» no es un número`);
+        return;
+      }
+      const costoUnitario = redondearSQL(normalizarNumero(costoCelda), 2);
+      const bonificacion = normalizarNumero(bonificacionCelda);
       const columnaGratis = Object.keys(fila).find(k => {
         const n = k.toLowerCase();
         return n.includes('gratis') && !n.includes('bonif');

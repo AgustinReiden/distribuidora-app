@@ -6,6 +6,7 @@
 import '@testing-library/jest-dom/vitest'
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import ModalNotaCredito from './ModalNotaCredito'
 import type { ModalNotaCreditoProps } from './ModalNotaCredito'
 
@@ -78,6 +79,34 @@ describe('ModalNotaCredito — ajuste sin mercadería', () => {
       compraId: '313', motivo: 'II mal liquidado',
       subtotal: 1000, iva: 210, impuestosInternos: 50, total: 1260, items: [],
     })
+  })
+
+  // B20 (D17, H3 de la lente de #1644): el IVA se tipea igual que el Neto de al lado. Antes «1.500»
+  // era 1,5 en el Neto y 1500 en el IVA del mismo formulario.
+  it('FC: el IVA tipeado se lee como el Neto: «2100» se ve «2.100»', async () => {
+    const user = userEvent.setup()
+    const onSave = renderModal()
+    await user.click(screen.getByRole('button', { name: 'Ajuste sin mercadería' }))
+    await user.type(screen.getByLabelText('Neto'), '10000')
+    await user.type(screen.getByLabelText('IVA'), '2100')
+    expect(screen.getByLabelText('Neto')).toHaveValue('10.000')
+    expect(screen.getByLabelText('IVA')).toHaveValue('2.100')
+    await user.type(screen.getByLabelText('Motivo (obligatorio)'), 'Ajuste')
+    await user.click(guardar())
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ subtotal: 10000, iva: 2100 })
+  })
+
+  it('FC: un IVA que no se entiende queda en rojo y no deja guardar (no se guarda como 0)', async () => {
+    const user = userEvent.setup()
+    renderModal()
+    await user.click(screen.getByRole('button', { name: 'Ajuste sin mercadería' }))
+    await user.type(screen.getByLabelText('Neto'), '1000')
+    await user.click(screen.getByLabelText('IVA'))
+    await user.paste('1,234,567')
+    await user.type(screen.getByLabelText('Motivo (obligatorio)'), 'Ajuste')
+    expect(screen.getByLabelText('IVA')).toHaveAttribute('aria-invalid', 'true')
+    expect(guardar()).toBeDisabled()
   })
 
   it('FC: el IVA no se propone (#1380): vacío, avisa qué falta y no deja guardar', () => {

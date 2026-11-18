@@ -209,4 +209,29 @@ describe('ModalGestionRutas — dividir entre varios (#1549)', () => {
     await user.click(botonDividir())
     expect(onArmarRutaMulti).toHaveBeenCalledTimes(1)
   })
+
+  // H9 de la segunda lente (B20): un máximo de paradas en rojo no viaja como «sin tope».
+  it('un máximo de paradas tipeado «1,5» queda en rojo y no deja dividir', async () => {
+    multi.data = []
+    const { onArmarRutaMulti } = montar()
+    const user = await irADividirConUnChofer()
+    const max = screen.getByPlaceholderText('sin tope')
+    await user.type(max, '1,5')
+    expect(max).toHaveAttribute('aria-invalid', 'true')
+    expect(botonDividir()).toBeDisabled()
+    await user.click(botonDividir())
+    expect(onArmarRutaMulti).not.toHaveBeenCalled()
+  })
+
+  it('un máximo de paradas «12» divide con ese tope', async () => {
+    multi.data = []
+    const { onArmarRutaMulti } = montar()
+    const user = await irADividirConUnChofer()
+    await user.type(screen.getByPlaceholderText('sin tope'), '12')
+    await user.click(botonDividir())
+    expect(onArmarRutaMulti).toHaveBeenCalledTimes(1)
+    expect(onArmarRutaMulti.mock.calls[0][0]).toEqual([
+      { transportista_id: 't1', max_paradas: 12, zonas_preferidas: null },
+    ])
+  })
 })

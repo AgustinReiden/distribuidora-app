@@ -103,7 +103,7 @@ describe('ModalImputarCredito', () => {
     montar()
     await screen.findByRole('option', { name: /^Pedido #7001 / })
     // El más viejo primero: 7001, que debe 10.000 de un crédito de 16.700.
-    expect(screen.getByLabelText('Monto a imputar')).toHaveValue('10000')
+    expect(screen.getByLabelText('Monto a imputar')).toHaveValue('10.000')
     expect(screen.getByTestId('preview-imputacion')).toHaveTextContent(
       `Se imputan ${fp(10000)} al pedido #7001 · quedan ${fp(6700)} a favor`,
     )

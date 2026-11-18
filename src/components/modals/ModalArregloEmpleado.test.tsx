@@ -46,7 +46,9 @@ describe('ModalArregloEmpleado', () => {
     expect(screen.getByText('Los períodos anteriores conservan el arreglo que tenían.')).toBeInTheDocument()
     expect((screen.getByLabelText(/^Vale desde/) as HTMLInputElement).value).toBe('2026-10-26')
 
-    await user.type(screen.getByLabelText(/^Sueldo fijo/), '300.000')
+    // B20 (D17, cambió de regla): los miles los pone el campo; el punto tipeado es la coma decimal.
+    await user.type(screen.getByLabelText(/^Sueldo fijo/), '300000')
+    expect(screen.getByLabelText(/^Sueldo fijo/)).toHaveValue('300.000')
     await user.click(screen.getByRole('button', { name: 'Guardar arreglo' }))
 
     expect(onSave).toHaveBeenCalledWith({
@@ -192,10 +194,10 @@ describe('ModalArregloEmpleado', () => {
 
   it('un sueldo que no se entiende no se guarda y dice cómo escribirlo', async () => {
     const { onSave, user } = renderModal(null)
-    await user.type(screen.getByLabelText(/^Sueldo fijo/), '280,000')
+    await user.type(screen.getByLabelText(/^Sueldo fijo/), '280,000,5') // B20: tres decimales ya no es ilegible (se guarda con aviso); dos comas, sí
     await user.click(screen.getByRole('button', { name: 'Guardar arreglo' }))
     expect(onSave).not.toHaveBeenCalled()
-    expect(await screen.findByText('Escribí el monto con números, por ejemplo 280.000 o 280.000,50')).toBeInTheDocument()
+    expect(await screen.findByText('Escribí el monto con números, por ejemplo 280000 (se ve 280.000) o 280000,50')).toBeInTheDocument()
   })
 
   it('parte del arreglo vigente: sueldo, frecuencia y comisión, y los manda si sólo cambia la fecha', async () => {

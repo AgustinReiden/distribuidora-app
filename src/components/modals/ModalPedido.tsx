@@ -1,10 +1,13 @@
-import { useState, useMemo, memo, useRef, useEffect } from 'react';
+import { useState, useMemo, memo, useRef, useEffect, useCallback } from 'react';
 import { X, Loader2, Search, MapPin, Tag, Calendar, Trash2, Pencil, Gift, Truck, ChevronLeft, ChevronRight, ShoppingCart, ChevronUp, LocateFixed, AlertCircle, UserCheck, Percent, Plus, Layers } from 'lucide-react';
 import { formatPrecio, fechaLocalISO, formatFecha } from '../../utils/formatters';
 import { fechaPedidoFueraDeRango, mensajeFechaAnteriorAlPiso, pisoFechaPedido } from '../../utils/fechaPedido';
 import { techoFechaEntregaProgramada } from '../../utils/fechaEntregaProgramada';
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo';
-import { numeroEditable, parsePrecio } from '../../utils/calculations';
+import { parsePrecio } from '../../utils/calculations';
+import { motivoPrecioTipeado, numeroConMiles } from '../../utils/normalizarNumero';
+import { CampoNumero } from '../ui/CampoNumero';
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo';
 import { AddressAutocomplete } from '../AddressAutocomplete';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { resolverDescuentoPctCliente } from '../../utils/descuentoCliente';
@@ -50,6 +53,7 @@ import {
   LEYENDA_VB_ALTA,
   MENSAJE_CLIENTE_NO_HABILITADO_VB,
 } from '../../utils/valeBlanco';
+import { AbrirSeccionContext, RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles';
 
 // Alto del alta en el sheet. Un navegador sin `dvh` (Chrome < 108, Safari <
 // 15.4) descarta el valor inline entero y el sheet crecería más que la pantalla,
@@ -260,6 +264,8 @@ const ModalPedido = memo(function ModalPedido({
   onRestaurarPromoCreacion,
   onGuardarHorarioCliente
 }: ModalPedidoProps) {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles();
   // Solo admin puede reasignar preventista al pedido. La query se habilita
   // condicionalmente para no traer perfiles para preventistas/encargados.
   const { data: preventistasAsignables = [] } = usePreventistasAsignablesQuery();
@@ -301,6 +307,7 @@ const ModalPedido = memo(function ModalPedido({
     identidad: { direccion: string | null; latitud: number | null; longitud: number | null };
   } | null>(null);
   const [carritoAbierto, setCarritoAbierto] = useState<boolean>(false);
+  const abrirCarrito = useCallback(() => setCarritoAbierto(true), []);
 
   // Escape en la edición de precio cancela SÓLO la edición, no el alta (#853).
   // El cancelar lo hace el onKeyDown del input; esto evita que además cierre el
@@ -1304,6 +1311,8 @@ const ModalPedido = memo(function ModalPedido({
           </div>
 
           {/* Drawer overlay: cubre el área del modal con slide-up */}
+          {/* N4: el aviso de los campos en rojo abre el carrito para llevar al primero. */}
+          <AbrirSeccionContext.Provider value={abrirCarrito}>
           <div
             id="carrito-drawer"
             className={`absolute inset-0 z-20 bg-white dark:bg-gray-800 flex flex-col transition-transform duration-300 ease-out ${
@@ -1434,19 +1443,23 @@ const ModalPedido = memo(function ModalPedido({
                                 {esVB ? (
                                   <p className="text-xs text-violet-700 dark:text-violet-300">A costo (se calcula al guardar)</p>
                                 ) : isEditingPrice && isAdmin && onActualizarPrecio ? (
-                                  <div className="flex items-center gap-1 mt-0.5">
+                                  <>
+                                  <div className="flex flex-wrap items-center gap-1 mt-0.5">
                                     <span className="text-xs text-orange-600">$</span>
-                                    <input
+                                    {/* N2 y N3 de la segunda pasada (#1644): el `CampoNumero` de la tarjeta, como en
+                                        la edición. Lo lee `parsePrecio`; los miles los pone el campo, la tecla del
+                                        punto es la coma, «1.500» sale con el aviso amarillo, y en rojo se anota en
+                                        el registro del alta: Confirmar no guarda el pedido con el precio de antes. */}
+                                    <CampoNumero
                                       ref={precioInputRef}
-                                      // Texto y no `number` (#1560): el `number` deja vacío «1.500,50» y
-                                      // el precio no cambiaba sin aviso. Lo lee `parsePrecio`.
-                                      type="text"
-                                      inputMode="decimal"
                                       aria-label="Editar precio unitario"
                                       value={editingPriceValue}
-                                      onChange={e => setEditingPriceValue(e.target.value)}
+                                      motivo={motivoPrecioTipeado(editingPriceValue)}
+                                      onChange={setEditingPriceValue}
                                       onKeyDown={e => {
                                         if (e.key === 'Enter') {
+                                          // Lo que no se entiende queda a la vista para corregirlo.
+                                          if (motivoPrecioTipeado(editingPriceValue)) return;
                                           precioResueltoRef.current = true;
                                           const newPrice = parsePrecio(editingPriceValue);
                                           if (newPrice > 0) onActualizarPrecio(item.productoId, newPrice);
@@ -1458,6 +1471,9 @@ const ModalPedido = memo(function ModalPedido({
                                       }}
                                       onBlur={() => {
                                         if (precioResueltoRef.current) return;
+                                        // Igual que con Enter (H6): tocar afuera no descarta en silencio
+                                        // lo que no se entiende; queda abierto, en rojo y con el motivo.
+                                        if (motivoPrecioTipeado(editingPriceValue)) return;
                                         const newPrice = parsePrecio(editingPriceValue);
                                         if (newPrice > 0) onActualizarPrecio(item.productoId, newPrice);
                                         setEditingPriceId(null);
@@ -1466,14 +1482,31 @@ const ModalPedido = memo(function ModalPedido({
                                       autoFocus
                                     />
                                     <span className="text-xs text-orange-600">c/u</span>
+                                    {/* Punto 8 de la segunda pasada: en un teléfono no hay Escape. La X deja el
+                                        precio como estaba y cierra la edición, aunque lo tipeado esté en rojo. */}
+                                    <button
+                                      type="button"
+                                      aria-label="Cancelar precio"
+                                      // T8 de la tercera pasada: la marca va en el pointerdown, antes de un
+                                      // blur que el navegador dispare igual; el onBlur la respeta.
+                                      onPointerDown={e => { e.preventDefault(); precioResueltoRef.current = true; }}
+                                      onClick={() => {
+                                        precioResueltoRef.current = true;
+                                        setEditingPriceId(null);
+                                      }}
+                                      className="p-1 text-stone-500 hover:text-stone-700 dark:text-gray-400 dark:hover:text-gray-200 rounded shrink-0"
+                                    >
+                                      <X className="w-3.5 h-3.5" aria-hidden="true" />
+                                    </button>
                                   </div>
+                                  </>
                                 ) : esOverride ? (
                                   <p
                                     className={`text-xs text-orange-600 font-medium ${isAdmin && onActualizarPrecio ? 'cursor-pointer hover:underline' : ''}`}
                                     onClick={() => {
                                       if (isAdmin && onActualizarPrecio) {
                                         setEditingPriceId(item.productoId);
-                                        setEditingPriceValue(numeroEditable(item.precioUnitario));
+                                        setEditingPriceValue(numeroConMiles(item.precioUnitario));
                                       }
                                     }}
                                   >
@@ -1484,7 +1517,7 @@ const ModalPedido = memo(function ModalPedido({
                                     onClick={() => {
                                       if (isAdmin && onActualizarPrecio) {
                                         setEditingPriceId(item.productoId);
-                                        setEditingPriceValue(numeroEditable(precioInfo!.precioResuelto));
+                                        setEditingPriceValue(numeroConMiles(precioInfo!.precioResuelto));
                                       }
                                     }}
                                   >
@@ -1498,7 +1531,7 @@ const ModalPedido = memo(function ModalPedido({
                                     onClick={() => {
                                       if (isAdmin && onActualizarPrecio) {
                                         setEditingPriceId(item.productoId);
-                                        setEditingPriceValue(numeroEditable(item.precioUnitario));
+                                        setEditingPriceValue(numeroConMiles(item.precioUnitario));
                                       }
                                     }}
                                   >
@@ -1937,6 +1970,7 @@ const ModalPedido = memo(function ModalPedido({
               </div>
             </div>
           </div>
+          </AbrirSeccionContext.Provider>
         </div>
 
         {/* Aviso del horario faltante en la barra inferior: el bloque para
@@ -1961,8 +1995,9 @@ const ModalPedido = memo(function ModalPedido({
               type="button"
               variant="primary"
               size="sm"
-              onClick={() => { void onGuardarEnCola() }}
-              disabled={guardando}
+              // T1 de la tercera pasada: con un campo en rojo, encolar guardaría el valor de antes.
+              onClick={() => { if (!ilegibles.hay) void onGuardarEnCola() }}
+              disabled={guardando || ilegibles.hay}
               className="flex-shrink-0"
             >
               Guardar en el teléfono
@@ -2024,6 +2059,10 @@ const ModalPedido = memo(function ModalPedido({
           </div>
         )}
 
+        {/* N4: un campo en rojo (aunque esté en el carrito cerrado) frena Confirmar; esto dice por
+            qué y lleva al campo. */}
+        <AvisoCamposEnRojo className="flex-shrink-0 px-4 py-1.5 border-t border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30" />
+
         {/* Barra inferior: toggle del carrito + Confirmar (siempre visibles).
             En el sheet llega al borde de la pantalla: Confirmar necesita aire a
             la derecha y abajo (y el área segura de los celulares con muesca),
@@ -2065,12 +2104,12 @@ const ModalPedido = memo(function ModalPedido({
           </button>
           <Button
             type="button"
-            onClick={onGuardar}
+            onClick={() => { if (!ilegibles.hay) void onGuardar() }}
             // `!nuevoPedido.clienteId` (#732): sin cliente el botón quedaba
             // habilitado y sólo lo frenaba un aviso del container. Se mira el
             // id y no `clienteSeleccionado`: un cliente recién creado por el
             // alta rápida tiene id antes de que la lista de clientes refetchee.
-            disabled={guardando || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0 || vbNoHabilitado || motivoDatosPrecio !== null || fechaFueraDeRango !== null}
+            disabled={guardando || ilegibles.hay || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0 || vbNoHabilitado || motivoDatosPrecio !== null || fechaFueraDeRango !== null}
             loading={guardando}
             variant="success"
             size="lg"
@@ -2113,7 +2152,9 @@ const ModalPedido = memo(function ModalPedido({
         {/* El mismo boundary que ModalBase pone alrededor del cuerpo: si algo
             tira adentro, el sheet sigue teniendo título y X. */}
         <CompactErrorBoundary componentName="Nuevo Pedido" onClose={onClose}>
-          {cuerpo}
+          <RegistroIlegiblesContext.Provider value={ilegibles.registro}>
+            {cuerpo}
+          </RegistroIlegiblesContext.Provider>
           {confirmacion}
         </CompactErrorBoundary>
       </BottomSheet>
@@ -2122,7 +2163,9 @@ const ModalPedido = memo(function ModalPedido({
 
   return (
     <ModalBase title="Nuevo Pedido" onClose={cerrarAlta} maxWidth="max-w-2xl" headerExtra={tipoFacturaToggle}>
-      {cuerpo}
+      <RegistroIlegiblesContext.Provider value={ilegibles.registro}>
+        {cuerpo}
+      </RegistroIlegiblesContext.Provider>
       {confirmacion}
     </ModalBase>
   );

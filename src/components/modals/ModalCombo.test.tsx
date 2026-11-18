@@ -54,8 +54,10 @@ async function reemplazar(label: string | RegExp, valor: string) {
 
 async function guardarYVerError(mensaje: string | RegExp, onSave: ReturnType<typeof vi.fn>) {
   await userEvent.click(guardar())
-  const alerta = await screen.findByRole('alert')
-  expect(within(alerta).getByText(mensaje)).toBeInTheDocument()
+  // Puede haber más de un aviso: el del formulario y, desde B20, el del campo («Las cantidades van
+  // sin coma»). El del formulario tiene que estar.
+  const alertas = await screen.findAllByRole('alert')
+  expect(alertas.some(a => within(a).queryByText(mensaje) !== null)).toBe(true)
   expect(onSave).not.toHaveBeenCalled()
 }
 
@@ -175,22 +177,45 @@ describe('ModalCombo · validación (las mismas reglas del server)', () => {
     await guardarYVerError('El precio admite hasta 2 decimales', onSave)
   })
 
-  // #1560: el precio es plata y se lee con el punto de miles. `aNumero` leía «6.500» como 6,5.
+  // #1560 y B20 (D17, cambió de regla): tipeado, el punto y la coma son decimales y los miles los
+  // pone el campo («6500» se ve «6.500»); pegado, «6.500,50» se lee como se muestra la plata.
   it.each([
-    ['6.500', 6500],
-    ['6.500,50', 6500.5],
-    ['6500,5', 6500.5],
-    ['$ 7.200', 7200],
-  ])('lee el precio %j como %d', async (tipeado, esperado) => {
+    ['6500', 'tipea', '6.500', 6500],
+    ['6500,5', 'tipea', '6.500,5', 6500.5],
+    ['6500.5', 'tipea', '6.500,5', 6500.5],
+    ['6.500,50', 'pega', '6.500,50', 6500.5],
+    ['$ 7.200', 'pega', '7.200', 7200],
+  ])('el precio %j que se %s se ve %j y se lee %d', async (texto, como, visto, esperado) => {
     const { onSave } = renderModal()
-    await reemplazar('Precio del combo', tipeado)
+    const campo = screen.getByLabelText('Precio del combo') as HTMLInputElement
+    await userEvent.clear(campo)
+    if (como === 'tipea') await userEvent.type(campo, texto)
+    else { await userEvent.click(campo); await userEvent.paste(texto) }
+    expect(campo.value).toBe(visto)
     await userEvent.click(guardar())
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ precio: esperado }))
   })
 
+  it('un precio que no se entiende queda en rojo y no se guarda', async () => {
+    const { onSave } = renderModal()
+    const campo = screen.getByLabelText('Precio del combo')
+    await userEvent.clear(campo)
+    await userEvent.click(campo)
+    await userEvent.paste('1,234,567')
+    expect(campo).toHaveAttribute('aria-invalid', 'true')
+    await userEvent.click(guardar())
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('la cantidad tipeada «1500» se ve «1.500»', async () => {
+    renderModal()
+    await reemplazar('Cantidad (lugar 1)', '1500')
+    expect(screen.getByLabelText('Cantidad (lugar 1)')).toHaveValue('1.500')
+  })
+
   it('el precio guardado con centavos se muestra con coma', () => {
     renderModal(comboBase({ precio: 6500.5 }))
-    expect((screen.getByLabelText('Precio del combo') as HTMLInputElement).value).toBe('6500,5')
+    expect((screen.getByLabelText('Precio del combo') as HTMLInputElement).value).toBe('6.500,5')
   })
 
   it('exige fecha de inicio', async () => {
@@ -243,6 +268,20 @@ describe('ModalCombo · validación (las mismas reglas del server)', () => {
     const { onSave } = renderModal()
     await reemplazar('Cantidad (lugar 1)', valor)
     await guardarYVerError('La cantidad de cada lugar tiene que ser un entero entre 1 y 1000', onSave)
+  })
+
+  // H2 de la segunda lente: el tope y las cantidades son enteros, y se leen con `leerEntero`, el
+  // mismo lector que pone el campo en rojo. Con `leerNumero`, «1,000» (la tecla del punto) era 1 y
+  // «3,0» era 3, y el schema los dejaba pasar.
+  it.each([
+    ['Tope de combos (opcional)', '1.000'],
+    ['Cantidad (lugar 1)', '3.0'],
+  ])('%s tipeado «%s» queda en rojo y no se guarda como otro entero', async (campo, valor) => {
+    const { onSave } = renderModal()
+    await reemplazar(campo, valor)
+    expect(screen.getByLabelText(campo)).toHaveAttribute('aria-invalid', 'true')
+    await userEvent.click(guardar())
+    expect(onSave).not.toHaveBeenCalled()
   })
 
   it('cada lugar necesita al menos un producto', async () => {
@@ -311,7 +350,7 @@ describe('ModalCombo · guardado', () => {
     const { onSave } = renderModal(null)
 
     await userEvent.type(screen.getByLabelText('Nombre'), '  Combo Fernet  ')
-    await userEvent.type(screen.getByLabelText('Precio del combo'), '6.500,50')
+    await userEvent.type(screen.getByLabelText('Precio del combo'), '6500,50')
     fireEvent.change(screen.getByLabelText('Fecha inicio'), { target: { value: '2026-10-15' } })
     fireEvent.change(screen.getByLabelText('Fecha fin (opcional)'), { target: { value: '2026-12-31' } })
 
