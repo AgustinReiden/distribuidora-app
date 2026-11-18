@@ -164,8 +164,9 @@ suelta en `sucursales`.
   decisión del dueño D17): lo que se muestra lleva el punto de miles y la coma decimal. Al tipear,
   el punto y la coma son decimales (la tecla del punto se ve como coma) y el punto de miles lo pone
   el campo: para 150.000 se escribe «150000» y se ve «150.000»; «150.000» tipeado es 150. Un campo
-  lo hace con `NumberInput` o, si es un `<input>` de texto, con `useTecleoNumero` en el `onChange`
-  y la precarga con `numeroConMiles`; lo pegado se lee como se muestra («1.250,50» es 1250,5).
+  lo hace con `NumberInput` (valor número), `CampoNumero` (valor texto: entero, `sinMiles`,
+  `negativo`, `motivo`) o `InputMonto` (gastos y personal, lo lee `parseMonto`), y precarga con
+  `numeroConMiles`; lo pegado se lee como se muestra («1.250,50» es 1250,5).
   Los `sinMiles` (porcentajes, litros) no llevan miles. Lo que no se entiende da `null` y el campo
   lo marca: nunca se guarda como otro número. Nada de `type="number"`, `parseFloat` ni `Number()`
   sobre lo tipeado. La tabla de casos es `numeroTipeado.tabla.test.ts`. Un campo que no entiende
