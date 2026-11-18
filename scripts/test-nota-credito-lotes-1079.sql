@@ -150,11 +150,19 @@ BEGIN
     v_fallas := v_fallas || format('I · la bajada quedó %s', to_jsonb(v_hist));
   END IF;
 
-  v_res := public.sincronizar_lotes_compra(v_compra, jsonb_build_array(jsonb_build_object(
-             'producto_id', v_prod, 'fecha_vencimiento', v_hoy + 60, 'cantidad', 100)));
-  IF NOT COALESCE((v_res->>'ok')::boolean, false) THEN
-    v_fallas := v_fallas || format('F · sincronizar_lotes_compra falló: %s', v_res);
-  END IF;
+  -- Desde la 523 una compra con notas de crédito no cambia sus vencimientos desde la compra: la RPC
+  -- levanta (antes devolvía ok y el caso comprobaba que la edición no pisara lo bajado por la nota).
+  -- Lo que se sigue comprobando es lo mismo: tras el intento, el stock, los lotes y la bolsa quedan como
+  -- los dejó la nota.
+  BEGIN
+    v_res := public.sincronizar_lotes_compra(v_compra, jsonb_build_array(jsonb_build_object(
+               'producto_id', v_prod, 'fecha_vencimiento', v_hoy + 60, 'cantidad', 100)));
+    v_fallas := v_fallas || format('F · sincronizar_lotes_compra tenía que rechazar una compra con notas de crédito y devolvió %s', v_res);
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE '%tiene notas de crédito%' THEN
+      v_fallas := v_fallas || format('F · sincronizar_lotes_compra falló por otra cosa: %s', SQLERRM);
+    END IF;
+  END;
   v_foto := pg_temp.foto(v_prod);
   IF v_foto <> '{"stock":80,"lotes":40,"bolsa":40}'::jsonb THEN
     v_fallas := v_fallas || format('F · tras editar la compra esperaba stock 80, lote 40, bolsa 40; quedó %s', v_foto);
