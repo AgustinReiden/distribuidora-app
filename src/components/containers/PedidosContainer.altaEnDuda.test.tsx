@@ -11,8 +11,8 @@
  * El andamiaje de mocks es el de `PedidosContainer.altaClave.test.tsx`.
  */
 import React from 'react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -168,17 +168,22 @@ vi.mock('../modals/ModalPedido', () => ({
     onAgregarItem: (id: string, cantidad?: number, precio?: number) => void
     onNotasChange: (notas: string) => void
     onEstadoPagoChange: (e: string) => void
+    onFormaPagoChange: (f: string) => void
     onTipoFacturaChange: (t: string) => void
     onGuardar: () => void
+    onGuardarEnCola?: () => void
     onClose: () => void
   }) => (
     <>
+      {/* D56: el modal real ofrece la cola cuando el container le pasa el callback. */}
+      {p.onGuardarEnCola && <button type="button" onClick={() => p.onGuardarEnCola?.()}>Guardar en el teléfono</button>}
       <button type="button" onClick={() => p.onClose()}>Cerrar alta</button>
       <button type="button" onClick={() => { p.onClienteChange('9'); p.onAgregarItem('7', 10, 1000) }}>Armar</button>
       <button type="button" onClick={() => { p.onClienteChange('10'); p.onAgregarItem('7', 10, 1000) }}>Armar otro cliente</button>
       <button type="button" onClick={() => p.onNotasChange('dejar en la puerta')}>Cambiar nota</button>
       <button type="button" onClick={() => p.onNotasChange('')}>Nota igual</button>
       <button type="button" onClick={() => p.onEstadoPagoChange('pagado')}>Pagado</button>
+      <button type="button" onClick={() => p.onFormaPagoChange('transferencia')}>Transferencia</button>
       <button type="button" onClick={() => p.onTipoFacturaChange('VB')}>Vale blanco</button>
       <button type="button" onClick={() => p.onGuardar()}>Confirmar</button>
     </>
@@ -187,6 +192,7 @@ vi.mock('../modals/ModalPedido', () => ({
 
 import PedidosContainer from './PedidosContainer'
 import { fijarUsuarioRequestIds } from '../../utils/requestIdPersistente'
+import { MARGEN_INTENTO_EN_VUELO_MS, MENSAJE_ALTA_EN_DUDA_ENCOLADA, PLAZO_ALTA_DIRECTA_MS } from '../../utils/idempotencia'
 
 /** Lo que tira de verdad `crearPedido` cuando la respuesta se pierde. */
 const respuestaPerdida = () =>
@@ -200,6 +206,22 @@ function montar() {
     </QueryClientProvider>,
   )
 }
+
+/**
+ * M5 (#1603): un «no entró» dentro de `MARGEN_INTENTO_EN_VUELO_MS` del último
+ * intento no se cree (el intento puede seguir corriendo en el servidor). Los tests
+ * que prueban qué pasa con un «no entró» de verdad corren el reloj pasado el margen.
+ */
+let reloj: MockInstance<() => number> | null = null
+function pasaElMargen(): void {
+  const despues = Date.now() + MARGEN_INTENTO_EN_VUELO_MS
+  reloj = vi.spyOn(Date, 'now').mockReturnValue(despues)
+}
+
+afterEach(() => {
+  reloj?.mockRestore()
+  reloj = null
+})
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -223,7 +245,9 @@ async function primerIntentoPerdido() {
   mutateAlta.mockRejectedValueOnce(respuestaPerdida())
   await user.click(screen.getByRole('button', { name: 'Confirmar' }))
   await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(1))
-  await waitFor(() => expect(notify.error).toHaveBeenCalled())
+  // Cambió de regla con D56 (1563-b7): un fallo de red con la clave en duda ya no
+  // es un toast de error; el modal queda abierto y ofrece guardarlo en la cola.
+  await screen.findByRole('button', { name: 'Guardar en el teléfono' })
   return { user, pantalla, claveAnterior: mutateAlta.mock.calls[0][0].offlineId as string }
 }
 
@@ -269,6 +293,7 @@ describe('#1543 — el alta con la clave anterior en duda', () => {
 
   it('el anterior no entró: se llama al alta con una clave nueva', async () => {
     const { user, claveAnterior } = await primerIntentoPerdido()
+    pasaElMargen()
 
     await user.click(screen.getByRole('button', { name: 'Cambiar nota' }))
     await user.click(screen.getByRole('button', { name: 'Confirmar' }))
@@ -291,6 +316,7 @@ describe('#1543 — el alta con la clave anterior en duda', () => {
     await waitFor(() => expect(avisos().some(a => /Esperá a tener señal/.test(a))).toBe(true))
     expect(mutateAlta).toHaveBeenCalledTimes(1)
     // El alta sigue abierta, y el próximo Confirmar vuelve a preguntar por la MISMA clave.
+    pasaElMargen()
     await user.click(screen.getByRole('button', { name: 'Confirmar' }))
     await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(2))
     expect(verificarClave).toHaveBeenCalledTimes(2)
@@ -384,6 +410,7 @@ describe('#1543 variante 4 — el primer intento online se perdió y el segundo 
   it('editado y el server contesta que no entró: se encola con una clave nueva', async () => {
     const { user, claveAnterior } = await primerIntentoPerdido()
     await sinSenal(user)
+    pasaElMargen()
 
     await user.click(screen.getByRole('button', { name: 'Cambiar nota' }))
     await user.click(screen.getByRole('button', { name: 'Confirmar' }))
@@ -457,6 +484,7 @@ describe('INF-6 — recargar la app con un alta en duda', () => {
 
   it('si no entró, se olvida sin avisar nada', async () => {
     const { pantalla, claveAnterior } = await primerIntentoPerdido()
+    pasaElMargen()
 
     const user = await recargar(pantalla)
     await waitFor(() => expect(verificarClave).toHaveBeenCalledWith(claveAnterior))
@@ -540,6 +568,7 @@ describe('VTA-1 — cerrar el alta con la clave en duda', () => {
 
   it('no entró: se olvida sin avisar, y el pedido nuevo va con otra clave', async () => {
     const { user, claveAnterior } = await primerIntentoPerdido()
+    pasaElMargen()
     await cerrarYCargarDeNuevo(user, true)
     await waitFor(() => expect(verificarClave).toHaveBeenCalledWith(claveAnterior))
 
@@ -663,5 +692,175 @@ describe('L2 — la clave en duda es del cliente del pedido', () => {
 
     await waitFor(() => expect(guardarPedidoOffline).toHaveBeenCalledTimes(1))
     expect(guardarPedidoOffline.mock.calls[0][1].claveDeAlta).not.toBe(claveAnterior)
+  })
+})
+
+/**
+ * D56 (decisión del dueño, 1563-b7 de #1563): con señal que no pasa datos y
+ * `navigator.onLine` en true, el alta que falla por la red queda en duda y la
+ * pantalla ofrece guardarla en la cola; no se encola sola. Se encola con la MISMA
+ * clave del intento: si ese intento sí había entrado, el replay recibe el mismo
+ * pedido (rama idempotente) y no se duplica.
+ */
+describe('D56 — señal inservible con onLine en true: la cola se ofrece', () => {
+  it('el fallo de red no encola solo ni se pierde: el alta queda abierta y ofrece la cola', async () => {
+    await primerIntentoPerdido()
+
+    expect(guardarPedidoOffline).not.toHaveBeenCalled()
+    expect(notify.error).not.toHaveBeenCalled()
+    // El alta sigue abierta con el pedido.
+    expect(screen.getByRole('button', { name: 'Confirmar' })).toBeTruthy()
+  })
+
+  it('«Guardar en el teléfono» lo encola con la MISMA clave del intento, sin otro intento directo', async () => {
+    const { user, claveAnterior } = await primerIntentoPerdido()
+
+    await user.click(screen.getByRole('button', { name: 'Guardar en el teléfono' }))
+
+    await waitFor(() => expect(guardarPedidoOffline).toHaveBeenCalledTimes(1))
+    expect(guardarPedidoOffline.mock.calls[0][1]).toMatchObject({ claveDeAlta: claveAnterior })
+    // El cobro no viaja en la cola (1598-b10).
+    expect(guardarPedidoOffline.mock.calls[0][0]).toMatchObject({ estadoPago: 'pendiente' })
+    expect(mutateAlta).toHaveBeenCalledTimes(1)
+    expect(verificarClave).not.toHaveBeenCalled()
+    await waitFor(() => expect(avisos()).toContain(MENSAJE_ALTA_EN_DUDA_ENCOLADA))
+    // Encolada, la clave es de la cola: ya no queda en duda en el teléfono.
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Confirmar' })).toBeNull())
+    expect(localStorage.getItem('distribuidora:alta-en-duda:u1') ?? '').not.toContain(claveAnterior)
+  })
+
+  it('tocar Confirmar de nuevo reintenta con la misma clave, y si vuelve a fallar se vuelve a ofrecer', async () => {
+    const { user, claveAnterior } = await primerIntentoPerdido()
+    mutateAlta.mockRejectedValueOnce(respuestaPerdida())
+
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(2))
+    expect(mutateAlta.mock.calls[1][0].offlineId).toBe(claveAnterior)
+    await screen.findByRole('button', { name: 'Guardar en el teléfono' })
+  })
+
+  it('si cambia el pedido, la oferta deja de valer (sería otro pedido)', async () => {
+    const { user } = await primerIntentoPerdido()
+
+    await user.click(screen.getByRole('button', { name: 'Cambiar nota' }))
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Guardar en el teléfono' })).toBeNull())
+  })
+
+  // H4 (revisión de B12a): que no quede un estado en el que no se puede ni encolar ni mandar.
+  it('si el encolado falla, la oferta sigue ahí con su error (no queda sólo Confirmar)', async () => {
+    const { user } = await primerIntentoPerdido()
+    guardarPedidoOffline.mockResolvedValueOnce({ success: false, error: 'Stock insuficiente para algunos productos' })
+
+    await user.click(screen.getByRole('button', { name: 'Guardar en el teléfono' }))
+
+    await waitFor(() => expect(notify.error).toHaveBeenCalled())
+    expect(screen.getByRole('button', { name: 'Guardar en el teléfono' })).toBeTruthy()
+  })
+
+  it('tocar el estado de pago (que la cola descarta) no hace desaparecer la oferta, y encola con la MISMA clave', async () => {
+    const { user, claveAnterior } = await primerIntentoPerdido()
+
+    await user.click(screen.getByRole('button', { name: 'Pagado' }))
+    expect(screen.getByRole('button', { name: 'Guardar en el teléfono' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Guardar en el teléfono' }))
+
+    await waitFor(() => expect(guardarPedidoOffline).toHaveBeenCalledTimes(1))
+    expect(guardarPedidoOffline.mock.calls[0][1]).toMatchObject({ claveDeAlta: claveAnterior })
+    expect(guardarPedidoOffline.mock.calls[0][0]).toMatchObject({ estadoPago: 'pendiente' })
+    expect(verificarClave).not.toHaveBeenCalled()
+  })
+
+  it('N3: tocar la forma de pago no hace desaparecer la oferta: encola con la forma NUEVA y la MISMA clave', async () => {
+    const { user, claveAnterior } = await primerIntentoPerdido()
+
+    await user.click(screen.getByRole('button', { name: 'Transferencia' }))
+    expect(screen.getByRole('button', { name: 'Guardar en el teléfono' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Guardar en el teléfono' }))
+
+    await waitFor(() => expect(guardarPedidoOffline).toHaveBeenCalledTimes(1))
+    expect(guardarPedidoOffline.mock.calls[0][1]).toMatchObject({ claveDeAlta: claveAnterior })
+    expect(guardarPedidoOffline.mock.calls[0][0]).toMatchObject({ formaPago: 'transferencia' })
+    expect(verificarClave).not.toHaveBeenCalled()
+  })
+
+  it('un rechazo del servidor no ofrece la cola: avisa el error', async () => {
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: 'Nuevo pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Armar' }))
+    mutateAlta.mockRejectedValueOnce(new RechazoDeNegocioError('Stock insuficiente para Coca 2.25'))
+
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(notify.error).toHaveBeenCalled())
+    expect(screen.queryByRole('button', { name: 'Guardar en el teléfono' })).toBeNull()
+    expect(guardarPedidoOffline).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * H3 de la revisión de B12a (ya pasaba; dejaba a D56 a medias): el alta directa no
+ * tenía plazo. Con señal que no pasa datos el `fetch` queda colgado sin fallar, y
+ * la oferta de la cola no aparecía nunca.
+ */
+describe('H3 — el alta directa tiene plazo', () => {
+  afterEach(() => { vi.useRealTimers() })
+
+  it('plazo vencido → queda en duda y se ofrece la cola → se encola con la MISMA clave', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    montar()
+    await user.click(await screen.findByRole('button', { name: 'Nuevo pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Armar' }))
+    // Señal que no pasa datos: el alta no contesta nunca.
+    mutateAlta.mockImplementationOnce(() => new Promise(() => {}))
+
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+    await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(1))
+    const intento = mutateAlta.mock.calls[0][0] as { offlineId: string; signal?: AbortSignal }
+    expect(screen.queryByRole('button', { name: 'Guardar en el teléfono' })).toBeNull()
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(PLAZO_ALTA_DIRECTA_MS) })
+
+    // El request colgado se corta, y el corte es «sin respuesta»: oferta, sin error.
+    expect(intento.signal?.aborted).toBe(true)
+    await user.click(await screen.findByRole('button', { name: 'Guardar en el teléfono' }))
+    expect(notify.error).not.toHaveBeenCalled()
+    await waitFor(() => expect(guardarPedidoOffline).toHaveBeenCalledTimes(1))
+    // Un alta cortada pudo haber entrado: la cola va con su clave, y el replay
+    // recibe ese pedido de la rama idempotente (no se duplica).
+    expect(guardarPedidoOffline.mock.calls[0][1]).toMatchObject({ claveDeAlta: intento.offlineId })
+  })
+})
+
+/**
+ * M5 (#1603): preguntar por la clave mientras el primer intento sigue corriendo en
+ * el servidor puede dar «no entró» (la fila sin COMMIT no se ve). Creérselo
+ * olvidaba la clave, y la próxima alta del cliente acuñaba otra: dos pedidos.
+ */
+describe('M5 — un «no entró» recién terminado el intento no se cree', () => {
+  it('al cerrar enseguida, el «no entró» no la olvida: el mismo pedido viaja con la MISMA clave', async () => {
+    const { user, claveAnterior } = await primerIntentoPerdido()
+
+    await user.click(screen.getByRole('button', { name: 'Cerrar alta' }))
+    await waitFor(() => expect(verificarClave).toHaveBeenCalledWith(claveAnterior))
+    await user.click(await screen.findByRole('button', { name: 'Nuevo pedido' }))
+    await user.click(await screen.findByRole('button', { name: 'Armar' }))
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(mutateAlta).toHaveBeenCalledTimes(2))
+    expect(mutateAlta.mock.calls[1][0].offlineId).toBe(claveAnterior)
+  })
+
+  it('editado enseguida: no acuña otra clave con un «no entró» que no vale; pide esperar', async () => {
+    const { user } = await primerIntentoPerdido()
+
+    await user.click(screen.getByRole('button', { name: 'Cambiar nota' }))
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    await waitFor(() => expect(avisos().some(a => /Esperá a tener señal/.test(a))).toBe(true))
+    expect(mutateAlta).toHaveBeenCalledTimes(1)
   })
 })

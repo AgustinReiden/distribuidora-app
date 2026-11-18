@@ -272,6 +272,28 @@ describe('la clave del alta en duda', () => {
     expect((await cargar('u-ana')).leerClavesDeAlta(T0)).toEqual([{ id: 'vieja', huella: 'h', enDuda: true }])
   })
 
+  // Punto que dejó la ola 1 (L2 de #1603): una clave vieja sin cliente hacía esperar
+  // a las altas de TODOS los clientes hasta vencer (24 h). Su huella dice de quién es.
+  it('una clave vieja sin cliente toma el cliente de su huella', async () => {
+    const { huellaDeAlta } = await import('./idempotencia')
+    const huella = huellaDeAlta({ clienteId: '77', items: [], notas: '' }, [{ productoId: 'p1', cantidad: 2, precioUnitario: 10 }])
+    localStorage.setItem('distribuidora:alta-en-duda:u-ana', JSON.stringify({ alta: { id: 'vieja', t: T0, huella } }))
+
+    const [vieja] = (await cargar('u-ana')).leerClavesDeAlta(T0)
+
+    expect(vieja).toEqual({ id: 'vieja', huella, enDuda: true, clienteId: '77' })
+    // …y con eso un alta de otro cliente ya no la espera.
+    const { pasoDeAlta } = await import('./idempotencia')
+    expect(pasoDeAlta(null, 'otra-huella', '78', [vieja]).paso).toBe('enviar')
+    expect(pasoDeAlta(null, 'otra-huella', '77', [vieja]).paso).toBe('verificar')
+  })
+
+  it('guarda cuándo fue el último intento, y sobrevive a una recarga (M5)', async () => {
+    const conIntento = { ...EN_DUDA, clienteId: '9', intentoEn: T0 - 5_000 }
+    ;(await cargar()).guardarClaveDeAlta(conIntento, T0)
+    expect((await cargar()).leerClaveDeAlta(T0 + 1_000)).toEqual(conIntento)
+  })
+
   it('es del usuario: otro no la ve, y el logout la borra', async () => {
     ;(await cargar('u-ana')).guardarClaveDeAlta(EN_DUDA, T0)
     expect((await cargar('u-beto')).leerClaveDeAlta(T0)).toBeNull()

@@ -1,16 +1,19 @@
 /**
- * Test de caracterización de BannerActualizacion: fija el comportamiento
- * ACTUAL antes de moverlo a una pila común de avisos por portal.
+ * Test de caracterización de BannerActualizacion.
  *
  * Mockea useActualizacionDisponible (no ejercita el chequeo real de
  * /version.json ni el service worker; eso lo cubre otra suite).
+ *
+ * Cambió de regla con D57 (1563-b8 de #1563): la actualización es obligatoria.
+ * El cartel avisa que se actualiza sola y ya no tiene «Mas tarde»; la X sólo lo
+ * esconde (`ocultar`), no pospone nada.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 const actualizar = vi.fn()
-const posponer = vi.fn()
+const ocultar = vi.fn()
 
 vi.mock('../hooks/useActualizacionDisponible', () => ({
   useActualizacionDisponible: vi.fn(),
@@ -25,14 +28,15 @@ function mockHook(disponible: boolean, actualizando = false): void {
     actualizando,
     buildActual: 'test-build',
     actualizar,
-    posponer,
+    ocultar,
   })
 }
 
 describe('BannerActualizacion', () => {
   beforeEach(() => {
     actualizar.mockClear()
-    posponer.mockClear()
+    ocultar.mockClear()
+    vi.mocked(useActualizacionDisponible).mockClear()
   })
 
   it('no renderiza nada cuando no hay actualizacion disponible', () => {
@@ -45,12 +49,24 @@ describe('BannerActualizacion', () => {
     expect(screen.queryByRole('status')).toBeNull()
   })
 
-  it('muestra el aviso con role status y su texto cuando hay actualizacion disponible', () => {
+  it('avisa que se actualiza sola al cambiar de pantalla o volver a la app (D57)', () => {
     mockHook(true)
     render(<BannerActualizacion />)
     const aviso = screen.getByRole('status')
-    expect(aviso).toHaveTextContent('Hay una version nueva')
-    expect(aviso).toHaveTextContent(/Actualiza para no seguir trabajando con pantallas viejas/)
+    expect(aviso).toHaveTextContent('Hay una versión nueva')
+    expect(aviso).toHaveTextContent(/se va a actualizar sola cuando cambies de pantalla o vuelvas a ella/)
+  })
+
+  it('ya no ofrece «Mas tarde» (D57)', () => {
+    mockHook(true)
+    render(<BannerActualizacion />)
+    expect(screen.queryByRole('button', { name: /m[aá]s tarde/i })).toBeNull()
+  })
+
+  it('le pasa la ruta al hook, para actualizar al cambiar de pantalla', () => {
+    mockHook(false)
+    render(<BannerActualizacion ruta="/clientes" />)
+    expect(useActualizacionDisponible).toHaveBeenCalledWith('/clientes')
   })
 
   it('el boton Actualizar llama a actualizar()', async () => {
@@ -60,26 +76,17 @@ describe('BannerActualizacion', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Actualizar' }))
 
     expect(actualizar).toHaveBeenCalledTimes(1)
-    expect(posponer).not.toHaveBeenCalled()
+    expect(ocultar).not.toHaveBeenCalled()
   })
 
-  it('el boton Mas tarde llama a posponer()', async () => {
+  it('el boton de cerrar (X) sólo esconde el cartel', async () => {
     mockHook(true)
     render(<BannerActualizacion />)
 
-    await userEvent.click(screen.getByRole('button', { name: 'Mas tarde' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cerrar aviso de actualización' }))
 
-    expect(posponer).toHaveBeenCalledTimes(1)
+    expect(ocultar).toHaveBeenCalledTimes(1)
     expect(actualizar).not.toHaveBeenCalled()
-  })
-
-  it('el boton de cerrar (X) tambien llama a posponer()', async () => {
-    mockHook(true)
-    render(<BannerActualizacion />)
-
-    await userEvent.click(screen.getByRole('button', { name: 'Cerrar aviso de actualizacion' }))
-
-    expect(posponer).toHaveBeenCalledTimes(1)
   })
 
   it('mientras actualiza, el boton queda deshabilitado y lo dice', () => {

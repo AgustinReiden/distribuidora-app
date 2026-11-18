@@ -6,8 +6,9 @@
 -- test-idempotencia-cobro-1440 fallaba en CI por eso y no por un bug (H4 de la lente de #1645).
 -- Con 10^9 los ids nuevos quedan por encima de cualquier id histórico, como en prod.
 --
--- Se saltea sucursales_id_seq: la semilla de docker-local.mjs la deja en 4 a propósito (las
--- sucursales 1 y 2 son las de prod). NUNCA contra prod: sólo base local.
+-- sucursales_id_seq se deja en 4, como en prod (las sucursales 1 y 2 son las de prod): la semilla de
+-- docker-local.mjs NO la mueve (queda en 1) y un ensayo que da de alta una sucursal chocaba con la 2
+-- (`sucursales_pkey`, 17/11). NUNCA contra prod: sólo base local.
 DO $secuencias$
 DECLARE r record;
 BEGIN
@@ -20,3 +21,5 @@ BEGIN
   END LOOP;
 END
 $secuencias$;
+
+SELECT setval(pg_get_serial_sequence('public.sucursales', 'id'), 4, true);

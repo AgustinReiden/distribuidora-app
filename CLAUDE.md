@@ -550,6 +550,12 @@ suelta en `sucursales`.
   decisiones del dueño). Un regalo sin promoción no bajaba stock y nada lo devuelve: no nace, y la
   edición sólo conserva el que el pedido ya tenía. La sucursal inactiva se mira en el alta, no en
   `current_sucursal_id()`. El cambio de cliente (`app.cambio_cliente_desde`) recrea y pasa.
+- **El alta en duda no se encola sola ni con otra clave** (D56 y M5 de #1603). Si el alta falla
+  por la red, su clave (`pedidos.offline_id`) queda en duda y la pantalla ofrece la cola con esa
+  MISMA clave: si había entrado, `crear_pedido_idempotente` devuelve ese pedido. Antes de acuñar
+  otra se le pregunta al servidor, y un «no entró» dentro de los 30 s del último intento no vale
+  (`verificacionConfiable`): el intento puede seguir corriendo y su fila sin COMMIT no se ve. Un
+  camino nuevo que pregunte por una clave de alta pasa por ahí.
 - **La versión de un pedido (`updated_at`) la pone el server** (1595-b6): un UPDATE de
   `authenticated` que cambia algo la mueve a `now()` en `pedidos_proteger_columnas`, y uno que no
   cambia nada la deja. Lo que mande el cliente en esa columna no cuenta. Una RPC que la mueve
