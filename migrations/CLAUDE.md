@@ -266,7 +266,9 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   techo. La regla es una, `regalo_tope_sustituto`, con espejo en `topeSustitutoRegalo` (gate:
   `topeSustituto.espejo.json`); la pantalla sugiere con ella. El reparto la cumple sobre la suma
   de las partes, y la edición no escala una cadena por encima (`_regalo_tope_de_cadena`): lo que
-  armó un admin se conserva pero no crece. El admin, sin tope.
+  armó un admin se conserva pero no crece. Y el tope de la promo se mide en el corte también cuando
+  la edición recibe la línea cambiada por valor tal como está (W×1 con corte 10 cuenta 10; C2 de la
+  ola 2). El admin, sin tope.
 - **Un regalo se mide contra la promo con la que se armó, no contra la vigente** (mig 370,
   #1164). Todo lo que mide el regalo de un pedido que ya existe —la salvedad, su anulación y
   las dos simulaciones— lee `promos_del_pedido(pedido)`, no `promocion_reglas` ni
