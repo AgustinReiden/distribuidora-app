@@ -11,6 +11,7 @@
 import { useState, type FormEvent } from 'react'
 import { Landmark, Plus, Loader2 } from 'lucide-react'
 import { Button } from '../../ui/Button'
+import { CampoNumero } from '../../ui/CampoNumero'
 import {
   useCatalogoIIQuery,
   useGuardarEncuadreIIMutation,
@@ -20,6 +21,7 @@ import {
 import { alicuotaVigente, alicuotasProgramadas, tasaEfectivaEncuadre, formatearNominal, nominalDesdeTexto, II_NOMINAL_MAXIMO, type AlicuotaII, type EncuadreII } from '../../../utils/impuestosInternos'
 import { fechaLocalISO } from '../../../utils/formatters'
 import { useNotification } from '../../../contexts/NotificationContext'
+import { useTrabajoEnCurso } from '../../../hooks/useTrabajoEnCurso'
 
 const INPUT = 'px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
 
@@ -39,6 +41,8 @@ function FormTasa({ encuadre, onListo }: { encuadre: EncuadreII; onListo: () => 
   const hoy = fechaLocalISO()
   const [tasa, setTasa] = useState('')
   const [desde, setDesde] = useState(hoy)
+  // Una tasa tipeada y no guardada: la actualización obligatoria de la app no recarga encima (#1655).
+  useTrabajoEnCurso(tasa.trim() !== '', 'impuestos internos: tasa sin guardar')
 
   const nominal = nominalDesdeTexto(tasa)
   // Vale cualquier fecha, también futura (mig 282): las fichas no se mueven
@@ -64,11 +68,13 @@ function FormTasa({ encuadre, onListo }: { encuadre: EncuadreII; onListo: () => 
     <form onSubmit={handleSubmit} className="mt-2 flex flex-wrap items-end gap-2">
       <div>
         <label htmlFor={`tasa-${encuadre.id}`} className="block text-xs text-stone-500 mb-1">Tasa nominal (%)</label>
-        <input
+        {/* Un porcentaje: sin miles, y la tecla del punto es la coma (B20, D17). */}
+        <CampoNumero
           id={`tasa-${encuadre.id}`}
-          inputMode="decimal"
+          sinMiles
+          motivo={null}
           value={tasa}
-          onChange={(e) => setTasa(e.target.value)}
+          onChange={setTasa}
           placeholder="8"
           className={`${INPUT} w-24`}
         />
@@ -146,6 +152,12 @@ function FormEncuadre({ encuadre, onListo }: { encuadre?: EncuadreII; onListo: (
   // Sólo al crear: un encuadre nuevo nace con su primera tasa.
   const [tasa, setTasa] = useState('')
   const [desde, setDesde] = useState(hoy)
+  // Lo tipeado y no guardado: la actualización obligatoria de la app no recarga encima (#1655).
+  useTrabajoEnCurso(
+    nombre !== (encuadre?.nombre ?? '') || criterio !== (encuadre?.criterio ?? '')
+      || activo !== (encuadre?.activo ?? true) || tasa.trim() !== '',
+    'impuestos internos: encuadre sin guardar',
+  )
 
   const nominal = nominalDesdeTexto(tasa)
   const valido = nombre.trim() !== '' && (encuadre ? true : nominal !== null && desde !== '')
@@ -182,7 +194,7 @@ function FormEncuadre({ encuadre, onListo }: { encuadre?: EncuadreII; onListo: (
         <div className="flex flex-wrap gap-2">
           <div>
             <label htmlFor="tasa-nuevo" className="block text-xs text-stone-500 mb-1">Tasa nominal (%)</label>
-            <input id="tasa-nuevo" inputMode="decimal" value={tasa} onChange={(e) => setTasa(e.target.value)} placeholder="10" className={`${INPUT} w-24`} />
+            <CampoNumero id="tasa-nuevo" sinMiles motivo={null} value={tasa} onChange={setTasa} placeholder="10" className={`${INPUT} w-24`} />
           </div>
           <div>
             <label htmlFor="desde-nuevo" className="block text-xs text-stone-500 mb-1">Vigente desde</label>

@@ -101,3 +101,27 @@ describe('ModalRegistrarPago — pago dividido sobre una boleta (COB-F-3)', () =
     expect(onConfirmar).not.toHaveBeenCalled()
   })
 })
+
+// T6 de la tercera pasada: los renglones tienen claves estables. Con `key={index}`, quitar un
+// renglón en rojo le pasaba su borrador en rojo al de abajo, y la marca de «en rojo» quedaba en el
+// índice del que se fue.
+describe('ModalRegistrarPago — pago dividido: quitar un renglón en rojo', () => {
+  it('el rojo se va con su renglón y no pasa al que queda', async () => {
+    const user = userEvent.setup()
+    montar(vi.fn<Dividido>())
+    await cargarDividido(user, '300', '300')
+    await user.click(screen.getByRole('button', { name: /Agregar forma de pago/ }))
+    const montos = screen.getAllByPlaceholderText('0.00')
+    await user.clear(montos[2]); await user.type(montos[2], '300')
+    await user.click(montos[0])
+    await user.keyboard('{Control>}a{/Control}1.500.000')
+    expect(montos[0]).toHaveAttribute('aria-invalid', 'true')
+    const renglon = montos[0].closest('div.p-3') as HTMLElement
+    await user.click(renglon.querySelector('button.text-red-500') as HTMLElement)
+    const quedan = screen.getAllByPlaceholderText('0.00')
+    expect(quedan).toHaveLength(2)
+    for (const m of quedan) expect(m).not.toHaveAttribute('aria-invalid', 'true')
+    expect(quedan.map(m => (m as HTMLInputElement).value)).toEqual(['300', '300'])
+    expect(screen.getAllByText(/Se registra:/)).toHaveLength(2)
+  })
+})

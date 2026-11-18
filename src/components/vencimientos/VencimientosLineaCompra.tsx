@@ -22,9 +22,11 @@
  * el vencimiento encima es exactamente lo que hay que poder registrar, y el
  * panel se encarga de pintarlo en rojo.
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { CalendarClock, Plus, X } from 'lucide-react'
 import type { VencimientoLinea } from '../modals/ModalCompra.reducer'
+import { NumberInput } from '../ui/NumberInput'
+import { useAnotarIlegible } from '../../hooks/useRegistroIlegibles'
 import {
   formatearFechaVencimiento,
   lineaExcedeVencimientos,
@@ -38,12 +40,24 @@ export interface VencimientosLineaCompraProps {
   onChange: (vencimientos: VencimientoLinea[]) => void
 }
 
+const MENSAJE_VENCIMIENTO_SIN_UNIDADES = 'Cada vencimiento lleva 1 unidad o más: poné cuántas o quitalo'
+
 export default function VencimientosLineaCompra({
   cantidadLinea,
   vencimientos,
   onChange,
 }: VencimientosLineaCompraProps) {
   const [abierto, setAbierto] = useState(false)
+  // Claves estables por renglón (N6 de la segunda pasada): con el índice, quitar el de arriba de uno
+  // en rojo le pasaba el borrador en rojo a otro renglón, o lo desmontaba y quedaba el valor de antes.
+  const [claves, setClaves] = useState<number[]>(() => vencimientos.map((_, i) => i))
+  const proximaClave = useRef(vencimientos.length)
+  const clavesVigentes = claves.length === vencimientos.length ? claves : vencimientos.map((_, i) => -1 - i)
+  // Los renglones con las unidades en rojo: mientras haya uno, la lista no se cierra (si se cerrara,
+  // el campo se desmonta y la compra se guardaba callada con las unidades de antes).
+  const [rojos, setRojos] = useState<ReadonlySet<number>>(new Set())
+  const hayRojo = clavesVigentes.some(c => rojos.has(c))
+  const badge = useRef<HTMLButtonElement>(null)
 
   // La cuenta sale de `utils/vencimientos`: es la MISMA que usan los submits del
   // alta y de la edición para frenar el guardado. Dos cuentas separadas dejarían
@@ -51,6 +65,10 @@ export default function VencimientosLineaCompra({
   const asignado = unidadesEtiquetadas(vencimientos)
   const libre = Math.max(0, (Number(cantidadLinea) || 0) - asignado)
   const excede = lineaExcedeVencimientos(cantidadLinea, vencimientos)
+  // El `min=1` que tenía el `type="number"` (H11 de la segunda lente): un vencimiento con 0
+  // unidades se descartaba sin aviso al guardar. Ahora se dice y frena el guardado de la compra.
+  const sinUnidades = vencimientos.some(v => !(v.cantidad >= 1))
+  useAnotarIlegible(sinUnidades ? MENSAJE_VENCIMIENTO_SIN_UNIDADES : null, badge)
 
   function actualizar(i: number, cambios: Partial<VencimientoLinea>) {
     onChange(vencimientos.map((v, j) => (j === i ? { ...v, ...cambios } : v)))
@@ -60,11 +78,23 @@ export default function VencimientosLineaCompra({
     // Arranca con lo que queda libre: en el caso más común —un solo
     // vencimiento para toda la línea— no hay que tipear la cantidad.
     onChange([...vencimientos, { fecha: '', cantidad: libre > 0 ? libre : 1 }])
+    setClaves([...clavesVigentes, proximaClave.current++])
     setAbierto(true)
   }
 
   function quitar(i: number) {
     onChange(vencimientos.filter((_, j) => j !== i))
+    setClaves(clavesVigentes.filter((_, j) => j !== i))
+  }
+
+  function marcarRojo(clave: number, valido: boolean) {
+    setRojos(prev => {
+      if (valido === !prev.has(clave)) return prev
+      const sig = new Set(prev)
+      if (valido) sig.delete(clave)
+      else sig.add(clave)
+      return sig
+    })
   }
 
   const resumen =
@@ -78,8 +108,14 @@ export default function VencimientosLineaCompra({
     <div className="mt-2 pt-2 border-t border-dashed dark:border-gray-600">
       <div className="flex flex-wrap items-center gap-2">
         <button
+          ref={badge}
           type="button"
-          onClick={() => (vencimientos.length === 0 ? agregar() : setAbierto(!abierto))}
+          onClick={() => {
+            if (vencimientos.length === 0) agregar()
+            else if (!(abierto && hayRojo)) setAbierto(!abierto)
+          }}
+          aria-expanded={vencimientos.length > 0 ? abierto : undefined}
+          title={abierto && hayRojo ? 'Corregí las unidades en rojo antes de cerrar' : undefined}
           className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full transition-colors ${
             excede
               ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200'
@@ -102,12 +138,15 @@ export default function VencimientosLineaCompra({
             Etiquetaste {asignado} u. y la línea tiene {cantidadLinea}
           </span>
         )}
+        {sinUnidades && (
+          <span role="alert" className="text-xs text-red-700 dark:text-red-300">{MENSAJE_VENCIMIENTO_SIN_UNIDADES}</span>
+        )}
       </div>
 
       {abierto && vencimientos.length > 0 && (
         <div className="mt-2 space-y-1">
           {vencimientos.map((v, i) => (
-            <div key={i} className="flex flex-wrap items-center gap-2">
+            <div key={clavesVigentes[i]} className="flex flex-wrap items-center gap-2">
               <input
                 type="date"
                 value={v.fecha}
@@ -115,11 +154,14 @@ export default function VencimientosLineaCompra({
                 aria-label={`Fecha de vencimiento ${i + 1}`}
                 className="px-2 py-1 border rounded text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
               />
-              <input
-                type="number"
-                min={1}
+              {/* B20 (D17): era `type="number"`; los miles los pone el campo y una coma no entra. */}
+              <NumberInput
+                integer
+                commitOnChange
+                emptyValue={0}
                 value={v.cantidad}
-                onChange={e => actualizar(i, { cantidad: Number(e.target.value) })}
+                onChange={n => actualizar(i, { cantidad: n })}
+                onValidez={valido => marcarRojo(clavesVigentes[i], valido)}
                 aria-label={`Unidades del vencimiento ${i + 1}`}
                 className="w-20 px-2 py-1 border rounded text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
               />

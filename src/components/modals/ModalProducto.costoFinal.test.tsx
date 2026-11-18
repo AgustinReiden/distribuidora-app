@@ -74,7 +74,7 @@ describe('ModalProducto — costo final con los cargos de la compra', () => {
 
   it('muestra como costo final el que dejó la compra, con el flete adentro', () => {
     renderFicha()
-    expect(campo(/^Costo final \(reposición\)/).value).toBe('5200.00')
+    expect(campo(/^Costo final \(reposición\)/).value).toBe('5.200') // H11 de la segunda lente: sólo lectura, con miles
     expect(screen.getByText(/por unidad que sumó la última compra/)).toBeInTheDocument()
   })
 

@@ -75,7 +75,8 @@ describe('VistaConfiguracion — múltiplo del redondeo de los precios en masa',
   })
 
   // «1.234» ya no va acá: es plata, y con el punto de miles es mil doscientos treinta y cuatro (#1560).
-  it.each(['0', '-10', '10000.01', '1,234', '10.001', 'abc', '12abc', ''])('rechaza %j con su motivo y no guarda', async (valor) => {
+  // B20 (D17): el menos y las letras tipeados no entran (ver abajo); lo demás se rechaza con su motivo.
+  it.each(['0', '10000.01', '1,234', '10.001', 'abc', ''])('rechaza %j con su motivo y no guarda', async (valor) => {
     const onGuardar = vi.fn()
     render(<VistaConfiguracion {...props({ onGuardarMultiploRedondeo: onGuardar })} />)
     const { input, boton } = formMultiplo()
@@ -85,13 +86,24 @@ describe('VistaConfiguracion — múltiplo del redondeo de los precios en masa',
     expect(boton).toBeDisabled()
   })
 
-  // #1560: es plata y se lee con el punto de miles, como el resto de los montos. Con
-  // `Number(valor.replace(',', '.'))`, «1.000» se guardaba 1 y «10.000», 10, sin error.
   it.each([
-    ['1.000', 1000],
-    ['10.000', 10000],
-    ['1.000,00', 1000],
-    ['1.000,5', 1000.5],
+    ['-10', '10'],
+    ['12abc', '12'],
+  ])('tipeado %j: el menos y las letras no entran, queda %j', async (tipeado, queda) => {
+    render(<VistaConfiguracion {...props({ onGuardarMultiploRedondeo: vi.fn() })} />)
+    const { input } = formMultiplo()
+    await userEvent.clear(input)
+    await userEvent.type(input, tipeado)
+    expect(input.value).toBe(queda)
+  })
+
+  // #1560 y B20 (D17, cambió de regla): es plata. Tipeado, el punto es la coma decimal y los miles
+  // los pone el campo («1000» se ve «1.000»).
+  it.each([
+    ['1000', 1000],
+    ['10000', 10000],
+    ['1000,00', 1000],
+    ['1000,5', 1000.5],
     ['12.5', 12.5],
     ['0.50', 0.5],
   ])('lee %j como %d', async (tipeado, esperado) => {
@@ -114,5 +126,58 @@ describe('VistaConfiguracion — múltiplo del redondeo de los precios en masa',
     render(<VistaConfiguracion {...props({ puedeEditarMultiploRedondeo: false })} />)
     expect(formMultiplo().input).toBeDisabled()
     expect(screen.getByText('Solo un admin puede cambiarlo.')).toBeInTheDocument()
+  })
+})
+
+// Punto 9 de la segunda pasada de #1644 (#1655): /configuracion guarda en `useState` hasta
+// «Guardar», sin modal. Lo tipeado y no guardado levanta la marca de trabajo en curso, para que la
+// actualización obligatoria de la app no recargue encima; volver al valor precargado la baja.
+describe('VistaConfiguracion — lo tipeado sin guardar es trabajo en curso', () => {
+  const todas = props({
+    puedeEditarMinimo: true,
+    onGuardarAlertasCombos: vi.fn(),
+    puedeEditarAlertasCombos: true,
+    onGuardarDiasAtrasFechaPedido: vi.fn(),
+    puedeEditarDiasAtrasFechaPedido: true,
+  })
+
+  it.each([
+    ['Compra mínima por pedido', '5', 'configuración: compra mínima y envío sin guardar'],
+    ['Preventistas', '5', 'configuración: comisiones sin guardar'],
+    ['Amarillo', '5', 'configuración: alertas de vencimiento sin guardar'],
+    ['Horas', '5', 'configuración: ventana del precio anterior sin guardar'],
+    ['Múltiplo', '5', 'configuración: múltiplo de redondeo sin guardar'],
+    ['Margen mínimo', '5', 'configuración: alertas de combos sin guardar'],
+    ['Días hacia atrás', '5', 'configuración: días hacia atrás del pedido sin guardar'],
+  ])('«%s»', async (etiqueta, tecla, motivo) => {
+    const { motivosDeTrabajoEnCurso, _resetTrabajoEnCursoParaTests } = await import('../../utils/trabajoEnCurso')
+    _resetTrabajoEnCursoParaTests()
+    const user = userEvent.setup()
+    render(<VistaConfiguracion {...todas} />)
+    expect(motivosDeTrabajoEnCurso()).toEqual([])
+    const campo = screen.getByLabelText(etiqueta) as HTMLInputElement
+    const precargado = campo.value
+    await user.type(campo, tecla)
+    expect(motivosDeTrabajoEnCurso()).toEqual([motivo])
+    await user.clear(campo)
+    await user.type(campo, precargado)
+    expect(motivosDeTrabajoEnCurso()).toEqual([])
+  })
+
+  // T4 de la tercera pasada: se comparan números con el lector del campo, no textos. «10,00» sobre
+  // un múltiplo de 10 o «2,0» sobre una comisión de 2 no son cambios; un texto que no se entiende sí.
+  it.each([
+    ['Múltiplo', '10.00', []],
+    ['Preventistas', '2.0', []],
+    ['Múltiplo', '1..0', ['configuración: múltiplo de redondeo sin guardar']],
+  ])('«%s» con «%s»', async (etiqueta, texto, marcas) => {
+    const { motivosDeTrabajoEnCurso, _resetTrabajoEnCursoParaTests } = await import('../../utils/trabajoEnCurso')
+    _resetTrabajoEnCursoParaTests()
+    const user = userEvent.setup()
+    render(<VistaConfiguracion {...todas} />)
+    const campo = screen.getByLabelText(etiqueta)
+    await user.clear(campo)
+    await user.type(campo, texto)
+    expect(motivosDeTrabajoEnCurso()).toEqual(marcas)
   })
 })

@@ -1,8 +1,9 @@
 /**
  * MontoLeido - Debajo de un campo de plata, el monto como la app lo leyó (#1560).
  *
- * El cobrador escribe «150.000» y ve «Se registra: $ 150.000,00» antes de confirmar. Si el
- * campo leyó otra cosa, se nota ahí y no en la boleta. No muestra nada mientras el monto es 0.
+ * El cobrador ve «Se registra: $ 150.000,00» antes de confirmar: lo que el campo leyó, que es lo
+ * que se manda. Si leyó otra cosa (con D17, «150.000» tipeado es $150), se nota ahí y no en la
+ * boleta. No muestra nada mientras el monto es 0.
  */
 import type { ReactElement } from 'react'
 import { formatPrecio } from '../../utils/formatters'

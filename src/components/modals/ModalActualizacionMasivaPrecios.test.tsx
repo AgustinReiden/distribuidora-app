@@ -77,6 +77,15 @@ function renderModal() {
 }
 
 describe('ModalActualizacionMasivaPrecios — confirmación', () => {
+  // B20 (D17): un porcentaje no lleva miles; la tecla del punto es la coma y el menos entra.
+  it('el porcentaje tipeado «-2.5» se ve «-2,5»', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    renderModal()
+    const campo = screen.getByLabelText(/porcentaje de aumento o rebaja/i) as HTMLInputElement
+    await userEvent.type(campo, '-2.5')
+    expect(campo.value).toBe('-2,5')
+  })
+
   it('el confirm se renderiza visible y "Aplicar" dispara la actualización', async () => {
     renderModal()
 

@@ -846,7 +846,7 @@ describe('ModalCompra — vencimientos por línea (migs 223/224)', () => {
     // El badge arranca en "Sin vencimiento" y el primer click ya crea la fila
     // con las unidades libres de la línea: el caso típico no pide tipear nada.
     await user.click(screen.getByRole('button', { name: 'Sin vencimiento' }))
-    expect(screen.getByLabelText('Unidades del vencimiento 1')).toHaveValue(4)
+    expect(screen.getByLabelText('Unidades del vencimiento 1')).toHaveValue('4')
 
     await user.type(screen.getByLabelText('Fecha de vencimiento 1'), '2027-03-01')
 

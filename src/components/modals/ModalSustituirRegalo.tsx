@@ -49,6 +49,9 @@ import { evaluarCambioRegalo, topeSustitutoRegalo } from '../../utils/regaloOtro
 import { formatPrecio } from '../../utils/formatters'
 import type { ProductoDB } from '../../types'
 import type { CambioDeVersion } from '../../utils/versionPedido'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
+import { useClavesDeRenglones } from '../../hooks/useClavesDeRenglones'
 
 export interface ModalSustituirRegaloProps {
   pedidoItemId: string
@@ -108,6 +111,8 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   const notify = useNotification()
   const { data: productos = [] } = useProductosQuery()
   const sustituirMut = useSustituirRegaloMutation()
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   const dividirMut = useDividirRegaloMutation()
   const enviando = sustituirMut.isPending || dividirMut.isPending
 
@@ -132,12 +137,20 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   const productoNuevoId = filas[0]?.productoId ?? ''
   const actualizarFila = (idx: number, cambio: Partial<ParteReparto>) =>
     setFilas(prev => prev.map((f, i) => (i === idx ? { ...f, ...cambio } : f)))
-  const agregarFila = () =>
+  // T6 de la tercera pasada: claves estables por renglón (con el índice, quitar uno le pasaba el
+  // borrador en rojo al de abajo).
+  const clavesFilas = useClavesDeRenglones(filas.length)
+  const agregarFila = () => {
     setFilas(prev => {
       const asignadas = prev.reduce((acc, f) => acc + (Number(f.cantidad) || 0), 0)
       return [...prev, { productoId: '', cantidad: Math.max(cantidadOriginal - asignadas, 0) }]
     })
-  const quitarFila = (idx: number) => setFilas(prev => prev.filter((_, i) => i !== idx))
+    clavesFilas.agregar()
+  }
+  const quitarFila = (idx: number) => {
+    setFilas(prev => prev.filter((_, i) => i !== idx))
+    clavesFilas.quitar(idx)
+  }
   const [motivo, setMotivo] = useState<string>('')
   const [error, setError] = useState<string>('')
   const [avanzadoOpen, setAvanzadoOpen] = useState<boolean>(false)
@@ -294,6 +307,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
     && !faltaBulto
     && !sobreTope
     && !enviando
+    && !ilegibles.hay
 
   // Calculos para el banner didactico (modo B)
   const usosOrigAntes = Number(acumuladorOriginal?.usos_pendientes ?? 0)
@@ -362,6 +376,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   }
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase title="Cambiar regalo" onClose={onClose} maxWidth="max-w-md" onEscapeKeyDown={handleEscapeKeyDown}>
       <div className="p-4 space-y-4">
         {/* Header: regalo actual */}
@@ -386,7 +401,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
             const prodFila = productos.find(p => String(p.id) === String(fila.productoId)) ?? null
             const opciones = esReparto ? opcionesReparto : productosOpcionesSimple
             return (
-              <div key={idx} className="space-y-1">
+              <div key={clavesFilas.de(idx)} className="space-y-1">
                 <div className="flex items-center gap-2">
                   <Combobox<ProductoDB>
                     aria-label={`Producto ${idx + 1}`}
@@ -651,6 +666,8 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
         )}
       </div>
 
+      {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+      <AvisoCamposEnRojo className="mb-2" />
       <div className="flex justify-end gap-2 p-4 border-t bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
         <Button
           onClick={onClose}
@@ -672,6 +689,7 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
         </Button>
       </div>
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   )
 })
 

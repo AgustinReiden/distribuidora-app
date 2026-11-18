@@ -93,6 +93,9 @@ import SelectorConAlta from '../productos/SelectorConAlta'
 import type { OpcionCatalogo } from '../productos/SelectorConAlta'
 import type { CategoriaDB } from '../../hooks/queries/useCategoriasQuery'
 import type { MarcaDB } from '../../hooks/queries/useMarcasQuery'
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
+import { RegistroPropio } from '../ui/RegistroPropio'
 
 
 const ModalProveedor = lazyWithReload(() => import('./ModalProveedor'))
@@ -567,6 +570,8 @@ export default function ModalCompra(props: ModalCompraProps) {
 }
 
 function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = [], onSave, onClose, onCrearProductoRapido, onCrearProveedor, sucursalId = null, usuarioId = null }: ModalCompraProps) {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   const [state, dispatch] = useReducer(compraReducer, initialState)
   const puedeEscanear = useContext(AuthDataContext)?.isAdminOrEncargado ?? false
   const [modalProveedorOpen, setModalProveedorOpen] = useState(false)
@@ -867,6 +872,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
 
   const handleSubmit = (e: FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault()
+    if (ilegibles.hay) return
     dispatch({ type: 'SET_ERROR', payload: '' })
     // Un cargo de la plantilla sin monto no es un error de carga: es un flete
     // que esta factura no trajo. Se pregunta antes de validar el resto.
@@ -1102,6 +1108,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
   // compra; así esa caja le da toda la altura que la pantalla permite, y un
   // "Importar" al pie de una vista previa larga no queda cortado.
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase
       title="Nueva Compra"
       onClose={onClose}
@@ -1313,6 +1320,8 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
               {textoPendientesRevision(pendientesRevision)}
             </p>
           )}
+          {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+          <AvisoCamposEnRojo className="mb-2" />
           <div className="flex gap-3">
             <Button
               type="button"
@@ -1326,7 +1335,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
             <Button
               type="button"
               onClick={handleSubmit}
-              disabled={state.guardando || state.items.length === 0 || pendientesRevision > 0}
+              disabled={state.guardando || state.items.length === 0 || pendientesRevision > 0 || ilegibles.hay}
               loading={state.guardando}
               variant="success"
               size="md"
@@ -1384,6 +1393,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
         </Suspense>
       )}
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   )
 }
 
@@ -1612,6 +1622,8 @@ function ModalCompraEditar({
   compra, productos, proveedores, categorias = [], marcas = [], onClose, onCrearProductoRapido,
   onGuardarEdicion, usuarioId = null, lotes, canCambiarProveedor = false, onCambiarProveedor,
 }: ModalCompraProps & { compra: CompraDBExtended }) {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles()
   // Se hidrata UNA vez, al montar: si la compra se refresca mientras se edita,
   // no se pisa lo tipeado.
   const [hidratada] = useState(() => hidratarCompraGuardada(compra))
@@ -1711,6 +1723,7 @@ function ModalCompraEditar({
   const puedeCambiarProveedor = Boolean(canCambiarProveedor && onCambiarProveedor && compra.estado !== 'cancelada')
 
   const handleGuardar = async () => {
+    if (ilegibles.hay) return
     dispatch({ type: 'SET_ERROR', payload: '' })
     // FRT-1 (#1517): sin los vencimientos de la compra precargados, guardar
     // mandaría la foto vacía (la edición llama a sincronizar_lotes_compra
@@ -1748,6 +1761,7 @@ function ModalCompraEditar({
   }
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase
       title={`Editar Compra #${compra.id}`}
       onClose={onClose}
@@ -1856,6 +1870,8 @@ function ModalCompraEditar({
               <p className="text-sm text-red-600 dark:text-red-400">{state.error}</p>
             </div>
           )}
+          {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+          <AvisoCamposEnRojo className="mb-2" />
           <div className="flex gap-3">
             <Button type="button" onClick={onClose} disabled={state.guardando} variant="secondary" size="md" className="flex-1">
               Cancelar
@@ -1863,7 +1879,7 @@ function ModalCompraEditar({
             <Button
               type="button"
               onClick={handleGuardar}
-              disabled={state.guardando}
+              disabled={state.guardando || ilegibles.hay}
               loading={state.guardando}
               variant="success"
               size="md"
@@ -1876,6 +1892,7 @@ function ModalCompraEditar({
         </div>
       </div>
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   )
 }
 
@@ -2774,6 +2791,10 @@ function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster
 
       {/* Formulario de item rapido */}
       {!ver && state.modoItemRapido && onCrearProductoRapido && (
+        // Su propio registro (T1 de la tercera pasada): el costo en rojo frena «Crear y Agregar»
+        // (si no, creaba el producto con el costo de antes) y no el Guardar de la compra.
+        <RegistroPropio>
+        {({ hay, aviso }) => (
         <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 space-y-2">
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-blue-800 dark:text-blue-300">Crear producto rapido</p>
@@ -2822,10 +2843,11 @@ function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster
             </div>
           </div>
           <CamposClasificacion catalogo={catalogo} valor={clasificacion} onChange={setClasificacion} />
+          {aviso}
           <Button
             type="button"
-            onClick={handleCrearProductoRapido}
-            disabled={!itemRapido.nombre.trim() || creandoItem}
+            onClick={() => { if (!hay) void handleCrearProductoRapido() }}
+            disabled={!itemRapido.nombre.trim() || creandoItem || hay}
             loading={creandoItem}
             variant="primary"
             size="sm"
@@ -2835,6 +2857,8 @@ function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster
             {creandoItem ? 'Creando...' : 'Crear y Agregar'}
           </Button>
         </div>
+        )}
+        </RegistroPropio>
       )}
 
       {/* Lista de items */}
@@ -2875,7 +2899,9 @@ function ItemsList({ items, onActualizarItem, onCondicionItem, onEliminarItem, o
       </div>
       {items.map((item, index) => (
         <ItemRow
-          key={index}
+          // T6 de la tercera pasada: la clave es el producto (y su vez, si se repite), no el índice:
+          // quitar un renglón le pasaba al de abajo el borrador en rojo.
+          key={`${item.productoId}#${items.slice(0, index).filter(i => i.productoId === item.productoId).length}`}
           item={item}
           index={index}
           onActualizarItem={onActualizarItem}
@@ -3302,7 +3328,11 @@ function CrearProductoDesdeLinea({ linea, catalogo, onCrear, onCancelar }: {
     }
   }
 
+  // Su propio registro (T1 de la tercera pasada): el costo en rojo frena «Crear y vincular» (si no,
+  // creaba el producto con el costo de antes) y no el Guardar de la compra.
   return (
+    <RegistroPropio>
+    {({ hay, aviso }) => (
     <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-2 space-y-2">
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
         <div className="sm:col-span-2">
@@ -3341,11 +3371,12 @@ function CrearProductoDesdeLinea({ linea, catalogo, onCrear, onCancelar }: {
         </div>
       </div>
       <CamposClasificacion catalogo={catalogo} valor={clasificacion} onChange={setClasificacion} />
+      {aviso}
       <div className="flex gap-2 pt-1">
         <Button
           type="button"
-          onClick={handleCrear}
-          disabled={!nombreNuevo.trim() || creando}
+          onClick={() => { if (!hay) void handleCrear() }}
+          disabled={!nombreNuevo.trim() || creando || hay}
           loading={creando}
           variant="success"
           size="sm"
@@ -3359,6 +3390,8 @@ function CrearProductoDesdeLinea({ linea, catalogo, onCrear, onCancelar }: {
         </Button>
       </div>
     </div>
+    )}
+    </RegistroPropio>
   )
 }
 

@@ -39,6 +39,9 @@ import {
 } from '../../utils/horariosCliente';
 import type { FranjaHoraria } from '../../utils/horariosCliente';
 import type { ClienteDB, TipoComprobanteVenta } from '../../types';
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles';
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo';
+import { useClavesDeRenglones } from '../../hooks/useClavesDeRenglones';
 
 // Schema CO-LOCADO a propósito (no en lib/schemas.ts): si viviera en ese chunk
 // compartido, un deploy podía dejar la versión vieja cacheada en el PWA y
@@ -227,6 +230,8 @@ const RUBROS_OPCIONES = [
 ];
 
 const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDuplicado, onClose, guardando, isAdmin = false, edicionRestringida = false }: ModalClienteProps) {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles();
   // Ref para scroll a errores
   const formRef = useRef<HTMLDivElement>(null);
   // Guard de duplicados (mig 250): `bloqueo` es el motivo que impide guardar,
@@ -421,7 +426,11 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
   );
 
   // --- Descuentos por categoría (filas dinámicas) ---
+  // T6 de la tercera pasada: claves estables por renglón (con el índice, quitar uno le pasaba el
+  // borrador en rojo al de abajo).
+  const clavesDescuentos = useClavesDeRenglones(form.descuentosPorCategoria.length);
   const agregarDescuentoCategoria = (): void => {
+    clavesDescuentos.agregar();
     setForm(prev => ({
       ...prev,
       descuentosPorCategoria: [...prev.descuentosPorCategoria, { categoria: '', porcentaje: 0 }],
@@ -441,6 +450,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
     }));
   };
   const eliminarDescuentoCategoria = (index: number): void => {
+    clavesDescuentos.quitar(index);
     setForm(prev => ({
       ...prev,
       descuentosPorCategoria: prev.descuentosPorCategoria.filter((_, i) => i !== index),
@@ -587,6 +597,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
     preventistas.find(p => p.id === id)?.nombre ?? 'otro preventista';
 
   const handleSubmit = async (): Promise<void> => {
+    if (ilegibles.hay) return;
     setErrorDocumento(null);
     // Un intento nuevo empieza sin el bloqueo del anterior: el usuario acaba de
     // cambiar la dirección o el nombre justamente para destrabarlo.
@@ -754,6 +765,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
   const inputClass = (field: keyof ClienteFormData): string => `w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white ${errores[field] ? 'border-red-500 bg-red-50 dark:bg-red-900/20' : ''}`;
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase title={cliente ? 'Editar Cliente' : 'Nuevo Cliente'} onClose={onClose}>
       <div ref={formRef} className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
         {bloqueoDuplicado && (
@@ -1263,7 +1275,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
               {form.descuentosPorCategoria.length > 0 && (
                 <div className="space-y-2 mb-2">
                   {form.descuentosPorCategoria.map((row, index) => (
-                    <div key={index} className="flex items-center gap-2">
+                    <div key={clavesDescuentos.de(index)} className="flex items-center gap-2">
                       <input
                         type="text"
                         list="cliente-categorias-disponibles"
@@ -1338,13 +1350,15 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
           )
         )}
       </div>
+      {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+      <AvisoCamposEnRojo className="mb-2" />
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50 dark:bg-gray-800">
         <Button variant="ghost" size="md" onClick={onClose}>Cancelar</Button>
         <Button
           variant="primary"
           size="md"
           onClick={() => { void handleSubmit(); }}
-          disabled={guardando || verificandoDuplicado}
+          disabled={guardando || verificandoDuplicado || ilegibles.hay}
           loading={guardando || verificandoDuplicado}
         >
           {verificandoDuplicado ? 'Verificando...' : 'Guardar'}
@@ -1405,6 +1419,7 @@ const ModalCliente = memo(function ModalCliente({ cliente, onSave, onVerificarDu
         );
       })()}
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   );
 });
 

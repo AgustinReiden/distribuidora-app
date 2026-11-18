@@ -89,13 +89,30 @@ describe('ModalProducto — unidades sueltas por unidad de stock (#950)', () => 
     expect(onSave.mock.calls[0][0].unidades_por_bulto).toBeUndefined()
   })
 
-  it('no acepta un número con decimales', async () => {
+  // B20 (D17, cambió de regla): es un NumberInput entero. «1.5» tipeado se ve «1,5», queda en rojo
+  // con su motivo y no le llega a la ficha; al salir, el campo vuelve a lo que tenía y lo dice.
+  it('no acepta un número con decimales: queda en rojo y no se guarda', async () => {
     const { onSave } = renderFicha(PLACER)
     await userEvent.clear(campo())
     await userEvent.type(campo(), '1.5')
+    expect(campo().value).toBe('1,5')
+    expect(campo()).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('alert')).toHaveTextContent('Van sin coma: para mil escribí 1000 (los puntos de miles los pone el sistema)')
+    // B20 (segunda lente, «lo que está en rojo no se guarda»): la ficha no se guarda con el valor
+    // de antes; el campo sigue en rojo hasta que se corrige.
     await guardar()
+    expect(campo().value).toBe('1,5')
+    expect(campo()).toHaveAttribute('aria-invalid', 'true')
     expect(onSave).not.toHaveBeenCalled()
-    expect(screen.getByText('Debe ser un número entero')).toBeInTheDocument()
+  })
+
+  it('con miles: «1200» se ve «1.200» y se manda 1200', async () => {
+    const { onSave } = renderFicha(PLACER)
+    await userEvent.clear(campo())
+    await userEvent.type(campo(), '1200')
+    expect(campo().value).toBe('1.200')
+    await guardar()
+    expect(onSave.mock.calls[0][0].unidades_por_bulto).toBe(1200)
   })
 
   it('no se confunde con "unidades por bulto/fardo" de la boleta', () => {

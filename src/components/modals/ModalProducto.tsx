@@ -18,7 +18,9 @@ import {
   calcularCostoReal,
   numeroEditable,
   parsePrecio,
+  redondear,
 } from '../../utils/calculations';
+import { numeroConMiles } from '../../utils/normalizarNumero';
 import type { CondicionIva, ProductoDB, ProveedorDBExtended } from '../../types';
 import { OPCIONES_CONDICION_IVA, claveCondicionIva } from '../../utils/condicionIva';
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta';
@@ -27,6 +29,8 @@ import { adicionalDeCompra, conAdicionalDeCompra, costoEditadoEnFicha } from '..
 import { tipoParaCostoDeProducto } from '../../utils/letraComprobante';
 import { lazyWithReload } from '../../utils/lazyWithReload';
 import { soloLoCambiado } from '../../utils/fichaProductoCambios';
+import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles';
+import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo';
 
 // Lazy: solo hace falta al editar, y arrastra la query de grupos de precio.
 const ProductoCondicionesMayoristas = lazyWithReload(() => import('../productos/ProductoCondicionesMayoristas'));
@@ -250,6 +254,8 @@ const getCategoryName = (cat: string | CategoriaOption): string => {
 };
 
 const ModalProducto = memo(function ModalProducto({ producto, categorias, subrubros = [], rubrosConFila, rubrosDesactivados, proveedores = [], onSave, onClose, guardando, esAdmin = false, onCrearCondicionMayorista }: ModalProductoProps) {
+  // B20: los campos de número en rojo frenan el guardado.
+  const ilegibles = useRegistroIlegibles();
   // Zod validation hook
   const { errors, validate, clearFieldError, hasAttemptedSubmit: intentoGuardar } = useZodValidation(modalProductoSchema);
   const errores = errors as ValidationErrors;
@@ -322,6 +328,18 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   // FRG-5). Sin esto, guardar un cambio de subrubro volvía el precio y los costos a
   // los de la apertura si una compra o un aumento masivo los cambió en el medio.
   const [formInicial] = useState<ProductoFormData>(form);
+
+  // Las unidades por bulto/fardo (de la boleta) y las sueltas por unidad de stock (B20: dejaron el
+  // `type="number"`). Vaciar las de la boleta también limpia la etiqueta: sola no tiene sentido y
+  // antes generaba un guardado bloqueado.
+  const cambiarUnidadesFardo = (n: number | undefined): void => {
+    setForm(f => ({ ...f, unidades_de_venta_por_fardo: n, ...(n ? {} : { etiqueta_bulto: undefined }) }));
+    if (intentoGuardar && errores.unidades_de_venta_por_fardo) clearFieldError('unidades_de_venta_por_fardo');
+  };
+  const cambiarUnidadesPorBulto = (n: number | undefined): void => {
+    setForm(f => ({ ...f, unidades_por_bulto: n }));
+    if (intentoGuardar && errores.unidades_por_bulto) clearFieldError('unidades_por_bulto');
+  };
   // null = eligiendo de la lista; un string = escribiendo una nueva.
   const [categoriaNueva, setCategoriaNueva] = useState<string | null>(null);
   const [subrubroNuevo, setSubrubroNuevo] = useState<string | null>(null);
@@ -516,6 +534,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
     : '';
 
   const handleSubmit = (): void => {
+    if (ilegibles.hay) return;
     // La etiqueta es accesoria al fardo: sin unidades configuradas no tiene
     // sentido persistirla. Normalizar acá hace de defensa en profundidad por
     // si la UI dejó pasar un valor (ej. autocompletado del browser).
@@ -614,6 +633,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   const claveActualIva = claveCondicionIva(form.condicion_iva, form.porcentaje_iva);
 
   return (
+<RegistroIlegiblesContext.Provider value={ilegibles.registro}>
     <ModalBase title={producto ? 'Editar Producto' : 'Nuevo Producto'} onClose={onClose} maxWidth="max-w-lg">
       <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
         {/* Informacion basica */}
@@ -800,26 +820,13 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-sm font-medium mb-1">Unidades por bulto/fardo</label>
-            <input
-              type="number"
-              inputMode="decimal"
-              step="0.5"
-              min="0"
-              value={form.unidades_de_venta_por_fardo ?? ''}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => {
-                const val = e.target.value
-                const nuevasUnidades = val === '' ? undefined : Number(val)
-                setForm({
-                  ...form,
-                  unidades_de_venta_por_fardo: nuevasUnidades,
-                  // Si dejan unidades vacío, también limpiar la etiqueta — la etiqueta
-                  // sola no tiene sentido y antes generaba un guardado bloqueado.
-                  ...(nuevasUnidades ? {} : { etiqueta_bulto: undefined })
-                })
-                if (intentoGuardar && errores.unidades_de_venta_por_fardo) {
-                  clearFieldError('unidades_de_venta_por_fardo');
-                }
-              }}
+            {/* B20 (D17): un NumberInput (era `type="number"`): la tecla del punto es la coma y lo
+                que no se entiende no se guarda. */}
+            <NumberInput
+              min={0}
+              value={form.unidades_de_venta_por_fardo ?? null}
+              onChange={(n) => cambiarUnidadesFardo(n)}
+              onVaciar={() => cambiarUnidadesFardo(undefined)}
               className={inputClass('unidades_de_venta_por_fardo')}
               placeholder="ej. 2"
             />
@@ -862,20 +869,14 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
           <label htmlFor="producto-unidades-por-bulto" className="block text-sm font-medium mb-1">
             Unidades sueltas por unidad de stock
           </label>
-          <input
+          {/* B20 (D17): un NumberInput entero (era `type="number"`): una coma no es una cantidad.
+              Sin commitOnChange: confirma al salir, así lo que no se entiende vuelve a lo que había. */}
+          <NumberInput
             id="producto-unidades-por-bulto"
-            type="number"
-            inputMode="numeric"
-            step="1"
-            min="1"
-            value={form.unidades_por_bulto ?? ''}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => {
-              const val = e.target.value
-              setForm({ ...form, unidades_por_bulto: val === '' ? undefined : Number(val) })
-              if (intentoGuardar && errores.unidades_por_bulto) {
-                clearFieldError('unidades_por_bulto');
-              }
-            }}
+            integer
+            value={form.unidades_por_bulto ?? null}
+            onChange={(n) => cambiarUnidadesPorBulto(n)}
+            onVaciar={() => cambiarUnidadesPorBulto(undefined)}
             className={inputClass('unidades_por_bulto')}
             placeholder="ej. 6"
           />
@@ -965,7 +966,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
               <label className="block text-xs font-medium mb-1 text-gray-600">Imp. Internos ($)</label>
               <input
                 type="text"
-                value={(parsePrecio(form.costo_sin_iva) * ((parseFloat(String(form.impuestos_internos)) || 0) / 100)).toFixed(2)}
+                value={numeroConMiles(redondear(parsePrecio(form.costo_sin_iva) * ((parseFloat(String(form.impuestos_internos)) || 0) / 100), 2))}
                 readOnly
                 className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-100"
               />
@@ -976,7 +977,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
               </label>
               <input
                 type="text"
-                value={costosDesdeForm(form).costoReal.toFixed(2)}
+                value={numeroConMiles(redondear(costosDesdeForm(form).costoReal, 2))}
                 readOnly
                 className="w-full px-3 py-2 border-2 border-blue-300 rounded-lg text-sm bg-blue-50 font-semibold"
                 title="Costo unitario final de la última compra: neto + imp. internos (si FC) + flete y cargos prorrateados. La base para fijar precios."
@@ -988,10 +989,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
                 {adicionalCompra !== 0 ? ' + cargos' : ''}
               </label>
               <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                value={costoTotalMostrado ? costoTotalMostrado.toFixed(2) : ''}
+                type="text"
+                value={costoTotalMostrado ? numeroConMiles(redondear(costoTotalMostrado, 2)) : ''}
                 readOnly
                 className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-100"
                 placeholder="0.00"
@@ -1087,10 +1086,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
             <div>
               <label className="block text-xs font-medium mb-1 text-gray-600">Precio Neto (calculado)</label>
               <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                value={form.precio_sin_iva || ''}
+                type="text"
+                value={form.precio_sin_iva ? numeroConMiles(Number(form.precio_sin_iva)) : ''}
                 readOnly
                 className="w-full px-3 py-2 border rounded-lg bg-gray-100"
                 placeholder="0.00"
@@ -1226,14 +1223,17 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
           </Suspense>
         )}
       </div>
+      {/* N4/T2: dice por qué está frenado el Guardar y lleva al campo en rojo. */}
+      <AvisoCamposEnRojo className="mb-2" />
       <div className="flex justify-end space-x-3 p-4 border-t bg-gray-50">
         {/* El footer (bg-gray-50) no tiene dark:bg, así que sigue claro en modo
             oscuro: el className pisa también dark:text/dark:hover para que
             siga siendo texto oscuro sobre fondo claro, como el <button> original. */}
         <Button variant="ghost" size="md" onClick={onClose} className="text-gray-700 hover:bg-gray-200 dark:text-gray-700 dark:hover:bg-gray-200">Cancelar</Button>
-        <Button variant="primary" size="md" onClick={handleSubmit} disabled={guardando} loading={guardando}>Guardar</Button>
+        <Button variant="primary" size="md" onClick={handleSubmit} disabled={guardando || ilegibles.hay} loading={guardando}>Guardar</Button>
       </div>
     </ModalBase>
+    </RegistroIlegiblesContext.Provider>
   );
 });
 

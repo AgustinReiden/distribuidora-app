@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { formatearTecleo } from './normalizarNumero'
 import {
   PUESTOS,
   conceptoDeMovimiento,
@@ -17,9 +18,7 @@ import {
   etiquetaPuesto,
   fechaCompleta,
   filtrarPersonal,
-  cerrarMontoTipeado,
   formatCuil,
-  formatearMontoTipeado,
   inicioDelPeriodo,
   montoATexto,
   normalizarCuil,
@@ -499,11 +498,17 @@ describe('parseMonto', () => {
     ['10,5', 10.5],
     ['280.000,', 280000],
     ['0,', 0],
+    // B20 (decisión del dueño, 17/11): más de dos decimales se guardan al centavo, con aviso.
+    ['280,000', 280],
+    ['1500,555', 1500.56],
+    ['1.2345', 1.23],
+    // El lector de toda la app: la planilla en inglés con los dos separadores también se lee.
+    ['1,234.56', 1234.56],
   ])('lee %j como %d', (texto, esperado) => {
     expect(parseMonto(texto)).toBe(esperado)
   })
 
-  it.each(['', '   ', '-280.000', '280,000', '1,234.56', '280.000.', '12abc', 'abc', '1.2345', '280.00.0', '$'])(
+  it.each(['', '   ', '-280.000', '−5', '$ -10', '280.000.', '12abc', 'abc', '280.00.0', '$', '1,234,567'])(
     'no entiende %j: da null, nunca 0',
     texto => {
       expect(parseMonto(texto)).toBeNull()
@@ -511,25 +516,25 @@ describe('parseMonto', () => {
   )
 })
 
-describe('formatearMontoTipeado', () => {
+// B20 (D17, cambió de regla): el importe de gastos y personal se tipea como todo número. El punto
+// y la coma tipeados son decimales y el punto de miles lo pone el campo; antes un punto con tres
+// dígitos detrás era de miles («1.500» era mil quinientos). Lo tipea `formatearTecleo` (el de
+// `InputMonto`) y lo lee `parseMonto`.
+describe('el importe tipeado (formatearTecleo + parseMonto)', () => {
   /** Tipea `teclas` de a una al final, como en el campo. */
   const tipear = (teclas: string, desde = ''): string =>
-    [...teclas].reduce((campo, tecla) => formatearMontoTipeado(campo + tecla, campo).texto, desde)
+    [...teclas].reduce((campo, tecla) => formatearTecleo(campo, campo + tecla, campo.length + 1, { negativo: true }).texto, desde)
 
   it.each([
     ['280000', '280.000'],
     ['1234567', '1.234.567'],
     ['1500,5', '1.500,5'],
     ['1500,55', '1.500,55'],
-    ['1500,555', '1.500,555'],
-    ['12.', '12.'],
-    ['12.5', '12.5'],
-    ['1500.', '1.500.'],
-    ['1.500', '1.500'],
-    ['280.000', '280.000'],
-    ['1.500.000', '1.500.000'],
-    ['1.5000', '15.000'],
-    [',5', '0,5'],
+    ['1500.5', '1.500,5'],
+    ['12.5', '12,5'],
+    ['1.500', '1,500'],
+    ['280.000', '280,000'],
+    [',5', ',5'],
     ['0005', '5'],
     ['12a3', '123'],
     ['-500', '-500'],
@@ -540,67 +545,48 @@ describe('formatearMontoTipeado', () => {
   it.each([
     ['280000', 280000],
     ['1500,55', 1500.55],
-    ['1.500', 1500],
-    ['1.500,5', 1500.5],
-    ['12.', 12],
+    ['1500.55', 1500.55],
     ['12.5', 12.5],
-    ['1500.5', 1500.5],
     ['1234567,8', 1234567.8],
-  ])('tipear %j y salir del campo se lee %d', (teclas, esperado) => {
-    expect(parseMonto(cerrarMontoTipeado(tipear(teclas)))).toBe(esperado)
+  ])('tipear %j se lee %d', (teclas, esperado) => {
+    expect(parseMonto(tipear(teclas))).toBe(esperado)
   })
 
-  it.each(['280,000', '-3000', '1500,555'])('%j queda a la vista para que parseMonto lo rechace', teclas => {
-    expect(parseMonto(cerrarMontoTipeado(tipear(teclas)))).toBeNull()
+  // «1.500» y «280.000» tipeados son decimales con tres dígitos: parseMonto los rechaza (no los lee
+  // como 1,5 ni como 280, ni como miles), y el formulario dice «Escribí el monto con números».
+  // Más de dos decimales se guardan al centavo (decisión del dueño, 17/11): el campo lo avisa.
+  it.each([
+    ['1.500', 1.5],
+    ['280.000', 280],
+    ['1500,555', 1500.56],
+  ])('tipear %j se guarda al centavo: %d', (teclas, esperado) => {
+    expect(parseMonto(tipear(teclas))).toBe(esperado)
+  })
+
+  it('el menos tipeado queda a la vista para que parseMonto lo rechace', () => {
+    expect(parseMonto(tipear('-3000'))).toBeNull()
   })
 
   it('al borrar, los puntos son de miles: «1.500» sin el último 0 es 150, no 1,50', () => {
-    expect(formatearMontoTipeado('1.50', '1.500').texto).toBe('150')
-    expect(formatearMontoTipeado('1.234.56', '1.234.567').texto).toBe('123.456')
-    expect(formatearMontoTipeado('1.500', '1.500,').texto).toBe('1.500')
+    expect(formatearTecleo('1.500', '1.50', 4).texto).toBe('150')
+    expect(formatearTecleo('1.234.567', '1.234.56', 8).texto).toBe('123.456')
   })
 
-  it('un dígito más después de los miles no es decimal', () => {
-    expect(formatearMontoTipeado('1.5005', '1.500').texto).toBe('15.005')
-  })
-
-  it('pegado: el punto con dos decimales queda pendiente, con tres son miles', () => {
-    expect(formatearMontoTipeado('12.50', '').texto).toBe('12.50')
-    expect(formatearMontoTipeado('$ 280.000', '').texto).toBe('280.000')
-    expect(formatearMontoTipeado('280.000,50', '').texto).toBe('280.000,50')
+  it('pegado: se lee como se muestra la plata', () => {
+    expect(formatearTecleo('', '12.50', 5).texto).toBe('12,50')
+    expect(formatearTecleo('', '$ 280.000', 9).texto).toBe('280.000')
+    expect(formatearTecleo('', '280.000,50', 10).texto).toBe('280.000,50')
+    expect(parseMonto(formatearTecleo('', '1.250,50', 8).texto)).toBe(1250.5)
   })
 
   it('el cursor queda después del mismo dígito', () => {
-    // «1.500» → tipea un 2 después del 1: «12.500» y el cursor después del 2.
-    expect(formatearMontoTipeado('12.500', '1.500', 2)).toEqual({ texto: '12.500', cursor: 2 })
-    // «12.500» → borra el 2: «1.500» y el cursor después del 1.
-    expect(formatearMontoTipeado('1.500', '12.500', 1)).toEqual({ texto: '1.500', cursor: 1 })
-    // «150» → tipea un 0 al final: «1.500» y el cursor al final.
-    expect(formatearMontoTipeado('1500', '150', 4)).toEqual({ texto: '1.500', cursor: 5 })
-    // «12» → tipea un punto: queda pendiente y el cursor después de él.
-    expect(formatearMontoTipeado('12.', '12', 3)).toEqual({ texto: '12.', cursor: 3 })
-    expect(formatearMontoTipeado('1.500,57', '1.500,5', 8)).toEqual({ texto: '1.500,57', cursor: 8 })
+    expect(formatearTecleo('1.500', '12.500', 2)).toEqual({ texto: '12.500', cursor: 2 })
+    expect(formatearTecleo('12.500', '1.500', 1)).toEqual({ texto: '1.500', cursor: 1 })
+    expect(formatearTecleo('150', '1500', 4)).toEqual({ texto: '1.500', cursor: 5 })
   })
 
-  it('vacío queda vacío', () => {
-    expect(formatearMontoTipeado('', '5')).toEqual({ texto: '', cursor: 0 })
-  })
-})
-
-describe('cerrarMontoTipeado', () => {
-  it.each([
-    ['12.5', '12,5'],
-    ['12.50', '12,50'],
-    ['1.500.5', '1.500,5'],
-    ['12.', '12'],
-    ['.5', '0,5'],
-    ['1.500', '1.500'],
-    ['1.500,5', '1.500,5'],
-    ['150', '150'],
-    ['', ''],
-    ['-12.5', '-12,5'],
-  ])('%j → %j', (texto, esperado) => {
-    expect(cerrarMontoTipeado(texto)).toBe(esperado)
+  it('parseMonto no da Infinity con una tira enorme de dígitos', () => {
+    expect(parseMonto('9'.repeat(400))).toBeNull()
   })
 })
 

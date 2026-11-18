@@ -82,7 +82,7 @@ describe('ModalPagoPedido — botón de entrega del chofer', () => {
     const onConfirmar = vi.fn()
     const onEntregarSinPago = vi.fn().mockResolvedValue(undefined)
     renderModal([], false, { onConfirmar, onEntregarSinPago })
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     // La fecha elegida, no la de hoy: muerde si la entrega queda fija en hoy (L6, #1603).
     const d = new Date(`${fechaLocalISO()}T12:00:00`)
     d.setDate(d.getDate() - 1)
@@ -99,7 +99,7 @@ describe('ModalPagoPedido — botón de entrega del chofer', () => {
   it('un cobro parcial registra sólo lo cobrado: el resto queda de saldo', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     renderModal([], false, { onConfirmar })
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     fireEvent.change(inputMonto(), { target: { value: '10000' } })
     fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
 
@@ -154,7 +154,7 @@ describe('ModalPagoPedido — quién lo repartió (#1204)', () => {
   it('el chofer elegido viaja con el pago', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     renderModal([], false, { pedirChofer: true, onConfirmar })
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     fireEvent.change(screen.getByLabelText('¿Quién lo repartió?'), { target: { value: 'c-1' } })
     fireEvent.click(screen.getByRole('button', { name: /^entregar y registrar pago$/i }))
 
@@ -165,7 +165,7 @@ describe('ModalPagoPedido — quién lo repartió (#1204)', () => {
   it('el retiro en depósito viaja con la entrega a cuenta corriente', async () => {
     const onEntregarSinPago = vi.fn().mockResolvedValue(undefined)
     renderModal([], false, { pedirChofer: true, onEntregarSinPago })
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
     fireEvent.change(screen.getByLabelText('¿Quién lo repartió?'), { target: { value: '__retiro__' } })
     fireEvent.click(screen.getByRole('button', { name: /^entregar a cuenta corriente$/i }))
 
@@ -223,14 +223,14 @@ describe('ModalPagoPedido — monto sugerido', () => {
     )
 
     // El saldo (21.600 - 10.000), no el total. Ese era el bug.
-    await waitFor(() => expect(inputMonto().value).toBe('11600'))
+    await waitFor(() => expect(inputMonto().value).toBe('11.600'))
     // Y por lo tanto el botón de cobrar queda usable, sin retipear nada.
     expect(screen.queryByText(/excede el saldo pendiente/i)).toBeNull()
   })
 
   it('sin pagos previos sugiere el total entero', async () => {
     renderModal([], false)
-    await waitFor(() => expect(inputMonto().value).toBe('21600'))
+    await waitFor(() => expect(inputMonto().value).toBe('21.600'))
   })
 })
 

@@ -19,7 +19,9 @@ const choferes = [{ id: 'c-1', nombre: 'Chofer Uno' }] as unknown as PerfilDB[]
 const inputMonto = (): HTMLInputElement => screen.getAllByPlaceholderText(/0[.,]00/i)[0] as HTMLInputElement
 
 describe('ModalPagoPedido · el monto leído', () => {
-  it('«150.000» se muestra como $ 150.000,00 y se registra 150000', async () => {
+  // Pegado (de una sola vez, como `fireEvent.change`), «150.000» se lee como se muestra la plata.
+  // Tipeado tecla por tecla sería «150,000» = $150 (D17): eso lo cubren NumberInput y la tabla.
+  it('«150.000» pegado se muestra como $ 150.000,00 y se registra 150000', async () => {
     const onConfirmar = vi.fn().mockResolvedValue(undefined)
     render(
       <ModalPagoPedido
@@ -34,7 +36,7 @@ describe('ModalPagoPedido · el monto leído', () => {
         guardando={false}
       />,
     )
-    await waitFor(() => expect(inputMonto().value).toBe('300000'))
+    await waitFor(() => expect(inputMonto().value).toBe('300.000'))
 
     fireEvent.change(inputMonto(), { target: { value: '150.000' } })
 
