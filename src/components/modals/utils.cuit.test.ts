@@ -72,6 +72,23 @@ describe('errorDeCuit', () => {
   it('pero si se cambia a otro inválido sí se rechaza', () => {
     expect(errorDeCuit('20-12345678-8', '20-12345678-9')).not.toBeNull()
   })
+
+  // B17 (#1561): el campo CUIT exigía 11 dígitos y los DNI se cargaban rellenados con ceros
+  // (00-0NNNNNNN-D). Uno de cada once pasa el dígito verificador: el prefijo lo frena igual.
+  it('un DNI rellenado con ceros no pasa como CUIT, aunque el dígito verificador coincida', () => {
+    expect(validarCuit('00-03012346-8')).toBe(true)
+    expect(errorDeCuit('00-03012346-8')).toMatch(/no empieza con 00.*elegí «DNI»/)
+    expect(errorDeCuit('00-03012345-6')).toMatch(/no empieza con 00/)
+  })
+
+  // El campo CUIT era obligatorio y se inventaba un número corto: el campo lo rellenaba con ceros.
+  it('un número inventado rellenado con ceros no pasa como CUIT y dice que se puede dejar vacío', () => {
+    expect(errorDeCuit('00-00000123-4')).toMatch(/no empieza con 00.*dejá el campo vacío/)
+  })
+
+  it('el de una ficha vieja que no se tocó no bloquea guardar otros cambios', () => {
+    expect(errorDeCuit('00-03012345-6', '00-03012345-6')).toBeNull()
+  })
 })
 
 describe('errorDeDocumento', () => {
@@ -83,6 +100,12 @@ describe('errorDeDocumento', () => {
     expect(errorDeDocumento('DNI', '1234567')).toBeNull()
     expect(errorDeDocumento('DNI', '12345678')).toBeNull()
     expect(errorDeDocumento('DNI', '123456')).toBe('El DNI debe tener 7 u 8 dígitos')
+  })
+
+  it('un DNI con ceros de adelante cuenta sus cifras sin ellos (B17)', () => {
+    expect(errorDeDocumento('DNI', '01234567')).toBeNull()
+    expect(errorDeDocumento('DNI', '0012345')).toBe('El DNI debe tener 7 u 8 dígitos')
+    expect(errorDeDocumento('DNI', '00000123')).toBe('El DNI debe tener 7 u 8 dígitos')
   })
 
   it('vacío se permite en los dos tipos', () => {

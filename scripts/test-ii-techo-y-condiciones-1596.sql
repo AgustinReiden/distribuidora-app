@@ -41,6 +41,8 @@
 --
 --   psql "$DATABASE_URL" -1 -f scripts/test-ii-techo-y-condiciones-1596.sql
 
+-- El día es el argentino, no el de la sesión: entre las 21 y las 24 de Argentina CURRENT_DATE ya es mañana y el
+-- sistema (que mide con _tablero_hoy()) rechaza la fecha del ensayo como futura (B13d).
 CREATE OR REPLACE FUNCTION pg_temp.t_si(p_f text[], p_ok boolean, p_msg text)
 RETURNS text[] LANGUAGE sql AS $fn$
   SELECT CASE WHEN COALESCE(p_ok, false) THEN p_f ELSE p_f || p_msg END;
@@ -135,14 +137,14 @@ RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   f text[] := '{}'; v_e1 bigint; v_e2 bigint; v_p bigint; v_p2 bigint; v_r text;
 BEGIN
-  v_e1 := pg_temp.t_encuadre('cigarrillos', 0.70, CURRENT_DATE - 1);
+  v_e1 := pg_temp.t_encuadre('cigarrillos', 0.70, public._tablero_hoy() - 1);
   v_r := pg_temp.t_err(format('SELECT pg_temp.t_prod(%s, %s)', p_suc, v_e1));
   f := pg_temp.t_si(f, v_r = 'ok', format('el alta en un encuadre al 70 %%: %s', v_r));
   SELECT id INTO v_p FROM public.productos WHERE ii_encuadre_id = v_e1;
   f := pg_temp.t_si(f, pg_temp.t_ii(v_p) = 233.3333, format('la ficha al 70 %% quedó en %s, esperado 233.3333', pg_temp.t_ii(v_p)));
-  v_e2 := pg_temp.t_encuadre('alcohol', 0.20, CURRENT_DATE - 10);
+  v_e2 := pg_temp.t_encuadre('alcohol', 0.20, public._tablero_hoy() - 10);
   v_p2 := pg_temp.t_prod(p_suc, v_e2);
-  v_r := pg_temp.t_err(format('SELECT public.cambiar_alicuota_ii(%s, 0.55, CURRENT_DATE)', v_e2));
+  v_r := pg_temp.t_err(format('SELECT public.cambiar_alicuota_ii(%s, 0.55, public._tablero_hoy())', v_e2));
   f := pg_temp.t_si(f, v_r = 'ok' AND pg_temp.t_ii(v_p2) = 122.2222,
                     format('subir al 55 %% con una ficha adentro: %s, ficha %s (esperado 122.2222)', v_r, pg_temp.t_ii(v_p2)));
   RETURN jsonb_build_object('fallas', to_jsonb(f));
@@ -154,13 +156,13 @@ RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   f text[] := '{}'; v_e1 bigint; v_e2 bigint; v_p1 bigint; v_p2 bigint; v_r text;
 BEGIN
-  v_e1 := pg_temp.t_encuadre('E1', 0.20, CURRENT_DATE - 30);
-  v_e2 := pg_temp.t_encuadre('E2', 0.30, CURRENT_DATE - 30);
+  v_e1 := pg_temp.t_encuadre('E1', 0.20, public._tablero_hoy() - 30);
+  v_e2 := pg_temp.t_encuadre('E2', 0.30, public._tablero_hoy() - 30);
   v_p1 := pg_temp.t_prod(p_suc, v_e1);
   v_p2 := pg_temp.t_prod(p_suc, v_e2);
-  v_r := pg_temp.t_err(format('SELECT public.cambiar_alicuota_ii(%s, 0.60, CURRENT_DATE + 1)', v_e2));
+  v_r := pg_temp.t_err(format('SELECT public.cambiar_alicuota_ii(%s, 0.60, public._tablero_hoy() + 1)', v_e2));
   f := pg_temp.t_si(f, v_r = 'ok', format('programar E2 al 60 %%: %s', v_r));
-  PERFORM public.cambiar_alicuota_ii(v_e1, 0.25, CURRENT_DATE + 1);
+  PERFORM public.cambiar_alicuota_ii(v_e1, 0.25, public._tablero_hoy() + 1);
   PERFORM pg_temp.t_manana(ARRAY[v_e1, v_e2]);
   v_r := pg_temp.t_err('SELECT public.refrescar_ii_productos()');
   f := pg_temp.t_si(f, v_r = 'ok', format('refrescar_ii_productos(): %s', v_r));
@@ -177,12 +179,12 @@ RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   f text[] := '{}'; v_e1 bigint; v_e2 bigint; v_p1 bigint; v_p2 bigint; v_r text;
 BEGIN
-  v_e1 := pg_temp.t_encuadre('E1', 0.20, CURRENT_DATE - 30);
-  v_e2 := pg_temp.t_encuadre('E2', 0.30, CURRENT_DATE - 30);
+  v_e1 := pg_temp.t_encuadre('E1', 0.20, public._tablero_hoy() - 30);
+  v_e2 := pg_temp.t_encuadre('E2', 0.30, public._tablero_hoy() - 30);
   v_p1 := pg_temp.t_prod(p_suc, v_e1);
   v_p2 := pg_temp.t_prod(p_suc, v_e2);
-  PERFORM public.cambiar_alicuota_ii(v_e1, 0.25, CURRENT_DATE + 1);
-  PERFORM public.cambiar_alicuota_ii(v_e2, 0.40, CURRENT_DATE + 1);
+  PERFORM public.cambiar_alicuota_ii(v_e1, 0.25, public._tablero_hoy() + 1);
+  PERFORM public.cambiar_alicuota_ii(v_e2, 0.40, public._tablero_hoy() + 1);
   PERFORM pg_temp.t_manana(ARRAY[v_e1, v_e2]);
   -- Las fichas de E2 no se pueden escribir: un CHECK del ensayo, que no valida lo que hay.
   EXECUTE format('ALTER TABLE public.productos ADD CONSTRAINT zz_ensayo_1596 CHECK (ii_encuadre_id <> %s OR impuestos_internos < 50) NOT VALID', v_e2);
@@ -201,13 +203,13 @@ RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   f text[] := '{}'; v_e1 bigint; v_e2 bigint; v_p1 bigint; v_p2 bigint; v_r text;
 BEGIN
-  v_e1 := pg_temp.t_encuadre('E1', 0.20, CURRENT_DATE - 30);
-  v_e2 := pg_temp.t_encuadre('E2', 0.20, CURRENT_DATE - 30);
+  v_e1 := pg_temp.t_encuadre('E1', 0.20, public._tablero_hoy() - 30);
+  v_e2 := pg_temp.t_encuadre('E2', 0.20, public._tablero_hoy() - 30);
   v_p1 := pg_temp.t_prod(p_suc, v_e1);
   v_p2 := pg_temp.t_prod(p_suc, v_e2);
   -- Una regla ajena que frena la ficha de E1 al 30 % (42,8571).
   EXECUTE format('ALTER TABLE public.productos ADD CONSTRAINT zz_ensayo_1596_h2 CHECK (id <> %s OR impuestos_internos <> 42.8571) NOT VALID', v_p1);
-  v_r := pg_temp.t_err(format('SELECT public.cambiar_alicuota_ii(%s, 0.30, CURRENT_DATE)', v_e1));
+  v_r := pg_temp.t_err(format('SELECT public.cambiar_alicuota_ii(%s, 0.30, public._tablero_hoy())', v_e1));
   f := pg_temp.t_si(f, v_r LIKE '23514 %zz_ensayo_1596_h2%', format('el cambio de tasa tendría que fallar con el motivo: %s', v_r));
   f := pg_temp.t_si(f, pg_temp.t_ii(v_p1) = 25
                        AND (SELECT tasa_nominal FROM public.ii_alicuotas WHERE encuadre_id = v_e1 AND vigente_hasta IS NULL) = 0.2,
@@ -216,7 +218,7 @@ BEGIN
   f := pg_temp.t_si(f, pg_temp.t_deriva(ARRAY[v_e1, v_e2]) = 0,
                     format('II-A ve %s fichas con deriva', pg_temp.t_deriva(ARRAY[v_e1, v_e2])));
   -- El otro encuadre se sigue cambiando normalmente.
-  v_r := pg_temp.t_err(format('SELECT public.cambiar_alicuota_ii(%s, 0.30, CURRENT_DATE)', v_e2));
+  v_r := pg_temp.t_err(format('SELECT public.cambiar_alicuota_ii(%s, 0.30, public._tablero_hoy())', v_e2));
   f := pg_temp.t_si(f, v_r = 'ok' AND pg_temp.t_ii(v_p2) = 42.8571, format('el otro encuadre: %s, ficha %s', v_r, pg_temp.t_ii(v_p2)));
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
@@ -229,15 +231,15 @@ DECLARE
 BEGIN
   INSERT INTO public.ii_encuadres (nombre) VALUES ('ZZ ensayo 1596 I4 ' || gen_random_uuid()) RETURNING id INTO v_e;
   FOR c IN SELECT * FROM (VALUES ('0.995'), ('1'), ('-0.01'), ($$'NaN'$$), ('NULL')) AS t(v) LOOP
-    v_r := pg_temp.t_err(format('SELECT public.cambiar_alicuota_ii(%s, %s::numeric, CURRENT_DATE)', v_e, c.v));
+    v_r := pg_temp.t_err(format('SELECT public.cambiar_alicuota_ii(%s, %s::numeric, public._tablero_hoy())', v_e, c.v));
     f := pg_temp.t_si(f, v_r LIKE '22023 %99 %%', format('cambiar_alicuota_ii con %s: %s', c.v, v_r));
   END LOOP;
-  v_r := pg_temp.t_err(format('SELECT public.cambiar_alicuota_ii(%s, 0.99, CURRENT_DATE)', v_e));
+  v_r := pg_temp.t_err(format('SELECT public.cambiar_alicuota_ii(%s, 0.99, public._tablero_hoy())', v_e));
   f := pg_temp.t_si(f, v_r = 'ok', format('cambiar_alicuota_ii con 0,99: %s', v_r));
   -- Por la tabla, en un encuadre sin alícuotas (así no choca con la vigencia de arriba).
   INSERT INTO public.ii_encuadres (nombre) VALUES ('ZZ ensayo 1596 I4b ' || gen_random_uuid()) RETURNING id INTO v_e;
   FOR c IN SELECT * FROM (VALUES ('0.995', 1), ($$'NaN'$$, 2), ('-0.01', 3)) AS t(v, n) LOOP
-    v_r := pg_temp.t_err(format('INSERT INTO public.ii_alicuotas (encuadre_id, tasa_nominal, vigente_desde, vigente_hasta) VALUES (%s, %s, CURRENT_DATE + %s, CURRENT_DATE + %s)', v_e, c.v, c.n, c.n));
+    v_r := pg_temp.t_err(format('INSERT INTO public.ii_alicuotas (encuadre_id, tasa_nominal, vigente_desde, vigente_hasta) VALUES (%s, %s, public._tablero_hoy() + %s, public._tablero_hoy() + %s)', v_e, c.v, c.n, c.n));
     f := pg_temp.t_si(f, v_r LIKE '23514 %ii_alicuotas_tasa_rango%', format('ii_alicuotas con %s: %s', c.v, v_r));
   END LOOP;
   RETURN jsonb_build_object('fallas', to_jsonb(f));

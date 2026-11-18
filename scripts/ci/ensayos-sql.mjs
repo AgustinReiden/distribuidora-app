@@ -23,6 +23,8 @@
  * Uso:  GATE_DB_CONTENEDOR=<contenedor con la semilla> node scripts/ci/ensayos-sql.mjs
  *       [--solo <fragmento>]   corre sólo los que lo contienen
  *       [--escribir-excepciones]  imprime el JSON con los que fallan (para armar la lista)
+ *       [--tz Pacific/Kiritimati]  (o ENSAYOS_PGTZ) corre la SESIÓN en esa zona: con una donde ya es «mañana» respecto de
+ *                              Argentina, un ensayo que arma sus datos con CURRENT_DATE falla como falla de noche (B13d)
  * NUNCA contra prod: los ensayos escriben (y se deshacen), y algunos no se deshacen.
  */
 import { readdirSync, readFileSync } from 'node:fs';
@@ -33,6 +35,10 @@ import { destino, esLocal, psqlCompleto, verificarSemilla } from '../lib/pg.mjs'
 const args = process.argv.slice(2);
 const solo = args.includes('--solo') ? args[args.indexOf('--solo') + 1] : null;
 const escribir = args.includes('--escribir-excepciones');
+// Zona horaria de la SESIÓN (PGTZ) con la que corren los ensayos: con una donde ya es «mañana» respecto de Argentina
+// (Pacific/Kiritimati, UTC+14) un ensayo que arma sus datos con CURRENT_DATE le manda al sistema una fecha futura, como
+// pasa de noche (21 a 24 de Argentina) con el servidor en UTC. Por línea de comando o por ENSAYOS_PGTZ.
+const tz = args.includes('--tz') ? args[args.indexOf('--tz') + 1] : process.env.ENSAYOS_PGTZ || undefined;
 
 const d = destino({ GATE_DB_CONTENEDOR: process.env.GATE_DB_CONTENEDOR, GATE_DB_URL: process.env.GATE_DB_URL });
 if (!d) {
@@ -45,6 +51,7 @@ if (!esLocal(d)) {
 }
 
 verificarSemilla(d);
+if (tz) console.log(`Los ensayos corren con la sesión en la zona ${tz} (PGTZ): CURRENT_DATE es el día de esa zona.`);
 
 const carpeta = new URL('../', import.meta.url);
 const lista = JSON.parse(readFileSync(new URL('../ensayos-sql-excepciones.json', import.meta.url), 'utf8'));
@@ -65,7 +72,7 @@ const t0 = Date.now();
 for (const f of archivos) {
   const sql = readFileSync(new URL(f, carpeta), 'utf8').replaceAll('\r\n', '\n');
   const t = Date.now();
-  const r = psqlCompleto(sql, { destino: d });
+  const r = psqlCompleto(sql, { destino: d, tz });
   const { ok, firma: motivo } = veredicto(`${r.stdout}\n${r.stderr}`);
   resultados.push({ f, ok, motivo, seg: (Date.now() - t) / 1000 });
   console.log(`${ok ? 'OK   ' : 'FALLA'} ${f}${ok ? '' : `  ← ${motivo}`}  (${((Date.now() - t) / 1000).toFixed(1)} s)`);

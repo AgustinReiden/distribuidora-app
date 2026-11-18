@@ -527,6 +527,7 @@ export {
   useNotasCreditoByCompraQuery,
   useNotasCreditoResumenQuery,
   useRegistrarNotaCreditoMutation,
+  useAnularNotaCreditoCompraMutation,
 } from './useNotasCreditoQuery'
 export type { NCResumen } from './useNotasCreditoQuery'
 

@@ -231,6 +231,84 @@ describe("ModalCompra modo 'ver': lo que mostraba ModalDetalleCompra", () => {
   })
 })
 
+describe("ModalCompra modo 'ver': anular una nota de crédito (B18 de #1603, mig 523)", () => {
+  const anulada = {
+    id: '6', numero_nota: 'NC-0002', fecha: '2026-09-25', total: 43100, motivo: 'Descuento por volumen', tipo: 'ajuste' as const,
+    anulada: true, anulada_at: '2026-11-14T15:00:00Z', anulada_por_nombre: 'Ana Depósito', motivo_anulacion: 'Era de otra compra', items: [],
+  }
+
+  it('la nota anulada se sigue mostrando, marcada, con quién, cuándo y por qué; no ofrece anular ni cuenta', () => {
+    renderVer({}, { notasCredito: [anulada], onAnularNotaCredito: vi.fn() })
+    expect(screen.getByText('NC-0002')).toBeInTheDocument()
+    expect(screen.getByText('Anulada')).toBeInTheDocument()
+    const detalle = screen.getByTestId('nc-anulada')
+    expect(detalle).toHaveTextContent(/Anulada el \d{1,2}\/11\/2026 por Ana Depósito: Era de otra compra/)
+    expect(screen.queryByRole('button', { name: /Anular la nota/ })).toBeNull()
+    // Un ajuste anulado no abarata la compra.
+    expect(screen.queryByTestId('costo-efectivo')).toBeNull()
+  })
+
+  it('una compra cuya única nota está anulada ofrece "Anular Compra" (H13)', () => {
+    renderVer({}, { notasCredito: [anulada] })
+    expect(screen.getByRole('button', { name: 'Anular Compra' })).toBeInTheDocument()
+    expect(screen.queryByText('Tiene notas de crédito: no se puede anular')).toBeNull()
+  })
+
+  it('"Anular" pide el motivo ADENTRO del modal y llama con la nota y el motivo', async () => {
+    const onAnularNotaCredito = vi.fn(() => Promise.resolve())
+    const { user } = renderVer({}, { onAnularNotaCredito })
+    await user.click(screen.getByRole('button', { name: 'Anular la nota NC-0001' }))
+    const grupo = screen.getByRole('group', { name: 'Anular nota de crédito' })
+    // Adentro del Dialog de la compra: si quedara detrás del overlay, userEvent no podría tocarlo.
+    expect(screen.getByRole('dialog')).toContainElement(grupo)
+    // Sin motivo no anula.
+    await user.click(within(grupo).getByRole('button', { name: 'Anular nota de crédito' }))
+    expect(within(grupo).getByRole('alert')).toHaveTextContent('Escribí por qué se anula la nota')
+    expect(onAnularNotaCredito).not.toHaveBeenCalled()
+
+    await user.type(within(grupo).getByLabelText(/Por qué se anula/), 'Se cargó en la compra equivocada')
+    await user.click(within(grupo).getByRole('button', { name: 'Anular nota de crédito' }))
+    await waitFor(() => expect(onAnularNotaCredito).toHaveBeenCalledWith('5', 'Se cargó en la compra equivocada'))
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Anular nota de crédito' })).toBeNull())
+  })
+
+  it('el rechazo del server se muestra tal cual, adentro, y el formulario queda abierto', async () => {
+    const motivoServer = 'Esta nota es anterior al 10/11/2026 y no se puede anular desde acá: cuando se cargó no corrigió el costo promedio ni devolvió las unidades a su lote, y anularla desharía movimientos que no existieron. Si la devolución no salió, corregí el stock desde la ficha del producto.'
+    const onAnularNotaCredito = vi.fn(() => Promise.reject(new Error(motivoServer)))
+    const { user } = renderVer({}, { onAnularNotaCredito })
+    await user.click(screen.getByRole('button', { name: 'Anular la nota NC-0001' }))
+    const grupo = screen.getByRole('group', { name: 'Anular nota de crédito' })
+    await user.type(within(grupo).getByLabelText(/Por qué se anula/), 'No salió la mercadería')
+    await user.click(within(grupo).getByRole('button', { name: 'Anular nota de crédito' }))
+    expect(await within(grupo).findByRole('alert')).toHaveTextContent(motivoServer)
+    expect(screen.getByRole('group', { name: 'Anular nota de crédito' })).toBeInTheDocument()
+  })
+
+  it('una devolución anterior al 10/11/2026 muestra "Anular" deshabilitado, con el motivo a la vista (H3, decisión del dueño)', () => {
+    const vieja = {
+      id: '7', numero_nota: 'NC-0003', fecha: '2026-10-02', created_at: '2026-10-02T14:00:00Z', total: 3000,
+      motivo: 'Faltante', tipo: 'devolucion' as const, items: [],
+    }
+    const onAnularNotaCredito = vi.fn()
+    renderVer({}, { notasCredito: [vieja], onAnularNotaCredito })
+    const boton = screen.getByRole('button', { name: 'Anular la nota NC-0003' })
+    expect(boton).toBeDisabled()
+    expect(boton).toHaveAccessibleDescription(/anterior al 10\/11\/2026.*no se puede anular desde el sistema/)
+    expect(screen.getByText(/no se puede anular desde el sistema/)).toBeVisible()
+    expect(onAnularNotaCredito).not.toHaveBeenCalled()
+  })
+
+  it('sin permiso (el container no pasa la acción) no ofrece anular la nota', () => {
+    renderVer()
+    expect(screen.queryByRole('button', { name: /Anular la nota/ })).toBeNull()
+  })
+
+  it('con la compra cancelada no ofrece anular la nota', () => {
+    renderVer({ estado: 'cancelada' as never }, { onAnularNotaCredito: vi.fn() })
+    expect(screen.queryByRole('button', { name: /Anular la nota/ })).toBeNull()
+  })
+})
+
 describe("ModalCompra modo 'ver': cargos, costo guardado y variación", () => {
   it('cada cargo muestra su reparto por línea con los pesos guardados', () => {
     renderVer()
