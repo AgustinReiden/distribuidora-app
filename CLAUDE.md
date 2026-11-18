@@ -590,6 +590,14 @@ suelta en `sucursales`.
 - **Un producto con stock, con lotes (aun agotados) o que es el regalo de una promo no se borra: se
   desactiva** (1561-b2, decisión del dueño). Lo frena `productos_rechazar_borrado_con_historial`,
   junto con el historial; sin nada de eso se borra y su `stock_historico` se va con él.
+- **El código de un producto es único por sucursal, sin mirar mayúsculas ni los espacios de los
+  bordes** (1561-b1, decisión del dueño D31), como los rubros: índice
+  `productos_codigo_unico_por_sucursal` sobre `upper(btrim(codigo))`, sin los vacíos (un producto
+  sin código no choca con nadie), y `trg_productos_codigo_unico` da el mensaje con el producto que
+  ya lo tiene, sólo a quien lo ve (el server, o un usuario en su sucursal activa). Busca por el índice
+  (DEFINER, sin `ORDER BY` y con `plan_cache_mode = force_custom_plan`): un trigger por fila cuyo
+  plan guardado recorre la sucursal hace cuadrática un alta masiva en una base nueva. Espejo en `src/utils/codigoProducto.ts`. Un camino nuevo que escriba
+  `productos.codigo` no lo valida aparte: lo frena la base.
 - **Un stock mínimo de 0 es «sin alerta», y vacío es 10** (CAT-13, decisión del dueño): con alerta,
   está bajo cuando `stock <= mínimo`. Es una regla en tres lugares: `stockBajo`
   (`src/utils/stockMinimo.ts`), su copia del bot (`supabase/functions/_shared/utils/stockMinimo.ts`)
