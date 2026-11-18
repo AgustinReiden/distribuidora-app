@@ -280,6 +280,8 @@ suelta en `sucursales`.
   `anular_salvedad` se lo devuelve, con tope en lo que la boleta debe. Si el recorte lo borró, o
   el cobro ya está en una rendición confirmada o en un día con la caja cerrada, vuelve como un
   cobro nuevo con sus datos (con la fecha de hoy si la suya está cerrada), y la foto no cambia.
+  Ese cobro nuevo lleva las marcas del recortado (`a_cuenta`, `pago_origen_id` y `pago_padre_id`;
+  1595-b2): un adelanto de sueldo del FIFO de la ficha sigue a cuenta y `desimputar_pago` lo acepta.
   Lo que quedó a favor, o un cobro que alguien borró o movió después, no se repone.
   **La línea que la salvedad borró vuelve con su foto** (VTA-1, #1595): al borrarla,
   `registrar_salvedad` guarda su costo, su lista, su origen, su descuento y su escala en
@@ -320,7 +322,9 @@ suelta en `sucursales`.
   de total ya no absorbe sola el crédito suelto: lo absorbe el próximo pedido o una imputación a
   mano. El FIFO es uno, `_aplicar_credito_pagos(cliente, sucursal, pagos)`, y
   `aplicar_credito_cliente` lo llama con todos: sólo barren todo el alta y el FIFO de la ficha. Un
-  camino nuevo que deje plata a favor pasa la lista de sus pagos. **El saldo a favor aplicado a
+  camino nuevo que deje plata a favor pasa la lista de sus pagos. El crédito que se aplica a una
+  boleta pierde sus marcas de saldo a favor en las notas por `_notas_sin_saldo_a_favor` (las tres:
+  la común, la de cancelación y la de cambio de cliente; COB-b6). **El saldo a favor aplicado a
   una boleta no se borra:** un pago con `de_saldo_a_favor`, `a_cuenta`, `pago_origen_id` o
   `nota_credito_id` se quita con `desimputar_pago` y vuelve suelto, sin reaplicarse solo (decisión
   del dueño); el `DELETE` REST lo rechaza `trg_pagos_guard_credito_aplicado`. Anular una NC
