@@ -79,6 +79,10 @@ BEGIN;
 
 SET LOCAL lock_timeout = '5s';
 
+-- La única tabla que se altera (la columna de la versión y su trigger, v2): de una vez y antes de
+-- toda premisa. O se consigue o falla al instante y se reintenta.
+LOCK TABLE public.clientes IN ACCESS EXCLUSIVE MODE NOWAIT;
+
 DO $lf$
 BEGIN
   IF position(E'\r' in current_query()) > 0 THEN
@@ -102,7 +106,12 @@ BEGIN
     -- No cambian: las RPC nuevas cuentan con ellas como están.
     ('public.es_admin()', '975886be1dc20e67edba71686ef50959'),
     ('public.admin_abarca_sucursales_de(uuid)', 'fa0ee154b1c1c5a35245ea0746ad0c7e'),
-    ('public.cliente_de_sucursal_activa(bigint)', 'f40cb2ef4e2c451a601d2030ec6196d8')
+    ('public.cliente_de_sucursal_activa(bigint)', 'f40cb2ef4e2c451a601d2030ec6196d8'),
+    -- v2: guardar_cliente y guardar_usuario corren como quien llama (INVOKER) y cuentan con que
+    -- estas guardas de clientes, cliente_preventistas y perfiles sigan como en la 530.
+    ('public.verificar_duplicado_cliente(numeric,numeric,text,bigint)', '3f95ea7d1843c7dade9bbc84baf50dd9'),
+    ('public._cliente_visible(bigint,bigint,boolean)', '7698df4ccb647b9760d60efca9ac4437'),
+    ('public.perfiles_guard_desactivacion()', 'e5f88a02905ba3dc4118db7fb8ef39de')
   ) AS t(f, h) LOOP
     IF to_regprocedure(r.f) IS NULL THEN
       RAISE EXCEPTION 'mig NNN · % no existe: rehacer sobre lo vigente', r.f;
@@ -117,7 +126,14 @@ BEGIN
      OR to_regprocedure('public.guardar_condicion_mayorista(jsonb)') IS NOT NULL
      OR to_regprocedure('public.crear_promocion(jsonb)') IS NOT NULL
      OR to_regprocedure('public.guardar_roles_extra(uuid,text[])') IS NOT NULL
-     OR to_regprocedure('public.guardar_descuentos_categoria(bigint,jsonb)') IS NOT NULL THEN
+     OR to_regprocedure('public.guardar_descuentos_categoria(bigint,jsonb)') IS NOT NULL
+     OR to_regprocedure('public.guardar_cliente(jsonb)') IS NOT NULL
+     OR to_regprocedure('public.guardar_usuario(jsonb)') IS NOT NULL
+     OR to_regprocedure('public._alta_cliente_tomar_clave(uuid,text)') IS NOT NULL
+     OR to_regprocedure('public._alta_cliente_cerrar_clave(uuid,bigint)') IS NOT NULL
+     OR to_regprocedure('public.clientes_version()') IS NOT NULL
+     OR EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'clientes' AND column_name = 'updated_at') THEN
     RAISE EXCEPTION 'mig NNN · alguno de los objetos nuevos ya existe';
   END IF;
   -- Una sola firma de cada una (trampa 5: nada de sobrecargas).
@@ -169,7 +185,7 @@ $f$;
 -- =========================================================================
 CREATE TABLE public.altas_por_clave (
   clave       uuid        PRIMARY KEY,
-  operacion   text        NOT NULL CHECK (operacion IN ('condicion_mayorista', 'promocion')),
+  operacion   text        NOT NULL CHECK (operacion IN ('condicion_mayorista', 'promocion', 'cliente')),
   usuario_id  uuid        NOT NULL,
   sucursal_id bigint      NOT NULL,
   contenido   text        NOT NULL,
@@ -178,7 +194,7 @@ CREATE TABLE public.altas_por_clave (
 );
 
 COMMENT ON TABLE public.altas_por_clave IS
-  'C4b (ola 2 de #1603): la clave de cada alta de condición mayorista o de promo, para que un reintento después de una respuesta perdida devuelva la misma y no cree otra. `contenido` es el md5 del JSON pedido sin la clave: con la misma clave y otro contenido se rechaza. Sólo de server: RLS sin policies y sin grants para anon ni authenticated. La escriben guardar_condicion_mayorista y crear_promocion.';
+  'C4b (ola 2 de #1603): la clave de cada alta de condición mayorista, de promo o de cliente, para que un reintento después de una respuesta perdida devuelva la misma y no cree otra. `contenido` es el md5 del JSON pedido sin la clave: con la misma clave y otro contenido se rechaza. Sólo de server: RLS sin policies y sin grants para anon ni authenticated. La escriben guardar_condicion_mayorista y crear_promocion, y la del cliente _alta_cliente_tomar_clave / _alta_cliente_cerrar_clave (guardar_cliente corre como quien llama).';
 
 ALTER TABLE public.altas_por_clave ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.altas_por_clave FROM PUBLIC, anon, authenticated;
@@ -779,6 +795,400 @@ GRANT EXECUTE ON FUNCTION public.guardar_roles_extra(uuid, text[]) TO authentica
 GRANT EXECUTE ON FUNCTION public.guardar_descuentos_categoria(bigint, jsonb) TO authenticated, service_role;
 
 -- =========================================================================
+-- 5b · v2 · La versión de un cliente
+-- =========================================================================
+-- La edición de un cliente compara la versión que abrió (`updated_at_esperado`), como la de un
+-- gasto, un combo o una promo. `clientes` no tenía versión: se suma la columna y un trigger que la
+-- mueve cuando cambia algo que no sea `saldo_cuenta` (lo escriben los pedidos y los pagos en cada
+-- venta: con eso, cualquier venta en el medio parecería «otro lo cambió»). Un UPDATE que no cambia
+-- nada tampoco la mueve. El trigger va último (`zz`): `clientes_proteger_columnas_preventista`
+-- compara OLD y NEW columna por columna y no tiene que ver esta.
+ALTER TABLE public.clientes ADD COLUMN updated_at timestamptz NOT NULL DEFAULT now();
+
+COMMENT ON COLUMN public.clientes.updated_at IS
+  'C4b (ola 2 de #1603): la versión del cliente. La pone trg_clientes_zz_version en cada cambio que no sea saldo_cuenta; la compara guardar_cliente (updated_at_esperado). Lo que mande el cliente no cuenta.';
+
+CREATE FUNCTION public.clientes_version()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $fn$
+BEGIN
+  IF (to_jsonb(NEW) - 'saldo_cuenta' - 'updated_at') = (to_jsonb(OLD) - 'saldo_cuenta' - 'updated_at') THEN
+    NEW.updated_at := OLD.updated_at;
+  ELSE
+    NEW.updated_at := now();
+  END IF;
+  RETURN NEW;
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION public.clientes_version() FROM PUBLIC, anon, authenticated;
+
+CREATE TRIGGER trg_clientes_zz_version
+  BEFORE UPDATE ON public.clientes
+  FOR EACH ROW EXECUTE FUNCTION public.clientes_version();
+
+-- =========================================================================
+-- 5c · v2 · La clave del alta de un cliente
+-- =========================================================================
+-- guardar_cliente corre como quien llama (ver 5d) y `altas_por_clave` es sólo de server: estas
+-- dos la leen y la escriben por él, sólo para el que llama, en la sucursal activa y para la
+-- operación 'cliente'. La primera reserva la clave (o devuelve el cliente que ya entró con ella);
+-- la segunda le anota el cliente. Si el alta falla, la transacción entera (la reserva incluida) se
+-- deshace.
+CREATE FUNCTION public._alta_cliente_tomar_clave(p_clave uuid, p_contenido text)
+RETURNS bigint
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $fn$
+DECLARE
+  v_suc    bigint := public.current_sucursal_id();
+  v_previa public.altas_por_clave%ROWTYPE;
+BEGIN
+  -- Quien puede dar de alta un cliente (mt_clientes_insert): es_preventista() (admin y encargado
+  -- incluidos), en la sucursal activa.
+  IF auth.uid() IS NULL OR NOT public.es_preventista() THEN
+    RAISE EXCEPTION 'No podés dar de alta clientes.' USING ERRCODE = '42501';
+  END IF;
+  IF v_suc IS NULL OR p_clave IS NULL OR p_contenido IS NULL THEN
+    RAISE EXCEPTION 'Falta la clave del alta o la sucursal activa: recargá la página e intentá de nuevo.' USING ERRCODE = '22023';
+  END IF;
+  INSERT INTO altas_por_clave (clave, operacion, usuario_id, sucursal_id, contenido)
+  VALUES (p_clave, 'cliente', auth.uid(), v_suc, p_contenido)
+  ON CONFLICT (clave) DO NOTHING;
+  IF FOUND THEN
+    RETURN NULL;
+  END IF;
+  SELECT * INTO v_previa FROM altas_por_clave WHERE clave = p_clave;
+  IF v_previa.operacion <> 'cliente' OR v_previa.usuario_id IS DISTINCT FROM auth.uid()
+     OR v_previa.sucursal_id <> v_suc THEN
+    RAISE EXCEPTION 'Esta clave de alta ya se usó para otra operación: recargá la página e intentá de nuevo.' USING ERRCODE = '22023';
+  END IF;
+  IF v_previa.contenido <> p_contenido THEN
+    RAISE EXCEPTION 'Este cliente ya se creó con el intento anterior y lo que mandaste ahora es distinto: cerrá esta ventana y corregilo desde la lista.' USING ERRCODE = '22023';
+  END IF;
+  IF v_previa.entidad_id IS NULL
+     OR NOT EXISTS (SELECT 1 FROM clientes WHERE id = v_previa.entidad_id AND sucursal_id = v_suc) THEN
+    RAISE EXCEPTION 'Este cliente ya se había creado con el intento anterior y después se eliminó: cerrá esta ventana y crealo de nuevo.' USING ERRCODE = '22023';
+  END IF;
+  RETURN v_previa.entidad_id;
+END
+$fn$;
+
+CREATE FUNCTION public._alta_cliente_cerrar_clave(p_clave uuid, p_cliente_id bigint)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $fn$
+BEGIN
+  IF auth.uid() IS NULL OR NOT public.es_preventista() THEN
+    RAISE EXCEPTION 'No podés dar de alta clientes.' USING ERRCODE = '42501';
+  END IF;
+  -- Sólo la reserva propia y sin cliente, de la sucursal activa, y un cliente de esa sucursal.
+  UPDATE altas_por_clave a
+     SET entidad_id = p_cliente_id
+   WHERE a.clave = p_clave AND a.operacion = 'cliente' AND a.usuario_id = auth.uid()
+     AND a.sucursal_id = public.current_sucursal_id() AND a.entidad_id IS NULL
+     AND EXISTS (SELECT 1 FROM clientes c WHERE c.id = p_cliente_id AND c.sucursal_id = a.sucursal_id);
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'No se pudo anotar la clave del alta del cliente.' USING ERRCODE = '22023';
+  END IF;
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION public._alta_cliente_tomar_clave(uuid, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public._alta_cliente_cerrar_clave(uuid, bigint) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public._alta_cliente_tomar_clave(uuid, text) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public._alta_cliente_cerrar_clave(uuid, bigint) TO authenticated, service_role;
+
+-- =========================================================================
+-- 5d · v2 · El alta y la edición de un cliente, en una transacción
+-- =========================================================================
+-- Antes: el INSERT o el PATCH de `clientes`, después `cliente_preventistas` (un DELETE y un INSERT
+-- por preventista) y después los descuentos por categoría, en llamadas REST separadas. Ahora es
+-- una llamada. Corre como QUIEN LLAMA (SECURITY INVOKER) a propósito: así rigen exactamente las
+-- mismas policies (mt_clientes_insert / mt_clientes_update / cp_insert / cp_delete, la
+-- visibilidad de `_cliente_visible`) y los mismos triggers que con el REST, que se eximen cuando
+-- `current_user` no es 'authenticated' (reservado, vale blanco, comodín, crédito y descuento sólo
+-- de admin, alta en zona propia, columnas protegidas del preventista, el tipo de documento del
+-- valor, la reasignación por zona). Una definer los salteaba todos. Los descuentos van por
+-- guardar_descuentos_categoria (sólo admin), en la misma transacción.
+--   · Escribe sólo las columnas que vienen en `campos` (como el PATCH: los triggers `UPDATE OF`
+--     ven la misma lista). El tipo de documento lo recalcula del valor su trigger (B17).
+--   · No reasigna nada por su cuenta: la zona la sigue mandando el trigger, y la lista de
+--     preventistas es la que eligió quien guarda (la diferencia contra `preventista_ids_previos`,
+--     o contra lo que hay), como hacía el front.
+--   · El alta lleva la clave del formulario: el reintento devuelve el cliente que ya entró.
+--   · El duplicado: lo que bloquea `verificar_duplicado_cliente` no entra, y lo que avisa entra
+--     sólo con `duplicado_confirmado` (el formulario ya lo preguntó; esto ataja la carrera).
+--   · La edición compara `updated_at_esperado` con la fila tomada: si otro la guardó, devuelve
+--     `codigo` 'cliente_cambiado' sin escribir nada.
+-- Mientras corra como quien llama, necesita los grants REST de clientes y cliente_preventistas:
+-- revocarlos obliga a pasarla a definer replicando esas guardas.
+CREATE FUNCTION public.guardar_cliente(p_cliente jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $fn$
+DECLARE
+  c_campos constant text[] := ARRAY[
+    'razon_social', 'nombre_fantasia', 'direccion', 'aclaracion_direccion', 'telefono', 'cuit',
+    'tipo_documento', 'zona_id', 'latitud', 'longitud', 'limite_credito', 'dias_credito', 'descuento_porcentaje',
+    'contacto', 'horarios_atencion', 'dias_atencion', 'horarios_atencion_original', 'horario_entrega',
+    'sin_horario_fijo', 'activo', 'rubro', 'notas', 'reservado_admin', 'tipo_factura_default',
+    'place_id', 'es_comodin'];
+  v_suc        bigint := public.current_sucursal_id();
+  v_id         bigint;
+  v_clave      uuid;
+  v_esperado   timestamptz;
+  v_campos     jsonb;
+  v_keys       text[];
+  v_malo       text;
+  v_confirmado boolean;
+  v_deseados   uuid[];
+  v_previos    uuid[];
+  v_viejo      public.clientes%ROWTYPE;
+  v_nuevo      public.clientes%ROWTYPE;
+  v_previa     bigint;
+  v_ver        jsonb;
+  v_sql        text;
+  v_x          uuid;
+  v_toca_dir   boolean;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Sin sesión: volvé a entrar.' USING ERRCODE = '42501';
+  END IF;
+  IF v_suc IS NULL THEN
+    RAISE EXCEPTION 'No hay una sucursal activa: recargá la página e intentá de nuevo.' USING ERRCODE = '22023';
+  END IF;
+  IF jsonb_typeof(p_cliente) IS DISTINCT FROM 'object'
+     OR jsonb_typeof(COALESCE(p_cliente->'campos', '{}'::jsonb)) IS DISTINCT FROM 'object' THEN
+    RAISE EXCEPTION 'Faltan los datos del cliente.' USING ERRCODE = '22023';
+  END IF;
+
+  BEGIN
+    v_id         := NULLIF(p_cliente->>'id', '')::bigint;
+    v_clave      := NULLIF(p_cliente->>'clave', '')::uuid;
+    v_esperado   := NULLIF(p_cliente->>'updated_at_esperado', '')::timestamptz;
+    v_confirmado := COALESCE((p_cliente->>'duplicado_confirmado')::boolean, false);
+    IF p_cliente ? 'preventista_ids' THEN
+      IF jsonb_typeof(p_cliente->'preventista_ids') IS DISTINCT FROM 'array' THEN
+        RAISE EXCEPTION USING ERRCODE = '22P02';
+      END IF;
+      SELECT COALESCE(array_agg(DISTINCT (e #>> '{}')::uuid), '{}') INTO v_deseados
+        FROM jsonb_array_elements(p_cliente->'preventista_ids') e;
+    END IF;
+    IF jsonb_typeof(p_cliente->'preventista_ids_previos') = 'array' THEN
+      SELECT COALESCE(array_agg(DISTINCT (e #>> '{}')::uuid), '{}') INTO v_previos
+        FROM jsonb_array_elements(p_cliente->'preventista_ids_previos') e;
+    END IF;
+  EXCEPTION WHEN others THEN
+    RAISE EXCEPTION 'Hay un dato del cliente con un formato inválido.' USING ERRCODE = '22023';
+  END;
+
+  -- Sólo las columnas que el formulario escribe.
+  v_campos := COALESCE(p_cliente->'campos', '{}'::jsonb);
+  SELECT k INTO v_malo FROM jsonb_object_keys(v_campos) k WHERE k <> ALL (c_campos) ORDER BY k LIMIT 1;
+  IF FOUND THEN
+    RAISE EXCEPTION 'El dato «%» del cliente no se guarda desde acá.', v_malo USING ERRCODE = '22023';
+  END IF;
+  v_keys := ARRAY(SELECT k FROM jsonb_object_keys(v_campos) k ORDER BY k);
+
+  IF v_id IS NULL THEN
+    -- ---------------------------------------------------------------- alta -
+    IF v_clave IS NULL THEN
+      RAISE EXCEPTION 'Falta la clave del alta: recargá la página e intentá de nuevo.' USING ERRCODE = '22023';
+    END IF;
+    v_previa := public._alta_cliente_tomar_clave(v_clave, md5((p_cliente - 'clave')::text));
+    IF v_previa IS NOT NULL THEN
+      SELECT * INTO v_nuevo FROM clientes WHERE id = v_previa;
+      RETURN jsonb_build_object('success', true, 'replay', true, 'cliente', to_jsonb(v_nuevo),
+        'preventista_ids', (SELECT COALESCE(jsonb_agg(cp.preventista_id ORDER BY cp.preventista_id), '[]'::jsonb)
+                              FROM cliente_preventistas cp WHERE cp.cliente_id = v_previa));
+    END IF;
+    IF cardinality(v_keys) = 0 THEN
+      RAISE EXCEPTION 'Faltan los datos del cliente.' USING ERRCODE = '22023';
+    END IF;
+    v_ver := public.verificar_duplicado_cliente(NULLIF(v_campos->>'latitud', '')::numeric,
+                                                NULLIF(v_campos->>'longitud', '')::numeric,
+                                                v_campos->>'direccion', NULL);
+    IF COALESCE((v_ver->>'bloquea')::boolean, false) THEN
+      RAISE EXCEPTION 'Ya hay un cliente en esa dirección o en ese mismo punto: no se creó nada.' USING ERRCODE = '23505';
+    END IF;
+    IF COALESCE((v_ver->>'avisa')::boolean, false) AND NOT v_confirmado THEN
+      RAISE EXCEPTION 'Hay otro cliente muy cerca: no se creó nada. Volvé a guardar y confirmá que es otro comercio.' USING ERRCODE = '22023';
+    END IF;
+    v_sql := format('INSERT INTO public.clientes (%s, sucursal_id) SELECT %s, $2 FROM jsonb_populate_record(NULL::public.clientes, $1) r RETURNING *',
+                    (SELECT string_agg(format('%I', k), ', ') FROM unnest(v_keys) k),
+                    (SELECT string_agg(format('r.%I', k), ', ') FROM unnest(v_keys) k));
+    EXECUTE v_sql INTO v_nuevo USING v_campos, v_suc;
+    v_id := v_nuevo.id;
+    PERFORM public._alta_cliente_cerrar_clave(v_clave, v_id);
+  ELSE
+    -- ------------------------------------------------------------ edición -
+    -- Tomada con la RLS de quien guarda: si no la ve o no la puede editar, no hay fila.
+    SELECT * INTO v_viejo FROM clientes WHERE id = v_id FOR UPDATE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'El cliente no existe o no lo podés editar.' USING ERRCODE = '42501';
+    END IF;
+    IF v_esperado IS NOT NULL AND v_viejo.updated_at IS DISTINCT FROM v_esperado THEN
+      RETURN jsonb_build_object('success', false, 'codigo', 'cliente_cambiado', 'error',
+        'Otro usuario cambió este cliente mientras lo editabas: no se guardó nada. Volvé a abrirlo para ver cómo quedó.');
+    END IF;
+    -- El duplicado se mira sólo si cambia lo que compara (como cambiaIdentidadDuplicado).
+    v_toca_dir := (v_campos ? 'direccion' AND (v_campos->>'direccion') IS DISTINCT FROM v_viejo.direccion)
+               OR (v_campos ? 'latitud' AND NULLIF(v_campos->>'latitud', '')::numeric IS DISTINCT FROM v_viejo.latitud)
+               OR (v_campos ? 'longitud' AND NULLIF(v_campos->>'longitud', '')::numeric IS DISTINCT FROM v_viejo.longitud);
+    IF v_toca_dir THEN
+      v_ver := public.verificar_duplicado_cliente(
+        CASE WHEN v_campos ? 'latitud' THEN NULLIF(v_campos->>'latitud', '')::numeric ELSE v_viejo.latitud END,
+        CASE WHEN v_campos ? 'longitud' THEN NULLIF(v_campos->>'longitud', '')::numeric ELSE v_viejo.longitud END,
+        CASE WHEN v_campos ? 'direccion' THEN v_campos->>'direccion' ELSE v_viejo.direccion END,
+        v_id);
+      IF COALESCE((v_ver->>'bloquea')::boolean, false) THEN
+        RAISE EXCEPTION 'Ya hay otro cliente en esa dirección o en ese mismo punto: no se guardó nada.' USING ERRCODE = '23505';
+      END IF;
+      IF COALESCE((v_ver->>'avisa')::boolean, false) AND NOT v_confirmado THEN
+        RAISE EXCEPTION 'Hay otro cliente muy cerca: no se guardó nada. Volvé a guardar y confirmá que es otro comercio.' USING ERRCODE = '22023';
+      END IF;
+    END IF;
+    IF cardinality(v_keys) > 0 THEN
+      v_sql := format('UPDATE public.clientes c SET %s FROM jsonb_populate_record(NULL::public.clientes, $1) r WHERE c.id = $2 RETURNING c.*',
+                      (SELECT string_agg(format('%I = r.%I', k, k), ', ') FROM unnest(v_keys) k));
+      EXECUTE v_sql INTO v_nuevo USING v_campos, v_id;
+      IF v_nuevo.id IS NULL THEN
+        RAISE EXCEPTION 'El cliente no existe o no lo podés editar.' USING ERRCODE = '42501';
+      END IF;
+    END IF;
+  END IF;
+
+  -- ------------------------------------------------------- preventistas -
+  -- La lista que eligió quien guarda, contra la que tenía al abrir (o contra la de la base). Lo
+  -- que el trigger de la zona ya puso y está en la lista, se queda.
+  IF v_deseados IS NOT NULL THEN
+    IF v_previos IS NULL THEN
+      v_previos := ARRAY(SELECT cp.preventista_id FROM cliente_preventistas cp WHERE cp.cliente_id = v_id);
+    END IF;
+    DELETE FROM cliente_preventistas
+     WHERE cliente_id = v_id AND preventista_id = ANY (v_previos) AND preventista_id <> ALL (v_deseados);
+    FOR v_x IN SELECT x FROM unnest(v_deseados) x WHERE x <> ALL (v_previos) ORDER BY x LOOP
+      INSERT INTO cliente_preventistas (cliente_id, preventista_id) VALUES (v_id, v_x)
+      ON CONFLICT DO NOTHING;
+    END LOOP;
+  END IF;
+
+  -- ---------------------------------------------------------- descuentos -
+  IF p_cliente ? 'descuentos_categoria' THEN
+    PERFORM public.guardar_descuentos_categoria(v_id, p_cliente->'descuentos_categoria');
+  END IF;
+
+  SELECT * INTO v_nuevo FROM clientes WHERE id = v_id;
+  RETURN jsonb_build_object('success', true, 'replay', false, 'cliente', to_jsonb(v_nuevo),
+    'preventista_ids', (SELECT COALESCE(jsonb_agg(cp.preventista_id ORDER BY cp.preventista_id), '[]'::jsonb)
+                          FROM cliente_preventistas cp WHERE cp.cliente_id = v_id));
+END
+$fn$;
+
+COMMENT ON FUNCTION public.guardar_cliente(jsonb) IS
+  'C4b v2 (ola 2 de #1603): alta (con `clave`, idempotente) o edición (con `id` y `updated_at_esperado`) de un cliente con sus preventistas y sus descuentos por categoría, en una transacción. SECURITY INVOKER a propósito: rigen las mismas policies y triggers que con el REST. Devuelve {success, replay, cliente, preventista_ids} o {success:false, codigo:''cliente_cambiado''}.';
+
+REVOKE ALL ON FUNCTION public.guardar_cliente(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.guardar_cliente(jsonb) TO authenticated, service_role;
+
+-- =========================================================================
+-- 5e · v2 · Guardar un usuario (el perfil y sus roles extra), en una transacción
+-- =========================================================================
+-- Antes: el PATCH de `perfiles` y, si salía bien, guardar_roles_extra en otra llamada (si la
+-- segunda fallaba, el perfil quedaba guardado y los roles no). Ahora es una. Corre como QUIEN LLAMA
+-- (SECURITY INVOKER): el UPDATE de perfiles pasa por perfiles_update_admin (admin que abarca las
+-- sucursales del usuario), los grants por columna de perfiles y sus triggers
+-- (prevenir_autoescalada_perfil: nadie edita su propio perfil; perfiles_guard_desactivacion: nunca
+-- sin un admin activo; soltar la cartera y las zonas) exactamente como con el REST. No toca policies
+-- ni grants de perfiles (son de la tarjeta C6): si un día se revoca el UPDATE REST, esta pasa a
+-- definer replicándolos. Los roles extra van por guardar_roles_extra en la misma transacción.
+CREATE FUNCTION public.guardar_usuario(p_usuario jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $fn$
+DECLARE
+  c_campos constant text[] := ARRAY['nombre', 'rol', 'activo', 'zona'];
+  v_id    uuid;
+  v_campos jsonb;
+  v_keys  text[];
+  v_malo  text;
+  v_roles text[];
+  v_sql   text;
+  v_rid   uuid;
+  v_nom   text;
+  v_rol   text;
+  v_act   boolean;
+  v_zona  text;
+  v_hay   boolean := false;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Sin sesión: volvé a entrar.' USING ERRCODE = '42501';
+  END IF;
+  IF jsonb_typeof(p_usuario) IS DISTINCT FROM 'object'
+     OR jsonb_typeof(COALESCE(p_usuario->'campos', '{}'::jsonb)) IS DISTINCT FROM 'object' THEN
+    RAISE EXCEPTION 'Faltan los datos del usuario.' USING ERRCODE = '22023';
+  END IF;
+  BEGIN
+    v_id := (p_usuario->>'id')::uuid;
+    IF p_usuario ? 'roles_extra' THEN
+      IF jsonb_typeof(p_usuario->'roles_extra') IS DISTINCT FROM 'array' THEN
+        RAISE EXCEPTION USING ERRCODE = '22P02';
+      END IF;
+      v_roles := ARRAY(SELECT e #>> '{}' FROM jsonb_array_elements(p_usuario->'roles_extra') e);
+    END IF;
+  EXCEPTION WHEN others THEN
+    RAISE EXCEPTION 'Hay un dato del usuario con un formato inválido.' USING ERRCODE = '22023';
+  END;
+  IF v_id IS NULL THEN
+    RAISE EXCEPTION 'Falta el usuario.' USING ERRCODE = '22023';
+  END IF;
+  v_campos := COALESCE(p_usuario->'campos', '{}'::jsonb);
+  SELECT k INTO v_malo FROM jsonb_object_keys(v_campos) k WHERE k <> ALL (c_campos) ORDER BY k LIMIT 1;
+  IF FOUND THEN
+    RAISE EXCEPTION 'El dato «%» del usuario no se guarda desde acá.', v_malo USING ERRCODE = '22023';
+  END IF;
+  v_keys := ARRAY(SELECT k FROM jsonb_object_keys(v_campos) k ORDER BY k);
+
+  IF cardinality(v_keys) > 0 THEN
+    -- Devuelve sólo lo que se escribe: el email de los demás no se lee desde acá.
+    v_sql := format('UPDATE public.perfiles p SET %s FROM jsonb_populate_record(NULL::public.perfiles, $1) r WHERE p.id = $2 RETURNING p.id, p.nombre, p.rol, p.activo, p.zona',
+                    (SELECT string_agg(format('%I = r.%I', k, k), ', ') FROM unnest(v_keys) k));
+    EXECUTE v_sql INTO v_rid, v_nom, v_rol, v_act, v_zona USING v_campos, v_id;
+    IF v_rid IS NULL THEN
+      RAISE EXCEPTION 'No podés editar a este usuario: también trabaja en sucursales que no son tuyas. Lo edita un admin de todas ellas.' USING ERRCODE = '42501';
+    END IF;
+    v_hay := true;
+  END IF;
+
+  IF v_roles IS NOT NULL THEN
+    PERFORM public.guardar_roles_extra(v_id, v_roles);
+  END IF;
+
+  RETURN jsonb_build_object('success', true,
+    'perfil', CASE WHEN NOT v_hay THEN NULL
+                   ELSE jsonb_build_object('id', v_rid, 'nombre', v_nom, 'rol', v_rol,
+                                           'activo', v_act, 'zona', v_zona) END,
+    'roles_extra', CASE WHEN v_roles IS NULL THEN NULL ELSE to_jsonb(v_roles) END);
+END
+$fn$;
+
+COMMENT ON FUNCTION public.guardar_usuario(jsonb) IS
+  'C4b v2 (ola 2 de #1603): guarda el perfil de un usuario (nombre, rol, activo, zona) y sus roles extra de la sucursal activa en una transacción. SECURITY INVOKER: rigen perfiles_update_admin, los grants por columna y los triggers de perfiles, como con el REST. Los roles van por guardar_roles_extra.';
+
+REVOKE ALL ON FUNCTION public.guardar_usuario(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.guardar_usuario(jsonb) TO authenticated, service_role;
+
+-- =========================================================================
 -- 6 · guardar_combo: «otro lo cambió» y el orden del grupo
 -- =========================================================================
 DO $combo$
@@ -794,6 +1204,8 @@ $n$  v_abajo    bigint;
   v_versiones jsonb;
   v_actual   timestamptz;
   v_x        bigint;
+  v_vistos   bigint[];
+  v_otro     text;
 BEGIN$n$, 'guardar_combo · declaraciones');
 
   v_def := pg_temp.parche(v_def,
@@ -808,6 +1220,13 @@ $n$    v_mover   := NULLIF(p_combo->>'producto_a_mover_id', '')::bigint;
     ELSIF COALESCE(jsonb_typeof(p_combo->'versiones'), 'null') <> 'null' THEN
       RAISE EXCEPTION USING ERRCODE = '22P02';
     END IF;
+    -- v2: los combos que tenía la lista de quien edita (todos los de la sucursal que vio).
+    IF jsonb_typeof(p_combo->'vistos') = 'array' THEN
+      SELECT COALESCE(array_agg((e #>> '{}')::bigint), '{}') INTO v_vistos
+        FROM jsonb_array_elements(p_combo->'vistos') e;
+    ELSIF COALESCE(jsonb_typeof(p_combo->'vistos'), 'null') <> 'null' THEN
+      RAISE EXCEPTION USING ERRCODE = '22P02';
+    END IF;
 $n$, 'guardar_combo · lectura de la versión');
 
   v_def := pg_temp.parche(v_def,
@@ -817,6 +1236,9 @@ $n$  -- C4b (1599-b8, decisión del dueño D47 para la edición de un gasto, mis
   -- guardó este combo, o cambió uno de los del orden que se reescribe, no se pisa. El combo y los
   -- del orden, tomados por id antes de comparar (dos guardados a la vez van de a uno). Sin las
   -- claves (un PWA de antes) no compara.
+  -- v2: los guardados de combos de una sucursal van de a uno (son de admin y raros): así el que
+  -- llega segundo ve el combo que el primero acaba de crear.
+  PERFORM pg_advisory_xact_lock(hashtext('guardar_combo'), v_sucursal::integer);
   FOR v_x IN SELECT co.id FROM combos co
               WHERE co.sucursal_id = v_sucursal
                 AND (co.id = v_id OR co.id = ANY (COALESCE(v_orden, '{}')))
@@ -837,6 +1259,26 @@ $n$  -- C4b (1599-b8, decisión del dueño D47 para la edición de un gasto, mis
                   AND co.updated_at IS DISTINCT FROM NULLIF(v_versiones->>(x::text), '')::timestamptz) THEN
       RETURN jsonb_build_object('success', false, 'codigo', 'orden_cambiado', 'error',
         'Otro usuario cambió un combo que compite con éste mientras lo editabas: no se guardó nada. Revisá el orden con los combos de ahora y volvé a guardar.');
+    END IF;
+  END IF;
+  -- v2: un combo activo que compite con éste (vende alguno de sus productos) y que quien edita no
+  -- tenía en su lista: lo creó otro mientras tanto, y el orden que se guarda no lo cuenta.
+  IF v_vistos IS NOT NULL THEN
+    SELECT co.nombre INTO v_otro
+      FROM combos co
+     WHERE co.sucursal_id = v_sucursal AND co.activo
+       AND co.id IS DISTINCT FROM v_id AND co.id <> ALL (v_vistos)
+       AND EXISTS (
+         SELECT 1 FROM combo_componentes cc
+          WHERE cc.combo_id = co.id AND cc.sucursal_id = v_sucursal
+            AND (cc.producto_id = ANY (v_resueltos)
+                 OR EXISTS (SELECT 1 FROM productos pr
+                             WHERE pr.sucursal_id = v_sucursal AND pr.activo AND pr.id = ANY (v_resueltos)
+                               AND (pr.categoria_id = cc.categoria_id OR pr.subcategoria_id = cc.categoria_id))))
+     ORDER BY co.id LIMIT 1;
+    IF FOUND THEN
+      RETURN jsonb_build_object('success', false, 'codigo', 'orden_cambiado', 'error',
+        format('Otro usuario creó el combo «%s», que compite con éste, mientras lo editabas: no se guardó nada.', v_otro));
     END IF;
   END IF;
 
@@ -990,6 +1432,9 @@ BEGIN
      OR position('updated_at = now()' in v_c) = 0 OR position('FOR UPDATE' in v_c) = 0 THEN
     RAISE EXCEPTION 'mig NNN · el parche de guardar_combo no quedó';
   END IF;
+  IF position('pg_advisory_xact_lock(hashtext(''guardar_combo'')' in v_c) = 0 OR position('v_vistos' in v_c) = 0 THEN
+    RAISE EXCEPTION 'mig NNN · guardar_combo no quedó con la guarda del combo nuevo';
+  END IF;
   IF position('CREATE TEMP TABLE IF NOT EXISTS' in v_c) > 0 OR position('DROP TABLE IF EXISTS pg_temp._combo_resuelto' in v_c) = 0
      OR (SELECT count(*) FROM regexp_matches(v_c, '([^._])_combo_resuelto', 'g')) > 0 THEN
     RAISE EXCEPTION 'mig NNN · guardar_combo sigue pudiendo usar la temporal de quien llama';
@@ -1025,6 +1470,28 @@ BEGIN
   IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace
         AND proname IN ('guardar_combo', 'cambiar_regalo_promocion')) <> 2 THEN
     RAISE EXCEPTION 'mig NNN · quedó una sobrecarga de guardar_combo o de cambiar_regalo_promocion';
+  END IF;
+  -- v2: las de quien llama, las dos claves del cliente y el trigger de la versión.
+  FOREACH v_f IN ARRAY ARRAY['public.guardar_cliente(jsonb)', 'public.guardar_usuario(jsonb)',
+                             'public._alta_cliente_tomar_clave(uuid,text)', 'public._alta_cliente_cerrar_clave(uuid,bigint)',
+                             'public.clientes_version()'] LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_proc, unnest(proconfig) c
+                    WHERE oid = v_f::regprocedure AND c LIKE 'search_path=%pg_temp') THEN
+      RAISE EXCEPTION 'mig NNN · % no tiene pg_temp al final del search_path', v_f;
+    END IF;
+    IF has_function_privilege('anon', v_f, 'EXECUTE')
+       OR EXISTS (SELECT 1 FROM pg_proc, aclexplode(proacl) a WHERE oid = v_f::regprocedure AND a.grantee = 0)
+       OR has_function_privilege('authenticated', v_f, 'EXECUTE') = (v_f = 'public.clientes_version()') THEN
+      RAISE EXCEPTION 'mig NNN · % quedó con un EXECUTE que no corresponde', v_f;
+    END IF;
+  END LOOP;
+  IF (SELECT prosecdef FROM pg_proc WHERE oid = 'public.guardar_cliente(jsonb)'::regprocedure)
+     OR (SELECT prosecdef FROM pg_proc WHERE oid = 'public.guardar_usuario(jsonb)'::regprocedure) THEN
+    RAISE EXCEPTION 'mig NNN · guardar_cliente y guardar_usuario tienen que correr como quien llama';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.clientes'::regclass
+                   AND tgname = 'trg_clientes_zz_version' AND NOT tgisinternal) THEN
+    RAISE EXCEPTION 'mig NNN · falta trg_clientes_zz_version';
   END IF;
   IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.altas_por_clave'::regclass)
      OR has_table_privilege('authenticated', 'public.altas_por_clave', 'SELECT')

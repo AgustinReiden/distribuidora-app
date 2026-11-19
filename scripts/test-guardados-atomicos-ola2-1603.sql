@@ -45,6 +45,27 @@
 --   D2 · [F] Todo o nada: si falla el INSERT, quedan los de antes.
 --   D3 · [F] Permisos y rango: encargado, preventista, admin desactivado, cliente de otra sucursal,
 --        150 % y un porcentaje en texto se rechazan.
+--   C5 · [F] v2: un combo que compite con éste y que quien edita no tenía en su lista (lo creó otro
+--        mientras tanto) devuelve 'orden_cambiado' y no guarda; con la lista de ahora, guarda.
+--   K1 · [F] v2 · guardar_cliente: el preventista da de alta un cliente y se lo asigna, en una
+--        llamada; el reintento con la misma clave devuelve el mismo; otro contenido se rechaza.
+--   K2 · [F] Todo o nada en el alta del admin con descuentos: si fallan los descuentos, no queda el
+--        cliente ni su clave.
+--   K3 · [F] Siguen las guardas de los triggers y las policies (corre como quien llama): el
+--        preventista no crea un reservado ni fija descuento; nadie se asigna un cliente ajeno; el
+--        duplicado bloquea.
+--   K4 · [F] Versión: con la de antes devuelve 'cliente_cambiado' sin cambiar nada; con la de ahora
+--        guarda. Un UPDATE sólo de saldo_cuenta no la mueve; uno que no cambia nada tampoco.
+--   K5 · [F] Edición: el preventista no toca una columna protegida ni un cliente de otro; un admin
+--        desactivado no edita.
+--   K6 · [F] La zona manda: el alta en una zona con dueño le asigna el dueño (lo hace el trigger, no
+--        la RPC), y una edición sin lista de preventistas no lo saca.
+--   K7 · [F] Los preventistas se guardan como la diferencia (#1316): con los previos que cargó el
+--        formulario, un dueño que puso otro en el medio se queda; sin previos, la lista vacía saca
+--        a todos (el admin que destilda al dueño de la zona).
+--   U1 · [F] v2 · guardar_usuario: el admin que abarca al usuario le cambia el nombre y el rol extra
+--        en una llamada; si el rol extra es inválido no queda ni el nombre; el admin de una sola
+--        sucursal no edita a uno de dos.
 --   S1 · [F] Las cuatro RPC nuevas: definer, pg_temp al final del search_path, EXECUTE sólo para
 --        authenticated (no PUBLIC ni anon); altas_por_clave con RLS, sin policies ni grants.
 --   S2 · [F] guardar_combo y cambiar_regalo_promocion: una sola firma cada una y pg_temp en el
@@ -87,7 +108,13 @@ DECLARE
   v_ca     bigint; v_cb bigint; v_cc bigint;
   v_n      bigint;
   v_fallas text[] := '{}';
-  v_casos  int := 24;
+  v_casos  int := 34;
+  v_cl     bigint;
+  v_cl2    bigint;
+  v_zona   bigint;
+  v_cd     bigint;
+  kc1      uuid := gen_random_uuid();
+  kc2      uuid := gen_random_uuid();
 BEGIN
  BEGIN
   SET LOCAL lock_timeout = '5s';
@@ -631,6 +658,178 @@ BEGIN
   IF v_t NOT LIKE '%de 0 a 100%' THEN v_fallas := v_fallas || ('D3 · entró un porcentaje en texto: ' || v_t); END IF;
   IF pg_temp.descuentos(c1) <> 'Bebidas=7.00,Limpieza=3.00' OR pg_temp.descuentos(c2) <> '(ninguno)' THEN
     v_fallas := v_fallas || text 'D3 · un rechazo cambió los descuentos';
+  END IF;
+
+  -- ===================================================== v2 · combo nuevo -
+  -- C5 · otro crea un combo D que compite con A después de que el editor de A cargó su lista.
+  v_j := jsonb_build_object('nombre', 'ZZ C4b combo A', 'precio', 180, 'fecha_inicio', v_hoy,
+    'componentes', jsonb_build_array(jsonb_build_object('cantidad', 1, 'productos', jsonb_build_array(p1)),
+                                     jsonb_build_object('cantidad', 1, 'productos', jsonb_build_array(p2))));
+  IF v_ca IS NOT NULL THEN
+    v_cd := (pg_temp.j(pg_temp.combo(v_adm, 1, jsonb_set(v_j, '{nombre}', '"ZZ C4b combo D"')))->>'id')::bigint;
+    v_t := pg_temp.combo(v_adm, 1, v_j || jsonb_build_object('id', v_ca, 'precio', 150,
+      'vistos', jsonb_build_array(v_ca, v_cb, v_cc)));
+    IF pg_temp.j(v_t)->>'codigo' IS DISTINCT FROM 'orden_cambiado' OR v_t NOT LIKE '%ZZ C4b combo D%'
+       OR (SELECT precio FROM combos WHERE id = v_ca) = 150 THEN
+      v_fallas := v_fallas || ('C5 · se guardó el combo sin ver al competidor nuevo: ' || v_t);
+    END IF;
+    v_t := pg_temp.combo(v_adm, 1, v_j || jsonb_build_object('id', v_ca, 'precio', 150,
+      'vistos', jsonb_build_array(v_ca, v_cb, v_cc, v_cd)));
+    IF (pg_temp.j(v_t)->>'success')::boolean IS DISTINCT FROM true OR (SELECT precio FROM combos WHERE id = v_ca) <> 150 THEN
+      v_fallas := v_fallas || ('C5 · con la lista de ahora no guardó: ' || v_t);
+    END IF;
+  END IF;
+
+  -- ============================================================ v2 · cliente -
+  -- K1 · el preventista da de alta y se asigna.
+  v_j := jsonb_build_object('clave', kc1, 'preventista_ids', jsonb_build_array(v_pre),
+    'campos', jsonb_build_object('razon_social', 'ZZ C4b K1', 'nombre_fantasia', 'ZZ C4b K1',
+                                 'direccion', 'Av. Siempreviva 742', 'latitud', -26.8, 'longitud', -65.2,
+                                 'tipo_documento', 'CUIT'));
+  v_t := pg_temp.intenta(v_pre, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text', v_j));
+  v_cl := (pg_temp.j(v_t)->'cliente'->>'id')::bigint;
+  IF v_cl IS NULL
+     OR (SELECT count(*) FROM clientes WHERE razon_social = 'ZZ C4b K1') <> 1
+     OR NOT EXISTS (SELECT 1 FROM cliente_preventistas WHERE cliente_id = v_cl AND preventista_id = v_pre) THEN
+    v_fallas := v_fallas || ('K1 · el alta del preventista no quedó entera: ' || v_t);
+  END IF;
+  v_t := pg_temp.intenta(v_pre, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text', v_j));
+  IF (pg_temp.j(v_t)->'cliente'->>'id')::bigint IS DISTINCT FROM v_cl OR (pg_temp.j(v_t)->>'replay')::boolean IS DISTINCT FROM true
+     OR (SELECT count(*) FROM clientes WHERE razon_social = 'ZZ C4b K1') <> 1 THEN
+    v_fallas := v_fallas || ('K1 · el reintento del alta no devolvió el mismo cliente: ' || v_t);
+  END IF;
+  v_t := pg_temp.intenta(v_pre, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+    jsonb_set(v_j, '{campos,notas}', '"otra"')));
+  IF v_t NOT LIKE '%ya se creó con el intento anterior%' THEN
+    v_fallas := v_fallas || ('K1 · la misma clave con otro contenido no se rechazó: ' || v_t);
+  END IF;
+
+  -- K2 · todo o nada: el admin da de alta con descuentos y fallan los descuentos.
+  PERFORM set_config('c4b.falla', 'cliente_descuentos_categoria', true);
+  v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+    jsonb_build_object('clave', kc2, 'campos', jsonb_build_object('razon_social', 'ZZ C4b K2', 'nombre_fantasia', 'ZZ C4b K2',
+                                                                   'direccion', 'Calle Falsa 999', 'descuento_porcentaje', 5),
+                       'descuentos_categoria', '[{"categoria":"Bebidas","descuento_porcentaje":7}]'::jsonb)));
+  PERFORM set_config('c4b.falla', '', true);
+  IF v_t NOT LIKE '%falla a propósito%' OR EXISTS (SELECT 1 FROM clientes WHERE razon_social = 'ZZ C4b K2')
+     OR pg_temp.hay_clave(kc2) THEN
+    v_fallas := v_fallas || ('K2 · un alta que falla en los descuentos dejó algo: ' || v_t);
+  END IF;
+
+  -- K3 · las guardas de los triggers y las policies siguen.
+  v_t := pg_temp.intenta(v_pre, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+    jsonb_build_object('clave', gen_random_uuid(), 'campos', jsonb_build_object('razon_social', 'ZZ C4b K3a', 'nombre_fantasia', 'ZZ C4b K3a',
+                                                                                 'direccion', 'Calle 1 100', 'reservado_admin', true))));
+  IF v_t NOT LIKE '42501 %' OR EXISTS (SELECT 1 FROM clientes WHERE razon_social = 'ZZ C4b K3a') THEN
+    v_fallas := v_fallas || ('K3 · el preventista creó un cliente reservado: ' || v_t);
+  END IF;
+  v_t := pg_temp.intenta(v_pre, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+    jsonb_build_object('clave', gen_random_uuid(), 'campos', jsonb_build_object('razon_social', 'ZZ C4b K3b', 'nombre_fantasia', 'ZZ C4b K3b',
+                                                                                 'direccion', 'Calle 2 200', 'descuento_porcentaje', 10))));
+  IF v_t NOT LIKE '42501 %' THEN
+    v_fallas := v_fallas || ('K3 · el preventista fijó el descuento de un cliente: ' || v_t);
+  END IF;
+  v_t := pg_temp.intenta(v_u, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+    jsonb_build_object('id', v_cl, 'preventista_ids', jsonb_build_array(v_pre, v_u))));
+  IF v_t NOT LIKE '42501 %' OR EXISTS (SELECT 1 FROM cliente_preventistas WHERE cliente_id = v_cl AND preventista_id = v_u) THEN
+    v_fallas := v_fallas || ('K3 · otro preventista se asignó un cliente ajeno: ' || v_t);
+  END IF;
+  v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+    jsonb_build_object('clave', gen_random_uuid(), 'campos', jsonb_build_object('razon_social', 'ZZ C4b K3c', 'nombre_fantasia', 'ZZ C4b K3c',
+                                                                                 'direccion', 'Av. Siempreviva 742', 'latitud', -26.8, 'longitud', -65.2))));
+  IF v_t NOT LIKE '%Ya hay un cliente en esa dirección%' OR EXISTS (SELECT 1 FROM clientes WHERE razon_social = 'ZZ C4b K3c') THEN
+    v_fallas := v_fallas || ('K3 · entró un duplicado: ' || v_t);
+  END IF;
+
+  -- K4 · la versión del cliente (el ensayo es una transacción: la vieja se escribe sin triggers).
+  IF v_cl IS NOT NULL THEN
+    SET LOCAL session_replication_role = replica;
+    UPDATE clientes SET updated_at = '2020-01-01 00:00:00+00' WHERE id = v_cl;
+    SET LOCAL session_replication_role = origin;
+    UPDATE clientes SET saldo_cuenta = saldo_cuenta + 10 WHERE id = v_cl;
+    UPDATE clientes SET notas = notas WHERE id = v_cl;
+    IF (SELECT updated_at FROM clientes WHERE id = v_cl) IS DISTINCT FROM '2020-01-01 00:00:00+00'::timestamptz THEN
+      v_fallas := v_fallas || text 'K4 · el saldo (o un UPDATE que no cambia nada) movió la versión del cliente';
+    END IF;
+    v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+      jsonb_build_object('id', v_cl, 'updated_at_esperado', '2019-12-31 00:00:00+00', 'campos', jsonb_build_object('notas', 'pisada'))));
+    IF pg_temp.j(v_t)->>'codigo' IS DISTINCT FROM 'cliente_cambiado' OR (SELECT notas FROM clientes WHERE id = v_cl) IS NOT DISTINCT FROM 'pisada' THEN
+      v_fallas := v_fallas || ('K4 · una edición con la versión vieja pisó el cliente: ' || v_t);
+    END IF;
+    v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+      jsonb_build_object('id', v_cl, 'updated_at_esperado', '2020-01-01 00:00:00+00', 'campos', jsonb_build_object('notas', 'buena'))));
+    IF (pg_temp.j(v_t)->>'success')::boolean IS DISTINCT FROM true OR (SELECT notas FROM clientes WHERE id = v_cl) IS DISTINCT FROM 'buena'
+       OR (SELECT updated_at FROM clientes WHERE id = v_cl) = '2020-01-01 00:00:00+00'::timestamptz THEN
+      v_fallas := v_fallas || ('K4 · una edición con la versión de ahora no guardó o no movió la versión: ' || v_t);
+    END IF;
+  ELSE
+    v_fallas := v_fallas || text 'K4 · sin cliente (K1 falló)';
+  END IF;
+
+  -- K5 · las guardas de la edición.
+  v_t := pg_temp.intenta(v_pre, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+    jsonb_build_object('id', v_cl, 'campos', jsonb_build_object('limite_credito', 999999))));
+  IF v_t NOT LIKE '42501 %' THEN v_fallas := v_fallas || ('K5 · el preventista cambió el límite de crédito: ' || v_t); END IF;
+  v_t := pg_temp.intenta(v_u, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+    jsonb_build_object('id', v_cl, 'campos', jsonb_build_object('notas', 'de otro'))));
+  IF v_t NOT LIKE '%no lo podés editar%' THEN v_fallas := v_fallas || ('K5 · otro preventista editó un cliente ajeno: ' || v_t); END IF;
+  v_t := pg_temp.intenta(v_des, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+    jsonb_build_object('id', v_cl, 'campos', jsonb_build_object('notas', 'desactivado'))));
+  IF v_t LIKE 'PASA %' THEN v_fallas := v_fallas || ('K5 · un admin desactivado editó un cliente: ' || v_t); END IF;
+  IF v_cl IS NOT NULL AND (SELECT notas FROM clientes WHERE id = v_cl) IS DISTINCT FROM 'buena' THEN
+    v_fallas := v_fallas || text 'K5 · un rechazo cambió el cliente';
+  END IF;
+
+  -- K6 · la zona manda (lo hace el trigger, no la RPC).
+  INSERT INTO zonas (nombre, sucursal_id) VALUES ('ZZ C4b zona', 1) RETURNING id INTO v_zona;
+  INSERT INTO preventista_zonas (perfil_id, zona_id, sucursal_id) VALUES (v_pre, v_zona, 1);
+  v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+    jsonb_build_object('clave', gen_random_uuid(), 'campos', jsonb_build_object('razon_social', 'ZZ C4b K6', 'nombre_fantasia', 'ZZ C4b K6',
+                                                                                 'direccion', 'Ruta 9 km 1300', 'zona_id', v_zona))));
+  v_cl2 := (pg_temp.j(v_t)->'cliente'->>'id')::bigint;
+  IF v_cl2 IS NULL OR NOT EXISTS (SELECT 1 FROM cliente_preventistas WHERE cliente_id = v_cl2 AND preventista_id = v_pre) THEN
+    v_fallas := v_fallas || ('K6 · el alta en una zona con dueño no le asignó el dueño: ' || v_t);
+  ELSE
+    v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+      jsonb_build_object('id', v_cl2, 'campos', jsonb_build_object('telefono', '000'))));
+    IF v_t NOT LIKE 'PASA %' OR NOT EXISTS (SELECT 1 FROM cliente_preventistas WHERE cliente_id = v_cl2 AND preventista_id = v_pre) THEN
+      v_fallas := v_fallas || ('K6 · una edición sin lista de preventistas sacó al dueño de la zona: ' || v_t);
+    END IF;
+  END IF;
+
+  -- K7 · la diferencia de preventistas.
+  IF v_cl2 IS NOT NULL THEN
+    v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+      jsonb_build_object('id', v_cl2, 'preventista_ids', jsonb_build_array(v_pre), 'preventista_ids_previos', jsonb_build_array(v_u))));
+    IF v_t NOT LIKE 'PASA %'
+       OR (SELECT array_agg(preventista_id) FROM cliente_preventistas WHERE cliente_id = v_cl2) IS DISTINCT FROM ARRAY[v_pre] THEN
+      v_fallas := v_fallas || ('K7 · con previos no quedó sólo la diferencia: ' || v_t);
+    END IF;
+    v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+      jsonb_build_object('id', v_cl2, 'preventista_ids', '[]'::jsonb)));
+    IF v_t NOT LIKE 'PASA %' OR EXISTS (SELECT 1 FROM cliente_preventistas WHERE cliente_id = v_cl2) THEN
+      v_fallas := v_fallas || ('K7 · sin previos, la lista vacía no sacó al dueño: ' || v_t);
+    END IF;
+  ELSE
+    v_fallas := v_fallas || text 'K7 · sin cliente (K6 falló)';
+  END IF;
+
+  -- ============================================================ v2 · usuario -
+  v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_usuario(%L::jsonb)::text',
+    jsonb_build_object('id', v_u, 'campos', jsonb_build_object('nombre', 'ZZ C4b U nuevo'), 'roles_extra', jsonb_build_array('transportista'))));
+  IF v_t NOT LIKE 'PASA %' OR (SELECT nombre FROM perfiles WHERE id = v_u) IS DISTINCT FROM 'ZZ C4b U nuevo'
+     OR NOT EXISTS (SELECT 1 FROM perfil_roles WHERE usuario_id = v_u AND sucursal_id = 1 AND rol = 'transportista') THEN
+    v_fallas := v_fallas || ('U1 · guardar el usuario no dejó el nombre y el rol extra: ' || v_t);
+  END IF;
+  v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_usuario(%L::jsonb)::text',
+    jsonb_build_object('id', v_u, 'campos', jsonb_build_object('nombre', 'ZZ C4b U roto'), 'roles_extra', jsonb_build_array('admin'))));
+  IF v_t NOT LIKE '%Rol extra desconocido%' OR (SELECT nombre FROM perfiles WHERE id = v_u) IS DISTINCT FROM 'ZZ C4b U nuevo' THEN
+    v_fallas := v_fallas || ('U1 · con un rol extra inválido quedó el nombre: ' || v_t);
+  END IF;
+  v_t := pg_temp.intenta(v_a1, 1, format('SELECT public.guardar_usuario(%L::jsonb)::text',
+    jsonb_build_object('id', v_u, 'campos', jsonb_build_object('nombre', 'ZZ C4b U de a1'))));
+  IF v_t NOT LIKE '%No podés editar a este usuario%' OR (SELECT nombre FROM perfiles WHERE id = v_u) IS DISTINCT FROM 'ZZ C4b U nuevo' THEN
+    v_fallas := v_fallas || ('U1 · el admin de una sola sucursal editó a uno de dos: ' || v_t);
   END IF;
 
   -- ============================================================= seguridad -

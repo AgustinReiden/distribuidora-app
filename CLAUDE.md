@@ -364,7 +364,11 @@ suelta en `sucursales`.
   sólo de server). La edición de un combo o de una promo manda la versión que abrió
   (`updated_at_esperado`, y en un combo las `versiones` del orden que reescribe): si otro guardó, no
   se pisa y el formulario queda abierto con lo tipeado. La versión de una promo no la mueve la barra
-  (`usos_pendientes`).
+  (`usos_pendientes`), ni la de un cliente su saldo (`clientes.updated_at`, `trg_clientes_zz_version`).
+  El alta y la edición de un cliente (`guardar_cliente`) y el guardado de un usuario (`guardar_usuario`)
+  corren como quien llama (INVOKER), a propósito: los triggers de `clientes` y `perfiles` se eximen
+  cuando `current_user` no es 'authenticated', y una definer los salteaba. Mientras sean INVOKER
+  necesitan los grants REST de esas tablas: revocarlos obliga a pasarlas a definer con esas guardas.
 - **El stock por lote lo lleva un trigger, no las RPCs** (y cómo devolver, etiquetar y lockear) → `migrations/CLAUDE.md`.
 - **"Venta por vendedor" tiene UNA definición y se escribe siempre igual** (migs 241 y 318, #568):
   `estado = 'entregado'` · `canal <> 'cambio'` · `tipo_factura IS DISTINCT FROM 'VB'` · por
