@@ -12,6 +12,10 @@
 --        de la misma raíz y del mismo padre.
 --   E1 · Un cobro común de la boleta (efectivo, por registrar_pagos_pedido) borrado por la salvedad vuelve sin
 --        marcas, como siempre: desimputar_pago no lo acepta (se anula como un cobro).
+--   L11 · H4 de la revisión de C1 (decisión de la coordinadora): el empleado se da de baja entre la salvedad y la
+--        anulación. Reponerle el adelanto se rechaza con «Ese cliente es la ficha de un empleado dado de baja…»,
+--        sea la raíz, un pedazo o un adelanto vivo al que se le suma lo recortado; la cuenta no cambia (antes el
+--        pedazo y el que se suma entraban y le volvían a cargar el adelanto al ex empleado).
 --
 --   COB-b6 · al aplicar un crédito se limpian todas las marcas de saldo a favor
 --   L3 · Una boleta cobrada en efectivo se cancela con otra boleta del cliente impaga: el cobro pasa a la otra
@@ -20,10 +24,11 @@
 --        entero y en parte, el pago aplicado dice «x».
 --   L5 · _notas_sin_saldo_a_favor saca las tres marcas y nada más.
 --
---   1598-b4 · la marca «tiene salvedad vigente» de un pedido
---   L6 · Tres boletas: una con salvedad viva, una con la salvedad anulada y una sin salvedad. Como el admin
---        (authenticated), filtrar pedidos por tiene_salvedad_vigente da la primera con true y las otras dos con
---        false, igual que la lista de ids de antes.
+--   1598-b4 · el filtro «con / sin salvedad» es un embed del front (sin SQL nuevo)
+--   E4 · Lo mismo que el embed en SQL, como authenticated: «con» es un EXISTS sobre las salvedades vigentes y «sin»
+--        el NOT EXISTS. El admin ve la boleta y el vale blanco con salvedad viva en «con» y la anulada en «sin»; el
+--        transportista ve la boleta que reparte y no el vale blanco (la RLS de pedidos); un preventista ajeno y el
+--        admin parado en otra sucursal no ven nada. Pasa con y sin la migración (la RLS corre sola).
 --
 --   N2 y N7 de la revisión de B22 · la nota por unidades
 --   L7 · 3 × $ 100 con un descuento de $ 299,99 en la línea: 1 u. sola se rechaza con el mensaje de «casi toda su
@@ -31,6 +36,8 @@
 --   E2 · Las 3 u. juntas (le quedan $ 0,01) entran: la parte no es 0.
 --   L8 · Los mensajes de la rama por unidades nombran el producto y no el id de la línea: cantidad 0, un regalo,
 --        más de lo entregado y un renglón que no es de la boleta.
+--   L12 · H3 de la revisión de C1: una línea de venta a $ 0 sin la marca de regalo (de antes de la marca): 1 u.
+--        sola o con otro renglón se rechaza con «“X” está a $ 0 en la boleta» (antes, con otro renglón entraba a $ 0).
 --
 --   1592-b5 residual (N1 de la revisión de M4) · una salvedad sobre el regalo no es un recorte
 --   Promo 10 → 2 del mismo producto, venta 20 y regalo 4. Cada salvedad en su propia transacción (se corre la
@@ -360,6 +367,74 @@ BEGIN
 END
 $fn$;
 
+-- anular_salvedad sin abortar: 'ok', el código del rechazo o el error.
+CREATE OR REPLACE FUNCTION pg_temp.c1_anu_err(p_salv bigint, p_adm uuid, p_suc bigint)
+RETURNS text LANGUAGE plpgsql AS $fn$
+DECLARE
+  v_res jsonb;
+BEGIN
+  PERFORM pg_temp.c1_claims(p_adm, p_suc);
+  v_res := public.anular_salvedad(p_salv, 'ensayo C1');
+  PERFORM pg_temp.c1_reset();
+  RETURN CASE WHEN COALESCE((v_res->>'success')::boolean, false) THEN 'ok' ELSE COALESCE(v_res->>'codigo', v_res::text) END;
+EXCEPTION WHEN OTHERS THEN
+  PERFORM pg_temp.c1_reset();
+  RETURN SQLSTATE || ' ' || SQLERRM;
+END
+$fn$;
+
+-- L11 · H4 de la revisión: el empleado se da de baja entre la salvedad y la anulación.
+-- p_caso: 'raiz' (el adelanto de la boleta, borrado), 'pedazo' (el pedazo de una boleta posterior, borrado)
+-- o 'sumar' (la salvedad recortó parte del adelanto, que sigue vivo: anular se lo vuelve a sumar).
+CREATE OR REPLACE FUNCTION pg_temp.c1_l11(a jsonb, p_caso text)
+RETURNS text[] LANGUAGE plpgsql AS $fn$
+DECLARE
+  f     text[] := '{}';
+  v_suc bigint := (a->>'suc')::bigint;
+  v_adm uuid := (a->>'adm')::uuid;
+  v_cli bigint := pg_temp.c1_cliente(v_suc, 'C1 empleado L11');
+  v_pr  bigint := pg_temp.c1_producto(v_suc, 'C1 L11 fardo', 10);
+  v_emp bigint := pg_temp.c1_empleado(v_suc, v_cli, v_adm);
+  v_b1  bigint;
+  v_b3  bigint;
+  v_s   bigint;
+  v_cuenta numeric;
+  v_r   text;
+BEGIN
+  v_b1 := pg_temp.c1_boleta(v_cli, v_adm, v_suc, pg_temp.c1_linea(v_pr, 6, 10));
+  PERFORM pg_temp.c1_fifo_adelanto(v_cli, 100, v_adm, v_suc);   -- 60 a la boleta (raíz), 40 sueltos
+  v_b3 := pg_temp.c1_boleta(v_cli, v_adm, v_suc, pg_temp.c1_linea(v_pr, 3, 10));  -- un pedazo de 30
+  v_s := CASE p_caso WHEN 'raiz' THEN pg_temp.c1_salvedad(v_b1, 6, v_adm, v_suc)
+                     WHEN 'pedazo' THEN pg_temp.c1_salvedad(v_b3, 3, v_adm, v_suc)
+                     ELSE pg_temp.c1_salvedad(v_b1, 2, v_adm, v_suc) END;
+  UPDATE public.empleados SET activo = false, fecha_baja = public._tablero_hoy() WHERE id = v_emp;
+  v_cuenta := pg_temp.c1_cuenta(v_emp);
+  v_r := pg_temp.c1_anu_err(v_s, v_adm, v_suc);
+  f := pg_temp.c1_si(f, v_r LIKE '%Ese cliente es la ficha de un empleado dado de baja: ya no se le dan adelantos de sueldo%',
+                     format('%s: anular dio %s', p_caso, v_r));
+  f := pg_temp.c1_si(f, pg_temp.c1_cuenta(v_emp) = v_cuenta,
+                     format('%s: la cuenta del ex empleado pasó de %s a %s', p_caso, v_cuenta, pg_temp.c1_cuenta(v_emp)));
+  RETURN f;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.c1_caso_l11(a jsonb)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f text[] := '{}';
+  v_caso text;
+BEGIN
+  FOREACH v_caso IN ARRAY ARRAY['raiz', 'pedazo', 'sumar'] LOOP
+    BEGIN
+      f := f || pg_temp.c1_l11(a, v_caso);
+      RAISE EXCEPTION USING ERRCODE = 'ZZ002';
+    EXCEPTION WHEN SQLSTATE 'ZZ002' THEN NULL;
+    END;
+  END LOOP;
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
 -- ---------------------------------------------------------------------------
 -- COB-b6
 -- ---------------------------------------------------------------------------
@@ -460,61 +535,86 @@ $fn$;
 -- ---------------------------------------------------------------------------
 -- 1598-b4
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION pg_temp.c1_caso_l6(a jsonb)
+-- Lo que hace el embed del front, en SQL y como authenticated: «con» es un EXISTS sobre salvedades_items
+-- vigentes (el !inner de PostgREST) y «sin» el NOT EXISTS (el anti-join), con la RLS de quien pregunta.
+CREATE OR REPLACE FUNCTION pg_temp.c1_filtro(p_user uuid, p_suc bigint, p_ids bigint[], p_con boolean)
+RETURNS text LANGUAGE plpgsql AS $fn$
+DECLARE
+  v text;
+BEGIN
+  PERFORM pg_temp.c1_claims(p_user, p_suc);
+  SET LOCAL ROLE authenticated;
+  EXECUTE format($q$SELECT COALESCE(string_agg(p.id::text, ',' ORDER BY p.id), '-')
+                      FROM public.pedidos p
+                     WHERE p.id = ANY (%L::bigint[])
+                       AND %s EXISTS (SELECT 1 FROM public.salvedades_items s
+                                       WHERE s.pedido_id = p.id AND s.sucursal_id = p.sucursal_id
+                                         AND s.estado_resolucion <> 'anulada')$q$,
+                 p_ids, CASE WHEN p_con THEN '' ELSE 'NOT' END) INTO v;
+  RESET ROLE;
+  RETURN v;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.c1_caso_e4(a jsonb)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   f     text[] := '{}';
   v_suc bigint := (a->>'suc')::bigint;
   v_adm uuid := (a->>'adm')::uuid;
-  v_cli bigint := pg_temp.c1_cliente(v_suc, 'C1 L6');
-  v_pr  bigint := pg_temp.c1_producto(v_suc, 'C1 L6 fardo', 10);
+  v_cli bigint := pg_temp.c1_cliente(v_suc, 'C1 E4');
+  v_pr  bigint := pg_temp.c1_producto(v_suc, 'C1 E4 fardo', 10);
+  v_tra uuid := pg_temp.c1_usuario('transportista', v_suc);
+  v_prev uuid := pg_temp.c1_usuario('preventista', v_suc);
   v_viva bigint;
   v_anul bigint;
   v_sin  bigint;
+  v_vb   bigint;
+  v_cli_vb bigint;
   v_s    bigint;
-  v_got  text;
-  v_ids  text;
-  v_prev uuid;
-  v_bool boolean;
+  v_res  jsonb;
+  v_ids  bigint[];
+  v_r    text;
 BEGIN
-  IF to_regprocedure('public.tiene_salvedad_vigente(public.pedidos)') IS NULL THEN
-    RETURN jsonb_build_object('fallas', jsonb_build_array('no existe la columna calculada tiene_salvedad_vigente(pedidos)'));
-  END IF;
-  v_viva := pg_temp.c1_boleta(v_cli, v_adm, v_suc, pg_temp.c1_linea(v_pr, 5, 10));
+  v_viva := pg_temp.c1_boleta(v_cli, v_adm, v_suc, pg_temp.c1_linea(v_pr, 5, 10), false);
   v_anul := pg_temp.c1_boleta(v_cli, v_adm, v_suc, pg_temp.c1_linea(v_pr, 5, 10));
   v_sin  := pg_temp.c1_boleta(v_cli, v_adm, v_suc, pg_temp.c1_linea(v_pr, 5, 10));
+  -- Un vale blanco que reparte el transportista, con su salvedad.
+  PERFORM pg_temp.c1_claims(v_adm, v_suc);
+  PERFORM set_config('app.omitir_minimo_pedido', '1', true);
+  v_cli_vb := pg_temp.c1_cliente(v_suc, 'C1 E4 consumo interno');
+  UPDATE public.clientes SET tipo_factura_default = 'VB' WHERE id = v_cli_vb;
+  v_res := public.crear_pedido_completo(v_cli_vb, 0, v_adm, pg_temp.c1_linea(v_pr, 5, 0), 'ensayo C1', 'efectivo',
+                                        'pendiente', public._tablero_hoy(), 'VB');
+  PERFORM pg_temp.c1_reset();
+  v_vb := (v_res->>'pedido_id')::bigint;
+  IF v_vb IS NULL THEN
+    RAISE EXCEPTION 'fixture · no se pudo crear el vale blanco: %', v_res;
+  END IF;
+  UPDATE public.pedidos SET transportista_id = v_tra, estado = 'entregado', fecha_entrega = now()
+   WHERE id IN (v_viva, v_vb);
   PERFORM pg_temp.c1_salvedad(v_viva, 1, v_adm, v_suc);
+  PERFORM pg_temp.c1_salvedad(v_vb, 1, v_adm, v_suc);
   v_s := pg_temp.c1_salvedad(v_anul, 1, v_adm, v_suc);
   PERFORM pg_temp.c1_anular(v_s, v_adm, v_suc);
+  v_ids := ARRAY[v_viva, v_anul, v_sin, v_vb];
 
-  -- Como lo pide PostgREST: authenticated, con la RLS de pedidos y de salvedades_items.
-  PERFORM pg_temp.c1_claims(v_adm, v_suc);
-  SET LOCAL ROLE authenticated;
-  EXECUTE format($q$SELECT string_agg(p.id || '=' || public.tiene_salvedad_vigente(p), ',' ORDER BY p.id)
-                     FROM public.pedidos p WHERE p.id IN (%s, %s, %s)$q$, v_viva, v_anul, v_sin) INTO v_got;
-  EXECUTE format($q$SELECT string_agg(p.id::text, ',' ORDER BY p.id) FROM public.pedidos p
-                     WHERE p.cliente_id = %s AND public.tiene_salvedad_vigente(p)$q$, v_cli) INTO v_ids;
-  RESET ROLE;
-  f := pg_temp.c1_si(f, v_got = format('%s=true,%s=false,%s=false', v_viva, v_anul, v_sin),
-                     format('la marca dio %s', v_got));
-  f := pg_temp.c1_si(f, v_ids = v_viva::text, format('el filtro «con salvedad» trajo %s y no %s', v_ids, v_viva));
-
-  -- La RPC llamada directo con la fila: un preventista que no vendió ni reparte el pedido no ve su salvedad
-  -- (la RLS de salvedades_items tampoco se la deja ver), y desde otra sucursal tampoco.
-  v_prev := pg_temp.c1_usuario('preventista', v_suc);
-  PERFORM pg_temp.c1_claims(v_prev, v_suc);
-  SET LOCAL ROLE authenticated;
-  EXECUTE format('SELECT public.tiene_salvedad_vigente(p) FROM public.pedidos p WHERE p.id = %s', v_viva) INTO v_bool;
-  RESET ROLE;
-  IF v_bool IS NULL THEN
-    -- La RLS de pedidos no le deja leer la fila: se la pasa armada, como por la RPC.
-    PERFORM pg_temp.c1_claims(v_prev, v_suc);
-    SELECT public.tiene_salvedad_vigente(p) INTO v_bool FROM public.pedidos p WHERE p.id = v_viva;
-  END IF;
-  f := pg_temp.c1_si(f, v_bool IS FALSE, format('a un preventista ajeno le dio %s', v_bool));
-  PERFORM pg_temp.c1_claims(v_adm, (a->>'suc_b')::bigint);
-  SELECT public.tiene_salvedad_vigente(p) INTO v_bool FROM public.pedidos p WHERE p.id = v_viva;
-  f := pg_temp.c1_si(f, v_bool IS FALSE, format('desde otra sucursal le dio %s', v_bool));
+  -- El admin ve las dos con salvedad vigente; la anulada cae en «sin».
+  v_r := pg_temp.c1_filtro(v_adm, v_suc, v_ids, true);
+  f := pg_temp.c1_si(f, v_r = format('%s,%s', least(v_viva, v_vb), greatest(v_viva, v_vb)), format('admin «con» dio %s', v_r));
+  v_r := pg_temp.c1_filtro(v_adm, v_suc, v_ids, false);
+  f := pg_temp.c1_si(f, v_r = format('%s,%s', v_anul, v_sin), format('admin «sin» dio %s', v_r));
+  -- El transportista ve la boleta que reparte con su salvedad; el vale blanco no lo ve (la RLS de pedidos).
+  v_r := pg_temp.c1_filtro(v_tra, v_suc, v_ids, true);
+  f := pg_temp.c1_si(f, v_r = v_viva::text, format('transportista «con» dio %s (el VB no se ve)', v_r));
+  v_r := pg_temp.c1_filtro(v_tra, v_suc, v_ids, false);
+  f := pg_temp.c1_si(f, v_r = '-', format('transportista «sin» dio %s', v_r));
+  -- Un preventista que no vendió ninguna: nada, ni con ni sin.
+  v_r := pg_temp.c1_filtro(v_prev, v_suc, v_ids, true) || '|' || pg_temp.c1_filtro(v_prev, v_suc, v_ids, false);
+  f := pg_temp.c1_si(f, v_r = '-|-', format('preventista ajeno dio %s', v_r));
+  -- El admin parado en otra sucursal: nada.
+  v_r := pg_temp.c1_filtro(v_adm, (a->>'suc_b')::bigint, v_ids, true) || '|' || pg_temp.c1_filtro(v_adm, (a->>'suc_b')::bigint, v_ids, false);
+  f := pg_temp.c1_si(f, v_r = '-|-', format('desde otra sucursal dio %s', v_r));
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;
@@ -846,6 +946,45 @@ BEGIN
 END
 $fn$;
 
+-- L12 · H3 de la revisión: una línea de venta a $ 0 sin la marca de regalo (de antes de que el alta la guardara;
+-- hoy no se puede crear, se inserta sin triggers). 1 u. de esa línea, sola o con otro renglón con plata, se rechaza
+-- con su mensaje (antes, sola daba «el total tiene que ser mayor a 0» y con otro renglón entraba a $ 0,00).
+CREATE OR REPLACE FUNCTION pg_temp.c1_caso_l12(a jsonb)
+RETURNS jsonb LANGUAGE plpgsql AS $fn$
+DECLARE
+  f     text[] := '{}';
+  v_suc bigint := (a->>'suc')::bigint;
+  v_adm uuid := (a->>'adm')::uuid;
+  v_cli bigint := pg_temp.c1_cliente(v_suc, 'C1 L12');
+  v_pa  bigint := pg_temp.c1_producto(v_suc, 'C1 legado a cero', 100);
+  v_pb  bigint := pg_temp.c1_producto(v_suc, 'C1 L12 con plata', 100);
+  v_b   bigint;
+  v_cero bigint;
+  v_ib  bigint;
+  v_r   text;
+  v_msg text := '%“C1 legado a cero” está a $ 0 en la boleta: no hay plata que acreditar%';
+BEGIN
+  v_b := pg_temp.c1_boleta(v_cli, v_adm, v_suc, pg_temp.c1_linea(v_pb, 3, 100));
+  SET LOCAL session_replication_role = replica;
+  INSERT INTO public.pedido_items (pedido_id, producto_id, cantidad, precio_unitario, subtotal, sucursal_id, es_bonificacion)
+  VALUES (v_b, v_pa, 2, 0, 0, v_suc, NULL) RETURNING id INTO v_cero;
+  SET LOCAL session_replication_role = origin;
+  v_ib := pg_temp.c1_item(v_b, v_pb);
+
+  v_r := pg_temp.c1_nc(v_b, jsonb_build_array(jsonb_build_object('pedido_item_id', v_cero, 'cantidad', 1)), 'cliente_rechaza', v_adm, v_suc);
+  f := pg_temp.c1_si(f, v_r LIKE '22023' || v_msg, format('la línea a $ 0 sola dio %s', v_r));
+  v_r := pg_temp.c1_nc(v_b, jsonb_build_array(jsonb_build_object('pedido_item_id', v_ib, 'cantidad', 1),
+                                              jsonb_build_object('pedido_item_id', v_cero, 'cantidad', 1)),
+                       'cliente_rechaza', v_adm, v_suc);
+  f := pg_temp.c1_si(f, v_r LIKE '22023' || v_msg, format('la línea a $ 0 con otro renglón dio %s', v_r));
+  f := pg_temp.c1_si(f, NOT EXISTS (SELECT 1 FROM public.nota_credito_venta_items i
+                                     JOIN public.notas_credito_venta n ON n.id = i.nota_credito_id
+                                    WHERE n.pedido_id = v_b AND i.cantidad > 0 AND i.subtotal = 0),
+                     'quedó un renglón por unidades de $ 0');
+  RETURN jsonb_build_object('fallas', to_jsonb(f));
+END
+$fn$;
+
 DO $ensayoC1$
 DECLARE
   v_suc    bigint;
@@ -862,7 +1001,7 @@ BEGIN
   v_args := jsonb_build_object('suc', v_suc, 'adm', pg_temp.c1_usuario('admin', v_suc),
                                'suc_b', (SELECT min(id) FROM sucursales WHERE activa AND id > v_suc));
 
-  FOREACH v_caso IN ARRAY ARRAY['l1', 'l2', 'e1', 'l3', 'l4', 'l5', 'l6', 'l7', 'e2', 'l8', 'l9', 'l10', 'e3'] LOOP
+  FOREACH v_caso IN ARRAY ARRAY['l1', 'l2', 'e1', 'l11', 'l3', 'l4', 'l5', 'e4', 'l7', 'e2', 'l8', 'l12', 'l9', 'l10', 'e3'] LOOP
     v_out := NULL;
     BEGIN
       PERFORM pg_temp.c1_reset();
@@ -881,6 +1020,6 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION E'ENSAYO FALLÓ (% fallas):\n- %', cardinality(v_fallas), array_to_string(v_fallas, E'\n- ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · 1595-b2, COB-b6, 1598-b4, N2, N7 y 1592-b5 (tarjeta C1 de la tanda 5)';
+  RAISE EXCEPTION 'ENSAYO OK · 1595-b2 (con H4), COB-b6, 1598-b4, N2, N7, H3 y 1592-b5 (tarjeta C1 de la tanda 5)';
 END
 $ensayoC1$;

@@ -282,6 +282,8 @@ suelta en `sucursales`.
   cobro nuevo con sus datos (con la fecha de hoy si la suya está cerrada), y la foto no cambia.
   Ese cobro nuevo lleva las marcas del recortado (`a_cuenta`, `pago_origen_id` y `pago_padre_id`;
   1595-b2): un adelanto de sueldo del FIFO de la ficha sigue a cuenta y `desimputar_pago` lo acepta.
+  Reponer un adelanto a la ficha de un empleado dado de baja se rechaza siempre: raíz, pedazo o
+  sumado al pago vivo (H4 de la revisión de C1).
   Lo que quedó a favor, o un cobro que alguien borró o movió después, no se repone.
   **La línea que la salvedad borró vuelve con su foto** (VTA-1, #1595): al borrarla,
   `registrar_salvedad` guarda su costo, su lista, su origen, su descuento y su escala en

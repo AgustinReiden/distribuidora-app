@@ -25,6 +25,11 @@
 -- Quedan anotadas en el recorte (cobro_recortado[].marcas). Sin ninguna de las
 -- dos, el cobro nace sin marcas, como antes. anular_salvedad se parcha por
 -- ancla con premisa de forma (otra tarjeta de la tanda puede tocarla).
+-- H4 de la revisión (decisión de la coordinadora, conservadora como la 530):
+-- reponer un adelanto de sueldo a la ficha de un empleado dado de baja se
+-- rechaza siempre, con el mensaje de hoy. Antes sólo lo frenaba el trigger de la
+-- cuenta del empleado en la raíz nueva; con las marcas, el pedazo repuesto (y el
+-- pago que vuelve a crecer) le volvían a cargar el adelanto al ex empleado.
 --
 -- =========================================================================
 -- 2 · COB-b6 (#1545): AL REAPLICAR UN CRÉDITO SE LIMPIAN TODAS SUS NOTAS
@@ -38,19 +43,13 @@
 -- crear_nota_credito_venta_impl (dos cada una: el crédito entero y el pedazo).
 --
 -- =========================================================================
--- 3 · 1598-b4 (#1598): LA MARCA «TIENE SALVEDAD VIGENTE» DE UN PEDIDO
+-- 3 · 1598-b4 (#1598): EL FILTRO «CON / SIN SALVEDAD» NO NECESITA SQL
 -- =========================================================================
--- El filtro «Con salvedad / Sin salvedad» de Pedidos mandaba en la URL los ids
--- de todos los pedidos con salvedad; pasados 700 cortaba con un aviso. Ahora
--- filtra por la columna calculada tiene_salvedad_vigente(pedidos): PostgREST la
--- expone como una columna más de pedidos (?tiene_salvedad_vigente=eq.true), sin
--- ids en la URL. pedidos se lee por REST con SELECT de tabla entera (no columna
--- por columna), así que la columna calculada no rompe ninguna consulta (trampa
--- 4 de CLAUDE.md; mismo caso que deuda_previa_detalle(pedidos)). Es definer por
--- el tiempo (se llama una vez por pedido), y mira lo mismo que la RLS de
--- salvedades_items sólo cuando el pedido tiene una salvedad vigente: da lo mismo
--- que la lista de ids de antes. Vigente = estado_resolucion <> 'anulada', el
--- criterio de siempre (#1180).
+-- Lo resuelve el front con un embed de PostgREST a salvedades_items (la FK
+-- salvedades_items_pedido_id_fkey por nombre, filtrada a las vigentes), sin
+-- objetos nuevos: la RLS de salvedades_items corre sola. Una columna calculada
+-- tiene_salvedad_vigente(pedidos) se llamaba una vez por pedido y con 100.000
+-- pedidos pasaba el timeout de 8 s (H1 de la revisión de C1).
 --
 -- =========================================================================
 -- 4 · N2 y N7 de la revisión de B22: LA NOTA POR UNIDADES
@@ -62,6 +61,9 @@
 -- parte de ese renglón dé $ 0, con qué hacer: anular primero el descuento.
 -- N7: los mensajes de la rama por unidades (y los mismos de la rama por monto)
 -- nombran el producto, no el id de la línea.
+-- H3 de la revisión de C1: después de las dos ramas, ningún renglón por unidades
+-- de $ 0. Lo que llegaba ahí era una línea de venta a $ 0 sin la marca de regalo
+-- (de antes de que el alta la guardara): «“X” está a $ 0 en la boleta».
 --
 -- =========================================================================
 -- 5 · 1592-b5 residual (#1592; N1 de la revisión de M4, parche de la tarjeta C2)
@@ -115,13 +117,8 @@ BEGIN
       RAISE EXCEPTION 'mig NNN · % cambió desde que se leyó (md5 %): rehacer sobre el cuerpo vigente', r.f, v;
     END IF;
   END LOOP;
-  IF to_regproc('public._notas_sin_saldo_a_favor') IS NOT NULL
-     OR to_regproc('public.tiene_salvedad_vigente') IS NOT NULL THEN
+  IF to_regproc('public._notas_sin_saldo_a_favor') IS NOT NULL THEN
     RAISE EXCEPTION 'mig NNN · algo de esta migración ya existe: revisar a mano';
-  END IF;
-  IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.pedidos'::regclass
-                AND attname = 'tiene_salvedad_vigente' AND NOT attisdropped) THEN
-    RAISE EXCEPTION 'mig NNN · pedidos ya tiene una columna tiene_salvedad_vigente: la calculada la taparía';
   END IF;
 END
 $premisas$;
@@ -244,6 +241,25 @@ $a$,
         END IF;
 $a$,
     1, v_que || ' (N2)');
+  -- H3 de la revisión de C1: después de las dos ramas, ningún renglón por unidades de $ 0. Lo que
+  -- queda para acá es la línea de venta a $ 0 sin la marca de regalo (de antes de que el alta la
+  -- guardara), que va por la rama de siempre.
+  v_def := pg_temp.parche(v_def,
+    $a$      END IF;
+      v_filas := v_filas || jsonb_build_object(
+        'pedido_item_id', v_it.pi_id, 'producto_id', v_it.producto_id, 'cantidad', v_cant,
+$a$,
+    $a$      END IF;
+      -- H3 de la revisión de C1: una línea de venta a $ 0 sin la marca de regalo (de antes de
+      -- que el alta la guardara) no tiene plata que acreditar: no hay renglón de $ 0.
+      IF v_sub <= 0 THEN
+        RAISE EXCEPTION '“%” está a $ 0 en la boleta: no hay plata que acreditar',
+          v_it.nombre USING ERRCODE = '22023';
+      END IF;
+      v_filas := v_filas || jsonb_build_object(
+        'pedido_item_id', v_it.pi_id, 'producto_id', v_it.producto_id, 'cantidad', v_cant,
+$a$,
+    1, v_que || ' (H3)');
   v_def := pg_temp.con_pg_temp(v_def, v_que);
   EXECUTE v_def;
 END
@@ -275,6 +291,16 @@ $a$,
       -- sueldo del FIFO de la ficha sigue siendo un pago a cuenta, y desimputar_pago
       -- lo acepta. Del pago vivo (foto de una rendición cerrada o caja cerrada) o, si
       -- el recorte lo borró, de la fila de su DELETE en audit_logs.
+      -- H4 de la revisión de C1 (decisión de la coordinadora, conservadora como la 530): reponer
+      -- un adelanto de sueldo es volver a cargárselo al empleado de la ficha. A uno dado de baja no
+      -- se le carga, sea la raíz o un pedazo, se sume al pago o vuelva como uno nuevo: se rechaza
+      -- con el mensaje del trigger de la cuenta del empleado (que sólo lo miraba en la raíz nueva).
+      IF v_accion <> 'nada' AND r_rec.e->>'forma_pago' = 'adelanto_sueldo'
+         AND EXISTS (SELECT 1 FROM empleados em
+                      WHERE em.cliente_id = (r_rec.e->>'cliente_id')::bigint AND NOT em.activo) THEN
+        RAISE EXCEPTION 'Ese cliente es la ficha de un empleado dado de baja: ya no se le dan adelantos de sueldo';
+      END IF;
+
       v_marcas := NULL;
       IF v_accion = 'nuevo' THEN
         SELECT jsonb_build_object('a_cuenta', pg.a_cuenta, 'pago_origen_id', pg.pago_origen_id,
@@ -356,46 +382,6 @@ END
 $salv$;
 
 -- =========================================================================
--- 3 · 1598-b4: la marca «tiene salvedad vigente» de un pedido
--- =========================================================================
-CREATE FUNCTION public.tiene_salvedad_vigente(p public.pedidos)
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $f$
-  -- 1598-b4 (#1598): la columna calculada del filtro «Con salvedad / Sin
-  -- salvedad» de Pedidos (?tiene_salvedad_vigente=eq.true). Vigente = no anulada
-  -- (#1180). PostgREST la llama una vez por pedido: invoker, la RLS de
-  -- salvedades_items (current_sucursal_id() y el rol) se evaluaba en cada llamada
-  -- y con 20.000 pedidos tardaba 3 a 4 veces más. Definer: primero el índice
-  -- por pedido_id, y sólo si hay una salvedad vigente, lo mismo que pide
-  -- mt_salvedades_items_select (la sucursal activa, y admin o encargado, o el
-  -- pedido es del que pregunta o lo reparte). Así una llamada directa a la RPC
-  -- con una fila armada no dice nada que la RLS no deje ver.
-  SELECT CASE
-           WHEN EXISTS (SELECT 1
-                          FROM salvedades_items s
-                         WHERE s.pedido_id = p.id
-                           AND s.sucursal_id = p.sucursal_id
-                           AND s.estado_resolucion <> 'anulada')
-           THEN COALESCE(p.sucursal_id = current_sucursal_id()
-                         AND (es_encargado_o_admin()
-                              OR EXISTS (SELECT 1
-                                           FROM pedidos pe
-                                          WHERE pe.id = p.id
-                                            AND pe.sucursal_id = p.sucursal_id
-                                            AND (pe.usuario_id = auth.uid() OR pe.transportista_id = auth.uid()))),
-                         false)
-           ELSE false
-         END;
-$f$;
-
-REVOKE ALL ON FUNCTION public.tiene_salvedad_vigente(public.pedidos) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.tiene_salvedad_vigente(public.pedidos) TO authenticated, service_role;
-
--- =========================================================================
 -- Poscondiciones
 -- =========================================================================
 DO $post$
@@ -407,6 +393,7 @@ BEGIN
     ('public.imputar_credito_a_pedido_impl(bigint,bigint,numeric)', 'public._notas_sin_saldo_a_favor(notas)', 2, true),
     ('public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)', 'public._notas_sin_saldo_a_favor(notas)', 2, true),
     ('public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)', 'ya se le acreditó casi toda su plata', 1, true),
+    ('public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)', 'está a $ 0 en la boleta: no hay plata que acreditar', 1, true),
     ('public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)', 'es un regalo de promoción: no se cobró', 2, true),
     ('public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)', 'El item %', 0, true),
     ('public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)', '''Item %:', 0, true),
@@ -414,7 +401,8 @@ BEGIN
     ('public.anular_salvedad(bigint,text)', 'COALESCE((r_rec.e->''marcas''->>''a_cuenta'')::boolean, false)', 1, true),
     ('public.anular_salvedad(bigint,text)', '''pagos'' AND a.accion = ''DELETE''', 1, true),
     ('public.anular_salvedad(bigint,text)', 'HAVING NOT bool_and(COALESCE(s.es_bonificacion, false) AND s.promocion_id IS NOT NULL)', 1, true),
-    ('public.anular_salvedad(bigint,text)', 'SELECT DISTINCT s.created_at', 0, true)
+    ('public.anular_salvedad(bigint,text)', 'SELECT DISTINCT s.created_at', 0, true),
+    ('public.anular_salvedad(bigint,text)', 'WHERE em.cliente_id = (r_rec.e->>''cliente_id'')::bigint AND NOT em.activo', 1, true)
   ) AS t(f, marca, n, definer) LOOP
     IF (SELECT (length(prosrc) - length(replace(prosrc, r.marca, ''))) / length(r.marca)
           FROM pg_proc WHERE oid = r.f::regprocedure) <> r.n
@@ -440,7 +428,7 @@ BEGIN
       RAISE EXCEPTION 'mig NNN · % quedó sin pg_temp en su search_path', r.f;
     END IF;
   END LOOP;
-  -- Los permisos: los de server sin la API; anular_salvedad y la columna calculada, para authenticated.
+  -- Los permisos: los de server sin la API; anular_salvedad, para authenticated.
   FOR r IN SELECT unnest(ARRAY['public._aplicar_credito_pagos(bigint,bigint,bigint[])',
                                'public.imputar_credito_a_pedido_impl(bigint,bigint,numeric)',
                                'public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)',
@@ -450,14 +438,8 @@ BEGIN
     END IF;
   END LOOP;
   IF NOT has_function_privilege('authenticated', 'public.anular_salvedad(bigint,text)', 'EXECUTE')
-     OR has_function_privilege('anon', 'public.anular_salvedad(bigint,text)', 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', 'public.tiene_salvedad_vigente(public.pedidos)', 'EXECUTE')
-     OR has_function_privilege('anon', 'public.tiene_salvedad_vigente(public.pedidos)', 'EXECUTE') THEN
-    RAISE EXCEPTION 'mig NNN · los permisos de anular_salvedad o de tiene_salvedad_vigente no son los esperados';
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = 'public.tiene_salvedad_vigente(public.pedidos)'::regprocedure
-                    AND prosecdef AND proconfig @> ARRAY['search_path=public, pg_temp']) THEN
-    RAISE EXCEPTION 'mig NNN · tiene_salvedad_vigente tiene que ser definer con pg_temp';
+     OR has_function_privilege('anon', 'public.anular_salvedad(bigint,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'mig NNN · los permisos de anular_salvedad no son los esperados';
   END IF;
 END
 $post$;
