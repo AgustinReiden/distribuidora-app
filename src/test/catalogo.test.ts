@@ -388,6 +388,15 @@ describe('problemaDeSearchPath (1564-b8 y 1564-g4)', () => {
     expect(problemaDeSearchPath(['search_path=pg_temp, public'])).toMatch(/no al final/)
   })
 
+  it('pg_temp repetido es rojo aunque el último sea pg_temp: Postgres usa la primera aparición (H1 de la lente)', () => {
+    expect(problemaDeSearchPath(['search_path=pg_temp, public, pg_temp'])).toMatch(/más de una vez/)
+    expect(problemaDeSearchPath(['search_path=public, pg_temp, pg_temp'], false)).toMatch(/más de una vez/)
+  })
+
+  it('el SQL no filtra por prokind: un procedimiento con SET search_path también se mira (H2 de la lente)', () => {
+    expect(SQL_SEARCH_PATH_FUNCIONES).not.toMatch(/prokind/)
+  })
+
   it('una definer sin search_path es roja: usa el de quien la llama', () => {
     expect(problemaDeSearchPath(null)).toMatch(/no fija search_path/)
     expect(problemaDeSearchPath([])).toMatch(/no fija search_path/)

@@ -147,8 +147,8 @@ export const SQL_ROL_SIN_ACTIVO_SIN_API = String.raw`
  * de su DML) también corre como postgres y vuelve a poner pg_temp primero (los dos casos los
  * reproduce scripts/test-search-path-ola2-1603.sql). Con `pg_temp` AL FINAL se busca último.
  *
- * La regla: una SECURITY DEFINER fija search_path, y TODA función que lo fija lo termina en
- * pg_temp. Una INVOKER sin search_path está bien: hereda el de quien la llama (dentro de una
+ * La regla: una SECURITY DEFINER fija search_path, y TODA función (o procedimiento) que lo fija
+ * lo termina en pg_temp, una sola vez. Una INVOKER sin search_path está bien: hereda el de quien la llama (dentro de una
  * definer, el de la definer), y una SQL sin SET se inlinea, que es a propósito.
  * `proconfig` es el array de pg_proc (`["search_path=public, pg_temp", …]`), que Postgres
  * guarda con los elementos separados por «, » (el vacío, como `""`). Devuelve null si está
@@ -159,15 +159,19 @@ export function problemaDeSearchPath(proconfig, definer = true) {
   if (sp === undefined) return definer ? 'es SECURITY DEFINER y no fija search_path: usa el de quien la llama' : null;
   const valor = sp.slice('search_path='.length);
   const elementos = valor.split(', ');
-  if (elementos[elementos.length - 1] === 'pg_temp') return null;
-  return elementos.includes('pg_temp')
+  const veces = elementos.filter((e) => e === 'pg_temp').length;
+  const alFinal = elementos[elementos.length - 1] === 'pg_temp';
+  if (alFinal && veces === 1) return null;
+  // Repetido (`pg_temp, public, pg_temp`): Postgres usa la PRIMERA aparición, así que la temporal va antes.
+  if (alFinal) return `su search_path (${valor}) tiene pg_temp más de una vez: vale la primera, antes de lo que le sigue`;
+  return veces
     ? `su search_path (${valor}) tiene pg_temp, pero no al final`
     : `su search_path (${valor}) no termina en pg_temp`;
 }
 
 /**
- * Las funciones de public que son SECURITY DEFINER o que fijan search_path, con su proconfig.
- * Devuelve un jsonb [{firma, definer, proconfig}].
+ * Las funciones (y procedimientos: no filtra `prokind`) de public que son SECURITY DEFINER o que
+ * fijan search_path, con su proconfig. Devuelve un jsonb [{firma, definer, proconfig}].
  */
 export const SQL_SEARCH_PATH_FUNCIONES = String.raw`
 SELECT COALESCE(jsonb_agg(jsonb_build_object('firma', p.oid::regprocedure::text,

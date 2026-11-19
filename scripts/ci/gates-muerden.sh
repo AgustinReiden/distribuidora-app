@@ -115,6 +115,14 @@ muerde "search_path: una INVOKER de trigger con SET search_path TO 'public' (sin
   "CREATE FUNCTION public.zz_gate_sp_inv() RETURNS trigger LANGUAGE plpgsql SET search_path TO 'public' AS \$f\$ BEGIN PERFORM 1 FROM perfiles WHERE id = auth.uid(); RETURN NEW; END \$f\$; REVOKE EXECUTE ON FUNCTION public.zz_gate_sp_inv() FROM PUBLIC, anon, authenticated" \
   "DROP FUNCTION IF EXISTS public.zz_gate_sp_inv()"
 
+muerde "search_path: pg_temp repetido (vale la primera aparición, antes que public)" check-search-path.mjs zz_gate_sp_doble \
+  "CREATE FUNCTION public.zz_gate_sp_doble() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path TO 'pg_temp', 'public', 'pg_temp' AS \$f\$ SELECT 1 \$f\$; REVOKE EXECUTE ON FUNCTION public.zz_gate_sp_doble() FROM PUBLIC, anon, authenticated" \
+  "DROP FUNCTION IF EXISTS public.zz_gate_sp_doble()"
+
+muerde "search_path: un PROCEDURE con SET search_path TO 'public'" check-search-path.mjs zz_gate_sp_proc \
+  "CREATE PROCEDURE public.zz_gate_sp_proc() LANGUAGE sql SET search_path TO 'public' AS \$f\$ SELECT 1 \$f\$; REVOKE EXECUTE ON PROCEDURE public.zz_gate_sp_proc() FROM PUBLIC, anon, authenticated" \
+  "DROP PROCEDURE IF EXISTS public.zz_gate_sp_proc()"
+
 # Lo que el gate tiene que dejar pasar: pg_temp al final (con otro esquema en el medio), y una INVOKER sin search_path.
 no_muerde "search_path: pg_temp al final, o una INVOKER sin search_path, pasan" check-search-path.mjs \
   "CREATE FUNCTION public.zz_gate_sp_bien() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path TO 'public', 'pg_catalog', 'pg_temp' AS \$f\$ SELECT 1 \$f\$; REVOKE EXECUTE ON FUNCTION public.zz_gate_sp_bien() FROM PUBLIC, anon, authenticated; CREATE FUNCTION public.zz_gate_sp_invoker() RETURNS int LANGUAGE sql AS \$f\$ SELECT 1 \$f\$; REVOKE EXECUTE ON FUNCTION public.zz_gate_sp_invoker() FROM PUBLIC, anon, authenticated" \
