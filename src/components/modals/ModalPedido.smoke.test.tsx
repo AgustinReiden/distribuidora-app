@@ -197,6 +197,7 @@ vi.mock('../../hooks/usePromocionPedido', () => ({
 }))
 
 import ModalPedido, { type NuevoPedidoState } from './ModalPedido'
+import { reiniciarAtrasModales } from '../../utils/atrasModales'
 import type { PatchHorarioCliente } from '../ui/BloqueHorarioRequerido'
 import { fechaLocalISO } from '../../utils/formatters'
 import type { ClienteDB, ProductoDB } from '../../types'
@@ -772,25 +773,52 @@ describe('ModalPedido — camino feliz', () => {
     expect(botonConfirmar()).toBeDisabled()
   })
 
-  it('cerrar avisa al padre y no guarda nada', async () => {
+  // Decisión 4 del dueño (#1603): con el pedido a medio armar, la X, Escape y el «atrás» preguntan
+  // «Salir sin guardar»; sin tocar cierran de una (tests de abajo). Antes cerraban sin preguntar.
+  it('cerrar con el pedido a medio armar pregunta; «Salir igual» avisa al padre y no guarda nada', async () => {
     const { user, onCloseSpy, onGuardarSpy } = montar()
 
     await elegirCliente(user, 'Kiosco El Sol')
     await agregarProducto(user, 'Gaseosa')
     await user.click(screen.getByRole('button', { name: 'Cerrar' }))
+    expect(onCloseSpy).not.toHaveBeenCalled()
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
 
     expect(onCloseSpy).toHaveBeenCalledTimes(1)
     expect(onGuardarSpy).not.toHaveBeenCalled()
   })
 
-  it('Escape cierra el modal', async () => {
+  it('«Seguir con el pedido» deja el pedido como estaba', async () => {
+    const { user, onCloseSpy } = montar()
+
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(screen.getByRole('button', { name: 'Cerrar' }))
+    await user.click(await screen.findByRole('button', { name: 'Seguir con el pedido' }))
+
+    expect(onCloseSpy).not.toHaveBeenCalled()
+    expect(botonCarrito()).toHaveAccessibleName(/1 unidad/)
+  })
+
+  it('Escape con el pedido a medio armar pregunta; «Salir igual» cierra el modal', async () => {
     const { user, onCloseSpy, onGuardarSpy } = montar()
 
     await agregarProducto(user, 'Gaseosa')
     await user.keyboard('{Escape}')
+    expect(onCloseSpy).not.toHaveBeenCalled()
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
 
     expect(onCloseSpy).toHaveBeenCalledTimes(1)
     expect(onGuardarSpy).not.toHaveBeenCalled()
+  })
+
+  it('un alta recién abierta, sin tocar, cierra de una con Escape y con la X', async () => {
+    const { user, onCloseSpy } = montar()
+
+    await user.keyboard('{Escape}')
+    expect(onCloseSpy).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole('button', { name: 'Cerrar' }))
+    expect(onCloseSpy).toHaveBeenCalledTimes(2)
   })
 
   // I1 de la revisión de B12a (decisión de pantalla a confirmar por el dueño):
@@ -1313,7 +1341,9 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     await user.keyboard('{Escape}')
     expect(onCloseSpy).not.toHaveBeenCalled()
 
+    // Ya cancelada la edición, Escape vuelve a cerrar el alta: con el pedido a medio armar, preguntando.
     await user.keyboard('{Escape}')
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
     expect(onCloseSpy).toHaveBeenCalledTimes(1)
   })
 
@@ -2107,5 +2137,44 @@ describe('ModalPedido — no se confirma sin los datos que arman el precio (FRV-
     expect(screen.queryByText(/No se puede confirmar:/)).not.toBeInTheDocument()
     await user.click(botonConfirmar())
     expect(onGuardarSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+// Decisión 4 del dueño (#1603): el «atrás» del teléfono cierra el alta por el mismo camino que la X y Escape:
+// con el pedido a medio armar pregunta «Salir sin guardar»; sin tocar, cierra de una. Historial real de jsdom.
+describe('ModalPedido (escritorio) — el «atrás» del teléfono', () => {
+  const asentar = () => act(async () => { await new Promise(r => setTimeout(r, 150)) })
+  const atras = async () => { act(() => { window.history.back() }); await asentar() }
+
+  beforeEach(() => {
+    reiniciarAtrasModales()
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('con el pedido a medio armar pregunta; «Seguir con el pedido» lo deja y «Salir igual» cierra', async () => {
+    const { user, onCloseSpy } = montar()
+    await asentar()
+    await agregarProducto(user, 'Gaseosa')
+
+    await atras()
+    expect(await screen.findByRole('button', { name: 'Salir igual' })).toBeInTheDocument()
+    expect(onCloseSpy).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Seguir con el pedido' }))
+    await asentar()
+    expect(onCloseSpy).not.toHaveBeenCalled()
+    expect(botonCarrito()).toHaveAccessibleName(/1 unidad/)
+
+    await atras()
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
+    expect(onCloseSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('un alta recién abierta, sin tocar, cierra de una', async () => {
+    const { onCloseSpy } = montar()
+    await asentar()
+    await atras()
+    expect(onCloseSpy).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: 'Salir igual' })).not.toBeInTheDocument()
   })
 })

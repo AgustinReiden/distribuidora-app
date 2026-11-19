@@ -94,6 +94,7 @@ vi.mock('../../hooks/usePromocionPedido', () => ({
 }))
 
 import ModalPedido, { type NuevoPedidoState } from './ModalPedido'
+import { reiniciarAtrasModales } from '../../utils/atrasModales'
 import { fechaLocalISO } from '../../utils/formatters'
 import type { ClienteDB, ProductoDB } from '../../types'
 import type { VeredictoDuplicadoRPC } from '../../utils/duplicadoCliente'
@@ -459,8 +460,9 @@ describe('ModalPedido en celular — Escape en la edición de precio (#853)', ()
     expect(screen.getByText(/1\.250,00 c\/u/)).toBeInTheDocument()
     expect(botonCarrito()).toHaveAccessibleName(/1 unidad/)
 
-    // Sin edición en curso, Escape cierra el sheet como siempre.
+    // Sin edición en curso, Escape cierra el sheet; con el pedido a medio armar, preguntando (decisión 4, #1603).
     await user.keyboard('{Escape}')
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
     expect(onCloseSpy).toHaveBeenCalledTimes(1)
   })
 })
@@ -589,5 +591,44 @@ describe('ModalPedido en celular — alta rápida de cliente', () => {
     // Con el cliente recién creado elegido, el Confirmar ya no lo frena #732.
     await agregarProducto(user, 'Gaseosa')
     expect(botonConfirmar()).toBeEnabled()
+  })
+})
+
+// Decisión 4 del dueño (#1603): el «atrás» del teléfono cierra el alta por el mismo camino que la X y Escape:
+// con el pedido a medio armar pregunta «Salir sin guardar»; sin tocar, cierra de una. Historial real de jsdom.
+describe('ModalPedido en celular (bottom sheet) — el «atrás» del teléfono', () => {
+  const asentar = () => act(async () => { await new Promise(r => setTimeout(r, 150)) })
+  const atras = async () => { act(() => { window.history.back() }); await asentar() }
+
+  beforeEach(() => {
+    reiniciarAtrasModales()
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('con el pedido a medio armar pregunta; «Seguir con el pedido» lo deja y «Salir igual» cierra', async () => {
+    const { user, onCloseSpy } = montar()
+    await asentar()
+    await agregarProducto(user, 'Gaseosa')
+
+    await atras()
+    expect(await screen.findByRole('button', { name: 'Salir igual' })).toBeInTheDocument()
+    expect(onCloseSpy).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Seguir con el pedido' }))
+    await asentar()
+    expect(onCloseSpy).not.toHaveBeenCalled()
+    expect(botonCarrito()).toHaveAccessibleName(/1 unidad/)
+
+    await atras()
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
+    expect(onCloseSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('un alta recién abierta, sin tocar, cierra de una', async () => {
+    const { onCloseSpy } = montar()
+    await asentar()
+    await atras()
+    expect(onCloseSpy).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: 'Salir igual' })).not.toBeInTheDocument()
   })
 })

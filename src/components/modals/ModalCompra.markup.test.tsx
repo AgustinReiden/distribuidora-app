@@ -20,7 +20,8 @@
  * `ModalCompra.reducer` y en `utils/prorrateoCompra`; acá no se duplica.
  */
 import { describe, it, expect, vi, beforeEach, afterAll, type Mock } from 'vitest'
-import { render, screen, within, waitFor } from '@testing-library/react'
+import { act, render, screen, within, waitFor } from '@testing-library/react'
+import { reiniciarAtrasModales } from '../../utils/atrasModales'
 import userEvent from '@testing-library/user-event'
 import type { ProductoDB, ProveedorDBExtended } from '../../types'
 
@@ -968,26 +969,44 @@ describe('ModalCompra — salidas del modal', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  // La X y Cancelar son un click deliberado: cierran con la compra a medio
-  // cargar, igual que antes de ModalBase. Lo que se frena es sólo Escape.
-  it.each([
-    ['la X', () => botonCerrar()],
-    ['Cancelar', () => screen.getByRole('button', { name: /^cancelar$/i })],
-  ])('%s cierra aunque la compra tenga datos cargados', async (_salida, boton) => {
+  // Cancelar es un click deliberado: cierra con la compra a medio cargar, como antes. La X, Escape y el
+  // «atrás» del teléfono preguntan «Salir sin guardar» (decisión 4 del dueño, #1603).
+  it('Cancelar cierra aunque la compra tenga datos cargados', async () => {
     const { user, onClose, onSave } = renderModal()
 
     await elegirProveedor(user, 'Manaos SA')
     await agregarProducto(user, 'Aceite Girasol 900ml')
-    await user.click(boton())
+    await user.click(screen.getByRole('button', { name: /^cancelar$/i }))
 
     expect(onClose).toHaveBeenCalledTimes(1)
     expect(onSave).not.toHaveBeenCalled()
   })
 
+  it('la X con datos cargados pregunta «Salir sin guardar»; «Salir igual» cierra', async () => {
+    const { user, onClose, onSave } = renderModal()
+
+    await elegirProveedor(user, 'Manaos SA')
+    await agregarProducto(user, 'Aceite Girasol 900ml')
+    await user.click(botonCerrar())
+    expect(onClose).not.toHaveBeenCalled()
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('la X con la compra sin tocar cierra de una', async () => {
+    const { user, onClose } = renderModal()
+
+    await user.click(botonCerrar())
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   // El modal hecho a mano no escuchaba Escape. Con ModalBase (Radix) Escape
-  // cierra, pero sólo si no hay nada que perder (`compraTieneCambios`). La
-  // confirmación de descarte que se pensó para acá no hace falta: con la
-  // compra a medio cargar, Escape directamente se ignora.
+  // cierra si no hay nada que perder (`compraTieneCambios`); con la compra a
+  // medio cargar pregunta «Salir sin guardar» (decisión 4 del dueño, #1603: antes
+  // se ignoraba sin decir nada).
   it('con la compra sin tocar, Escape cierra sin guardar', async () => {
     const { user, onClose, onSave } = renderModal()
 
@@ -998,11 +1017,14 @@ describe('ModalCompra — salidas del modal', () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 
-  it('con un proveedor elegido y sin líneas, Escape NO cierra', async () => {
+  it('con un proveedor elegido y sin líneas, Escape pregunta y no cierra', async () => {
     const { user, onClose } = renderModal()
 
     await elegirProveedor(user, 'Manaos SA')
+    // Con la lista del combobox abierta, ese Escape es para cerrarla a ella: se sale del campo antes.
+    await user.click(screen.getByPlaceholderText('Ej: 0001-00012345'))
     await user.keyboard('{Escape}')
+    await user.click(await screen.findByRole('button', { name: 'Seguir editando' }))
 
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog', { name: 'Nueva Compra' })).toBeInTheDocument()
@@ -1059,13 +1081,54 @@ describe('ModalCompra — salidas del modal', () => {
     expect(screen.getByRole('dialog', { name: 'Nueva Compra' })).toBeInTheDocument()
   })
 
-  it('Escape tampoco cierra con una línea ya cargada', async () => {
+  it('Escape con una línea ya cargada pregunta y no cierra hasta «Salir igual»', async () => {
     const { user, onClose } = renderModal()
 
     await agregarProducto(user, 'Aceite Girasol 900ml')
     await user.keyboard('{Escape}')
+    await user.click(await screen.findByRole('button', { name: 'Seguir editando' }))
 
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByRole('heading', { name: 'Resumen' })).toBeInTheDocument()
+  })
+})
+
+// Decisión 4 del dueño (#1603): el «atrás» del teléfono cierra la compra por el mismo camino que la X y
+// Escape. Con la compra a medio cargar pregunta «Salir sin guardar»; sin tocar, cierra de una.
+describe('ModalCompra — el «atrás» del teléfono', () => {
+  const asentar = () => act(async () => { await new Promise(r => setTimeout(r, 150)) })
+  const atras = async () => { act(() => { window.history.back() }); await asentar() }
+
+  beforeEach(() => {
+    reiniciarAtrasModales()
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('con una línea cargada pregunta; «Seguir editando» la deja y «Salir igual» cierra', async () => {
+    const { user, onClose, onSave } = renderModal()
+    await asentar()
+    await agregarProducto(user, 'Aceite Girasol 900ml')
+
+    await atras()
+    expect(await screen.findByRole('button', { name: 'Salir igual' })).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Seguir editando' }))
+    await asentar()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('heading', { name: 'Resumen' })).toBeInTheDocument()
+
+    await atras()
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('con la compra sin tocar, el «atrás» cierra de una', async () => {
+    const { onClose } = renderModal()
+    await asentar()
+    await atras()
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: 'Salir igual' })).not.toBeInTheDocument()
   })
 })

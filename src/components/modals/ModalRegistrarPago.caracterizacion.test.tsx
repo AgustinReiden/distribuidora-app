@@ -21,7 +21,8 @@
  */
 import '@testing-library/jest-dom/vitest'
 import { useState } from 'react'
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { reiniciarAtrasModales } from '../../utils/atrasModales'
 import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
@@ -424,5 +425,30 @@ describe('ModalRegistrarPago · selector «Aplicar a Pedido»', () => {
     })
     expect(screen.getByRole('option', { name: `Pedido #77 - falta ${formatPrecio(600)}` })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: `Pedido #78 - falta ${formatPrecio(500)}` })).toBeInTheDocument()
+  })
+})
+
+// Decisión 4 del dueño (#1603): un modal de plata no se cierra con Escape, y el «atrás» del teléfono tampoco.
+// Se ABSORBE: ni cierra el cobro ni navega a otra pantalla (la entrada del historial se repone).
+describe('ModalRegistrarPago — el «atrás» del teléfono', () => {
+  beforeEach(() => {
+    reiniciarAtrasModales()
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('el «atrás» no lo cierra ni navega: el cobro sigue ahí y el siguiente «atrás» tampoco lo cierra', async () => {
+    window.history.pushState({ pantalla: 'clientes' }, '', '/clientes')
+    const user = userEvent.setup()
+    const { onClose } = montar()
+    await dejarCorrerTimers()
+    await user.click(screen.getByRole('button', { name: 'Total' }))
+
+    for (let i = 0; i < 2; i++) {
+      act(() => { window.history.back() })
+      await act(async () => { await new Promise(r => setTimeout(r, 150)) })
+      expect(onClose).not.toHaveBeenCalled()
+      expect(window.location.pathname).toBe('/clientes')
+      expect(screen.getByRole('button', { name: 'Registrar' })).toBeEnabled()
+    }
   })
 })

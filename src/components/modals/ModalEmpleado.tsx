@@ -9,6 +9,7 @@
  * unicidades las valida el server (`guardar_empleado`); acá se repiten sus mensajes.
  */
 import React, { useId, useMemo, useState } from 'react'
+import { useCambiosDesdeApertura } from '../../hooks/useCambiosDesdeApertura'
 import type { FormEvent, ReactNode } from 'react'
 import { z } from 'zod'
 import { Link2 } from 'lucide-react'
@@ -277,6 +278,13 @@ export default function ModalEmpleado({
     if (comboboxAbierto) event.preventDefault()
   }
 
+  // La X, Escape y el «atrás» del teléfono preguntan «Salir sin guardar» si el formulario cambió respecto de
+  // como abrió (decisión 4 del dueño, #1603): una edición sin tocar no pregunta.
+  const hayCambios = useCambiosDesdeApertura({
+    nombre, puesto, sucursalSel, cuil, ingreso, telefono, usuarioId, clienteId, vehiculoId,
+    sueldoTxt, frecuencia, comisiona, desdeManual, saldoTxt, saldoSigno,
+  })
+
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError('')
@@ -360,6 +368,7 @@ export default function ModalEmpleado({
       title={edicion ? 'Editar empleado' : 'Nuevo empleado'}
       onClose={onClose}
       maxWidth="max-w-xl"
+      hayCambios={hayCambios}
       onEscapeKeyDown={handleEscapeKeyDown}
     >
       <form onSubmit={handleSubmit} className="p-4 space-y-4">

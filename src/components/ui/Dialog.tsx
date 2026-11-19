@@ -14,6 +14,7 @@ import * as React from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { useAtrasCierraModal } from '../../hooks/useAtrasCierraModal';
 
 // =============================================================================
 // PROPS INTERFACES
@@ -58,7 +59,25 @@ export interface DialogBodyProps extends React.HTMLAttributes<HTMLDivElement> {
 // COMPONENTS
 // =============================================================================
 
-const Dialog = DialogPrimitive.Root;
+export interface DialogProps extends DialogPrimitive.DialogProps {
+  /**
+   * El «atrás» del teléfono cierra este diálogo (pide lo mismo que Escape o la X: `onOpenChange(false)`).
+   * Default true. Con `false` el «atrás» se ABSORBE: no cierra ni navega, igual que Escape en un diálogo
+   * que no se cierra con Escape (un cobro, por ejemplo).
+   */
+  atrasCierra?: boolean;
+}
+
+/**
+ * El Root de Radix, más el «atrás» del teléfono (decisión 4 del dueño, #1603): mientras el diálogo está
+ * abierto (`open`), anota una entrada en el historial y un «atrás» le pide cerrarse. Los diálogos apilados se
+ * cierran de a uno, el de arriba primero (la confirmación antes que el modal que la abrió).
+ */
+function Dialog({ atrasCierra = true, ...props }: DialogProps) {
+  const { open, onOpenChange } = props;
+  useAtrasCierraModal(() => { if (atrasCierra) onOpenChange?.(false); }, open === true);
+  return <DialogPrimitive.Root {...props} />;
+}
 const DialogTrigger = DialogPrimitive.Trigger;
 const DialogPortal = DialogPrimitive.Portal;
 const DialogClose = DialogPrimitive.Close;

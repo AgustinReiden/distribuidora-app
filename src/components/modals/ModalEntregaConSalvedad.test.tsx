@@ -19,7 +19,8 @@
  * pero sólo si no hay nada tildado (`entregaSalvedadTieneCambios`).
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
+import { reiniciarAtrasModales } from '../../utils/atrasModales'
 import userEvent from '@testing-library/user-event'
 import type { RegaloSimulado } from '../../hooks/queries/useSimularSalvedadesQuery'
 import type { PedidoDB, RegistrarSalvedadResult } from '../../types'
@@ -837,8 +838,9 @@ describe('ModalEntregaConSalvedad — cerrar', () => {
   })
 
   // El modal hecho a mano no cerraba con Escape. Con ModalBase (Radix) Escape
-  // cierra, pero sólo si no hay nada que perder: sin ningún item tildado, como
-  // acá. Con algo tildado se lo traga (tests de abajo).
+  // cierra si no hay nada que perder: sin ningún item tildado, como acá. Con algo
+  // tildado pregunta «Salir sin guardar» (decisión 4 del dueño, #1603; antes lo
+  // ignoraba sin decir nada).
   it('sin nada tildado, Escape cierra sin guardar nada', async () => {
     const { user, onSave, onMarcarEntregado, onClose } = renderModal()
 
@@ -849,17 +851,29 @@ describe('ModalEntregaConSalvedad — cerrar', () => {
     expect(onMarcarEntregado).not.toHaveBeenCalled()
   })
 
-  it('con un item tildado, Escape NO cierra y lo cargado sigue ahí', async () => {
+  it('con un item tildado, Escape pregunta «Salir sin guardar»: «Seguir editando» deja lo cargado ahí', async () => {
     const { user, onClose } = renderModal()
 
     await tildarItem(user, 'Aceite Girasol 900ml')
     await user.selectOptions(screen.getByRole('combobox'), 'cliente_rechaza')
     await user.keyboard('{Escape}')
+    await user.click(await screen.findByRole('button', { name: 'Seguir editando' }))
 
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog', { name: 'Entrega con Salvedad' })).toBeInTheDocument()
     expect(screen.getByRole('combobox')).toHaveValue('cliente_rechaza')
     expect(screen.getByRole('button', { name: /continuar/i })).toBeEnabled()
+  })
+
+  it('con un item tildado, Escape y «Salir igual» cierran', async () => {
+    const { user, onClose, onSave } = renderModal()
+
+    await tildarItem(user, 'Aceite Girasol 900ml')
+    await user.keyboard('{Escape}')
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onSave).not.toHaveBeenCalled()
   })
 
   it('destildar todo vuelve a dejar cerrar con Escape', async () => {
@@ -872,11 +886,12 @@ describe('ModalEntregaConSalvedad — cerrar', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('en el paso de confirmación, Escape NO cierra', async () => {
+  it('en el paso de confirmación, Escape pregunta y no cierra hasta «Salir igual»', async () => {
     const { user, onSave, onClose } = renderModal()
 
     await llegarAConfirmacion(user)
     await user.keyboard('{Escape}')
+    await user.click(await screen.findByRole('button', { name: 'Seguir editando' }))
 
     expect(onClose).not.toHaveBeenCalled()
     expect(onSave).not.toHaveBeenCalled()
@@ -884,14 +899,24 @@ describe('ModalEntregaConSalvedad — cerrar', () => {
     expect(screen.getByRole('button', { name: /confirmar entrega/i })).toBeEnabled()
   })
 
-  it('con un item tildado, la X cierra igual (es un click deliberado)', async () => {
+  it('con un item tildado, la X pregunta lo mismo que Escape; «Salir igual» cierra', async () => {
     const { user, onSave, onClose } = renderModal()
 
     await tildarItem(user, 'Aceite Girasol 900ml')
     await user.click(botonCerrar())
+    expect(onClose).not.toHaveBeenCalled()
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
 
     expect(onClose).toHaveBeenCalledTimes(1)
     expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('sin nada tildado, la X cierra de una', async () => {
+    const { user, onClose } = renderModal()
+
+    await user.click(botonCerrar())
+
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it('con un item tildado, Cancelar cierra igual', async () => {
@@ -904,14 +929,53 @@ describe('ModalEntregaConSalvedad — cerrar', () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 
-  it('en el paso de confirmación, la X cierra igual sin guardar', async () => {
+  it('en el paso de confirmación, la X pregunta y «Salir igual» cierra sin guardar', async () => {
     const { user, onSave, onMarcarEntregado, onClose } = renderModal()
 
     await llegarAConfirmacion(user)
     await user.click(botonCerrar())
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
 
     expect(onClose).toHaveBeenCalledTimes(1)
     expect(onSave).not.toHaveBeenCalled()
     expect(onMarcarEntregado).not.toHaveBeenCalled()
+  })
+})
+
+// Decisión 4 del dueño (#1603): el «atrás» del teléfono cierra la entrega por el mismo camino que la X y
+// Escape. Con algo tildado (o en el paso de confirmación) pregunta «Salir sin guardar»; sin tocar, cierra.
+describe('ModalEntregaConSalvedad — el «atrás» del teléfono', () => {
+  const asentar = () => act(async () => { await new Promise(r => setTimeout(r, 150)) })
+  const atras = async () => { act(() => { window.history.back() }); await asentar() }
+
+  beforeEach(() => {
+    reiniciarAtrasModales()
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('con un item tildado pregunta; «Seguir editando» lo deja y «Salir igual» cierra', async () => {
+    const { user, onClose, onSave } = renderModal()
+    await asentar()
+    await tildarItem(user, 'Aceite Girasol 900ml')
+
+    await atras()
+    expect(await screen.findByRole('button', { name: 'Salir igual' })).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Seguir editando' }))
+    await asentar()
+    expect(onClose).not.toHaveBeenCalled()
+
+    await atras()
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('sin nada tildado, el «atrás» cierra de una', async () => {
+    const { onClose } = renderModal()
+    await asentar()
+    await atras()
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })

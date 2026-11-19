@@ -1266,6 +1266,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     void conGuardadoUnico(() => doGuardar(pregunta.notas, pregunta.fechaEntregaCambio, decision));
   };
 
+  // La X, Escape y el «atrás» del teléfono preguntan «Salir sin guardar» si lo editado difiere de lo guardado
+  // (decisión 4 del dueño, #1603): renglones, promos, notas, fechas. Un pedido sin tocar no pregunta.
+  const hayCambiosSinGuardar = itemsModificados || hayPromosQuitadas || promosAgregadas.length > 0
+    || notas !== (pedido?.notas || '')
+    || fecha !== (pedido?.fecha || '')
+    || fechaEntrega !== fechaEntregaOriginal
+    || fechaEntregaProgramada !== fechaEntregaProgramadaOriginal;
+
   const getStockDisponible = (productoId: string): number => {
     const producto = productos.find(p => p.id === productoId);
     const cantidadOriginal = itemsOriginales.find(o => o.productoId === productoId)?.cantidad || 0;
@@ -1279,6 +1287,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       description="Editar items, fechas y notas del pedido. El pago se gestiona desde el menú del pedido."
       onClose={onClose}
       maxWidth="max-w-2xl"
+      hayCambios={hayCambiosSinGuardar}
     >
       <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
         {/* Info del cliente */}

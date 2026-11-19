@@ -8,6 +8,8 @@
  * - aria-labelledby vinculado al título
  * - aria-describedby vinculado a la descripción (accesibilidad)
  * - Devuelve el foco al elemento que abrió el modal
+ * - El «atrás» del teléfono lo cierra (lo hace `ui/Dialog`, #1603)
+ * - Con `hayCambios`, la X, Escape y el «atrás» preguntan «¿Salir sin guardar?» (decisión 4 del dueño)
  */
 import { memo, ReactNode } from 'react';
 import {
@@ -20,6 +22,8 @@ import {
 } from '../ui/Dialog';
 import { CompactErrorBoundary } from '../ErrorBoundary';
 import { cn } from '../../lib/utils';
+import { useSalirSinGuardar } from '../../hooks/useSalirSinGuardar';
+import type { TextosSalirSinGuardar } from './ConfirmarSalirSinGuardar';
 
 export type ModalMaxWidth =
   | 'max-w-sm'
@@ -62,6 +66,15 @@ export interface ModalBaseProps {
    * abierto cambia el contenedor y React remonta el cuerpo (se pierde el estado).
    */
   bodyBare?: boolean;
+  /**
+   * El formulario cambió respecto de como abrió (no «tiene algo cargado»: una edición sin tocar no
+   * pregunta). Con cambios, la X, Escape y el «atrás» del teléfono muestran «¿Salir sin guardar?» DENTRO
+   * del modal y cierran recién con «Salir igual». Guardar y los botones del propio formulario, que llaman
+   * a `onClose` directo, no preguntan.
+   */
+  hayCambios?: boolean;
+  /** Los textos de esa pregunta, si el modal quiere decir otra cosa. */
+  textosSalirSinGuardar?: TextosSalirSinGuardar;
 }
 
 const MAX_WIDTH_MAP: Record<ModalMaxWidth, string> = {
@@ -85,8 +98,13 @@ const ModalBase = memo(function ModalBase({
   className,
   headerExtra,
   onEscapeKeyDown,
-  bodyBare = false
+  bodyBare = false,
+  hayCambios = false,
+  textosSalirSinGuardar,
 }: ModalBaseProps) {
+  // La X, Escape y el «atrás» (que `ui/Dialog` pide como `onOpenChange(false)`) pasan por el mismo camino.
+  const salida = useSalirSinGuardar({ hayCambios, onClose, textos: textosSalirSinGuardar });
+
   // El boundary envuelve sólo el cuerpo (no el header), con o sin `bodyBare`:
   // si algo tira adentro, el modal sigue teniendo título y botón de cerrar.
   const cuerpo = (
@@ -96,7 +114,7 @@ const ModalBase = memo(function ModalBase({
   );
 
   return (
-    <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={true} onOpenChange={(open) => !open && salida.pedirCierre()}>
       <DialogContent
         className={cn(MAX_WIDTH_MAP[maxWidth] || maxWidth, className)}
         // Bloqueo defensivo en TODAS las modalidades de cierre por interacción
@@ -116,7 +134,7 @@ const ModalBase = memo(function ModalBase({
         // undefined cuando no se pasa: Radix cierra con Escape como siempre.
         onEscapeKeyDown={onEscapeKeyDown}
       >
-        <DialogHeader onClose={onClose}>
+        <DialogHeader onClose={salida.pedirCierre}>
           <div className="flex items-center justify-between flex-1 gap-3 min-w-0">
             <DialogTitle>{title}</DialogTitle>
             {headerExtra && <div className="flex-shrink-0">{headerExtra}</div>}
@@ -136,6 +154,8 @@ const ModalBase = memo(function ModalBase({
         ) : (
           <DialogBody>{cuerpo}</DialogBody>
         )}
+        {/* Adentro del modal: una confirmación hermana queda detrás del overlay de Radix. */}
+        {salida.confirmacion}
       </DialogContent>
     </Dialog>
   );

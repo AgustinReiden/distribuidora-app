@@ -12,6 +12,7 @@ import { registrarServiceWorker } from './utils/serviceWorker'
 import { logger } from './utils/logger'
 import { queryClient } from './lib/queryClient'
 import { migrarRutasDeEsquemaViejo } from './lib/rutaOfflineCache'
+import { limpiarAtrasAlCargar } from './utils/atrasModales'
 
 /**
  * Corre un paso de arranque sin dejar que su error mate el boot.
@@ -44,6 +45,10 @@ function bootstrapApp(): void {
   // pantalla del chofer lea la caché. Se migran y no se descartan porque el
   // bundle viejo puede seguir escribiendo v1 hasta que el SW nuevo se activa.
   pasoOpcional('migrar-rutas-viejas', migrarRutasDeEsquemaViejo)
+
+  // Una recarga con una ventana abierta deja la marca de la ventana en el historial: se vuelve a la entrada de
+  // abajo para que no quede un «atrás» que no hace nada (decisión 4 del dueño, #1603).
+  pasoOpcional('atras-modales', limpiarAtrasAlCargar)
 
   // Monitoreo de performance
   pasoOpcional('web-vitals', initWebVitals)
