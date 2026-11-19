@@ -25,6 +25,8 @@ export interface QueryFiltrablePedidos {
   or(filters: string, options?: { referencedTable?: string }): this
   in(column: string, values: unknown[]): this
   not(column: string, operator: string, value: unknown): this
+  neq(column: string, value: unknown): this
+  is(column: string, value: null): this
 }
 
 export function construirFiltrosPedidos<Q extends QueryFiltrablePedidos>(
@@ -93,16 +95,39 @@ export function construirFiltrosPedidos<Q extends QueryFiltrablePedidos>(
   return q
 }
 
-/**
- * Filtro "Con salvedad / Sin salvedad" (1598-b4): la columna calculada
- * `tiene_salvedad_vigente(pedidos)` del server (vigente = no anulada, #1180), que PostgREST
- * expone como una columna más de `pedidos`. Antes se pedían aparte los ids de los pedidos con
- * salvedad y viajaban en la URL (`id=in.(…)`): pasados 700 el filtro dejaba de andar.
+/*
+ * Filtro "Con salvedad / Sin salvedad" (1598-b4). Antes se pedían aparte los ids de los pedidos
+ * con salvedad y viajaban en la URL (`id=in.(…)`): pasados 700 el filtro dejaba de andar. Ahora es
+ * un embed de PostgREST a `salvedades_items`, filtrado a las vigentes (no anuladas, #1180): «con»
+ * es un `!inner` (semi-join) y «sin» el anti-join (`salvedades_items=is.null`). La RLS de
+ * `salvedades_items` corre sola, como corría con la lista de ids.
+ *
+ * Trampa 5 de CLAUDE.md: `salvedades_items` tiene DOS FK a `pedidos` (`pedido_id` y
+ * `pedido_reprogramado_id`). Sin el nombre de la FK, PostgREST da PGRST201 y cae TODA la lista.
+ *
+ * El embed va en el `select` y los filtros en `aplicarFiltroConSalvedad`. Cada consulta suma la
+ * constante en su `.select(...)`: `selectStr + (conSalvedad === 'con_salvedad' ? EMBED_CON_SALVEDAD
+ * : conSalvedad === 'sin_salvedad' ? EMBED_SIN_SALVEDAD : '')`. Con una suma, no con una función ni
+ * con un ternario dentro de un template: el gate de embeds (`scripts/check-embeds.mjs`) lee
+ * constantes, sumas y ternarios, y sin leerlo no prueba el embed contra PostgREST. Lo que vuelve embebido no se muestra:
+ * `sinEmbedSalvedad` lo saca de cada fila.
  */
+export const EMBED_CON_SALVEDAD = ',salvedades_items!salvedades_items_pedido_id_fkey!inner(id)'
+export const EMBED_SIN_SALVEDAD = ',salvedades_items!salvedades_items_pedido_id_fkey(id)'
+
+/** Los filtros del embed. La consulta tiene que haber sumado `embedFiltroSalvedad` a su select. */
 export function aplicarFiltroConSalvedad<Q extends QueryFiltrablePedidos>(
   query: Q,
   conSalvedad: FiltrosPedidosState['conSalvedad'] | undefined,
 ): Q {
-  if (!conSalvedad || conSalvedad === 'todos') return query
-  return query.eq('tiene_salvedad_vigente', conSalvedad === 'con_salvedad')
+  if (conSalvedad !== 'con_salvedad' && conSalvedad !== 'sin_salvedad') return query
+  const q = query.neq('salvedades_items.estado_resolucion', 'anulada')
+  return conSalvedad === 'sin_salvedad' ? q.is('salvedades_items', null) : q
+}
+
+/** Saca de una fila lo que trajo el embed del filtro, para que nada lo muestre ni lo exporte. */
+export function sinEmbedSalvedad<T extends object>(fila: T): T {
+  if (!('salvedades_items' in fila)) return fila
+  const { salvedades_items: _embed, ...resto } = fila as T & { salvedades_items?: unknown }
+  return resto as T
 }

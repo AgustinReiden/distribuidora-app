@@ -147,14 +147,12 @@ vi.mock('../../../hooks/usePromocionPedido', () => ({
 
 // La vista abre cada modal; los modales confirman con un payload mínimo.
 vi.mock('../../vistas/VistaPedidos', () => ({
-  default: ({ onAbrirPagoPedido, onMarcarEntregadoConSalvedad, onMarcarEntregado, errorMotivo }: {
-    errorMotivo?: string
+  default: ({ onAbrirPagoPedido, onMarcarEntregadoConSalvedad, onMarcarEntregado }: {
     onAbrirPagoPedido: (p: unknown) => void
     onMarcarEntregadoConSalvedad: (p: unknown) => void
     onMarcarEntregado: (p: unknown) => void
   }) => (
     <>
-      {errorMotivo && <p role="alert">{errorMotivo}</p>}
       <button type="button" onClick={() => onAbrirPagoPedido(PEDIDO)}>Cobrar</button>
       <button type="button" onClick={() => onMarcarEntregado(PEDIDO_IMPAGO)}>Entregar impago</button>
       <button type="button" onClick={() => onMarcarEntregadoConSalvedad(PEDIDO)}>Salvedad</button>

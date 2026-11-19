@@ -15,7 +15,13 @@ import { nuevoRequestId, type VerificacionDeAlta } from '../../utils/idempotenci
 import { isTransientNetworkError, conPlazoDeRed } from '../../utils/retryWithBackoff'
 import { RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
 import type { OrigenPrecioItem } from '../../utils/origenPrecio'
-import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
+import {
+  construirFiltrosPedidos,
+  aplicarFiltroConSalvedad,
+  EMBED_CON_SALVEDAD,
+  EMBED_SIN_SALVEDAD,
+  sinEmbedSalvedad,
+} from '../../utils/construirFiltrosPedidos'
 import { traerTodo } from '../../utils/paginacion'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
@@ -298,6 +304,15 @@ export interface PaginatedResult<T> {
   totalCount: number
 }
 
+/** Lo que la lista paginada lee de cada fila de `pedidos` (el resto viaja tal cual a `PedidoDB`). */
+type FilaListaPedidos = Record<string, unknown> & {
+  id: number
+  estado?: string | null
+  usuario_id?: string | null
+  transportista_id?: string | null
+  entregado_por?: string | null
+}
+
 async function fetchPedidosPaginated(
   page: number,
   pageSize: number,
@@ -311,21 +326,25 @@ async function fetchPedidosPaginated(
 
   // Use !inner join when searching so PostgREST filters parent rows by client fields
   const selectStr = hasSearch ? PEDIDO_SELECT_CLIENTE_INNER : PEDIDO_SELECT
+  // 1598-b4: el filtro con/sin salvedad es un embed (ver aplicarFiltroConSalvedad).
+  const conSalvedad = filters?.conSalvedad
 
   // `created_at` solo no es único (un alta masiva o el replay de la cola comparten
   // timestamp): sin desempate, `range()` puede repetir un pedido entre dos páginas
   // y saltar otro. El `id` lo fija.
+  // El select con el embed ya no es un literal: el tipo de la fila se dice a mano (lo que se lee acá).
   let query = supabase
     .from('pedidos')
-    .select(selectStr, { count: 'exact' })
+    .select<string, FilaListaPedidos>(selectStr + (conSalvedad === 'con_salvedad' ? EMBED_CON_SALVEDAD : conSalvedad === 'sin_salvedad' ? EMBED_SIN_SALVEDAD : ''), { count: 'exact' })
     .order('created_at', { ascending: false })
     .order('id', { ascending: false })
 
   query = construirFiltrosPedidos(query, filters, search)
-  query = aplicarFiltroConSalvedad(query, filters?.conSalvedad)
+  query = aplicarFiltroConSalvedad(query, conSalvedad)
   query = query.range(from, to)
 
-  const { data, error, count } = await query
+  const { data: filas, error, count } = await query
+  const data = filas?.map(sinEmbedSalvedad)
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los pedidos. Revisá la señal e intentá de nuevo.')
 
@@ -365,7 +384,7 @@ async function fetchPedidosPaginated(
     salvedades: salvedadesMap[String(pedido.id)] || [],
   }))
 
-  return { data: enrichedPedidos as PedidoDB[], totalCount: count ?? 0 }
+  return { data: enrichedPedidos as unknown as PedidoDB[], totalCount: count ?? 0 }
 }
 
 // Mutation functions

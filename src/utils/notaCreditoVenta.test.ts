@@ -108,6 +108,15 @@ describe('validarNotaCreditoVenta', () => {
       expect(validarNotaCreditoVenta(conDescuento, { '1': 3 })).toBeNull()
     })
 
+    // H3 de la revisión de C1: la línea a $ 0 no llega por lineasAcreditables (la deja afuera), pero si llega,
+    // el motivo es el mismo que da el server, no el del descuento.
+    it('una línea a $ 0 dice que no hay plata que acreditar, como el server', () => {
+      const cero = { ...conDescuento[1], pedidoItemId: '9', nombre: 'Soda vieja', precioUnitario: 0, montoDisponible: 0 }
+      expect(validarNotaCreditoVenta([conDescuento[1], cero], { '2': 1, '9': 1 })).toBe(
+        '“Soda vieja” está a $ 0 en la boleta: no hay plata que acreditar',
+      )
+    })
+
     it('si el descuento se llevó toda la plata, el mensaje de H4', () => {
       const sinPlata = lineasAcreditables(
         [{ id: 1, producto_id: 1, cantidad: 3, precio_unitario: 100, producto: { nombre: 'Fardo de agua' } }],

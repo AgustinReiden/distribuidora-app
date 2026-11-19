@@ -10,6 +10,9 @@ import { describe, it, expect } from 'vitest'
 import {
   construirFiltrosPedidos,
   aplicarFiltroConSalvedad,
+  EMBED_CON_SALVEDAD,
+  EMBED_SIN_SALVEDAD,
+  sinEmbedSalvedad,
 } from './construirFiltrosPedidos'
 import type { FiltrosPedidosState } from '../types'
 
@@ -24,6 +27,8 @@ function crearQueryFalsa() {
     or: (...args: unknown[]) => { llamadas.push({ metodo: 'or', args }); return builder },
     in: (...args: unknown[]) => { llamadas.push({ metodo: 'in', args }); return builder },
     not: (...args: unknown[]) => { llamadas.push({ metodo: 'not', args }); return builder },
+    neq: (...args: unknown[]) => { llamadas.push({ metodo: 'neq', args }); return builder },
+    is: (...args: unknown[]) => { llamadas.push({ metodo: 'is', args }); return builder },
   }
   return { builder, llamadas }
 }
@@ -232,24 +237,40 @@ describe('aplicarFiltroConSalvedad', () => {
     expect(llamadas).toHaveLength(0)
   })
 
-  // 1598-b4: el filtro va por la columna calculada `tiene_salvedad_vigente(pedidos)` (mig NNN).
-  // Antes viajaban los ids de todos los pedidos con salvedad en la URL (`id=in.(…)`), y pasados
-  // 700 el filtro dejaba de andar.
-  it('con_salvedad filtra por la marca del server, sin ids en la URL', () => {
-    const { builder, llamadas } = crearQueryFalsa()
-    aplicarFiltroConSalvedad(builder, 'con_salvedad')
-    expect(llamadas).toEqual([{ metodo: 'eq', args: ['tiene_salvedad_vigente', true] }])
-  })
-
-  it('sin_salvedad pide la marca en false', () => {
-    const { builder, llamadas } = crearQueryFalsa()
-    aplicarFiltroConSalvedad(builder, 'sin_salvedad')
-    expect(llamadas).toEqual([{ metodo: 'eq', args: ['tiene_salvedad_vigente', false] }])
-  })
-
   it('undefined no toca la query', () => {
     const { builder, llamadas } = crearQueryFalsa()
     aplicarFiltroConSalvedad(builder, undefined)
     expect(llamadas).toHaveLength(0)
+  })
+
+  // 1598-b4: el filtro es un embed a salvedades_items (antes, ids en la URL con tope de 700).
+  it('con_salvedad filtra el embed a las salvedades vigentes (el !inner lo pone el select)', () => {
+    const { builder, llamadas } = crearQueryFalsa()
+    aplicarFiltroConSalvedad(builder, 'con_salvedad')
+    expect(llamadas).toEqual([{ metodo: 'neq', args: ['salvedades_items.estado_resolucion', 'anulada'] }])
+  })
+
+  it('sin_salvedad es el anti-join: las vigentes y salvedades_items=is.null', () => {
+    const { builder, llamadas } = crearQueryFalsa()
+    aplicarFiltroConSalvedad(builder, 'sin_salvedad')
+    expect(llamadas).toEqual([
+      { metodo: 'neq', args: ['salvedades_items.estado_resolucion', 'anulada'] },
+      { metodo: 'is', args: ['salvedades_items', null] },
+    ])
+  })
+})
+
+describe('el embed del filtro de salvedad (1598-b4)', () => {
+  // Trampa 5: salvedades_items tiene dos FK a pedidos (pedido_id y pedido_reprogramado_id).
+  it('nombra la FK de pedido_id: sin el nombre PostgREST da PGRST201 y cae toda la lista', () => {
+    expect(EMBED_CON_SALVEDAD).toBe(',salvedades_items!salvedades_items_pedido_id_fkey!inner(id)')
+    expect(EMBED_SIN_SALVEDAD).toBe(',salvedades_items!salvedades_items_pedido_id_fkey(id)')
+  })
+
+  it('sinEmbedSalvedad saca lo embebido y deja el resto de la fila igual', () => {
+    const fila = { id: 1, total: 100, salvedades: [{ id: 3 }], salvedades_items: [{ id: 9 }] }
+    expect(sinEmbedSalvedad(fila)).toEqual({ id: 1, total: 100, salvedades: [{ id: 3 }] })
+    const sinEmbed = { id: 2, total: 50 }
+    expect(sinEmbedSalvedad(sinEmbed)).toBe(sinEmbed)
   })
 })

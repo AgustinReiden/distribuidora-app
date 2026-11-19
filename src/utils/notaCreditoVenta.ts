@@ -277,6 +277,10 @@ export function validarNotaCreditoVenta(
     // H4 y N2 de la revisión de B22, espejo de crear_nota_credito_venta_impl: no hay renglón de $ 0.
     // Si un descuento se llevó la plata de la línea (toda, o toda menos unos centavos que no alcanzan
     // para estas unidades), la mercadería se devuelve anulando primero ese descuento.
+    // H3 de la revisión de C1: una línea a $ 0 (un regalo de antes de la marca) no tiene plata que acreditar.
+    if (!(l.precioUnitario > 0)) {
+      return `“${l.nombre}” está a $ 0 en la boleta: no hay plata que acreditar`
+    }
     if (montoUnidadesNC(l, cant) <= 0) {
       return `A «${l.nombre}» ya se le acreditó ${l.montoDisponible > 0 ? 'casi ' : ''}toda su plata con un descuento. ` +
         'Para devolver la mercadería, anulá primero ese descuento.'

@@ -10,7 +10,12 @@ import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { FiltrosPedidosState } from '../../types'
 import { pedidosKeys } from './usePedidosQuery'
-import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
+import {
+  construirFiltrosPedidos,
+  aplicarFiltroConSalvedad,
+  EMBED_CON_SALVEDAD,
+  EMBED_SIN_SALVEDAD,
+} from '../../utils/construirFiltrosPedidos'
 import { PAGINA_SUPABASE } from '../../utils/paginacion'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { ventaDePedido } from '../../utils/montoMinimo'
@@ -118,10 +123,17 @@ async function fetchPedidoStats(
     ? 'estado, estado_pago, total, monto_pagado, cargo_envio, tipo_factura, cliente:clientes!inner(id)'
     : 'estado, estado_pago, total, monto_pagado, cargo_envio, tipo_factura'
 
+  // 1598-b4: el filtro con/sin salvedad es un embed (ver aplicarFiltroConSalvedad). Las tarjetas
+  // sólo suman estado y montos: lo embebido no se mira.
+  const conSalvedad = filters?.conSalvedad
+
   const armarQuery = () => {
-    let query = supabase.from('pedidos').select(selectStr).order('id', { ascending: true })
+    let query = supabase
+      .from('pedidos')
+      .select(selectStr + (conSalvedad === 'con_salvedad' ? EMBED_CON_SALVEDAD : conSalvedad === 'sin_salvedad' ? EMBED_SIN_SALVEDAD : ''))
+      .order('id', { ascending: true })
     query = construirFiltrosPedidos(query, filters, search)
-    query = aplicarFiltroConSalvedad(query, filters?.conSalvedad)
+    query = aplicarFiltroConSalvedad(query, conSalvedad)
     return query as unknown as QueryPaginablePedidos
   }
 
