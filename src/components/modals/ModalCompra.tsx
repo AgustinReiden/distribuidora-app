@@ -2661,7 +2661,9 @@ function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster
     try {
       const producto = await onCrearProductoRapido({
         nombre: itemRapido.nombre,
-        codigo: itemRapido.codigo,
+        // Sin los espacios de los bordes: el código es único por sucursal sobre el texto
+        // recortado (tarjeta C4a de #1603), y «  A-12 » no es otro código.
+        codigo: itemRapido.codigo.trim(),
         costoSinIva: itemRapido.costo,
         ...datosClasificacion(clasificacion, catalogo.proveedorFactura),
       })

@@ -66,8 +66,16 @@
 --   H6  · La ficha de un PWA viejo corrige el neto a 105 con el PATCH de siempre (costo con IVA
 --         127,05, sin el flete): el server lo compone, 139,15. Un PATCH con sólo el costo con IVA
 --         no lo cambia.
---   H10 · Bajar una compra de 10 de la que salieron 8 a 5: «De “…” ya se vendieron 8: no se
---         puede bajar la compra a menos de 8.» (antes, el mensaje crudo del CHECK); a 8 entra.
+--   H6B · N4 de la segunda revisión: un producto sin compras (neto 100, costo con IVA 100) con el
+--         neto corregido a 110 en la ficha queda en 133,10 (no conserva una diferencia sin compra).
+--   H10 · Bajar una compra de 10 de la que salieron 8 a 5: «El stock de hoy de “…” no alcanza: no
+--         se puede bajar la compra a menos de 8.» (antes, el mensaje crudo del CHECK); a 8 entra.
+--   RC2 · El recálculo (_recalcular_costo_con_iva) sobre productos con el costo con IVA viejo: los
+--         que quedan afuera de la regla conservan el «Costo total» de la ficha de antes (N1): envío
+--         posterior (133), nacido por envío (133), costo real a mano (136), alícuota cambiada en la
+--         ficha (120,50), renglón de otra época (131). Entran en la regla con un centavo de
+--         tolerancia (N2: 9,06) y con la alícuota del producto para el IVA del cargo (N3: 133,10).
+--         Otra corrida no cambia nada.
 --   RC  · La tabla del recálculo existe y es sólo de server.
 --
 --   docker exec -i <contenedor> psql -U postgres -h localhost -d postgres -f - < scripts/test-compras-edicion-lotes-y-nc-ola2-1603.sql
@@ -575,7 +583,7 @@ BEGIN
     PERFORM set_config('app.stock_origen', '', true);
     v_j := pg_temp.editar(v_adm, v_c, pg_temp.renglon(v_p, 5, 10, 0), NULL);
     IF COALESCE((v_j->>'success')::boolean, true)
-       OR COALESCE(v_j->>'error', '') NOT LIKE 'De «C3 H10 %» ya se vendieron 8: no se puede bajar la compra a menos de 8.' THEN
+       OR COALESCE(v_j->>'error', '') NOT LIKE 'El stock de hoy de «C3 H10 %» no alcanza: no se puede bajar la compra a menos de 8.' THEN
       v_fallas := v_fallas || format('H10 · bajar a 5 una compra de la que salieron 8: esperaba el rechazo con su motivo y dio %s', v_j);
     END IF;
     v_j := pg_temp.editar(v_adm, v_c, pg_temp.renglon(v_p, 8, 10, 0), NULL);
@@ -584,6 +592,145 @@ BEGIN
     END IF;
   EXCEPTION WHEN OTHERS THEN
     v_fallas := v_fallas || format('H10 · %s %s', SQLSTATE, SQLERRM);
+  END;
+
+  -- ================================================================ H6B ====
+  -- N4 de la revisión: un producto sin compras (importado: neto 100, costo con IVA 100) al que la
+  -- ficha le corrige el neto a 110 y manda 133,10: queda 133,10 (no conserva una «diferencia» que
+  -- no viene de ninguna compra).
+  DECLARE
+    v_p bigint;
+  BEGIN
+    INSERT INTO public.productos (nombre, precio, stock, sucursal_id, porcentaje_iva, costo_sin_iva, costo_con_iva, costo_real)
+    VALUES ('C3 H6B ' || gen_random_uuid(), 1000, 0, 1, 21, 100, 100, 100) RETURNING id INTO v_p;
+    PERFORM pg_temp.como(v_adm, 1);
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    EXECUTE format('UPDATE public.productos SET costo_sin_iva = 110, costo_con_iva = 133.10, costo_real = 110 WHERE id = %s', v_p);
+    EXECUTE 'RESET ROLE';
+    v_t := (SELECT format('sin=%s con=%s', costo_sin_iva, costo_con_iva) FROM productos WHERE id = v_p);
+    IF v_t IS DISTINCT FROM 'sin=110.00 con=133.10' THEN
+      v_fallas := v_fallas || format('H6B · un producto sin compras con el neto corregido a 110: esperaba con=133,10 y dio %s', v_t);
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    EXECUTE 'RESET ROLE';
+    v_fallas := v_fallas || format('H6B · %s %s', SQLSTATE, SQLERRM);
+  END;
+
+  -- ================================================================ RC2 ====
+  -- El recálculo (_recalcular_costo_con_iva) sobre productos con el costo con IVA de la regla vieja.
+  -- Los que quedan afuera de la regla conservan el «Costo total» que mostraba la ficha de antes
+  -- (costo con IVA + lo que la compra sumó al costo real): N1 de la revisión. Un caso por grupo.
+  DECLARE
+    v_ids bigint[] := '{}';
+    v_casos jsonb := '{}';
+    v_p bigint; v_o bigint; v_c bigint; v_mov bigint; v_item bigint; v_r jsonb;
+    v_flete jsonb := jsonb_build_array(pg_temp.cargo(100, 'no_gravado', false));
+    k text; v_antes numeric; v_despues numeric; v_esperado numeric;
+  BEGIN
+    CREATE FUNCTION pg_temp.ficha_vieja(p bigint) RETURNS numeric LANGUAGE sql AS $f$
+      SELECT CASE WHEN COALESCE(costo_con_iva, 0) > 0 THEN round(costo_con_iva
+               + CASE WHEN COALESCE(costo_sin_iva, 0) > 0 AND COALESCE(costo_real, 0) > 0
+                      THEN costo_real - CASE WHEN ultimo_tipo_compra IN ('ZZ', 'FC B', 'FC C') THEN costo_sin_iva
+                                             ELSE round(costo_sin_iva * (1 + COALESCE(impuestos_internos, 0) / 100), 4) END
+                      ELSE 0 END, 2) END
+        FROM public.productos WHERE id = p;
+    $f$;
+    -- Deja el costo con IVA como lo dejaba la regla vieja (neto + IVA + II del renglón).
+    CREATE FUNCTION pg_temp.viejo(p bigint) RETURNS void LANGUAGE sql AS $f$
+      UPDATE public.productos pr SET costo_con_iva = round(public.costo_financiero_unitario(
+               ci.costo_neto_unitario, COALESCE(ci.porcentaje_iva, pr.porcentaje_iva), ci.impuestos_internos,
+               CASE WHEN pr.ultimo_tipo_compra IN ('ZZ', 'FC B', 'FC C') THEN 'ZZ' ELSE 'FC' END), 2)
+        FROM public.compra_items ci
+       WHERE pr.id = p AND ci.id = (SELECT max(id) FROM public.compra_items WHERE producto_id = p);
+    $f$;
+
+    -- G1 · envío posterior: la compra (flete de 100) hace una hora, y un envío aceptado después.
+    v_p := pg_temp.producto('RC2 envio');
+    v_c := pg_temp.compra(v_adm, pg_temp.renglon(v_p, 10, 100, 21), 'FC', 210, 1210, v_flete, 'A');
+    PERFORM pg_temp.viejo(v_p);
+    UPDATE compras SET created_at = now() - interval '1 hour' WHERE id = v_c;
+    UPDATE compra_items SET created_at = now() - interval '1 hour' WHERE compra_id = v_c;
+    INSERT INTO public.productos (nombre, precio, stock, sucursal_id, porcentaje_iva, costo_sin_iva, costo_con_iva, costo_real, costo_promedio, ultimo_tipo_compra)
+    VALUES ('C3 RC2 origen ' || gen_random_uuid(), 1000, 50, 2, 21, 100, 121, 112, 112, 'FC') RETURNING id INTO v_o;
+    INSERT INTO usuario_sucursales (usuario_id, sucursal_id) VALUES (v_adm, 2) ON CONFLICT DO NOTHING;
+    PERFORM pg_temp.como(v_adm, 2);
+    v_j := public.crear_movimiento_sucursal(1, 'rc2', jsonb_build_array(jsonb_build_object('producto_id', v_o, 'cantidad', 5)));
+    v_mov := (v_j->>'movimiento_id')::bigint;
+    SELECT id INTO v_item FROM movimiento_sucursal_items WHERE movimiento_id = v_mov;
+    PERFORM pg_temp.como(v_adm, 1);
+    v_j := public.aceptar_movimiento_sucursal(v_mov, jsonb_build_array(jsonb_build_object(
+             'item_id', v_item, 'accion', 'match_existente', 'producto_destino_id', v_p)));
+    v_ids := v_ids || v_p; v_casos := v_casos || jsonb_build_object('G1 envío posterior', v_p);
+
+    -- G2 · nació en su sucursal por un envío (crear_nuevo): trae el costo real del origen, con flete.
+    PERFORM pg_temp.como(v_adm, 2);
+    v_j := public.crear_movimiento_sucursal(1, 'rc2', jsonb_build_array(jsonb_build_object('producto_id', v_o, 'cantidad', 5)));
+    v_mov := (v_j->>'movimiento_id')::bigint;
+    SELECT id INTO v_item FROM movimiento_sucursal_items WHERE movimiento_id = v_mov;
+    PERFORM pg_temp.como(v_adm, 1);
+    v_j := public.aceptar_movimiento_sucursal(v_mov, jsonb_build_array(jsonb_build_object('item_id', v_item, 'accion', 'crear_nuevo')));
+    SELECT p.id INTO v_p FROM productos p WHERE p.sucursal_id = 1 AND p.nombre = (SELECT nombre FROM productos WHERE id = v_o);
+    v_ids := v_ids || v_p; v_casos := v_casos || jsonb_build_object('G2 nacido por envío', v_p);
+
+    -- G3 · costo real corregido a mano (115).
+    v_p := pg_temp.producto('RC2 real a mano');
+    PERFORM pg_temp.compra(v_adm, pg_temp.renglon(v_p, 10, 100, 21), 'FC', 210, 1210, v_flete, 'A');
+    PERFORM pg_temp.viejo(v_p);
+    UPDATE productos SET costo_real = 115 WHERE id = v_p;
+    v_ids := v_ids || v_p; v_casos := v_casos || jsonb_build_object('G3 real a mano', v_p);
+
+    -- G4 · la ficha vieja pasó la alícuota a 10,5 (costo con IVA 110,50).
+    v_p := pg_temp.producto('RC2 alicuota');
+    PERFORM pg_temp.compra(v_adm, pg_temp.renglon(v_p, 10, 100, 21), 'FC', 210, 1210, v_flete, 'A');
+    UPDATE productos SET porcentaje_iva = 10.5, costo_con_iva = 110.50 WHERE id = v_p;
+    v_ids := v_ids || v_p; v_casos := v_casos || jsonb_build_object('G4 alícuota de la ficha', v_p);
+
+    -- G5 · renglón sin costo_real_unitario (otra época), con flete.
+    v_p := pg_temp.producto('RC2 sin real');
+    v_c := pg_temp.compra(v_adm, pg_temp.renglon(v_p, 10, 100, 21), 'FC', 210, 1210, v_flete, 'A');
+    PERFORM pg_temp.viejo(v_p);
+    UPDATE compra_items SET costo_real_unitario = NULL WHERE compra_id = v_c;
+    v_ids := v_ids || v_p; v_casos := v_casos || jsonb_build_object('G5 renglón de otra época', v_p);
+
+    -- Los «Costo total» de la ficha de antes, y el recálculo.
+    FOR k, v_p IN SELECT key, value::bigint FROM jsonb_each_text(v_casos) LOOP
+      v_casos := jsonb_set(v_casos, ARRAY[k], jsonb_build_array(v_p, pg_temp.ficha_vieja(v_p)));
+    END LOOP;
+
+    -- R1 · N2: bonificación del 33,35049 % (doble redondeo) con flete de 1: entra en la regla, 9,06.
+    v_p := pg_temp.producto('RC2 redondeo');
+    PERFORM pg_temp.compra(v_adm, pg_temp.lineas(jsonb_build_array(jsonb_build_object(
+              'producto_id', v_p, 'cantidad', 1, 'costo_unitario', 10, 'porcentaje_iva', 21, 'condicion_iva', 'gravado',
+              'bonificacion', 33.35049))), 'FC', 1.40, 8.06,
+            jsonb_build_array(pg_temp.cargo(1, 'no_gravado', false)), 'A');
+    PERFORM pg_temp.viejo(v_p);
+    v_ids := v_ids || v_p; v_casos := v_casos || jsonb_build_object('R1 redondeo', jsonb_build_array(v_p, 9.06));
+
+    -- R2 · N3: renglón sin alícuota guardada con un cargo gravado en factura de 100: 133,10.
+    v_p := pg_temp.producto('RC2 sin alicuota');
+    v_c := pg_temp.compra(v_adm, pg_temp.renglon(v_p, 10, 100, 21), 'FC', 231, 1331,
+             jsonb_build_array(pg_temp.cargo(100, 'gravado', true)), 'A', 100);
+    PERFORM pg_temp.viejo(v_p);
+    UPDATE compra_items SET porcentaje_iva = NULL WHERE compra_id = v_c;
+    v_ids := v_ids || v_p; v_casos := v_casos || jsonb_build_object('R2 renglón sin alícuota', jsonb_build_array(v_p, 133.10));
+
+    v_r := public._recalcular_costo_con_iva(v_ids);
+    v_notas := v_notas || format('RC2 · %s', v_r);
+    FOR k IN SELECT key FROM jsonb_each(v_casos) LOOP
+      v_p := (v_casos->k->>0)::bigint;
+      v_esperado := (v_casos->k->>1)::numeric;
+      v_despues := (SELECT costo_con_iva FROM productos WHERE id = v_p);
+      IF v_despues IS DISTINCT FROM v_esperado THEN
+        v_fallas := v_fallas || format('RC2 · %s: el «Costo total» de la ficha era %s y la ficha nueva muestra %s', k, v_esperado, v_despues);
+      END IF;
+    END LOOP;
+    -- Idempotente: otra corrida no cambia nada.
+    v_r := public._recalcular_costo_con_iva(v_ids);
+    IF (v_r->>'regla')::int <> 0 OR (v_r->>'ficha_igual')::int <> 0 THEN
+      v_fallas := v_fallas || format('RC2 · la segunda corrida cambió algo: %s', v_r);
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_fallas := v_fallas || format('RC2 · %s %s', SQLSTATE, SQLERRM);
   END;
 
   -- ================================================================= RC ====
@@ -602,7 +749,7 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = format(E'ENSAYO FALLÓ (%s fallas, todo revertido):\n- %s\nnotas:\n  %s',
       cardinality(v_fallas), array_to_string(v_fallas, E'\n- '), array_to_string(v_notas, E'\n  '));
   END IF;
-  RAISE EXCEPTION USING ERRCODE = 'ZZ0OK', MESSAGE = format(E'ENSAYO OK (todo revertido) · E1 E2 E3 E4 H5 H5P H5L HG HZ C1-C13 RP ED N1-N5 H6 H10 RC\nnotas:\n  %s',
+  RAISE EXCEPTION USING ERRCODE = 'ZZ0OK', MESSAGE = format(E'ENSAYO OK (todo revertido) · E1 E2 E3 E4 H5 H5P H5L HG HZ C1-C13 RP ED N1-N5 H6 H6B H10 RC2 RC\nnotas:\n  %s',
     array_to_string(v_notas, E'\n  '));
 END
 $ensayo$;

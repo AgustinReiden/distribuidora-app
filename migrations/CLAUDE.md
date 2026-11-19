@@ -219,9 +219,11 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   `_costo_con_iva_unitario` con `_compra_iva_cargos` (o `_compra_iva_cargos_de_linea` desde las filas):
   el alta, la edición y `_reposicion_desde_ultima_compra`. La ficha lo muestra tal cual y, si se
   corrige el neto, conserva lo que la compra sumó (`adicionalConIvaDeCompra`); el server hace lo mismo
-  con lo que guarde cualquier ficha (`trg_productos_costo_con_iva`), mande lo que mande. Los productos
-  que ya existían se recalcularon desde su última compra, salvo los corregidos a mano y los que tomaron
-  el costo de un envío (rastro en `costo_con_iva_recalculos`). No es base de ningún
+  con lo que guarde cualquier ficha (`trg_productos_costo_con_iva`), mande lo que mande; los dos lo
+  conservan sólo si el producto tuvo una compra (`ultimo_tipo_compra`). Los productos que ya existían se
+  recalcularon desde su última compra (`_recalcular_costo_con_iva`); a los que no cerraban con ella (un
+  envío, una corrección a mano, otra época) se les sumó lo que la compra sumó al costo real, para que
+  la ficha no cambie (rastro en `costo_con_iva_recalculos`). No es base de ningún
   precio, margen del server ni CMV: lo leen los envíos (su valor y la reposición del destino), la
   ficha y la exportación.
 - **Dentro de una compra los renglones que fijan costo van antes que los regalos** (#1593 CMP-A):

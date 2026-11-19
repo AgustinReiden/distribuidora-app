@@ -50,12 +50,20 @@ export function adicionalDeCompra(
  * neto más el IVA de cada componente (el producto, el flete y los cargos que lo
  * llevan). Esto es lo que ese número tiene por encima de neto + IVA + II de la
  * ficha: si el admin corrige el neto, se conserva. Diferencias de redondeo (menos
- * de un centavo) dan 0. Sin neto o sin costo con IVA guardado, 0.
+ * de un centavo) dan 0. Sin neto, sin costo con IVA guardado o sin ninguna compra
+ * (`ultimo_tipo_compra` vacío), 0: es la misma cuenta que el trigger del server.
  */
 export function adicionalConIvaDeCompra(
-  producto: (CostosFichaProducto & { costo_con_iva?: number | string | null; porcentaje_iva?: number | string | null }) | null | undefined,
+  producto: (CostosFichaProducto & {
+    costo_con_iva?: number | string | null;
+    porcentaje_iva?: number | string | null;
+    ultimo_tipo_compra?: string | null;
+  }) | null | undefined,
   tipoCompra: 'ZZ' | 'FC',
 ): number {
+  // Sin ninguna compra no hay cargos de una compra que conservar (N4 de la revisión): la diferencia
+  // de una importación o de una carga a mano se limpia al corregir el neto, como el server.
+  if (!producto?.ultimo_tipo_compra) return 0;
   const neto = positivo(producto?.costo_sin_iva);
   const conIva = positivo(producto?.costo_con_iva);
   if (neto === null || conIva === null) return 0;

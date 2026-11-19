@@ -262,3 +262,15 @@ describe('ModalCompra — alta rápida: un costo en rojo', () => {
     expect(onCrearProductoRapido).not.toHaveBeenCalled()
   })
 })
+
+describe('ModalCompra — alta rápida: código', () => {
+  // El código de un producto es único por sucursal sobre el texto sin los espacios de los bordes
+  // (tarjeta C4a de #1603): el alta lo manda recortado, para que «  A-12 » no sea otro código.
+  it('viaja sin los espacios de los bordes', async () => {
+    const { user, onCrearProductoRapido } = renderModal()
+    await abrirAltaRapida(user)
+    await user.type(screen.getByPlaceholderText('Codigo'), '  A-12 ')
+    await crear(user)
+    expect(onCrearProductoRapido).toHaveBeenCalledWith(expect.objectContaining({ codigo: 'A-12' }))
+  })
+})

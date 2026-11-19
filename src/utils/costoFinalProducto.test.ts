@@ -70,15 +70,20 @@ describe('costoEditadoEnFicha', () => {
 describe('adicionalConIvaDeCompra (1593-b1)', () => {
   it('es lo que el costo con IVA de la compra tiene por encima de neto + IVA + II: el flete y su IVA', () => {
     // FC A 100 al 21 % con un flete de 10 por unidad y su IVA (2,10): la compra deja 133,10.
-    expect(adicionalConIvaDeCompra({ costo_sin_iva: 100, impuestos_internos: 0, porcentaje_iva: 21, costo_con_iva: 133.1 }, 'FC')).toBe(12.1);
+    expect(adicionalConIvaDeCompra({ costo_sin_iva: 100, impuestos_internos: 0, porcentaje_iva: 21, costo_con_iva: 133.1, ultimo_tipo_compra: 'FC' }, 'FC')).toBe(12.1);
   });
 
   it('en ZZ es lo pagado por encima del neto', () => {
-    expect(adicionalConIvaDeCompra({ costo_sin_iva: 100, costo_con_iva: 130 }, 'ZZ')).toBe(30);
+    expect(adicionalConIvaDeCompra({ costo_sin_iva: 100, costo_con_iva: 130, ultimo_tipo_compra: 'ZZ' }, 'ZZ')).toBe(30);
   });
 
   it('un producto sin cargos da 0, aunque el centavo del redondeo no cierre', () => {
     expect(adicionalConIvaDeCompra({ costo_sin_iva: 4000, impuestos_internos: 8.6957, porcentaje_iva: 21, costo_con_iva: 5187.83 }, 'FC')).toBe(0);
+  });
+
+  it('sin ninguna compra (ultimo_tipo_compra vacío) no hay cargos que conservar (N4)', () => {
+    // Un importado con el costo con IVA igual al neto: corregir el neto en la ficha lo limpia.
+    expect(adicionalConIvaDeCompra({ costo_sin_iva: 100, porcentaje_iva: 21, costo_con_iva: 100, ultimo_tipo_compra: null }, 'FC')).toBe(0);
   });
 
   it('sin neto o sin costo con IVA no hay nada que medir', () => {
