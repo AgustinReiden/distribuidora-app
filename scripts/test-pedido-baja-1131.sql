@@ -332,7 +332,7 @@ BEGIN
   END IF;
   f0 := pg_temp.t_foto(v_prod); e0 := pg_temp.t_ped(v_ped);
   r := pg_temp.t_rest(tr, 'authenticated',
-         format('UPDATE public.pedidos SET estado = ''entregado'', fecha_entrega = now(), updated_at = now() WHERE id = %s', v_ped));
+         format('UPDATE public.pedidos SET estado = ''entregado'', fecha_entrega = now() WHERE id = %s', v_ped));
   f := pg_temp.t_rech(f, 'transportista REST cancelado -> entregado', r, '42501', '%una baja no se deshace%');
   f := pg_temp.t_igual(f, 'R2', v_prod, f0, v_ped, e0);
   RETURN jsonb_build_object('fallas', to_jsonb(f), 'reporte', r);
@@ -552,8 +552,8 @@ BEGIN
     format('transportista_id = %L, estado = ''asignado''', tr),
     'transportista_id = NULL, estado = ''pendiente''',
     format('transportista_id = %L, estado = ''asignado''', tr),
-    'estado = ''entregado'', fecha_entrega = now(), updated_at = now()',
-    'estado = ''asignado'', fecha_entrega = NULL, updated_at = now()'] LOOP
+    'estado = ''entregado'', fecha_entrega = now()',
+    'estado = ''asignado'', fecha_entrega = NULL'] LOOP
     r := pg_temp.t_rest(a, 'authenticated', format('UPDATE public.pedidos SET %s WHERE id = %s', v_set, v_ped));
     f := pg_temp.t_pasa(f, 'admin REST ' || v_set, r);
   END LOOP;
@@ -573,7 +573,7 @@ BEGIN
   v_ped := pg_temp.t_pedido(c, a, v_prod, 20);
   PERFORM pg_temp.t_asignar(v_ped, tr);
   r := pg_temp.t_rest(tr, 'authenticated',
-         format('UPDATE public.pedidos SET estado = ''entregado'', fecha_entrega = now(), updated_at = now() WHERE id = %s', v_ped));
+         format('UPDATE public.pedidos SET estado = ''entregado'', fecha_entrega = now() WHERE id = %s', v_ped));
   f := pg_temp.t_pasa(f, 'transportista REST asignado -> entregado', r);
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END

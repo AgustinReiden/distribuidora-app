@@ -119,11 +119,8 @@ suelta en `sucursales`.
   (#1525): nombrarla en un `select` rompe la consulta entera. `_rol_en_sucursal(uid, suc)` da
   `perfiles.rol` si el usuario es de esa sucursal.
 - **El path de un bucket privado empieza por la sucursal** (`<sucursal_id>/…`, #1474). Sus
-  policies comparan `(storage.foldername(name))[1]` con la sucursal ACTIVA,
-  `current_sucursal_id()::text` (decisión del dueño D51, 1564-b7): un usuario de dos sucursales ve
-  sólo las facturas de la sucursal en la que está trabajando; nunca sólo el rol. Anda porque el front
-  manda el header `X-Sucursal-ID` también a Storage y storage-api lo pasa a `request.headers`. Lo
-  vigila `scripts/check-storage.mjs`, que además falla ante un bucket público.
+  policies comparan `(storage.foldername(name))[1]` con las sucursales del usuario, nunca sólo el
+  rol. Lo vigila `scripts/check-storage.mjs`, que además falla ante un bucket público.
 - **Lo reservado de la política comercial se lee por RPC** (decisión del dueño, 1564-b6 de #1603).
   Las comisiones, las alertas de combos y la ventana del precio anterior las da
   `politica_comercial_reservada()` a admin y encargado; el front lee por REST sólo lo de vender
@@ -264,9 +261,10 @@ suelta en `sucursales`.
   pago que se parte se bloquea
   `FOR UPDATE` **antes** de insertar el pedazo: la foto de una rendición se fía de eso para
   saber si un pedazo nació antes o después de ella (`ultimo_pago_id`, #1292). El linaje (`pago_padre_id`,
-  `pago_origen_id`) tiene FK compuesta con la sucursal a `pagos_linaje`, el registro de todo id de pago que
-  existió (1601-b9): el padre se puede borrar y el pedazo lo sigue nombrando; el pago nuevo entra al registro
-  por trigger. **La rendición confirmada se congela**
+  `pago_origen_id`) NO tiene FK, a propósito (1601-b9): el padre se puede borrar y el pedazo lo sigue
+  nombrando (la baja de total con un crédito de NC, el borrado del admin, el cobro que repone
+  `anular_salvedad`). Lo cuida `trg_pagos_linaje_de_su_sucursal` (si el padre o la raíz existen, son
+  de la misma sucursal) y PAGO-A/PAGO-B de `auditoria_integridad()`. **La rendición confirmada se congela**
   (#1248): al cerrarla, `trg_rendiciones_control_foto` guarda sus pagos en
   `rendicion_pagos_confirmados`, y un día cerrado se lee de esa foto. Reabrirla la descarta.
   Por eso reimputar ya no mueve la plata de una rendición cerrada a otro chofer. Una RPC
@@ -603,7 +601,7 @@ suelta en `sucursales`.
   junto con el historial; sin nada de eso se borra y su `stock_historico` se va con él. Tampoco uno que
   está en una meta (`trg_productos_rechazar_borrado_en_meta`, 1601-b9), y cada id de
   `metas_preventista.producto_ids` es un producto de la sucursal de la meta (su trigger, la FK que un
-  array no puede tener).
+  array no puede tener, y META-A de `auditoria_integridad()`).
 - **Un stock mínimo de 0 es «sin alerta», y vacío es 10** (CAT-13, decisión del dueño): con alerta,
   está bajo cuando `stock <= mínimo`. Es una regla en tres lugares: `stockBajo`
   (`src/utils/stockMinimo.ts`), su copia del bot (`supabase/functions/_shared/utils/stockMinimo.ts`)

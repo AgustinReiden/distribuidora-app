@@ -85,3 +85,18 @@ describe('ModalUsuario — capacidades extra', () => {
     expect(screen.getByRole('checkbox', { name: /Puede llevar la ruta/ })).toBeEnabled()
   })
 })
+
+// H2 de la revisión de C6 (1601-b5): el email llega por otro pedido (emails_de_usuarios) que
+// puede fallar. El campo es de sólo lectura y no se guarda: sin él, Guardar tiene que guardar.
+describe('ModalUsuario — sin el email', () => {
+  it('un usuario sin email (no se pudo cargar) se guarda igual', async () => {
+    mocks.rolesGuardados = []
+    const onSave = vi.fn()
+    const sinEmail = { ...usuario, email: undefined } as unknown as PerfilDB
+    render(<ModalUsuario usuario={sinEmail} onSave={onSave} onClose={vi.fn()} guardando={false} />)
+    fireEvent.click(screen.getByRole('button', { name: /guardar/i }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ id: 'u1', nombre: 'Persona Prueba' })))
+    expect(screen.getByLabelText('Email')).toHaveValue('')
+  })
+})

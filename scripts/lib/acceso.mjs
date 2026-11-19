@@ -249,9 +249,6 @@ export function hallazgosSucursalCruzada(pares, permitidas = {}) {
 const BUCKET = /\bbucket_id\s*=\s*'([^']+)'/;
 // El path de un objeto privado empieza por la sucursal (`<sucursal_id>/…`, #1474).
 const PATH = /\bfoldername\s*\(\s*name\s*\)|\bsplit_part\s*\(\s*name\b/i;
-// Y se compara con la sucursal ACTIVA (1564-b7, decisión del dueño D51: «un usuario de dos
-// sucursales ve las facturas escaneadas sólo de la sucursal en la que está trabajando»).
-const ACTIVA = /\bcurrent_sucursal_id\s*\(\s*\)/i;
 
 /**
  * Lo que es rojo en las policies de storage.objects (#1474). Las facturas
@@ -262,8 +259,7 @@ const ACTIVA = /\bcurrent_sucursal_id\s*\(\s*\)/i;
  *    la anon key;
  *  · nombrar su bucket (`bucket_id = '…'`): sin eso vale para todos;
  *  · mirar la sucursal del path: el primer tramo del nombre del objeto
- *    (`storage.foldername(name)`) contra la sucursal ACTIVA (`current_sucursal_id()`,
- *    D51 de #1564), no contra todas las del usuario.
+ *    (`storage.foldername(name)`) contra las sucursales del usuario.
  * Y ningún bucket es público: un bucket público se lee por URL sin RLS.
  * Excepciones: `{ policy, huella, motivo }` o `{ bucket, motivo }`. La huella es
  * la de huellaPolicy: si la policy cambia, vuelve a salir.
@@ -286,10 +282,6 @@ export function hallazgosStorage({ politicas = [], buckets = [] } = {}, excepcio
         if (!m) motivos.push(`${clausula}: un camino no nombra su bucket (vale para todos): ${rama}`);
         else if (!PATH.test(rama) || !SUCURSAL.test(rama)) {
           motivos.push(`${clausula}: un camino de '${m[1]}' no mira la sucursal del path: ${rama}`);
-        } else if (!ACTIVA.test(rama)) {
-          motivos.push(
-            `${clausula}: un camino de '${m[1]}' compara el path con todas las sucursales del usuario, no con la activa (D51): ${rama}`,
-          );
         }
       }
     }

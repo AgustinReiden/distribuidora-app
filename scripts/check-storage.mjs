@@ -12,9 +12,7 @@
  * mira sólo las policies de public, así que no lo veía.
  *
  * La regla: el path de un objeto privado es `<sucursal_id>/…`, y la policy
- * compara `(storage.foldername(name))[1]` con la sucursal activa,
- * `current_sucursal_id()` (1564-b7, decisión del dueño D51). Antes de la migración de
- * cierres de la tarjeta C6 de #1603 se comparaba con todas las del usuario: eso es rojo.
+ * compara `(storage.foldername(name))[1]` con las sucursales del usuario.
  *
  * Requiere env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
  * Uso local:  SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/check-storage.mjs
@@ -83,8 +81,8 @@ if (hallazgos.length) {
   }
   console.error(
     '\n   Arreglo: la policy va TO authenticated, con `bucket_id = \'…\'` y\n' +
-      '   `(storage.foldername(name))[1] = public.current_sucursal_id()::text` (la sucursal activa, D51),\n' +
-      '   y el front sube a `<sucursal_id>/…` con el header X-Sucursal-ID de esa sucursal.',
+      '   `(storage.foldername(name))[1] IN (SELECT us.sucursal_id::text FROM public.usuario_sucursales us\n' +
+      '   WHERE us.usuario_id = auth.uid())`, y el front sube a `<sucursal_id>/…`.',
   );
   process.exit(1);
 }
