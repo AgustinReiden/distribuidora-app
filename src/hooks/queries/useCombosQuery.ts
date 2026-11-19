@@ -15,6 +15,7 @@ import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { ComboComponente, ComboVigente } from '../../utils/combos'
 import type { LugarCombo } from '../../utils/comboCategorias'
+import { esConflictoDeVersion, lanzarSiConflicto } from '../../utils/conflictoDeVersion'
 
 export const combosKeys = {
   all: (sucursalId: number | null) => ['combos', sucursalId] as const,
@@ -194,6 +195,11 @@ export interface ComboAdmin {
   productoAMoverId: string | null
   /** Cada lugar: productos sueltos y categorías vivas (#1213). Lo que vende lo da `resolverLugares`. */
   componentes: LugarCombo[]
+  /**
+   * La versión del combo (`updated_at`, tal cual la dio la base): la edición la manda para que
+   * `guardar_combo` no pise lo que otro guardó en el medio (1599-b8).
+   */
+  updatedAt?: string | null
 }
 
 interface ComboAdminDB {
@@ -207,13 +213,14 @@ interface ComboAdminDB {
   prioridad: number | null
   tope_combos: number | null
   producto_a_mover_id: number | string | null
+  updated_at: string | null
   combo_componentes: { componente: number; producto_id: number | string | null; categoria_id: string | null; cantidad: number }[] | null
 }
 
 export async function fetchCombosAdmin(): Promise<ComboAdmin[]> {
   const { data, error } = await supabase
     .from('combos')
-    .select('id, nombre, activo, fecha_inicio, fecha_fin, precio, combina_escalas, prioridad, tope_combos, producto_a_mover_id, combo_componentes(componente, producto_id, categoria_id, cantidad)')
+    .select('id, nombre, activo, fecha_inicio, fecha_fin, precio, combina_escalas, prioridad, tope_combos, producto_a_mover_id, updated_at, combo_componentes(componente, producto_id, categoria_id, cantidad)')
     .order('activo', { ascending: false })
     .order('fecha_inicio', { ascending: false })
   if (error) throw errorDeSupabase(error, 'No se pudieron cargar los combos')
@@ -237,6 +244,7 @@ export async function fetchCombosAdmin(): Promise<ComboAdmin[]> {
       topeCombos: c.tope_combos == null ? null : Number(c.tope_combos),
       productoAMoverId: c.producto_a_mover_id == null ? null : String(c.producto_a_mover_id),
       componentes: [...porLugar.values()],
+      updatedAt: c.updated_at ?? null,
     }
   })
 }
@@ -269,6 +277,16 @@ export interface ComboFormInput {
    * orden se guarda `prioridad` tal cual.
    */
   orden?: number[]
+  /**
+   * La versión del combo al abrirlo (1599-b8): si otro lo guardó en el medio, `guardar_combo` no
+   * escribe nada y devuelve 'combo_cambiado'. Sin ella no compara (como antes).
+   */
+  updatedAtEsperado?: string | null
+  /**
+   * La versión de cada combo del `orden` que se reescribe (`versionesDelOrden`): si otro cambió
+   * uno, 'orden_cambiado'.
+   */
+  versiones?: Record<string, string | null>
 }
 
 export async function guardarCombo(input: ComboFormInput): Promise<string> {
@@ -290,10 +308,13 @@ export async function guardarCombo(input: ComboFormInput): Promise<string> {
         categorias: [...c.categorias],
       })),
       ...(input.orden ? { orden: input.orden } : {}),
+      ...(input.id && input.updatedAtEsperado ? { updated_at_esperado: input.updatedAtEsperado } : {}),
+      ...(input.orden && input.versiones ? { versiones: input.versiones } : {}),
     },
   })
   if (error) throw errorDeSupabase(error, 'No se pudo guardar el combo')
-  const r = data as { success: boolean; id?: number; error?: string } | null
+  const r = data as { success: boolean; id?: number; error?: string; codigo?: string } | null
+  lanzarSiConflicto(r)
   if (!r?.success) throw new Error(r?.error || 'No se pudo guardar el combo')
   return String(r.id)
 }
@@ -305,6 +326,11 @@ export function useGuardarComboMutation() {
     mutationFn: guardarCombo,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: combosKeys.all(currentSucursalId) })
+    },
+    // Si otro cambió el combo o uno del orden, la lista tiene que traer las versiones de ahora: el
+    // formulario abierto recalcula el orden con ellas (y el combo propio se ve al reabrirlo).
+    onError: (err) => {
+      if (esConflictoDeVersion(err)) queryClient.invalidateQueries({ queryKey: combosKeys.all(currentSucursalId) })
     },
   })
 }

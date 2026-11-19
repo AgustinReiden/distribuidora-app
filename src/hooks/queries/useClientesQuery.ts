@@ -161,89 +161,26 @@ async function sincronizarPreventistas(
   return leerPreventistasAsignados(clienteId)
 }
 
-const ERROR_DESCUENTOS = 'Sin conexión: no se pudo confirmar el cambio de descuentos del cliente. Revisá la ficha del cliente antes de reintentar, puede haber quedado hecho.'
+const ERROR_DESCUENTOS = 'Sin conexión: no se pudo confirmar el cambio de descuentos del cliente. Podés volver a guardar: deja los descuentos como los cargaste.'
 
 /**
- * Deja los descuentos por categoría de un cliente como la lista pedida. Idempotente. Dedup por
- * categoría normalizada (la última gana) para no chocar con el UNIQUE (cliente_id, categoria).
- * Filas sin categoría se descartan.
- *
- * Antes borraba TODO y después insertaba (dos llamadas sin transacción): si la segunda fallaba, el
- * cliente se quedaba sin ningún descuento (1598-b5). Ahora toca sólo lo que cambió, en este orden:
- *   1. inserta las categorías nuevas (si falla, no se borró nada);
- *   2. borra las que sobran y las de valor distinto (la tabla no tiene UPDATE: ni grant ni policy);
- *   3. inserta las de valor distinto; si falla, restituye las anteriores y relanza.
- * La ventana que queda (el paso 3 y su restitución fallan los dos) alcanza sólo a las categorías
- * cuyo valor cambió. Cerrarla del todo pide una RPC transaccional, que esta tarjeta no podía crear.
+ * Deja los descuentos por categoría de un cliente como la lista pedida, en UNA llamada y una
+ * transacción (`guardar_descuentos_categoria`, C4b de #1603; 1598-b5). Antes eran un INSERT, un
+ * DELETE y otro INSERT REST con restitución si fallaba: si fallaban el paso y la restitución, el
+ * cliente perdía los descuentos que cambiaban. La RPC hace lo mismo que hacía el front: una fila
+ * por categoría sin mirar mayúsculas ni los espacios de los bordes (la última gana), y las filas
+ * sin categoría no cuentan. Valida lo de las policies (admin y cliente de la sucursal activa) y el
+ * porcentaje de 0 a 100. Repetirla no cambia nada.
  */
 export async function replaceCategoriaDiscounts(
   clienteId: string,
   descuentos: { categoria: string; descuento_porcentaje: number }[]
 ): Promise<void> {
-  const clave = (categoria: string): string => categoria.trim().toUpperCase()
-
-  const dedup = new Map<string, { cliente_id: string; categoria: string; descuento_porcentaje: number }>()
-  for (const d of descuentos || []) {
-    const categoria = (d.categoria || '').trim()
-    if (!categoria) continue
-    dedup.set(clave(categoria), {
-      cliente_id: clienteId,
-      categoria,
-      descuento_porcentaje: d.descuento_porcentaje,
-    })
-  }
-
-  const { data: existentes, error: selError } = await supabase
-    .from('cliente_descuentos_categoria')
-    .select('categoria, descuento_porcentaje')
-    .eq('cliente_id', clienteId)
-  if (selError) throw errorDeSupabase(selError, ERROR_DESCUENTOS)
-
-  const actuales = (existentes ?? []) as { categoria: string; descuento_porcentaje: number }[]
-  const porClave = new Map<string, { categoria: string; descuento_porcentaje: number }[]>()
-  for (const f of actuales) porClave.set(clave(f.categoria), [...(porClave.get(clave(f.categoria)) ?? []), f])
-
-  const nuevas: { cliente_id: string; categoria: string; descuento_porcentaje: number }[] = []
-  const cambiadas: typeof nuevas = []
-  const sobran: string[] = []
-  const anteriores: typeof nuevas = []
-  for (const [k, destino] of dedup) {
-    const previas = porClave.get(k)
-    if (!previas) { nuevas.push(destino); continue }
-    const igual = previas.length === 1 && Number(previas[0].descuento_porcentaje) === Number(destino.descuento_porcentaje)
-    if (igual) continue
-    cambiadas.push(destino)
-    for (const p of previas) {
-      sobran.push(p.categoria)
-      anteriores.push({ cliente_id: clienteId, categoria: p.categoria, descuento_porcentaje: p.descuento_porcentaje })
-    }
-  }
-  for (const [k, previas] of porClave) {
-    if (!dedup.has(k)) for (const p of previas) sobran.push(p.categoria)
-  }
-
-  if (nuevas.length > 0) {
-    const { error } = await supabase.from('cliente_descuentos_categoria').insert(nuevas)
-    if (error) throw errorDeSupabase(error, ERROR_DESCUENTOS)
-  }
-
-  if (sobran.length > 0) {
-    const { error } = await supabase
-      .from('cliente_descuentos_categoria')
-      .delete()
-      .eq('cliente_id', clienteId)
-      .in('categoria', sobran)
-    if (error) throw errorDeSupabase(error, ERROR_DESCUENTOS)
-  }
-
-  if (cambiadas.length > 0) {
-    const { error } = await supabase.from('cliente_descuentos_categoria').insert(cambiadas)
-    if (error) {
-      // Los valores anteriores ya se borraron: se devuelven para no dejar al cliente sin ellos.
-      await supabase.from('cliente_descuentos_categoria').insert(anteriores)
-      throw errorDeSupabase(error, ERROR_DESCUENTOS)
-    }
-  }
+  const { error } = await supabase.rpc('guardar_descuentos_categoria', {
+    p_cliente_id: Number(clienteId),
+    p_descuentos: (descuentos || []).map(d => ({ categoria: d.categoria, descuento_porcentaje: d.descuento_porcentaje })),
+  })
+  if (error) throw errorDeSupabase(error, ERROR_DESCUENTOS)
 }
 
 // Mutation types

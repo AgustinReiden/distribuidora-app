@@ -37,6 +37,7 @@ import { useCategoriasQuery, useSubcategoriasQuery } from '../../hooks/queries/u
 import { ordenDelGrupo, ordenParaGuardar, ordenableDe } from '../../utils/comboOrden'
 import { fechaLocalISO } from '../../utils/formatters'
 import { detalleDeUso, mensajeAlNoBorrarPromocion } from '../../utils/promocionesEliminacion'
+import { versionesDelOrden } from '../../utils/conflictoDeVersion'
 
 const VistaPromociones = lazyWithReload(() => import('../vistas/VistaPromociones'))
 const ModalPromocion = lazyWithReload(() => import('../modals/ModalPromocion'))
@@ -65,6 +66,8 @@ function inputDesdeCombo(combo: ComboAdmin): ComboFormInput {
     topeCombos: combo.topeCombos,
     productoAMoverId: combo.productoAMoverId,
     componentes: combo.componentes.map(c => ({ cantidad: c.cantidad, sueltos: [...c.sueltos], categorias: [...c.categorias] })),
+    // La versión que se leyó (1599-b8): si otro lo cambió entre la lectura y el guardado, no se pisa.
+    updatedAtEsperado: combo.updatedAt,
   }
 }
 
@@ -254,7 +257,9 @@ export default function PromocionesContainer(): React.ReactElement {
   const handleGuardarPromocion = useCallback(async (data: PromocionFormInput) => {
     try {
       if (promoEditando) {
-        await actualizarPromocion.mutateAsync({ id: promoEditando.id, data })
+        // La versión que se abrió (1599-b8): si otro la guardó en el medio, no se pisa y el
+        // formulario queda abierto con lo cargado.
+        await actualizarPromocion.mutateAsync({ id: promoEditando.id, data, updatedAtEsperado: promoEditando.updated_at })
         notify.success('Promocion actualizada')
       } else {
         await crearPromocion.mutateAsync(data)
@@ -327,7 +332,10 @@ export default function PromocionesContainer(): React.ReactElement {
           fechaLocalISO(),
           { reubicar: true },
         )
-        if (orden) input.orden = ordenParaGuardar(orden)
+        if (orden) {
+          input.orden = ordenParaGuardar(orden)
+          input.versiones = versionesDelOrden(input.orden, frescos, combo.id)
+        }
       }
       await guardarCombo.mutateAsync(input)
       notify.success(activar ? 'Combo activado' : 'Combo desactivado')

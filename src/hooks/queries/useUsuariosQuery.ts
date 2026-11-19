@@ -7,7 +7,6 @@
  * misma llamada devuelve distintas filas para distintas sucursales.
  */
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
-import { diferenciaDeConjuntos } from '../../utils/diferenciaDeConjuntos'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -123,46 +122,19 @@ async function fetchPerfilRoles(usuarioId: string, sucursalId: number): Promise<
   return ((data ?? []) as Array<{ rol: string }>).map(r => r.rol)
 }
 
-// Deja los roles extra del usuario EN ESA SUCURSAL como pide la ficha, escribiendo
-// sólo lo que cambió (#1561, 1561-b12). Antes era DELETE de todo + INSERT de todo en
-// dos llamadas sin transacción: si el INSERT fallaba, el usuario quedaba sin ningún
-// rol extra (por ejemplo, sin poder repartir). Ahora se relee lo que hay, se quita
-// primero lo que sobra (nunca queda con más permisos de los pedidos) y después se
-// agrega lo que falta. Si lo segundo falla, el mensaje dice qué quedó hecho.
-// Cerrarlo del todo pide una RPC que lo haga en una transacción.
+// Deja los roles extra del usuario en la sucursal activa como pide la ficha, en UNA llamada y una
+// transacción (`guardar_roles_extra`, C4b de #1603; 1561-b12). Antes eran un DELETE y un INSERT
+// REST: si fallaba el segundo, el usuario quedaba sin el rol (por ejemplo, sin poder repartir) y
+// el front sólo podía avisar. La RPC valida lo mismo que la policy: admin activo que abarca las
+// sucursales del usuario, y el usuario es de la sucursal activa. Repetirla no cambia nada.
 async function asignarPerfilRoles(
   usuarioId: string,
-  sucursalId: number,
+  _sucursalId: number,
   roles: string[],
 ): Promise<void> {
-  const sinConexion = 'Sin conexión: no se pudo confirmar el cambio de roles. Revisá los roles del usuario antes de reintentar, puede haber quedado hecho.'
-  const actuales = await fetchPerfilRoles(usuarioId, sucursalId)
-  const { quitar, agregar } = diferenciaDeConjuntos(actuales, roles)
-
-  if (quitar.length > 0) {
-    const { error: errorDelete } = await supabase
-      .from('perfil_roles')
-      .delete()
-      .eq('usuario_id', usuarioId)
-      .eq('sucursal_id', sucursalId)
-      .in('rol', quitar)
-
-    if (errorDelete) throw errorDeSupabase(errorDelete, sinConexion)
-  }
-  if (agregar.length === 0) return
-
-  const { error } = await supabase
-    .from('perfil_roles')
-    .insert(agregar.map(rol => ({ usuario_id: usuarioId, sucursal_id: sucursalId, rol })))
-
+  const { error } = await supabase.rpc('guardar_roles_extra', { p_usuario_id: usuarioId, p_roles: roles })
   if (error) {
-    const motivo = errorDeSupabase(error, sinConexion)
-    if (quitar.length === 0 || motivo.sinServidor) throw errorDeSupabase(error, sinConexion)
-    // Lo quitado ya está hecho: que quien lo lee sepa que quedó a medias.
-    throw new Error(
-      `Se quitaron los roles ${quitar.join(', ')}, pero no se pudieron agregar ${agregar.join(', ')}: ${motivo.message} ` +
-      'Revisá los roles del usuario y volvé a guardar.'
-    )
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de roles. Podés volver a guardar: deja los roles como los marcaste.')
   }
 }
 

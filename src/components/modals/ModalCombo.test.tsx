@@ -9,6 +9,7 @@ import userEvent from '@testing-library/user-event'
 import ModalCombo from './ModalCombo'
 import type { ComboAdmin, ComboFormInput } from '../../hooks/queries/useCombosQuery'
 import type { ProductoDB } from '../../types'
+import { ConflictoDeVersionError } from '../../utils/conflictoDeVersion'
 
 const PRODUCTOS = [
   { id: '1', nombre: 'Coca 2,25', precio: 1000, stock: 10, activo: true },
@@ -389,6 +390,8 @@ describe('ModalCombo · guardado', () => {
       ],
       // Solo en su grupo: queda arriba de nadie.
       orden: [0],
+      // Ningún otro combo en el orden: ninguna versión que comparar (1599-b8).
+      versiones: {},
     })
   })
 
@@ -412,7 +415,33 @@ describe('ModalCombo · guardado', () => {
         { cantidad: 2, sueltos: ['1', '2'], categorias: [] },
         { cantidad: 1, sueltos: ['3'], categorias: [] },
       ],
+      // La versión que se abrió (1599-b8): este combo de prueba no la trae.
+      updatedAtEsperado: null,
     })
+  })
+
+  it('al editar manda la versión con la que se abrió el combo, tal cual (1599-b8)', async () => {
+    const { onSave } = renderModal(comboBase({ updatedAt: '2026-11-18T10:00:00.123456+00:00' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Actualizar' }))
+
+    expect(onSave.mock.calls[0][0].updatedAtEsperado).toBe('2026-11-18T10:00:00.123456+00:00')
+  })
+
+  it('si otro lo cambió, muestra el aviso y no pierde lo tipeado (1599-b8)', async () => {
+    const onSave = vi.fn().mockRejectedValue(new ConflictoDeVersionError(
+      'Otro usuario cambió este combo mientras lo editabas: no se guardó nada. Volvé a abrirlo para ver cómo quedó. Lo que cargaste sigue en esta ventana: anotalo antes de cerrarla.',
+      'combo_cambiado',
+    ))
+    const { onClose } = renderModal(comboBase({ updatedAt: '2026-11-18T10:00:00+00:00' }), onSave)
+    await reemplazar('Nombre', 'Combo Fernet nuevo')
+    await reemplazar('Precio del combo', '6800')
+    await userEvent.click(guardar())
+
+    expect(await screen.findByText(/Otro usuario cambió este combo mientras lo editabas/)).toBeInTheDocument()
+    expect(screen.getByText(/Lo que cargaste sigue en esta ventana/)).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Combo Fernet nuevo')
+    expect(screen.getByLabelText('Precio del combo')).toHaveValue('6.800')
   })
 
   it('muestra el error del server y deja el modal abierto para corregir', async () => {
@@ -525,6 +554,8 @@ describe('ModalCombo · compite con (#1213)', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Crear combo' }))
     expect(onSave.mock.calls[0][0].orden).toEqual([0, 50])
+    // Con la versión de cada combo del orden que se reescribe (1599-b8).
+    expect(onSave.mock.calls[0][0].versiones).toEqual({ 50: null })
   })
 
   it('las flechas cambian el orden y avisan si el de abajo nunca se arma', async () => {

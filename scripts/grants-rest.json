@@ -31,7 +31,17 @@
     "clientes": "el front escribe clientes (ClientesContainer). Desde #1151 ningún PATCH de pedidos nombra total ni monto_pagado, así que el trigger INVOKER actualizar_saldo_pedido ya no corre como authenticated"
   },
   "bundle_viejo": {
-    "_que_es": "Escrituras que el front de hoy ya no usa pero un bundle viejo del PWA sí: siguen concedidas para no cortarlo y se revocan en el issue de cada una. Sólo se achica."
+    "_que_es": "Escrituras que el front de hoy ya no usa pero un bundle viejo del PWA sí: siguen concedidas para no cortarlo y se revocan en el issue de cada una. Sólo se achica.",
+    "cliente_descuentos_categoria.INSERT": "los descuentos por categoría por guardar_descuentos_categoria (C4b de #1603, 1598-b5); revocar cuando no queden bundles de antes",
+    "cliente_descuentos_categoria.DELETE": "los descuentos por categoría por guardar_descuentos_categoria (C4b de #1603, 1598-b5); revocar cuando no queden bundles de antes",
+    "grupo_precio_escala_minimos.INSERT": "alta y edición de una condición mayorista por guardar_condicion_mayorista (C4b de #1603, 1561-b12); revocar cuando no queden bundles de antes",
+    "grupo_precio_escala_minimos.DELETE": "alta y edición de una condición mayorista por guardar_condicion_mayorista (C4b de #1603, 1561-b12); revocar cuando no queden bundles de antes",
+    "grupos_precio.INSERT": "alta y edición de una condición mayorista por guardar_condicion_mayorista (C4b de #1603, 1561-b12); revocar cuando no queden bundles de antes",
+    "perfil_roles.INSERT": "los roles extra por guardar_roles_extra (C4b de #1603, 1561-b12); revocar cuando no queden bundles de antes",
+    "perfil_roles.DELETE": "los roles extra por guardar_roles_extra (C4b de #1603, 1561-b12); revocar cuando no queden bundles de antes",
+    "promocion_productos.INSERT": "el alta de una promo por crear_promocion (C4b de #1603, 1561-b12); revocar cuando no queden bundles de antes",
+    "promocion_reglas.INSERT": "el alta de una promo por crear_promocion (C4b de #1603, 1561-b12); revocar cuando no queden bundles de antes",
+    "promociones.INSERT": "el alta de una promo por crear_promocion (C4b de #1603, 1561-b12); revocar cuando no queden bundles de antes"
   },
   "secuencias": [
     "cliente_descuentos_categoria_id_seq",
