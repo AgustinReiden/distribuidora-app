@@ -1,4 +1,4 @@
--- Ensayo de la migración NNN_cobros_salvedad_y_nota_restos (plan #1603, ola 2, tanda 5, tarjeta C1).
+-- Ensayo de la migración 533_cobros_salvedad_y_nota_restos (plan #1603, ola 2, tanda 5, tarjeta C1).
 --
 -- Los casos L fallan sin la migración; los E pasan con y sin ella (regresión):
 --
