@@ -1,6 +1,6 @@
 -- =========================================================================
--- NNN · EL search_path DE TODA FUNCIÓN SECURITY DEFINER DE public TERMINA EN
---       pg_temp (plan #1603, ola 2, tarjeta B15: 1564-b8 y 1564-g4)
+-- NNN · TODA FUNCIÓN DE public QUE FIJA search_path LO TERMINA EN pg_temp
+--       (plan #1603, ola 2, tarjeta B15 v2: 1564-b8 y 1564-g4)
 --
 -- Ensayo: scripts/test-search-path-ola2-1603.sql. Gate: scripts/check-search-path.mjs.
 -- Se aplica en LF. Va AL FINAL de la ola: un CREATE OR REPLACE posterior que no
@@ -21,34 +21,50 @@
 -- bajo, pero la puerta está abierta. Con `pg_temp` escrito AL FINAL, se busca
 -- último y la temporal no tapa nada.
 --
+-- Y no alcanza con las definer: una INVOKER con su propio
+-- `SET search_path = public` que llama una definer (o que dispara como trigger
+-- del DML de una definer) corre como postgres y su SET vuelve a poner pg_temp
+-- primero (el ensayo también lo reproduce: «admin como postgres»). Por eso la
+-- regla es para TODA función que fije search_path.
+--
 -- Qué hace
 -- --------
--- A cada SECURITY DEFINER de public le agrega `pg_temp` al final de su
--- search_path de hoy, conservando lo que tiene (`public` queda
--- `public, pg_temp`; `public, pg_catalog` queda `public, pg_catalog, pg_temp`).
--- La que ya lo tiene al final no se toca; la que lo tiene en otro lugar, se
--- mueve al final. Al 18/11 (conc-base:530): 355 definer, 345 con `public`,
--- 7 con `public, pg_catalog` y 3 que ya terminan en pg_temp → cambian 352.
+-- A cada función de public que fija search_path (definer o no, de trigger o
+-- no) le agrega `pg_temp` al final, conservando lo que tiene: `public` queda
+-- `public, pg_temp`; `public, pg_catalog` queda `public, pg_catalog, pg_temp`;
+-- el vacío (`''`, todo calificado) queda `pg_temp` (pg_catalog sigue primero,
+-- implícito). La que ya lo tiene al final no se toca; la que lo tiene en otro
+-- lugar, se mueve al final. Las que NO fijan search_path no se tocan: heredan
+-- el de quien las llama, y dentro de una definer es el de la definer (las SQL
+-- sin SET, como `_cliente_visible`, son así a propósito: para que se inlineen).
+-- Al 18/11 (conc-base:530), 607 funciones fijan search_path:
+--   definer 355: `public` 345, `public, pg_catalog` 7, `public, pg_temp` 3;
+--   invoker 252: `public` 239 (52 de trigger), `public, pg_catalog` 5, `''` 1,
+--                `public, pg_temp` 7.
+-- Cambian 597 (352 definer y 245 invoker).
 --
--- Por qué un DO que recorre el catálogo y no una lista de 352 ALTER
+-- Por qué un DO que recorre el catálogo y no una lista de 597 ALTER
 -- ----------------------------------------------------------------
 -- Hay sesiones en paralelo que crean y reemplazan funciones: una lista escrita
 -- hoy dejaría afuera la que nazca mañana y abortaría por una que ya no exista.
 -- El DO toma las que haya al aplicar y reaplicarlo no cambia nada (todas ya
 -- terminan en pg_temp: 0 cambios). Lo que se puede revisar a mano queda en las
--- premisas: aborta (sin cambiar nada) ante una definer sin search_path o con
--- uno que no sabe releer, y la poscondición compara la foto de antes y después.
+-- premisas: aborta (sin cambiar nada) ante una DEFINER sin search_path o ante
+-- un search_path que no sabe releer, y la poscondición compara la foto de
+-- antes y después.
 --
 -- Qué NO cambia (premisa y poscondición): el cuerpo (`md5(prosrc)`), los
 -- permisos (`proacl`), `prosecdef`, la volatilidad, el dueño y toda otra clave
 -- de `proconfig` de TODAS las funciones de public; y el `proconfig` entero de
--- las que no cambian (las INVOKER y las que ya terminaban en pg_temp).
+-- las que no cambian (las que no fijan search_path y las que ya terminaban en
+-- pg_temp). Una SQL con SET ya no se inlineaba; agregar pg_temp no cambia eso.
 --
 -- Locks: `ALTER FUNCTION … SET` no toma locks de tabla ni espera a quien está
--- ejecutando la función: reescribe la fila de pg_proc. Una llamada en curso
--- termina con el search_path con el que empezó; las siguientes toman el nuevo
--- después del COMMIT. Si otra sesión reemplaza la misma función a la vez, la
--- migración falla con «tuple concurrently updated» y se reintenta entera.
+-- ejecutando la función: reescribe la fila de pg_proc (RowExclusiveLock sobre
+-- pg_proc). Una llamada en curso termina con el search_path con el que empezó;
+-- las siguientes toman el nuevo después del COMMIT. Si otra sesión reemplaza
+-- la misma función a la vez, la migración falla con «tuple concurrently
+-- updated» y se reintenta entera.
 --
 -- Lo único que se apoya en una tabla temporal a propósito es guardar_combo
 -- (`CREATE TEMP TABLE IF NOT EXISTS _combo_resuelto … ON COMMIT DROP`), y en
@@ -73,16 +89,18 @@ DECLARE
   -- misma regla de scripts/check-search-path.mjs (scripts/lib/catalogo.mjs).
   c_termina CONSTANT text := '^search_path=(.*, )?pg_temp$';
   -- Cada elemento, como lo guarda Postgres: un identificador sin comillas o uno
-  -- entre comillas sin comas ni comillas adentro. Otra cosa no se relee.
+  -- entre comillas sin comas ni comillas adentro. El search_path vacío se guarda
+  -- `""` (y sólo así: un elemento vacío no se puede escribir). Otra cosa no se relee.
   c_elemento CONSTANT text := '^([a-z_][a-z0-9_$]*|"[^",]+")$';
   r record;
   v_elems text[];
   v_previo jsonb := '{}'::jsonb;
   v_malas text;
-  v_definer int;
+  v_total int;
   v_ya int := 0;
   v_movidas int := 0;
-  v_cambiadas int := 0;
+  v_def int := 0;
+  v_inv int := 0;
   v_fijo_antes text;
   v_fijo_despues text;
   v_quietas_antes text;
@@ -91,8 +109,9 @@ BEGIN
   -- -------------------------------------------------------------------------
   -- Premisas
   -- -------------------------------------------------------------------------
-  -- 1 · Toda definer de public tiene search_path. Una sin él usa el del que
+  -- 1 · Toda DEFINER de public tiene search_path. Una sin él usa el del que
   --     llama: elegirle uno puede cambiarle lo que lee, y eso se decide a mano.
+  --     (Una INVOKER sin search_path no se toca: hereda el de quien la llama.)
   SELECT string_agg(p.oid::regprocedure::text, ', ' ORDER BY p.oid::regprocedure::text) INTO v_malas
     FROM pg_proc p
    WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef
@@ -104,7 +123,8 @@ BEGIN
   -- 2 · Cada search_path se sabe releer elemento por elemento.
   SELECT string_agg(DISTINCT p.oid::regprocedure::text || ' [' || c || ']', ', ') INTO v_malas
     FROM pg_proc p, unnest(p.proconfig) c
-   WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef AND c LIKE 'search_path=%'
+   WHERE p.pronamespace = 'public'::regnamespace AND c LIKE 'search_path=%'
+     AND substr(c, 13) <> '""'
      AND EXISTS (SELECT 1 FROM unnest(string_to_array(substr(c, 13), ', ')) e WHERE e !~ c_elemento);
   IF v_malas IS NOT NULL THEN
     RAISE EXCEPTION 'mig NNN · search_path que no se sabe releer (revisar a mano, no se cambió nada): %', v_malas;
@@ -122,18 +142,18 @@ BEGIN
     INTO v_quietas_antes
     FROM pg_proc p
    WHERE p.pronamespace = 'public'::regnamespace
-     AND NOT (p.prosecdef AND NOT EXISTS (SELECT 1 FROM unnest(p.proconfig) c WHERE c ~ c_termina));
+     AND NOT EXISTS (SELECT 1 FROM unnest(p.proconfig) c WHERE c LIKE 'search_path=%' AND c !~ c_termina);
 
   -- -------------------------------------------------------------------------
   -- El cambio: pg_temp al final, conservando lo demás y su orden.
   -- -------------------------------------------------------------------------
   FOR r IN
-    SELECT p.oid, p.proname, pg_get_function_identity_arguments(p.oid) AS args, substr(c, 13) AS sp
+    SELECT p.oid, p.proname, p.prosecdef, pg_get_function_identity_arguments(p.oid) AS args, substr(c, 13) AS sp
       FROM pg_proc p, unnest(p.proconfig) c
-     WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef AND c LIKE 'search_path=%'
+     WHERE p.pronamespace = 'public'::regnamespace AND c LIKE 'search_path=%'
      ORDER BY p.oid
   LOOP
-    v_elems := string_to_array(r.sp, ', ');
+    v_elems := array_remove(string_to_array(r.sp, ', '), '""');
     IF v_elems[cardinality(v_elems)] = 'pg_temp' THEN
       v_ya := v_ya + 1;
       CONTINUE;
@@ -144,12 +164,15 @@ BEGIN
     v_elems := array_remove(v_elems, 'pg_temp') || 'pg_temp'::text;
     v_previo := v_previo || jsonb_build_object(r.oid::text, r.sp);
     EXECUTE format('ALTER FUNCTION public.%I(%s) SET search_path = %s', r.proname, r.args, array_to_string(v_elems, ', '));
-    v_cambiadas := v_cambiadas + 1;
+    IF r.prosecdef THEN v_def := v_def + 1; ELSE v_inv := v_inv + 1; END IF;
   END LOOP;
 
-  SELECT count(*) INTO v_definer FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef;
-  RAISE NOTICE 'mig NNN · % SECURITY DEFINER en public: % ya terminaban en pg_temp, % cambiaron (% lo tenían en otro lugar y se movió al final)',
-    v_definer, v_ya, v_cambiadas, v_movidas;
+  SELECT count(*) INTO v_total
+    FROM pg_proc p
+   WHERE p.pronamespace = 'public'::regnamespace
+     AND EXISTS (SELECT 1 FROM unnest(p.proconfig) c WHERE c LIKE 'search_path=%');
+  RAISE NOTICE 'mig NNN · % funciones de public fijan search_path: % ya terminaban en pg_temp, % cambiaron (% definer, % invoker; % lo tenían en otro lugar y se movió al final)',
+    v_total, v_ya, v_def + v_inv, v_def, v_inv, v_movidas;
 
   -- -------------------------------------------------------------------------
   -- Poscondición
@@ -172,12 +195,13 @@ BEGIN
     RAISE EXCEPTION 'mig NNN · cambió el proconfig de una función que no había que tocar';
   END IF;
 
-  -- Cada una que cambió: su search_path de antes, sin pg_temp, y pg_temp al final.
+  -- Cada una que cambió: su search_path de antes, sin pg_temp (ni el vacío), y pg_temp al final.
   SELECT string_agg(p.oid::regprocedure::text, ', ') INTO v_malas
     FROM pg_proc p
     JOIN jsonb_each_text(v_previo) prev(oid, sp) ON prev.oid::oid = p.oid
    WHERE (SELECT array_agg(substr(c, 13)) FROM unnest(p.proconfig) c WHERE c LIKE 'search_path=%')
-         IS DISTINCT FROM ARRAY[array_to_string(array_remove(string_to_array(prev.sp, ', '), 'pg_temp') || 'pg_temp'::text, ', ')];
+         IS DISTINCT FROM ARRAY[array_to_string(
+           array_remove(array_remove(string_to_array(prev.sp, ', '), '""'), 'pg_temp') || 'pg_temp'::text, ', ')];
   IF v_malas IS NOT NULL THEN
     RAISE EXCEPTION 'mig NNN · el search_path no quedó como el de antes con pg_temp al final: %', v_malas;
   END IF;
@@ -188,12 +212,15 @@ DO $post$
 DECLARE
   v_malas text;
 BEGIN
+  -- Toda definer fija search_path, y toda función que lo fija lo termina en pg_temp.
   SELECT string_agg(p.oid::regprocedure::text, ', ' ORDER BY p.oid::regprocedure::text) INTO v_malas
     FROM pg_proc p
-   WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef
-     AND NOT EXISTS (SELECT 1 FROM unnest(p.proconfig) c WHERE c ~ '^search_path=(.*, )?pg_temp$');
+   WHERE p.pronamespace = 'public'::regnamespace
+     AND (   (p.prosecdef AND NOT EXISTS (SELECT 1 FROM unnest(p.proconfig) c WHERE c LIKE 'search_path=%'))
+          OR EXISTS (SELECT 1 FROM unnest(p.proconfig) c
+                      WHERE c LIKE 'search_path=%' AND c !~ '^search_path=(.*, )?pg_temp$'));
   IF v_malas IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · quedaron definer cuyo search_path no termina en pg_temp: %', v_malas;
+    RAISE EXCEPTION 'mig NNN · quedaron funciones cuyo search_path no termina en pg_temp: %', v_malas;
   END IF;
 END
 $post$;

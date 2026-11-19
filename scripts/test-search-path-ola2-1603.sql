@@ -1,5 +1,5 @@
--- Ensayo de la tarjeta B15 de la ola 2 del plan #1603 (1564-b8 y 1564-g4): el search_path de toda
--- función SECURITY DEFINER de public termina en pg_temp.
+-- Ensayo de la tarjeta B15 (v2) de la ola 2 del plan #1603 (1564-b8 y 1564-g4): toda SECURITY DEFINER de
+-- public fija search_path, y toda función de public que lo fija (definer o no) lo termina en pg_temp.
 -- Migración: NNN_search_path_pg_temp. Gate: scripts/check-search-path.mjs.
 --
 -- Un único DO que termina SIEMPRE en una excepción: no deja rastro (la tabla temporal es ON COMMIT DROP y
@@ -13,6 +13,8 @@
 --     P1 ninguna SECURITY DEFINER de public sin search_path.
 --     P2 ninguna SECURITY DEFINER de public cuyo search_path no termine en pg_temp.
 --     P3 es_admin() (la de la demostración) sigue siendo definer y su search_path es «public, pg_temp».
+--     P4 (v2) ninguna INVOKER de public que fije search_path sin pg_temp al final (antes: 245, 52 de trigger).
+--     P5 (v2) _cliente_visible, que no fija search_path para inlinearse en la policy, sigue sin fijarlo.
 --   D · LA DEMOSTRACIÓN, como authenticated, con es_admin() (de sólo lectura: lee perfiles sin esquema)
 --     D1 un usuario que no tiene perfil no es admin (sin temporal: el punto de partida).
 --     D2 crea una tabla temporal `perfiles` con su uuid y rol 'admin'. La temporal existe y, para sus propias
@@ -27,6 +29,7 @@ DECLARE
   v_intruso uuid := '0b150000-0000-4000-8000-00000000b015';  -- inventado, sin perfil
   v_admin uuid := '00000000-0000-0000-0000-0000000004e7';    -- el admin de la semilla
   v_n int;
+  v_cnt_trg int;
   v_txt text;
   v_es boolean;
   v_t text;
@@ -55,6 +58,27 @@ BEGIN
       FROM pg_proc p WHERE p.oid = 'public.es_admin()'::regprocedure AND p.prosecdef;
     IF v_txt IS DISTINCT FROM 'search_path=public, pg_temp' THEN
       v_fallas := v_fallas || format('P3 es_admin(): se esperaba definer con «search_path=public, pg_temp» y es «%s»', v_txt);
+    END IF;
+
+    -- P4 (v2): ninguna INVOKER de public que fije search_path sin pg_temp al final. Una INVOKER con su propio
+    -- SET que llama una definer (o que dispara como trigger del DML de una definer) corre como postgres, y su
+    -- SET vuelve a poner pg_temp primero.
+    SELECT count(*), count(*) FILTER (WHERE p.prorettype = 'trigger'::regtype),
+           string_agg(p.oid::regprocedure::text, ', ' ORDER BY p.oid::regprocedure::text) INTO v_n, v_cnt_trg, v_txt
+      FROM pg_proc p
+     WHERE p.pronamespace = 'public'::regnamespace AND NOT p.prosecdef
+       AND EXISTS (SELECT 1 FROM unnest(p.proconfig) c WHERE c LIKE 'search_path=%' AND c !~ '^search_path=(.*, )?pg_temp$');
+    IF v_n > 0 THEN
+      v_fallas := v_fallas || format('P4 %s invoker (%s de trigger) que fijan search_path sin pg_temp al final (p. ej. %s)',
+                                     v_n, v_cnt_trg, left(v_txt, 200));
+    END IF;
+
+    -- P5 (v2): las INVOKER que NO fijan search_path siguen sin fijarlo (heredan el de quien las llama; las SQL
+    -- se inlinean, como _cliente_visible en la policy de clientes).
+    SELECT array_to_string(p.proconfig, ' | ') INTO v_txt
+      FROM pg_proc p WHERE p.oid = 'public._cliente_visible(bigint,bigint,boolean)'::regprocedure;
+    IF v_txt IS NOT NULL THEN
+      v_fallas := v_fallas || format('P5 _cliente_visible no tenía que fijar search_path (se inlinea en la policy) y tiene «%s»', v_txt);
     END IF;
 
     -- D · como authenticated
@@ -97,7 +121,7 @@ BEGIN
   END;
 
   IF cardinality(v_fallas) = 0 THEN
-    RAISE EXCEPTION 'ENSAYO OK · B15: toda definer de public termina su search_path en pg_temp, y una tabla temporal del que llama ya no le tapa una de public (es_admin() con una «perfiles» temporal)';
+    RAISE EXCEPTION 'ENSAYO OK · B15 v2: toda función de public que fija search_path lo termina en pg_temp, y una tabla temporal del que llama ya no le tapa una de public (es_admin() con una «perfiles» temporal)';
   END IF;
   RAISE EXCEPTION E'ENSAYO FALLÓ · % caso(s):\n  - %', cardinality(v_fallas), array_to_string(v_fallas, E'\n  - ');
 END
