@@ -924,7 +924,10 @@ $$;
 -- C2 y C5: una promo con auto-ajuste cuyo contenedor C es el menor de todos (C < A < B < S). Se compra A o B (10 dan
 -- 2 de regalo S, que no mueve stock) y cada 2 de regalo sale 1 de C. X es una venta de A con su regalo, a cli1. La
 -- barra queda en `p_barra`: lo que pide ajustar_stock_promocion_completo, o un cambio de factor que cierre un bloque.
-CREATE OR REPLACE FUNCTION conc.t14_setup(p_barra int DEFAULT 0) RETURNS jsonb LANGUAGE plpgsql AS $$
+-- p_entregado (H5 de la revisión de C2, ola 2 de #1603): X sale entregado. Desde D2 (#1592 PRM-2, decisión del dueño
+-- del 15/11) el factor de una promo no cambia con pedidos sin entregar que la usan, y T14c/T14d se rechazaban en el
+-- setup de cada ronda (0 de 100): el cambio de factor nunca llegaba a cruzarse con la venta.
+CREATE OR REPLACE FUNCTION conc.t14_setup(p_barra int DEFAULT 0, p_entregado boolean DEFAULT false) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE
   v_suc bigint := conc.f('suc_a')::bigint;
   v_adm uuid := conc.f('admin_a')::uuid;
@@ -946,6 +949,9 @@ BEGIN
     jsonb_build_object('producto_id', v_a, 'cantidad', 10, 'precio_unitario', 100),
     jsonb_build_object('producto_id', v_s, 'cantidad', 2, 'precio_unitario', 0, 'es_bonificacion', true, 'promocion_id', v_promo)));
   UPDATE public.promociones SET usos_pendientes = p_barra WHERE id = v_promo;
+  IF p_entregado THEN
+    UPDATE public.pedidos SET estado = 'entregado', retiro_deposito = true, fecha_entrega = now() WHERE id = v_x;
+  END IF;
   RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'admin2', conc.f('admin_a2')::uuid,
                             'cli1', v_cli1, 'cli2', conc.nuevo_cliente(v_suc),
                             'pc', v_c, 'pa', v_a, 'pb', v_b, 'ps', v_s, 'promo', v_promo, 'x', v_x);
@@ -972,7 +978,9 @@ $$;
 -- C4: una promo común P (5 dan 1 de regalo) sin contenedor, como 5 de las 6 de prod. X (cli) compra 10 de A con 2 de
 -- regalo s1, y después la promo cambia de tipo (#1324: se puede con pedidos abiertos, y X sigue con el modo de su
 -- foto). La venta de B con 1 de regalo s2 al mismo cliente no comparte productos con X.
-CREATE OR REPLACE FUNCTION conc.t14m_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+-- p_en_camino (H5 de la revisión de C2): X sale asignado (en camino). Desde D23 (1595-b5, decisión del dueño) una
+-- salvedad va sólo sobre un pedido en camino o entregado, y T14j se rechazaba en cada ronda (0 de 100).
+CREATE OR REPLACE FUNCTION conc.t14m_setup(p_en_camino boolean DEFAULT false) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE
   v_suc bigint := conc.f('suc_a')::bigint;
   v_adm uuid := conc.f('admin_a')::uuid;
@@ -992,6 +1000,9 @@ BEGIN
     jsonb_build_object('producto_id', v_a, 'cantidad', 10, 'precio_unitario', 100),
     jsonb_build_object('producto_id', v_s1, 'cantidad', 2, 'precio_unitario', 0, 'es_bonificacion', true, 'promocion_id', v_promo)));
   UPDATE public.promociones SET regalo_mueve_stock = false WHERE id = v_promo;
+  IF p_en_camino THEN
+    UPDATE public.pedidos SET estado = 'asignado' WHERE id = v_x;
+  END IF;
   RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'admin2', conc.f('admin_a2')::uuid, 'cli', v_cli,
                             'pa', v_a, 'pb', v_b, 's1', v_s1, 's2', v_s2, 'promo', v_promo, 'x', v_x,
                             'xi', (SELECT id FROM public.pedido_items WHERE pedido_id = v_x AND producto_id = v_a));
@@ -1044,6 +1055,8 @@ BEGIN
     jsonb_build_object('producto_id', (v_c->>'s1')::bigint, 'cantidad', 2, 'precio_unitario', 0, 'es_bonificacion', true,
                        'promocion_id', (v_c->>'promo')::bigint)), v_adm, NULL, NULL);
   IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 't14n_setup: edición %', v_r; END IF;
+  -- H5 de la revisión de C2: la salvedad va sobre un pedido en camino (D23).
+  UPDATE public.pedidos SET estado = 'asignado' WHERE id = v_x;
   v_r := public.registrar_salvedad(v_x, (SELECT id FROM public.pedido_items WHERE pedido_id = v_x AND producto_id = (v_c->>'pa')::bigint),
                                    2, 'cliente_rechaza', 'conc', NULL, true, NULL);
   RESET ROLE;
