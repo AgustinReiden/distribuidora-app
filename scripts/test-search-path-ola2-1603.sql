@@ -15,6 +15,9 @@
 --     P3 es_admin() (la de la demostración) sigue siendo definer y su search_path es «public, pg_temp».
 --     P4 (v2) ninguna INVOKER de public que fije search_path sin pg_temp al final (antes: 245, 52 de trigger).
 --     P5 (v2) _cliente_visible, que no fija search_path para inlinearse en la policy, sigue sin fijarlo.
+--     P6 (v3) pg_temp repetido: una función de juguete con `pg_temp, public, pg_temp` corre con la temporal antes
+--        que public, y la regla de P2/P4 (una sola vez y al final) la marca.
+--   P2 y P4 piden pg_temp una sola vez y al final (Postgres usa la primera aparición).
 --   D · LA DEMOSTRACIÓN, como authenticated, con es_admin() (de sólo lectura: lee perfiles sin esquema)
 --     D1 un usuario que no tiene perfil no es admin (sin temporal: el punto de partida).
 --     D2 crea una tabla temporal `perfiles` con su uuid y rol 'admin'. La temporal existe y, para sus propias
@@ -48,9 +51,10 @@ BEGIN
     SELECT count(*), string_agg(p.oid::regprocedure::text, ', ' ORDER BY p.oid::regprocedure::text) INTO v_n, v_txt
       FROM pg_proc p
      WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef
-       AND NOT EXISTS (SELECT 1 FROM unnest(p.proconfig) c WHERE c ~ '^search_path=(.*, )?pg_temp$');
+       AND NOT EXISTS (SELECT 1 FROM unnest(p.proconfig) c
+                        WHERE c ~ '^search_path=(.*, )?pg_temp$' AND c !~ '(=|, )pg_temp, ');
     IF v_n > 0 THEN
-      v_fallas := v_fallas || format('P2 %s definer cuyo search_path no termina en pg_temp (p. ej. %s)', v_n, left(v_txt, 200));
+      v_fallas := v_fallas || format('P2 %s definer cuyo search_path no termina en pg_temp, una sola vez (p. ej. %s)', v_n, left(v_txt, 200));
     END IF;
 
     -- P3
@@ -67,7 +71,8 @@ BEGIN
            string_agg(p.oid::regprocedure::text, ', ' ORDER BY p.oid::regprocedure::text) INTO v_n, v_cnt_trg, v_txt
       FROM pg_proc p
      WHERE p.pronamespace = 'public'::regnamespace AND NOT p.prosecdef
-       AND EXISTS (SELECT 1 FROM unnest(p.proconfig) c WHERE c LIKE 'search_path=%' AND c !~ '^search_path=(.*, )?pg_temp$');
+       AND EXISTS (SELECT 1 FROM unnest(p.proconfig) c
+                    WHERE c LIKE 'search_path=%' AND (c !~ '^search_path=(.*, )?pg_temp$' OR c ~ '(=|, )pg_temp, '));
     IF v_n > 0 THEN
       v_fallas := v_fallas || format('P4 %s invoker (%s de trigger) que fijan search_path sin pg_temp al final (p. ej. %s)',
                                      v_n, v_cnt_trg, left(v_txt, 200));
@@ -115,6 +120,23 @@ BEGIN
     EXECUTE 'RESET ROLE';
     PERFORM set_config('request.jwt.claims', '', true);
     DROP TABLE pg_temp.perfiles;
+
+    -- P6 (H1 de la revisión): pg_temp repetido. Una función de juguete con `pg_temp, public, pg_temp` corre con
+    -- la temporal ANTES que public (Postgres usa la primera aparición), así que la regla de P2/P4 tiene que
+    -- marcarla aunque su último elemento sea pg_temp. Va después de D (una temporal creada antes cambiaría
+    -- cómo se planifica es_admin) y se deshace con el resto.
+    CREATE FUNCTION public.zz_b15_doble() RETURNS text LANGUAGE sql STABLE
+      SET search_path = pg_temp, public, pg_temp AS $f$ SELECT current_schemas(true)::text $f$;
+    v_txt := public.zz_b15_doble();
+    IF position('pg_temp' in v_txt) = 0 OR position('pg_temp' in v_txt) > position('public' in v_txt) THEN
+      v_fallas := v_fallas || format('P6 con pg_temp repetido se esperaba la temporal antes que public, y el camino es %s', v_txt);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_proc p, unnest(p.proconfig) c
+                    WHERE p.oid = 'public.zz_b15_doble()'::regprocedure
+                      AND (c !~ '^search_path=(.*, )?pg_temp$' OR c ~ '(=|, )pg_temp, ')) THEN
+      v_fallas := v_fallas || 'P6 la regla de P2/P4 no marca un search_path con pg_temp repetido';
+    END IF;
+    DROP FUNCTION public.zz_b15_doble();
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_t = PG_EXCEPTION_CONTEXT;
     v_fallas := v_fallas || format('el ensayo cortó: %s %s (%s)', SQLSTATE, SQLERRM, left(v_t, 400));
