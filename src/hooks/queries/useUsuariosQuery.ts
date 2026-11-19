@@ -13,7 +13,6 @@ import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { PerfilDB } from '../../types'
 import { PERFIL_COLUMNAS } from '../../lib/perfilColumnas'
-import { fetchEmailsDeUsuarios } from './emailsDeUsuarios'
 
 // Query keys scoped by sucursalId (multi-tenant). Using function factories so
 // every cache entry lives under its own tenant prefix and a sucursal switch
@@ -58,11 +57,8 @@ async function fetchUsuarios(sucursalId: number | null): Promise<PerfilDB[]> {
     .order('nombre')
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los usuarios. Revisá la señal e intentá de nuevo.')
-  const usuarios = (data as unknown as PerfilDB[]) || []
-  // El email de cada uno, para la pantalla de usuarios: por la RPC (D53, 1601-b5), que se lo
-  // da sólo a admin y encargado. Sin email, la lista sale igual.
-  const emails = await fetchEmailsDeUsuarios(usuarios.map(u => u.id))
-  return usuarios.map(u => (emails.has(u.id) ? { ...u, email: emails.get(u.id) } : u))
+  // Sin el email (1601-b5): la pantalla de usuarios lo pide aparte (useEmailsDeUsuariosQuery).
+  return (data as unknown as PerfilDB[]) || []
 }
 
 async function fetchUsuarioById(id: string): Promise<PerfilDB | null> {
@@ -422,9 +418,7 @@ export function useActualizarUsuarioMutation() {
       // Actualizar cache de lista
       queryClient.setQueryData<PerfilDB[]>(usuariosKeys.lists(currentSucursalId), (old) => {
         if (!old) return [updatedUsuario]
-        // `{ ...u, ...}`: la fila que devuelve el update no trae el email (1601-b5), y la
-        // de la lista sí (lo puso la RPC): se conserva.
-        return old.map(u => u.id === updatedUsuario.id ? { ...u, ...updatedUsuario } : u)
+        return old.map(u => u.id === updatedUsuario.id ? updatedUsuario : u)
       })
       // Invalidar listas por rol
       if (updatedUsuario.rol) {
@@ -450,9 +444,7 @@ export function useToggleUsuarioActivoMutation() {
       queryClient.setQueryData(usuariosKeys.detail(currentSucursalId, updatedUsuario.id), updatedUsuario)
       queryClient.setQueryData<PerfilDB[]>(usuariosKeys.lists(currentSucursalId), (old) => {
         if (!old) return [updatedUsuario]
-        // `{ ...u, ...}`: la fila que devuelve el update no trae el email (1601-b5), y la
-        // de la lista sí (lo puso la RPC): se conserva.
-        return old.map(u => u.id === updatedUsuario.id ? { ...u, ...updatedUsuario } : u)
+        return old.map(u => u.id === updatedUsuario.id ? updatedUsuario : u)
       })
       queryClient.invalidateQueries({ queryKey: usuariosKeys.transportistas(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: usuariosKeys.preventistas(currentSucursalId) })

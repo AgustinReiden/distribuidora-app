@@ -1,43 +1,54 @@
--- Ensayo de la tarjeta C6 de la ola 2 del plan #1603 (1601-b9 de #1601): el linaje de un pago
--- y los productos de una meta, atados a su sucursal.
--- Migración: NNN_linaje_de_pagos_y_productos_de_metas.
+-- Ensayo de la tarjeta C6 de la ola 2 del plan #1603 (1601-b9 y la RPC de 1601-b5 de #1601): el
+-- linaje de un pago y los productos de una meta, de su sucursal; y el email de otro usuario por RPC.
+-- Migración: NNN_linaje_de_pagos_metas_y_emails.
 --
 -- Un único DO con datos propios que termina SIEMPRE en una excepción: no deja rastro (salvo
 -- valores de secuencia). Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ' con la lista. Sin la migración
 -- fallan todos los casos menos los que dicen «regresión».
 --
---   L1 · un pedazo de la sucursal 2 colgado de un pago (padre) de la sucursal 1: se rechaza.
+--   L1 · un pedazo de la sucursal 2 colgado de un pago (padre) VIVO de la sucursal 1: se rechaza.
 --   L2 · lo mismo con la raíz (pago_origen_id): se rechaza.
---   L3 · un pedazo colgado de un id de pago que nunca existió: se rechaza.
+--   L3 · regresión · un pedazo cuyo padre y raíz ya se borraron entra (el linaje sobrevive al
+--        borrado a propósito: no hay FK).
 --   L4 · regresión · desafectar_sobrepago_pedido con un crédito de NC: borra el pago y hace nacer
 --        el pedazo con el padre borrado, y anda (la salvedad o la edición que bajan el total).
 --   L5 · regresión · el admin borra lo que quedó de un pago partido (su pedazo sigue vivo), y
 --        después un pedazo nuevo puede nacer del borrado.
---   L6 · regresión · un pago común (sin linaje) entra y queda en el registro.
+--   L6 · auditoria_integridad() ve un pedazo con la raíz en otra sucursal que se escapó del
+--        trigger (PAGO-B) y una meta con un producto ajeno (META-A), y da 0 sin ellos.
 --   M1 · una meta con un producto de otra sucursal, escrita directo en la tabla: se rechaza.
 --   M2 · una meta con un id de producto que no existe, o con un id repetido o nulo: se rechaza.
 --   M3 · borrar un producto que está en una meta: se rechaza con el número de la meta.
 --   M4 · regresión · una meta con productos de su sucursal entra por guardar_meta_preventista, y
 --        un producto que no está en ninguna meta se borra.
+--   E1 · emails_de_usuarios: admin y encargado reciben el email de otro de su sucursal;
+--        preventista, chofer y un encargado desactivado, sólo el suyo.
 --
---   docker exec -i <contenedor> psql -U postgres -h localhost -d postgres -f - < scripts/test-linaje-pagos-y-metas-ola2-1603.sql
+-- Los ids de pago se toman de los propios: nada de recorrer la secuencia (en el CI está en 10^9).
+--
+--   docker exec -i <contenedor> psql -U postgres -h localhost -d postgres -f - < scripts/test-linaje-pagos-metas-y-emails-ola2-1603.sql
 
 DO $ensayo$
 DECLARE
   v_adm      uuid;
+  v_enc      uuid;
   v_pre      uuid;
+  v_tra      uuid;
+  v_des      uuid;
   v_cli1     bigint;
   v_cli2     bigint;
   v_p1       bigint;
   v_p2       bigint;
-  v_hijo     bigint;
+  v_borrado  bigint;
   v_prod1    bigint;
   v_prod1b   bigint;
   v_prod2    bigint;
   v_prod_lib bigint;
   v_meta     bigint;
   v_r        text;
+  v_t        text;
   v_n        bigint;
+  v_aud      jsonb;
   v_fallas   text[] := '{}';
 BEGIN
  BEGIN
@@ -67,15 +78,15 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     RETURN SQLSTATE || ' ' || SQLERRM;
   END $f$;
-  -- Lo mismo como un usuario (authenticated) parado en p_suc.
+  -- Corre p_sql como un usuario (authenticated) parado en p_suc; devuelve 'PASA <valor>' o 'SQLSTATE mensaje'.
   CREATE FUNCTION pg_temp.como_usuario(p_uid uuid, p_suc bigint, p_sql text) RETURNS text LANGUAGE plpgsql AS $f$
-  DECLARE r text;
+  DECLARE r text; x text;
   BEGIN
     PERFORM pg_temp.como(p_uid, p_suc);
     EXECUTE 'SET LOCAL ROLE authenticated';
     BEGIN
-      EXECUTE p_sql;
-      r := 'PASA';
+      EXECUTE p_sql INTO x;
+      r := 'PASA' || COALESCE(' ' || x, '');
     EXCEPTION WHEN OTHERS THEN
       r := SQLSTATE || ' ' || SQLERRM;
     END;
@@ -83,24 +94,43 @@ BEGIN
     PERFORM pg_temp.como(NULL, NULL);
     RETURN r;
   END $f$;
+  -- Las violaciones de un check de auditoria_integridad() (NULL si el check no existe).
+  CREATE FUNCTION pg_temp.check_de(p_aud jsonb, p_id text) RETURNS bigint LANGUAGE sql AS $f$
+    SELECT (c->>'violaciones')::bigint FROM jsonb_array_elements(p_aud->'checks') c WHERE c->>'id' = p_id
+  $f$;
 
   -- --------------------------------------------------------------- fixtures -
   v_adm := pg_temp.u('admin', 1);
+  v_enc := pg_temp.u('encargado', 1);
   v_pre := pg_temp.u('preventista', 1);
+  v_tra := pg_temp.u('transportista', 1);
+  v_des := pg_temp.u('encargado', 1);
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'auth.users'::regclass AND attname = 'banned_until') THEN
+    ALTER TABLE public.perfiles DISABLE TRIGGER trg_perfiles_sync_acceso_auth;
+    UPDATE perfiles SET activo = false WHERE id = v_des;
+    ALTER TABLE public.perfiles ENABLE TRIGGER trg_perfiles_sync_acceso_auth;
+  ELSE
+    UPDATE perfiles SET activo = false WHERE id = v_des;
+  END IF;
+  UPDATE perfiles SET email = 'c6-' || id || '@ensayo.invalid'
+   WHERE id IN (v_adm, v_enc, v_pre, v_tra, v_des) AND email IS NULL;
+
   INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
   VALUES ('C6 uno', 'C6 uno', 'Calle Falsa 1', 1) RETURNING id INTO v_cli1;
   INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
   VALUES ('C6 dos', 'C6 dos', 'Calle Falsa 2', 2) RETURNING id INTO v_cli2;
 
-  -- Un pago a cuenta de la 1 y otro de la 2 (saldo a favor, sin boleta).
+  -- Un pago que se borra (su id queda libre y menor que los que siguen), y un pago a cuenta de la
+  -- 1 y otro de la 2 (saldo a favor, sin boleta).
+  INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, sucursal_id, a_cuenta)
+  VALUES (v_cli1, NULL, 5, 'efectivo', public._tablero_hoy(), 1, true) RETURNING id INTO v_borrado;
+  DELETE FROM pagos WHERE id = v_borrado;
   INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, sucursal_id, a_cuenta)
   VALUES (v_cli1, NULL, 100, 'efectivo', public._tablero_hoy(), 1, true) RETURNING id INTO v_p1;
   INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, sucursal_id, a_cuenta)
   VALUES (v_cli2, NULL, 100, 'efectivo', public._tablero_hoy(), 2, true) RETURNING id INTO v_p2;
 
   -- ------------------------------------------------------------ L1, L2, L3 -
-  -- L3: un id menor que el del pedazo (pagos_padre_anterior) que no es de ningún pago.
-  SELECT g INTO v_n FROM generate_series(1, v_p2) g WHERE NOT EXISTS (SELECT 1 FROM pagos x WHERE x.id = g) LIMIT 1;
   v_r := pg_temp.server(format(
     'INSERT INTO pagos (cliente_id, monto, forma_pago, fecha, sucursal_id, a_cuenta, pago_origen_id, pago_padre_id)
      VALUES (%s, 10, ''efectivo'', public._tablero_hoy(), 2, true, %s, %s)', v_cli2, v_p2, v_p1));
@@ -115,16 +145,15 @@ BEGIN
   END IF;
   v_r := pg_temp.server(format(
     'INSERT INTO pagos (cliente_id, monto, forma_pago, fecha, sucursal_id, a_cuenta, pago_origen_id, pago_padre_id)
-     VALUES (%s, 10, ''efectivo'', public._tablero_hoy(), 1, true, %s, %s)', v_cli1, v_n, v_n));
-  IF v_r NOT LIKE '23503%' THEN
-    v_fallas := v_fallas || ('L3 · un pedazo colgado de un pago que nunca existió entró: ' || v_r);
+     VALUES (%s, 10, ''efectivo'', public._tablero_hoy(), 2, true, %s, %s)', v_cli2, v_borrado, v_borrado));
+  IF v_r <> 'PASA' THEN
+    v_fallas := v_fallas || ('L3 · un pedazo de un padre ya borrado no entró: ' || v_r);
   END IF;
 
   -- -------------------------------------------------------------------- L4 -
-  -- La rama del crédito de NC de desafectar_sobrepago_pedido: un pedido de 100 pagado
-  -- con un crédito de NC de 100; el total baja a 60 y el sobrante (40) vuelve a saldo a favor.
-  -- Se arma a mano lo mínimo: la NC, la boleta y el pago, y se llama a la función como la llama
-  -- el trigger de la baja de total.
+  -- La rama del crédito de NC de desafectar_sobrepago_pedido: un pedido de 100 pagado con un
+  -- crédito de NC de 100; el total baja a 0 y el crédito vuelve a saldo a favor como pedazo del
+  -- pago borrado. Se llama a la función como la llama el trigger de la baja de total.
   DECLARE
     v_ped   bigint;
     v_ped2  bigint;
@@ -140,8 +169,8 @@ BEGIN
     VALUES (v_ped2, v_cli1, 1, 'otro', 100, 100, 0, v_adm) RETURNING id INTO v_nc;
     INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, sucursal_id, nota_credito_id)
     VALUES (v_cli1, v_ped, 100, 'nota_credito', public._tablero_hoy(), 1, v_nc) RETURNING id INTO v_pago;
-    -- La baja del total sin pasar por el trigger de reconciliación (que llamaría a la misma
-    -- función y además reaplicaría el crédito): se mide sólo el DELETE + el pedazo.
+    -- La baja del total sin el trigger de reconciliación (que llamaría a la misma función y
+    -- además reaplicaría el crédito): se mide sólo el DELETE + el pedazo.
     PERFORM set_config('app.reimputacion_pagos', 'on', true);
     ALTER TABLE public.pedidos DISABLE TRIGGER USER;
     UPDATE pedidos SET total = 0 WHERE id = v_ped;
@@ -171,10 +200,9 @@ BEGIN
     v_fallas := v_fallas || ('L5 · el pedazo legítimo no entró: ' || v_r);
   END IF;
   UPDATE pagos SET monto = 70 WHERE id = v_p1;
-  -- Un pago a cuenta sin boleta: el guard de crédito aplicado no lo frena. El admin lo borra.
-  v_r := pg_temp.como_usuario(v_adm, 1, format('DELETE FROM pagos WHERE id = %s', v_p1));
+  v_r := pg_temp.como_usuario(v_adm, 1, format('DELETE FROM pagos WHERE id = %s RETURNING id::text', v_p1));
   SELECT count(*) INTO v_n FROM pagos WHERE id = v_p1;
-  IF v_r <> 'PASA' OR v_n <> 0 THEN
+  IF v_r NOT LIKE 'PASA%' OR v_n <> 0 THEN
     v_fallas := v_fallas || format('L5 · el admin no pudo borrar lo que quedó del pago partido: %s (quedan %s)', v_r, v_n);
   END IF;
   v_r := pg_temp.server(format(
@@ -182,16 +210,6 @@ BEGIN
      VALUES (%s, 5, ''efectivo'', public._tablero_hoy(), 1, true, %s, %s)', v_cli1, v_p1, v_p1));
   IF v_r <> 'PASA' THEN
     v_fallas := v_fallas || ('L5 · un pedazo de un pago ya borrado no entró: ' || v_r);
-  END IF;
-
-  -- -------------------------------------------------------------------- L6 -
-  IF to_regclass('public.pagos_linaje') IS NULL THEN
-    v_fallas := v_fallas || 'L6 · no existe el registro pagos_linaje'::text;
-  ELSE
-    EXECUTE format('SELECT count(*) FROM public.pagos_linaje WHERE id = %s AND sucursal_id = 2', v_p2) INTO v_n;
-    IF v_n <> 1 THEN
-      v_fallas := v_fallas || 'L6 · el pago nuevo no quedó en el registro con su sucursal'::text;
-    END IF;
   END IF;
 
   -- ----------------------------------------------------------------- M1..M4 -
@@ -213,7 +231,7 @@ BEGIN
       'INSERT INTO metas_preventista (sucursal_id, preventista_id, periodo, periodo_fin, tipo_meta, producto_ids, valor_objetivo)
        VALUES (1, %L, date_trunc(''month'', public._tablero_hoy())::date, (date_trunc(''month'', public._tablero_hoy()) + interval ''1 month - 1 day'')::date,
                ''unidades'', %s, 10)', v_pre, arr)))
-      FROM (VALUES ('inexistente', format('ARRAY[%s, 900000000]::bigint[]', v_prod1)),
+      FROM (VALUES ('inexistente', format('ARRAY[%s, %s]::bigint[]', v_prod1, v_prod_lib + 1000000)),
                    ('repetido',    format('ARRAY[%s, %s]::bigint[]', v_prod1, v_prod1)),
                    ('nulo',        format('ARRAY[%s, NULL]::bigint[]', v_prod1))) AS t(caso, arr)
   LOOP
@@ -231,7 +249,6 @@ BEGIN
     v_fallas := v_fallas || ('M4 · la meta buena por guardar_meta_preventista no entró: ' || SQLSTATE || ' ' || SQLERRM);
   END;
   PERFORM pg_temp.como(NULL, NULL);
-  -- Y un UPDATE que la deja con un producto de otra sucursal, directo en la tabla (M1 en la edición).
   IF v_meta IS NOT NULL THEN
     v_r := pg_temp.server(format('UPDATE metas_preventista SET producto_ids = ARRAY[%s, %s]::bigint[] WHERE id = %s', v_prod1, v_prod2, v_meta));
     IF v_r NOT LIKE '23503%' THEN
@@ -239,18 +256,64 @@ BEGIN
     END IF;
   END IF;
 
-  -- M3: el producto de la meta no se borra (ni como admin ni como server); el libre sí (M4).
-  v_r := pg_temp.como_usuario(v_adm, 1, format('DELETE FROM productos WHERE id = %s', v_prod1b));
+  -- M3: el producto de la meta no se borra; el libre sí (M4).
+  v_r := pg_temp.como_usuario(v_adm, 1, format('DELETE FROM productos WHERE id = %s RETURNING id::text', v_prod1b));
   SELECT count(*) INTO v_n FROM productos WHERE id = v_prod1b;
   IF v_n <> 1 THEN
     v_fallas := v_fallas || ('M3 · se borró un producto que está en una meta: ' || v_r);
   ELSIF v_r NOT LIKE '23503%' OR v_r NOT LIKE '%#' || v_meta || '%' THEN
     v_fallas := v_fallas || ('M3 · el borrado de un producto en una meta no dice cuál: ' || v_r);
   END IF;
-  v_r := pg_temp.como_usuario(v_adm, 1, format('DELETE FROM productos WHERE id = %s', v_prod_lib));
+  v_r := pg_temp.como_usuario(v_adm, 1, format('DELETE FROM productos WHERE id = %s RETURNING id::text', v_prod_lib));
   SELECT count(*) INTO v_n FROM productos WHERE id = v_prod_lib;
   IF v_n <> 0 THEN
     v_fallas := v_fallas || ('M4 · un producto sin metas ni historial no se borró: ' || v_r);
+  END IF;
+
+  -- -------------------------------------------------------------------- L6 -
+  -- Sin nada roto, los dos checks dan 0; con un pedazo y una meta que se escapan de sus
+  -- triggers (apagados sólo para armarlos, todo se deshace), dan 1.
+  v_aud := public.auditoria_integridad();
+  IF pg_temp.check_de(v_aud, 'PAGO-B') IS DISTINCT FROM 0 OR pg_temp.check_de(v_aud, 'META-A') IS DISTINCT FROM 0 THEN
+    v_fallas := v_fallas || format('L6 · sin nada roto: PAGO-B %s, META-A %s (esperado 0 y 0)',
+                                   pg_temp.check_de(v_aud, 'PAGO-B'), pg_temp.check_de(v_aud, 'META-A'));
+  END IF;
+  ALTER TABLE public.pagos DISABLE TRIGGER USER;
+  ALTER TABLE public.metas_preventista DISABLE TRIGGER USER;
+  -- La raíz, el último pago vivo de la 1 (el pedazo de L5); el padre, uno de la 2.
+  INSERT INTO pagos (cliente_id, monto, forma_pago, fecha, sucursal_id, a_cuenta, pago_origen_id, pago_padre_id)
+  VALUES (v_cli2, 1, 'efectivo', public._tablero_hoy(), 2, true, (SELECT max(id) FROM pagos WHERE sucursal_id = 1), v_p2);
+  INSERT INTO metas_preventista (sucursal_id, preventista_id, periodo, periodo_fin, tipo_meta, producto_ids, valor_objetivo)
+  VALUES (1, v_tra, date_trunc('month', public._tablero_hoy())::date,
+          (date_trunc('month', public._tablero_hoy()) + interval '1 month - 1 day')::date, 'unidades', ARRAY[v_prod2], 10);
+  ALTER TABLE public.pagos ENABLE TRIGGER USER;
+  ALTER TABLE public.metas_preventista ENABLE TRIGGER USER;
+  v_aud := public.auditoria_integridad();
+  IF pg_temp.check_de(v_aud, 'PAGO-B') IS DISTINCT FROM 1 OR pg_temp.check_de(v_aud, 'META-A') IS DISTINCT FROM 1 THEN
+    v_fallas := v_fallas || format('L6 · con un pedazo y una meta cruzados: PAGO-B %s, META-A %s (esperado 1 y 1)',
+                                   pg_temp.check_de(v_aud, 'PAGO-B'), pg_temp.check_de(v_aud, 'META-A'));
+  END IF;
+
+  -- -------------------------------------------------------------------- E1 -
+  IF to_regprocedure('public.emails_de_usuarios(uuid[])') IS NULL THEN
+    v_fallas := v_fallas || 'E1 · no existe emails_de_usuarios(uuid[])'::text;
+  ELSE
+    FOR v_t IN
+      SELECT format('%s pide el de %s: %s (esperado %s)', quien, de_quien, s.visto, esperado) FROM (VALUES
+          ('admin', v_adm, 'preventista', v_pre, 'PASA 1'),
+          ('encargado', v_enc, 'preventista', v_pre, 'PASA 1'),
+          ('encargado', v_enc, 'chofer', v_tra, 'PASA 1'),
+          ('preventista', v_pre, 'chofer', v_tra, 'PASA 0'),
+          ('preventista', v_pre, 'sí mismo', v_pre, 'PASA 1'),
+          ('chofer', v_tra, 'encargado', v_enc, 'PASA 0'),
+          ('encargado desactivado', v_des, 'preventista', v_pre, 'PASA 0')
+        ) AS t(quien, u, de_quien, otro, esperado),
+        LATERAL (SELECT pg_temp.como_usuario(u, 1, format(
+          'SELECT count(*)::text FROM public.emails_de_usuarios(ARRAY[%L]::uuid[]) e WHERE e.email = ''c6-'' || e.id || ''@ensayo.invalid''', otro)) AS visto) s
+       WHERE s.visto <> esperado
+    LOOP
+      v_fallas := v_fallas || ('E1 · ' || v_t);
+    END LOOP;
   END IF;
 
   IF cardinality(v_fallas) = 0 THEN
