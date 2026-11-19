@@ -41,6 +41,13 @@
 --        después de renombrar un rubro en la misma transacción (la marca no sobrevive).
 --   R4 · [R] con la marca puesta a mano, un UPDATE de rubro y precio se audita entero.
 --   R5 · [R] con la marca puesta a mano, un UPDATE de otra columna se audita entero.
+--   R6 · [F] renombrar en tandas de 12: la primera deja el rubro renombrado, 12 productos y UNA
+--        fila «en_curso»; otro nombre o eliminarlo se rechazan mientras está a medias; repetir
+--        con el mismo nombre sigue donde quedó y la fila termina con los 30 y sus ids.
+--   R7 · [F] eliminar en tandas de 20: el rubro sigue hasta la última («a medias» en la vista
+--        previa) y queda una sola fila DELETE con los 30.
+--   R8 · [R] fuera de las dos RPC la sincronización del id del rubro hace lo de siempre (otra
+--        caja y bordes, otro rubro, uno que no existe), también con una marca puesta a mano.
 --   A3 · [R] como service_role (sin usuario): productos y perfiles (sin sucursal_id).
 --   A4 · [R] por una RPC definer (actualizar_precios_masivo) de un admin.
 --   A5 · [R] con el token de un usuario desactivado: productos y perfiles.
@@ -130,7 +137,7 @@ RETURNS jsonb[] LANGUAGE sql AS $fn$
                    'usuario_id', a.usuario_id, 'usuario_email', a.usuario_email, 'usuario_rol', a.usuario_rol,
                    'sucursal_id', a.sucursal_id) AS x
             FROM public.audit_logs a
-           WHERE NOT (a.id = ANY (p_antes))) s;
+           WHERE a.id NOT IN (SELECT unnest(p_antes))) s;
 $fn$;
 
 CREATE OR REPLACE FUNCTION pg_temp.audit_foto()
@@ -498,6 +505,7 @@ BEGIN
        OR v_fila->>'tabla' <> 'categorias' OR v_fila->>'registro_id' <> v_cat::text OR v_fila->>'accion' <> 'UPDATE'
        OR v_fila->'old_data'->>'nombre' <> 'ZZ C4a R1' OR v_fila->'new_data'->>'nombre' <> 'ZZ C4a R1 nuevo'
        OR (v_fila->'new_data'->>'cantidad_productos')::int <> 30 OR v_fila->'campos_modificados' <> '["nombre"]'::jsonb
+       OR v_fila->'new_data'->>'estado' IS DISTINCT FROM 'terminado'
        OR v_fila->>'usuario_id' <> v_adm::text OR v_fila->>'usuario_rol' <> 'admin' OR (v_fila->>'sucursal_id')::bigint <> 1
        OR v_todos IS DISTINCT FROM (SELECT array_agg(x::bigint ORDER BY x::bigint) FROM unnest(v_ids) x)
        OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_grupos) g
@@ -566,6 +574,93 @@ BEGIN
     v_fallas := v_fallas || format('R4/R5 · con la marca a mano, un cambio de otra columna tenía que auditarse entero: anotó %s y tenía que anotar %s',
                                    v_real, v_esp);
   END IF;
+
+  -- ===================================================================== R6 ==
+  -- Renombrar en tandas de 12: retomable, una sola fila de auditoría que termina con el total,
+  -- y otro cambio del mismo rubro se rechaza mientras está a medias.
+  DECLARE v_cat uuid; v_fila jsonb; v_todos bigint[]; v_r jsonb;
+  BEGIN
+    INSERT INTO categorias (nombre, sucursal_id) VALUES ('ZZ C4a R6', 1) RETURNING id INTO v_cat;
+    SELECT array_agg(pg_temp.prod(1, 'R6 ' || g, NULL, true, 'ZZ C4a R6')::text) INTO v_ids FROM generate_series(1, 30) g;
+    v_foto := pg_temp.audit_foto();
+    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT (public.renombrar_rubro(%L, NULL, 'ZZ C4a R6 b', 12))::text$q$, v_cat));
+    v_r := CASE WHEN v_t LIKE 'PASA %' THEN substr(v_t, 6)::jsonb END;
+    v_real := pg_temp.audit_nuevas(v_foto);
+    IF v_t NOT LIKE 'PASA %' OR (v_r->>'productos')::int <> 12 OR (v_r->>'faltan')::int <> 18 OR (v_r->>'terminado')::boolean
+       OR cardinality(v_real) <> 1 OR v_real[1]->'new_data'->>'estado' <> 'en_curso'
+       OR (v_real[1]->'new_data'->>'cantidad_productos')::int <> 12
+       OR (SELECT nombre FROM categorias WHERE id = v_cat) <> 'ZZ C4a R6 b' THEN
+      v_fallas := v_fallas || format('R6 · la primera tanda de 12: %s; anotó %s filas', v_t, cardinality(v_real));
+    END IF;
+    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT (public.renombrar_rubro(%L, NULL, 'ZZ C4a R6 otro', 12))::text$q$, v_cat));
+    IF v_t NOT LIKE '22023 %quedó a medias%' THEN
+      v_fallas := v_fallas || ('R6 · otro nombre con el rubro a medias tenía que rechazarse: ' || v_t);
+    END IF;
+    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT (public.eliminar_rubro(%L, NULL, false, 12))::text$q$, v_cat));
+    IF v_t NOT LIKE '22023 %quedó a medias%' THEN
+      v_fallas := v_fallas || ('R6 · eliminarlo con el renombre a medias tenía que rechazarse: ' || v_t);
+    END IF;
+    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT (public.renombrar_rubro(%L, NULL, 'ZZ C4a R6 b', 12))::text$q$, v_cat));
+    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT (public.renombrar_rubro(%L, NULL, 'ZZ C4a R6 b', 12))::text$q$, v_cat));
+    v_r := CASE WHEN v_t LIKE 'PASA %' THEN substr(v_t, 6)::jsonb END;
+    v_real := pg_temp.audit_nuevas(v_foto);
+    v_fila := v_real[1];
+    SELECT array_agg(i::bigint ORDER BY i::bigint) INTO v_todos
+      FROM jsonb_array_elements(v_fila->'old_data'->'productos') g, jsonb_array_elements_text(g->'ids') i;
+    IF v_t NOT LIKE 'PASA %' OR (v_r->>'faltan')::int <> 0 OR NOT (v_r->>'terminado')::boolean
+       OR (v_r->>'productos_total')::int <> 30
+       OR cardinality(v_real) <> 1 OR v_fila->'new_data'->>'estado' <> 'terminado'
+       OR (v_fila->'new_data'->>'cantidad_productos')::int <> 30
+       OR v_todos IS DISTINCT FROM (SELECT array_agg(x::bigint ORDER BY x::bigint) FROM unnest(v_ids) x)
+       OR EXISTS (SELECT 1 FROM productos WHERE id = ANY (v_ids::bigint[])
+                   AND (categoria IS DISTINCT FROM 'ZZ C4a R6 b' OR categoria_id IS DISTINCT FROM v_cat)) THEN
+      v_fallas := v_fallas || format('R6 · al terminar: %s; anotó %s filas, la primera %s', v_t, cardinality(v_real), left(v_fila::text, 300));
+    END IF;
+
+    -- R7 · eliminarlo en tandas de 20: el rubro sigue hasta la última, y una sola fila DELETE.
+    v_foto := pg_temp.audit_foto();
+    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT (public.eliminar_rubro(%L, NULL, false, 20))::text$q$, v_cat));
+    v_r := CASE WHEN v_t LIKE 'PASA %' THEN substr(v_t, 6)::jsonb END;
+    IF v_t NOT LIKE 'PASA %' OR (v_r->>'faltan')::int <> 10 OR NOT EXISTS (SELECT 1 FROM categorias WHERE id = v_cat)
+       OR NOT (public.eliminar_rubro(v_cat, NULL, true)->>'a_medias')::boolean THEN
+      v_fallas := v_fallas || ('R7 · la primera tanda de 20 tenía que dejar el rubro, con 10 por sacar y «a medias»: ' || v_t);
+    END IF;
+    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT (public.eliminar_rubro(%L, NULL, false, 20))::text$q$, v_cat));
+    v_r := CASE WHEN v_t LIKE 'PASA %' THEN substr(v_t, 6)::jsonb END;
+    v_real := pg_temp.audit_nuevas(v_foto);
+    v_fila := v_real[1];
+    IF v_t NOT LIKE 'PASA %' OR NOT (v_r->>'terminado')::boolean OR (v_r->>'productos_total')::int <> 30
+       OR EXISTS (SELECT 1 FROM categorias WHERE id = v_cat)
+       OR cardinality(v_real) <> 1 OR v_fila->>'accion' <> 'DELETE' OR v_fila->'new_data' <> 'null'::jsonb
+       OR (v_fila->'old_data'->>'cantidad_productos')::int <> 30 THEN
+      v_fallas := v_fallas || format('R7 · al terminar de eliminar: %s; anotó %s filas, la primera %s', v_t, cardinality(v_real), left(v_fila::text, 300));
+    END IF;
+  END;
+
+  -- ===================================================================== R8 ==
+  -- Fuera de las dos RPC la sincronización del id del rubro hace lo de siempre, también con una
+  -- marca puesta a mano que no es la del texto.
+  DECLARE v_c1 uuid; v_c2 uuid; v_p bigint; v_ids8 uuid[] := '{}';
+  BEGIN
+    INSERT INTO categorias (nombre, sucursal_id) VALUES ('ZZ C4a R8 uno', 1) RETURNING id INTO v_c1;
+    INSERT INTO categorias (nombre, sucursal_id) VALUES ('ZZ C4a R8 dos', 1) RETURNING id INTO v_c2;
+    v_p := pg_temp.prod(1, 'R8', NULL, true, ' zz c4a r8 UNO ');
+    v_ids8 := v_ids8 || (SELECT categoria_id FROM productos WHERE id = v_p);
+    UPDATE productos SET categoria = 'ZZ C4A R8 DOS' WHERE id = v_p;
+    v_ids8 := v_ids8 || (SELECT categoria_id FROM productos WHERE id = v_p);
+    UPDATE productos SET categoria = 'ZZ C4a R8 no existe' WHERE id = v_p;
+    v_ids8 := v_ids8 || COALESCE((SELECT categoria_id FROM productos WHERE id = v_p), '00000000-0000-0000-0000-000000000000');
+    PERFORM set_config('app.rubro_masivo', 'renombrar_rubro', true);
+    PERFORM set_config('app.rubro_masivo_id', gen_random_uuid()::text, true);
+    PERFORM set_config('app.rubro_masivo_nombre', 'ZZ C4a R8 otro', true);
+    PERFORM set_config('app.rubro_masivo_sucursal', '1', true);
+    UPDATE productos SET categoria = 'ZZ C4a R8 uno' WHERE id = v_p;
+    v_ids8 := v_ids8 || (SELECT categoria_id FROM productos WHERE id = v_p);
+    PERFORM set_config('app.rubro_masivo', '', true);
+    IF v_ids8 IS DISTINCT FROM ARRAY[v_c1, v_c2, '00000000-0000-0000-0000-000000000000'::uuid, v_c1] THEN
+      v_fallas := v_fallas || format('R8 · la sincronización del rubro cambió fuera de las RPC: %s (esperaba %s, %s, ninguno, %s)', v_ids8, v_c1, v_c2, v_c1);
+    END IF;
+  END;
 
   -- ===================================================================== A3 ==
   v_a := pg_temp.prod(1, 'A3', NULL);
@@ -666,7 +761,7 @@ BEGIN
   END IF;
 
   IF cardinality(v_fallas) = 0 THEN
-    RAISE EXCEPTION 'ENSAYO OK · código único por sucursal (C1-C15) y auditoría igual fila por fila (A1-A7), rubros con una fila (R1-R5), permisos (K1)'
+    RAISE EXCEPTION 'ENSAYO OK · código único por sucursal (C1-C15) y auditoría igual fila por fila (A1-A7), rubros con una fila y en tandas (R1-R8), permisos (K1)'
       USING ERRCODE = 'P0001';
   END IF;
   RAISE EXCEPTION 'ENSAYO FALLÓ (%):%', cardinality(v_fallas), E'\n  ' || array_to_string(v_fallas, E'\n  ')

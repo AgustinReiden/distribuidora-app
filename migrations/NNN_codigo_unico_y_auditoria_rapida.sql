@@ -102,6 +102,26 @@
 --     cualquier otra columna se audita entero. Cambiar el rubro de un producto
 --     desde la ficha, o por un UPDATE directo, se sigue auditando como siempre.
 --     Por REST nadie puede poner la marca (`set_config` no es una RPC).
+--   · El `WHEN` compara NEW con esas cuatro columnas puestas como en OLD, contra
+--     OLD por imagen (`*=`): más barato que los dos `to_jsonb`, e igual de
+--     estricto (otra diferencia, aunque sea de escala, se audita).
+--   · `sync_producto_categoria_id` (que pasa a esta tarjeta) no busca el id del
+--     rubro por cada producto cuando renombra `renombrar_rubro`: el texto nuevo
+--     es el de la fila del rubro, único por sucursal, y el id viaja en las
+--     marcas. Fuera de esa RPC hace exactamente lo de antes.
+--   · EN TANDAS: aun sin auditoría por fila, un UPDATE de 30.000 productos
+--     tarda más de 4 s (el UPDATE pelado, sin triggers, ya tarda 4 s en la
+--     máquina de prueba cargada). Las dos RPC reciben `p_lote` (DEFAULT NULL,
+--     se borra la firma vieja: un bundle viejo llama sin él y hace todo en una
+--     llamada, como antes, y si se corta no queda nada a medias). Con p_lote,
+--     cada llamada pasa hasta esa cantidad y dice cuántos faltan; el front repite
+--     de a 5.000 mostrando el avance. El rubro queda coherente entre tandas: la
+--     fila de renombrar cambia en la primera y los productos guardan su id; la de
+--     eliminar se borra con la última. La fila de auditoría es una sola, «en_curso»
+--     hasta la última tanda (cantidad acumulada y el antes de cada tanda), y con
+--     ella se retoma: repetir la misma operación sigue donde quedó, y otra sobre el
+--     mismo rubro se rechaza con el motivo. Dos admins a la vez se ordenan en la
+--     fila del rubro (FOR UPDATE), y el rubro de texto, en un lock consultivo.
 --   · Quién lee `audit_logs` de `productos`: `precio_fuera_de_politica`, sólo
 --     las filas con `precio` (un rubro no lo toca). El front no lee
 --     `audit_logs`. Ninguna pantalla cambia.
@@ -137,7 +157,8 @@ BEGIN
   FOR r IN SELECT * FROM (VALUES
     ('public.audit_log_changes()',                   'd0dcffb22ac9e2e91eda9a0048e6b932'),
     ('public.renombrar_rubro(uuid,text,text)',       'b2d1c5d7c645205423f9a71930984295'),
-    ('public.eliminar_rubro(uuid,text,boolean)',     '7179adade957b3b85f377273ed951820')
+    ('public.eliminar_rubro(uuid,text,boolean)',     '7179adade957b3b85f377273ed951820'),
+    ('public.sync_producto_categoria_id()',          '08e272b3fcbf50a28aebc4403e3a1ee2')
   ) AS t(f, h) LOOP
     SELECT md5(prosrc) INTO v FROM pg_proc WHERE oid = to_regprocedure(r.f);
     IF v IS DISTINCT FROM r.h THEN
@@ -151,6 +172,10 @@ BEGIN
     RAISE EXCEPTION 'mig NNN · audit_productos_update cambió desde que se leyó: %', v;
   END IF;
 
+  IF to_regprocedure('public.renombrar_rubro(uuid,text,text,integer)') IS NOT NULL
+     OR to_regprocedure('public.eliminar_rubro(uuid,text,boolean,integer)') IS NOT NULL THEN
+    RAISE EXCEPTION 'mig NNN · las RPC de rubros con p_lote ya existen';
+  END IF;
   IF to_regprocedure('public.productos_codigo_unico()') IS NOT NULL THEN
     RAISE EXCEPTION 'mig NNN · public.productos_codigo_unico() ya existe';
   END IF;
@@ -362,18 +387,69 @@ CREATE TRIGGER audit_productos_update
                       AND current_setting('app.stock_origen', true) = ANY (ARRAY['pedido_creado', 'pedido_creado_bot', 'pedido_editado'])
                       AND (to_jsonb(OLD) - 'stock' - 'updated_at') = (to_jsonb(NEW) - 'stock' - 'updated_at')), false)
         AND NOT COALESCE((current_setting('app.rubro_masivo', true) = ANY (ARRAY['renombrar_rubro', 'eliminar_rubro'])
-                          AND (to_jsonb(OLD) - ARRAY['categoria', 'categoria_id', 'subcategoria_id', 'updated_at'])
-                            = (to_jsonb(NEW) - ARRAY['categoria', 'categoria_id', 'subcategoria_id', 'updated_at'])), false))
+                          AND jsonb_populate_record(NEW, jsonb_build_object('categoria', OLD.categoria,
+                                                                            'categoria_id', OLD.categoria_id,
+                                                                            'subcategoria_id', OLD.subcategoria_id,
+                                                                            'updated_at', OLD.updated_at)) *= OLD), false))
   EXECUTE FUNCTION public.audit_log_changes();
 
 COMMENT ON TRIGGER audit_productos_update ON public.productos IS
-  'No audita la baja de stock por venta (ya está en stock_historico, D38) ni, con la marca app.rubro_masivo que ponen renombrar_rubro y eliminar_rubro, una fila cuyo único cambio es el rubro: esas dos anotan una fila en el rubro (mig NNN, 1596-b9, decisión del dueño del 19/11). Con la marca, cualquier otro cambio se audita entero.';
+  'No audita la baja de stock por venta (ya está en stock_historico, D38) ni, con la marca app.rubro_masivo que ponen renombrar_rubro y eliminar_rubro, una fila cuyo único cambio es el rubro (categoria, categoria_id, subcategoria_id, updated_at): esas dos anotan una fila en el rubro (mig NNN, 1596-b9, decisión del dueño del 19/11). La comparación es NEW con esas cuatro columnas puestas como en OLD, contra OLD, por imagen (*=): cualquier otra diferencia, aunque sea de escala, se audita entera.';
 
-CREATE OR REPLACE FUNCTION public.renombrar_rubro(p_categoria_id uuid, p_nombre_actual text, p_nombre_nuevo text)
+-- La sincronización del id del rubro (1561-b7), con un atajo para renombrar un rubro: el texto
+-- nuevo ya es el de la fila del rubro (único por sucursal), así que el id es el del rubro y no
+-- hace falta buscarlo en cada producto. Fuera de renombrar_rubro hace exactamente lo de antes.
+CREATE OR REPLACE FUNCTION public.sync_producto_categoria_id()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  IF NEW.categoria IS NULL OR trim(NEW.categoria) = '' THEN
+    NEW.categoria_id := NULL;
+    RETURN NEW;
+  END IF;
+
+  -- mig NNN (1596-b9): renombrar_rubro ya le cambió el nombre a la fila del rubro (único por
+  -- sucursal: categorias_sucursal_padre_nombre_norm_uk) y escribe ese mismo texto en sus
+  -- productos; el id que daría la búsqueda de abajo es el del rubro, y lo deja en las marcas.
+  -- Buscarlo por cada producto era un tercio del tiempo de renombrar un rubro grande.
+  IF current_setting('app.rubro_masivo', true) = 'renombrar_rubro'
+     AND NEW.categoria = current_setting('app.rubro_masivo_nombre', true)
+     AND NEW.sucursal_id::text = current_setting('app.rubro_masivo_sucursal', true) THEN
+    NEW.categoria_id := current_setting('app.rubro_masivo_id', true)::uuid;
+    RETURN NEW;
+  END IF;
+
+  -- 1561-b7 (#1561): la comparacion del indice unico (categorias_sucursal_padre_nombre_norm_uk)
+  -- y de las RPC de rubros, escrita para que lo use; hay a lo sumo uno. El ORDER BY
+  -- deja el LIMIT determinista igual.
+  SELECT c.id INTO NEW.categoria_id
+  FROM categorias c
+  WHERE c.sucursal_id = NEW.sucursal_id
+    AND c.parent_id IS NULL
+    AND COALESCE(c.parent_id, '00000000-0000-0000-0000-000000000000'::uuid) = '00000000-0000-0000-0000-000000000000'::uuid
+    AND upper(btrim(c.nombre)) = upper(btrim(NEW.categoria))
+  ORDER BY c.created_at, c.id
+  LIMIT 1;
+
+  RETURN NEW;
+END;
+$function$;
+
+-- Las dos RPC de rubros: DEFINER (escriben la fila de auditoría del rubro) y en tandas. Cambia
+-- la firma (suma p_lote con DEFAULT NULL): se borra la vieja para que no queden dos sobrecargas
+-- (PGRST203). Un bundle viejo llama sin p_lote y hace todo en una llamada, como antes.
+DROP FUNCTION public.renombrar_rubro(uuid, text, text);
+DROP FUNCTION public.eliminar_rubro(uuid, text, boolean);
+
+CREATE FUNCTION public.renombrar_rubro(p_categoria_id uuid, p_nombre_actual text, p_nombre_nuevo text,
+                                       p_lote integer DEFAULT NULL)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
+ SET plan_cache_mode TO 'force_custom_plan'
 AS $function$
 DECLARE
   v_sucursal  bigint := current_sucursal_id();
@@ -381,14 +457,27 @@ DECLARE
   v_actual    text;
   v_id        uuid := p_categoria_id;
   v_productos integer := 0;
+  v_total     integer := 0;
+  v_faltan    integer := 0;
   v_desc      integer := 0;
   v_huerfanos integer := 0;
   v_antes     jsonb;
   v_uid       uuid := auth.uid();
+  v_audit     uuid;
+  v_pend      record;
+  v_lote      bigint[];
 BEGIN
   -- mig NNN (1596-b9, decisión del dueño del 19/11): DEFINER, para escribir la fila de
-  -- auditoría del rubro. Valida el rol y la sucursal activa como antes, y cada escritura
-  -- va acotada a esa sucursal (la RLS ya no la mira).
+  -- auditoría del rubro. Valida el rol y la sucursal activa como antes, y cada escritura va
+  -- acotada a esa sucursal (la RLS ya no la mira).
+  -- En tandas (p_lote): cada llamada renombra hasta p_lote productos y dice cuántos faltan; la
+  -- fila del rubro se renombra en la primera, y la auditoría es UNA fila «en_curso» que se
+  -- completa en cada tanda y queda «terminado» con la última. Volver a llamar con el mismo
+  -- nombre nuevo sigue donde quedó; otro cambio del mismo rubro se rechaza hasta terminar ése.
+  -- Sin p_lote hace todo de una vez, como antes (lo que llama un bundle viejo).
+  -- plan_cache_mode: el plan guardado de la tanda se arma con lo que el planificador cree de
+  -- productos; en una base nueva (estadísticas vacías) recorría la tabla por cada id de la
+  -- tanda. Una llamada planifica unas pocas sentencias: replanificar cuesta nada.
   IF NOT es_admin() THEN
     RAISE EXCEPTION 'Sólo un admin puede renombrar un rubro' USING ERRCODE = '42501';
   END IF;
@@ -397,6 +486,25 @@ BEGIN
   END IF;
   IF v_nuevo = '' THEN
     RAISE EXCEPTION 'El nombre nuevo no puede estar vacío' USING ERRCODE = '22023';
+  END IF;
+  IF p_lote IS NOT NULL AND (p_lote < 1 OR p_lote > 100000) THEN
+    RAISE EXCEPTION 'La tanda va de 1 a 100.000 productos' USING ERRCODE = '22023';
+  END IF;
+
+  IF v_id IS NULL THEN
+    -- Un rubro que sólo existe como texto de productos (#763). Si un renombre suyo quedó a
+    -- medias, ya tiene fila (con el nombre nuevo): se sigue con ésa.
+    v_actual := btrim(COALESCE(p_nombre_actual, ''));
+    IF v_actual = '' THEN
+      RAISE EXCEPTION 'Falta el rubro a renombrar' USING ERRCODE = '22023';
+    END IF;
+    SELECT a.registro_id::uuid INTO v_id
+      FROM audit_logs a
+     WHERE a.tabla = 'categorias' AND a.accion = 'UPDATE' AND a.sucursal_id = v_sucursal
+       AND a.new_data->>'estado' = 'en_curso'
+       AND a.old_data->>'nombre' = v_actual AND a.new_data->>'nombre' = v_nuevo
+     ORDER BY a.created_at DESC
+     LIMIT 1;
   END IF;
 
   IF v_id IS NOT NULL THEN
@@ -407,54 +515,96 @@ BEGIN
     IF NOT FOUND THEN
       RAISE EXCEPTION 'El rubro no existe en esta sucursal: recargá la pantalla' USING ERRCODE = 'P0002';
     END IF;
-  ELSE
-    -- Un rubro que sólo existe como texto de productos (#763): se le crea la fila.
-    v_actual := btrim(COALESCE(p_nombre_actual, ''));
-    IF v_actual = '' THEN
-      RAISE EXCEPTION 'Falta el rubro a renombrar' USING ERRCODE = '22023';
+    -- ¿Quedó a medias un cambio de este rubro? (la fila del rubro, tomada arriba, ordena a dos
+    -- admins que lo toquen a la vez: el segundo espera y sigue donde dejó el primero)
+    SELECT a.id, a.accion, a.old_data->>'nombre' AS viejo, a.new_data->>'nombre' AS nuevo INTO v_pend
+      FROM audit_logs a
+     WHERE a.tabla = 'categorias' AND a.registro_id = v_id::text AND a.sucursal_id = v_sucursal
+       AND a.new_data->>'estado' = 'en_curso'
+     ORDER BY a.created_at DESC
+     LIMIT 1;
+    IF FOUND THEN
+      IF v_pend.accion <> 'UPDATE' THEN
+        RAISE EXCEPTION 'El rubro «%» se está eliminando y quedó a medias: volvé a tocar «Eliminar» para terminar.', v_actual
+          USING ERRCODE = '22023';
+      END IF;
+      IF v_pend.nuevo IS DISTINCT FROM v_nuevo THEN
+        RAISE EXCEPTION 'El rubro «%» quedó a medias de pasar a llamarse «%»: volvé a renombrarlo a «%» para terminar, y después cambialo.',
+          v_pend.viejo, v_pend.nuevo, v_pend.nuevo USING ERRCODE = '22023';
+      END IF;
+      v_actual := v_pend.viejo;
+      v_audit := v_pend.id;
     END IF;
+  ELSIF EXISTS (SELECT 1 FROM categorias c
+                 WHERE c.sucursal_id = v_sucursal AND c.parent_id IS NULL
+                   AND upper(btrim(c.nombre)) = upper(v_actual)) THEN
+    RAISE EXCEPTION 'El rubro «%» ya tiene fila: recargá la pantalla', v_actual USING ERRCODE = '22023';
+  END IF;
+
+  IF v_audit IS NULL THEN
+    IF v_nuevo = v_actual THEN
+      RETURN jsonb_build_object('success', true, 'id', v_id, 'nombre', v_nuevo,
+                                'productos', 0, 'productos_total', 0, 'faltan', 0, 'terminado', true,
+                                'descuentos', 0, 'descuentos_huerfanos', 0);
+    END IF;
+
+    -- No fusiona: el nombre nuevo no puede ser de otro rubro, ni por fila ni por texto.
     IF EXISTS (SELECT 1 FROM categorias c
                 WHERE c.sucursal_id = v_sucursal AND c.parent_id IS NULL
-                  AND upper(btrim(c.nombre)) = upper(v_actual)) THEN
-      RAISE EXCEPTION 'El rubro «%» ya tiene fila: recargá la pantalla', v_actual USING ERRCODE = '22023';
+                  AND upper(btrim(c.nombre)) = upper(v_nuevo)
+                  AND c.id IS DISTINCT FROM v_id)
+       OR (upper(v_nuevo) <> upper(v_actual) AND EXISTS (
+            SELECT 1 FROM productos p
+             WHERE p.sucursal_id = v_sucursal
+               AND upper(btrim(p.categoria)) = upper(v_nuevo))) THEN
+      RAISE EXCEPTION 'Ya existe un rubro llamado «%»', v_nuevo USING ERRCODE = '23505';
     END IF;
+
+    IF v_id IS NOT NULL THEN
+      UPDATE categorias SET nombre = v_nuevo WHERE id = v_id AND sucursal_id = v_sucursal;
+    ELSE
+      INSERT INTO categorias (nombre, sucursal_id) VALUES (v_nuevo, v_sucursal) RETURNING id INTO v_id;
+    END IF;
+
+    -- La fila de auditoría del rubro (las columnas de audit_log_changes), «en_curso» hasta la
+    -- última tanda.
+    INSERT INTO audit_logs (tabla, registro_id, accion, old_data, new_data, campos_modificados,
+                            usuario_id, usuario_email, usuario_rol, sucursal_id)
+    VALUES ('categorias', v_id::text, 'UPDATE',
+            jsonb_build_object('nombre', v_actual, 'productos', '[]'::jsonb),
+            jsonb_build_object('nombre', v_nuevo, 'categoria_id', v_id, 'cantidad_productos', 0,
+                               'estado', 'en_curso'),
+            ARRAY['nombre'], v_uid,
+            (SELECT u.email FROM auth.users u WHERE u.id = v_uid),
+            (SELECT pf.rol FROM perfiles pf WHERE pf.id = v_uid AND COALESCE(pf.activo, true)),
+            v_sucursal)
+    RETURNING id INTO v_audit;
   END IF;
 
-  IF v_nuevo = v_actual THEN
-    RETURN jsonb_build_object('success', true, 'id', v_id, 'nombre', v_nuevo,
-                              'productos', 0, 'descuentos', 0, 'descuentos_huerfanos', 0);
-  END IF;
-
-  -- No fusiona: el nombre nuevo no puede ser de otro rubro, ni por fila ni por texto.
-  IF EXISTS (SELECT 1 FROM categorias c
-              WHERE c.sucursal_id = v_sucursal AND c.parent_id IS NULL
-                AND upper(btrim(c.nombre)) = upper(v_nuevo)
-                AND c.id IS DISTINCT FROM v_id)
-     OR (upper(v_nuevo) <> upper(v_actual) AND EXISTS (
-          SELECT 1 FROM productos p
-           WHERE p.sucursal_id = v_sucursal
-             AND upper(btrim(p.categoria)) = upper(v_nuevo))) THEN
-    RAISE EXCEPTION 'Ya existe un rubro llamado «%»', v_nuevo USING ERRCODE = '23505';
-  END IF;
-
-  IF v_id IS NOT NULL THEN
-    UPDATE categorias SET nombre = v_nuevo WHERE id = v_id AND sucursal_id = v_sucursal;
-  ELSE
-    INSERT INTO categorias (nombre, sucursal_id) VALUES (v_nuevo, v_sucursal) RETURNING id INTO v_id;
-  END IF;
-
-  -- El trigger de productos le vuelve a buscar el id por el nombre nuevo: es el mismo rubro.
-  -- mig NNN (1596-b9): con la marca, la auditoría de productos no anota una fila por producto
-  -- cuyo único cambio es el rubro; la anota esta función, en el rubro, con el antes de cada
-  -- uno (agrupado, con sus ids). La marca se borra apenas termina el UPDATE.
+  -- La tanda. Con la marca, la auditoría de productos no anota una fila por producto cuyo único
+  -- cambio es el rubro, y la sincronización del id no lo busca (es el del rubro). Las marcas
+  -- se borran apenas termina el UPDATE.
   PERFORM set_config('app.rubro_masivo', 'renombrar_rubro', true);
+  PERFORM set_config('app.rubro_masivo_id', v_id::text, true);
+  PERFORM set_config('app.rubro_masivo_nombre', v_nuevo, true);
+  PERFORM set_config('app.rubro_masivo_sucursal', v_sucursal::text, true);
+  -- Los ids de la tanda primero, tomados en orden (un IN con la subconsulta y el LIMIT como
+  -- parámetro se planificaba como un SubPlan que se repetía por cada fila).
+  SELECT COALESCE(array_agg(s.id ORDER BY s.id), '{}') INTO v_lote
+    FROM (SELECT q.id
+            FROM productos q
+           WHERE q.sucursal_id = v_sucursal
+             AND (q.categoria_id = v_id OR upper(btrim(q.categoria)) = upper(v_actual))
+             AND q.categoria IS DISTINCT FROM v_nuevo
+           ORDER BY q.id
+           LIMIT p_lote
+             FOR UPDATE) s;
   WITH cambiados AS (
     UPDATE productos p
        SET categoria = v_nuevo
-      FROM productos o
-     WHERE o.id = p.id
-       AND p.sucursal_id = v_sucursal
-       AND (p.categoria_id = v_id OR upper(btrim(p.categoria)) = upper(v_actual))
+      FROM unnest(v_lote) AS l(id)
+      JOIN productos o ON o.id = l.id
+     WHERE p.id = l.id
     RETURNING p.id, o.categoria, o.categoria_id, o.subcategoria_id
   )
   SELECT COALESCE(sum(g.n), 0), COALESCE(jsonb_agg(g.grupo ORDER BY g.grupo::text), '[]'::jsonb)
@@ -466,79 +616,105 @@ BEGIN
             FROM cambiados c
            GROUP BY c.categoria, c.categoria_id, c.subcategoria_id) g;
   PERFORM set_config('app.rubro_masivo', '', true);
+  PERFORM set_config('app.rubro_masivo_id', '', true);
+  PERFORM set_config('app.rubro_masivo_nombre', '', true);
+  PERFORM set_config('app.rubro_masivo_sucursal', '', true);
 
-  -- Un descuento con el nombre nuevo era de un rubro que no existe: si quedara, empezaría a
-  -- aplicar solo a los productos de este rubro.
-  IF upper(v_nuevo) <> upper(v_actual) THEN
-    DELETE FROM cliente_descuentos_categoria d
-     USING clientes c
-     WHERE c.id = d.cliente_id AND c.sucursal_id = v_sucursal
-       AND upper(btrim(d.categoria)) = upper(v_nuevo);
-    GET DIAGNOSTICS v_huerfanos = ROW_COUNT;
+  SELECT count(*) INTO v_faltan
+    FROM productos q
+   WHERE q.sucursal_id = v_sucursal
+     AND (q.categoria_id = v_id OR upper(btrim(q.categoria)) = upper(v_actual))
+     AND q.categoria IS DISTINCT FROM v_nuevo;
+
+  IF v_faltan = 0 THEN
+    -- Un descuento con el nombre nuevo era de un rubro que no existe: si quedara, empezaría a
+    -- aplicar solo a los productos de este rubro.
+    IF upper(v_nuevo) <> upper(v_actual) THEN
+      DELETE FROM cliente_descuentos_categoria d
+       USING clientes c
+       WHERE c.id = d.cliente_id AND c.sucursal_id = v_sucursal
+         AND upper(btrim(d.categoria)) = upper(v_nuevo);
+      GET DIAGNOSTICS v_huerfanos = ROW_COUNT;
+    END IF;
+
+    -- El descuento por rubro de cada cliente pasa al nombre nuevo (no hay UPDATE REST: se
+    -- reemplaza la fila). Si un cliente tenía dos con distinta caja, queda la exacta.
+    WITH viejos AS (
+      DELETE FROM cliente_descuentos_categoria d
+       USING clientes c
+       WHERE c.id = d.cliente_id AND c.sucursal_id = v_sucursal
+         AND upper(btrim(d.categoria)) = upper(v_actual)
+      RETURNING d.cliente_id, d.categoria, d.descuento_porcentaje
+    )
+    INSERT INTO cliente_descuentos_categoria (cliente_id, categoria, descuento_porcentaje)
+    SELECT DISTINCT ON (cliente_id) cliente_id, v_nuevo, descuento_porcentaje
+      FROM viejos
+     ORDER BY cliente_id, (categoria = v_actual) DESC, descuento_porcentaje;
+    GET DIAGNOSTICS v_desc = ROW_COUNT;
   END IF;
 
-  -- El descuento por rubro de cada cliente pasa al nombre nuevo (no hay UPDATE REST: se
-  -- reemplaza la fila). Si un cliente tenía dos con distinta caja, queda la exacta.
-  WITH viejos AS (
-    DELETE FROM cliente_descuentos_categoria d
-     USING clientes c
-     WHERE c.id = d.cliente_id AND c.sucursal_id = v_sucursal
-       AND upper(btrim(d.categoria)) = upper(v_actual)
-    RETURNING d.cliente_id, d.categoria, d.descuento_porcentaje
-  )
-  INSERT INTO cliente_descuentos_categoria (cliente_id, categoria, descuento_porcentaje)
-  SELECT DISTINCT ON (cliente_id) cliente_id, v_nuevo, descuento_porcentaje
-    FROM viejos
-   ORDER BY cliente_id, (categoria = v_actual) DESC, descuento_porcentaje;
-  GET DIAGNOSTICS v_desc = ROW_COUNT;
-
-  -- La fila de auditoría del rubro (las columnas de audit_log_changes).
-  INSERT INTO audit_logs (tabla, registro_id, accion, old_data, new_data, campos_modificados,
-                          usuario_id, usuario_email, usuario_rol, sucursal_id)
-  VALUES ('categorias', v_id::text, 'UPDATE',
-          jsonb_build_object('nombre', v_actual, 'productos', v_antes),
-          jsonb_build_object('nombre', v_nuevo, 'categoria_id', v_id, 'cantidad_productos', v_productos,
-                             'descuentos', v_desc, 'descuentos_huerfanos', v_huerfanos),
-          ARRAY['nombre'], v_uid,
-          (SELECT u.email FROM auth.users u WHERE u.id = v_uid),
-          (SELECT pf.rol FROM perfiles pf WHERE pf.id = v_uid AND COALESCE(pf.activo, true)),
-          v_sucursal);
+  UPDATE audit_logs a
+     SET old_data = jsonb_set(a.old_data, '{productos}', (a.old_data->'productos') || v_antes),
+         new_data = a.new_data
+                    || jsonb_build_object('cantidad_productos', (a.new_data->>'cantidad_productos')::int + v_productos,
+                                          'estado', CASE WHEN v_faltan = 0 THEN 'terminado' ELSE 'en_curso' END)
+                    || CASE WHEN v_faltan = 0
+                            THEN jsonb_build_object('descuentos', v_desc, 'descuentos_huerfanos', v_huerfanos)
+                            ELSE '{}'::jsonb END
+   WHERE a.id = v_audit
+  RETURNING (a.new_data->>'cantidad_productos')::int INTO v_total;
 
   RETURN jsonb_build_object('success', true, 'id', v_id, 'nombre', v_nuevo,
-                            'productos', v_productos, 'descuentos', v_desc,
-                            'descuentos_huerfanos', v_huerfanos);
+                            'productos', v_productos, 'productos_total', v_total,
+                            'faltan', v_faltan, 'terminado', v_faltan = 0,
+                            'descuentos', v_desc, 'descuentos_huerfanos', v_huerfanos);
 END
 $function$;
 
-CREATE OR REPLACE FUNCTION public.eliminar_rubro(p_categoria_id uuid, p_nombre text, p_solo_ver boolean DEFAULT false)
+CREATE FUNCTION public.eliminar_rubro(p_categoria_id uuid, p_nombre text, p_solo_ver boolean DEFAULT false,
+                                      p_lote integer DEFAULT NULL)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
+ SET plan_cache_mode TO 'force_custom_plan'
 AS $function$
 DECLARE
   v_sucursal   bigint := current_sucursal_id();
   v_id         uuid := p_categoria_id;
   v_nombre     text;
+  v_clave      text;
   v_ids        uuid[];
   v_combos     text[];
   v_comisiones integer;
   v_productos  integer;
+  v_total      integer := 0;
+  v_faltan     integer := 0;
   v_subrubros  integer;
   v_desc       integer;
   v_metas      integer;
   v_bloqueos   text[] := '{}';
   v_antes      jsonb;
   v_uid        uuid := auth.uid();
+  v_audit      uuid;
+  v_pend       record;
+  v_lote       bigint[];
 BEGIN
   -- mig NNN (1596-b9, decisión del dueño del 19/11): DEFINER, para escribir la fila de
-  -- auditoría del rubro. Valida el rol y la sucursal activa como antes, y cada escritura
-  -- va acotada a esa sucursal (la RLS ya no la mira).
+  -- auditoría del rubro. Valida el rol y la sucursal activa como antes, y cada escritura va
+  -- acotada a esa sucursal (la RLS ya no la mira).
+  -- En tandas (p_lote): cada llamada saca del rubro hasta p_lote productos y dice cuántos
+  -- faltan; la fila del rubro y sus descuentos se borran con la última, y la auditoría es UNA
+  -- fila DELETE «en_curso» que se completa en cada tanda (al terminar queda new_data NULL, la
+  -- forma de un DELETE). Volver a llamar sigue donde quedó. Sin p_lote, todo de una vez.
   IF NOT es_admin() THEN
     RAISE EXCEPTION 'Sólo un admin puede eliminar un rubro' USING ERRCODE = '42501';
   END IF;
   IF v_sucursal IS NULL THEN
     RAISE EXCEPTION 'No hay una sucursal activa: recargá la página e intentá de nuevo' USING ERRCODE = '22023';
+  END IF;
+  IF p_lote IS NOT NULL AND (p_lote < 1 OR p_lote > 100000) THEN
+    RAISE EXCEPTION 'La tanda va de 1 a 100.000 productos' USING ERRCODE = '22023';
   END IF;
 
   IF v_id IS NOT NULL THEN
@@ -552,6 +728,7 @@ BEGIN
     SELECT array_agg(c.id) INTO v_ids
       FROM categorias c
      WHERE c.sucursal_id = v_sucursal AND (c.id = v_id OR c.parent_id = v_id);
+    v_clave := v_id::text;
   ELSE
     v_nombre := btrim(COALESCE(p_nombre, ''));
     IF v_nombre = '' THEN
@@ -565,6 +742,24 @@ BEGIN
       RAISE EXCEPTION 'El rubro «%» tiene fila: eliminalo desde ahí, o recargá la pantalla', v_nombre USING ERRCODE = '22023';
     END IF;
     v_ids := '{}';
+    v_clave := v_nombre;
+    -- Sin fila que tomar: dos admins que eliminan el mismo rubro de texto se ordenan acá.
+    PERFORM pg_advisory_xact_lock(hashtextextended('eliminar_rubro:' || v_sucursal || ':' || upper(v_nombre), 0));
+  END IF;
+
+  -- ¿Quedó a medias un cambio de este rubro?
+  SELECT a.id, a.accion, a.new_data->>'nombre' AS nuevo INTO v_pend
+    FROM audit_logs a
+   WHERE a.tabla = 'categorias' AND a.registro_id = v_clave AND a.sucursal_id = v_sucursal
+     AND a.new_data->>'estado' = 'en_curso'
+   ORDER BY a.created_at DESC
+   LIMIT 1;
+  IF FOUND THEN
+    IF v_pend.accion <> 'DELETE' THEN
+      RAISE EXCEPTION 'El rubro «%» quedó a medias de pasar a llamarse «%»: volvé a renombrarlo a «%» para terminar, y después eliminalo.',
+        v_nombre, v_pend.nuevo, v_pend.nuevo USING ERRCODE = '22023';
+    END IF;
+    v_audit := v_pend.id;
   END IF;
 
   -- Lo que frena: la FK no deja, y soltarlos cambiaría el combo o la comisión.
@@ -607,20 +802,43 @@ BEGIN
     END IF;
     RETURN jsonb_build_object('success', true, 'solo_ver', true, 'nombre', v_nombre,
       'productos', v_productos, 'subrubros', v_subrubros, 'descuentos', v_desc, 'metas', v_metas,
-      'bloqueos', to_jsonb(v_bloqueos));
+      'bloqueos', to_jsonb(v_bloqueos), 'a_medias', v_audit IS NOT NULL);
   END IF;
 
-  -- mig NNN (1596-b9): con la marca, la auditoría de productos no anota una fila por producto
-  -- cuyo único cambio es el rubro; la anota esta función, en el rubro, con el antes de cada
-  -- uno (agrupado, con sus ids). La marca se borra apenas termina el UPDATE.
+  IF v_audit IS NULL THEN
+    -- La fila de auditoría del rubro (las columnas de audit_log_changes), «en_curso» hasta la
+    -- última tanda.
+    INSERT INTO audit_logs (tabla, registro_id, accion, old_data, new_data, campos_modificados,
+                            usuario_id, usuario_email, usuario_rol, sucursal_id)
+    VALUES ('categorias', v_clave, 'DELETE',
+            jsonb_build_object('nombre', v_nombre, 'categoria_id', v_id, 'productos', '[]'::jsonb,
+                               'cantidad_productos', 0, 'subrubros', v_subrubros),
+            jsonb_build_object('estado', 'en_curso', 'cantidad_productos', 0),
+            NULL, v_uid,
+            (SELECT u.email FROM auth.users u WHERE u.id = v_uid),
+            (SELECT pf.rol FROM perfiles pf WHERE pf.id = v_uid AND COALESCE(pf.activo, true)),
+            v_sucursal)
+    RETURNING id INTO v_audit;
+  END IF;
+
+  -- La tanda. Con la marca, la auditoría de productos no anota una fila por producto cuyo único
+  -- cambio es el rubro. La marca se borra apenas termina el UPDATE.
+  -- Los ids de la tanda primero, tomados en orden (ver renombrar_rubro).
+  SELECT COALESCE(array_agg(s.id ORDER BY s.id), '{}') INTO v_lote
+    FROM (SELECT q.id
+            FROM productos q
+           WHERE q.sucursal_id = v_sucursal
+             AND (q.categoria_id = v_id OR upper(btrim(q.categoria)) = upper(v_nombre))
+           ORDER BY q.id
+           LIMIT p_lote
+             FOR UPDATE) s;
   PERFORM set_config('app.rubro_masivo', 'eliminar_rubro', true);
   WITH cambiados AS (
     UPDATE productos p
        SET categoria = NULL, subcategoria_id = NULL
-      FROM productos o
-     WHERE o.id = p.id
-       AND p.sucursal_id = v_sucursal
-       AND (p.categoria_id = v_id OR upper(btrim(p.categoria)) = upper(v_nombre))
+      FROM unnest(v_lote) AS l(id)
+      JOIN productos o ON o.id = l.id
+     WHERE p.id = l.id
     RETURNING p.id, o.categoria, o.categoria_id, o.subcategoria_id
   )
   SELECT COALESCE(sum(g.n), 0), COALESCE(jsonb_agg(g.grupo ORDER BY g.grupo::text), '[]'::jsonb)
@@ -633,33 +851,44 @@ BEGIN
            GROUP BY c.categoria, c.categoria_id, c.subcategoria_id) g;
   PERFORM set_config('app.rubro_masivo', '', true);
 
-  DELETE FROM cliente_descuentos_categoria d
-   USING clientes c
-   WHERE c.id = d.cliente_id AND c.sucursal_id = v_sucursal
-     AND upper(btrim(d.categoria)) = upper(v_nombre);
-  GET DIAGNOSTICS v_desc = ROW_COUNT;
+  SELECT count(*) INTO v_faltan
+    FROM productos q
+   WHERE q.sucursal_id = v_sucursal
+     AND (q.categoria_id = v_id OR upper(btrim(q.categoria)) = upper(v_nombre));
 
-  IF v_id IS NOT NULL THEN
-    DELETE FROM categorias WHERE id = v_id AND sucursal_id = v_sucursal;
+  v_desc := 0;
+  IF v_faltan = 0 THEN
+    DELETE FROM cliente_descuentos_categoria d
+     USING clientes c
+     WHERE c.id = d.cliente_id AND c.sucursal_id = v_sucursal
+       AND upper(btrim(d.categoria)) = upper(v_nombre);
+    GET DIAGNOSTICS v_desc = ROW_COUNT;
+
+    IF v_id IS NOT NULL THEN
+      DELETE FROM categorias WHERE id = v_id AND sucursal_id = v_sucursal;
+    END IF;
   END IF;
 
-  -- La fila de auditoría del rubro (las columnas de audit_log_changes).
-  INSERT INTO audit_logs (tabla, registro_id, accion, old_data, new_data, campos_modificados,
-                          usuario_id, usuario_email, usuario_rol, sucursal_id)
-  VALUES ('categorias', COALESCE(v_id::text, v_nombre), 'DELETE',
-          jsonb_build_object('nombre', v_nombre, 'categoria_id', v_id, 'productos', v_antes,
-                             'cantidad_productos', v_productos, 'subrubros', v_subrubros,
-                             'descuentos', v_desc),
-          NULL, NULL, v_uid,
-          (SELECT u.email FROM auth.users u WHERE u.id = v_uid),
-          (SELECT pf.rol FROM perfiles pf WHERE pf.id = v_uid AND COALESCE(pf.activo, true)),
-          v_sucursal);
+  UPDATE audit_logs a
+     SET old_data = jsonb_set(a.old_data, '{productos}', (a.old_data->'productos') || v_antes)
+                    || jsonb_build_object('cantidad_productos', (a.old_data->>'cantidad_productos')::int + v_productos)
+                    || CASE WHEN v_faltan = 0 THEN jsonb_build_object('descuentos', v_desc) ELSE '{}'::jsonb END,
+         new_data = CASE WHEN v_faltan = 0 THEN NULL
+                         ELSE a.new_data || jsonb_build_object('cantidad_productos',
+                                                                (a.old_data->>'cantidad_productos')::int + v_productos) END
+   WHERE a.id = v_audit
+  RETURNING (a.old_data->>'cantidad_productos')::int INTO v_total;
 
   RETURN jsonb_build_object('success', true, 'solo_ver', false, 'nombre', v_nombre,
-    'productos', v_productos, 'subrubros', v_subrubros, 'descuentos', v_desc, 'metas', v_metas,
-    'bloqueos', '[]'::jsonb);
+    'productos', v_productos, 'productos_total', v_total, 'faltan', v_faltan, 'terminado', v_faltan = 0,
+    'subrubros', v_subrubros, 'descuentos', v_desc, 'metas', v_metas, 'bloqueos', '[]'::jsonb);
 END
 $function$;
+
+REVOKE ALL ON FUNCTION public.renombrar_rubro(uuid, text, text, integer) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.eliminar_rubro(uuid, text, boolean, integer) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.renombrar_rubro(uuid, text, text, integer) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.eliminar_rubro(uuid, text, boolean, integer) TO authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- Poscondición: los cuerpos, el definer, el search_path y los EXECUTE quedaron
@@ -676,15 +905,17 @@ BEGIN
      '{postgres=X/postgres,service_role=X/postgres}'),
     ('public.productos_codigo_unico()', 'c74701dda1cdcdcad67cfac0ca7d4da4', '{"search_path=public, pg_temp",plan_cache_mode=force_custom_plan}',
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public.renombrar_rubro(uuid,text,text)',   'ea0171901d85ae741541504ed9080c0a', '{"search_path=public, pg_temp"}',
+    ('public.renombrar_rubro(uuid,text,text,integer)',   'f29d7ebf507714ba97adafbf5fa6628e', '{"search_path=public, pg_temp",plan_cache_mode=force_custom_plan}',
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
-    ('public.eliminar_rubro(uuid,text,boolean)', '2e0c0eb8ad9d8a9485da605958b2d641', '{"search_path=public, pg_temp"}',
-     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}')
+    ('public.eliminar_rubro(uuid,text,boolean,integer)', '28047aaf3d312cbfb49d56ec564cfd73', '{"search_path=public, pg_temp",plan_cache_mode=force_custom_plan}',
+     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+    ('public.sync_producto_categoria_id()',              '092100d0fdb42ce04f3a4e8cde3c7788', '{"search_path=public, pg_temp"}',
+     '{postgres=X/postgres,service_role=X/postgres}')
   ) AS t(f, h, cfg, acl) LOOP
     SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS def, proconfig::text AS cfg INTO x
-      FROM pg_proc WHERE oid = r.f::regprocedure;
+      FROM pg_proc WHERE oid = to_regprocedure(r.f);
     IF x.h IS DISTINCT FROM r.h OR x.a IS DISTINCT FROM r.acl
-       OR x.def IS DISTINCT FROM true OR x.cfg IS DISTINCT FROM r.cfg THEN
+       OR x.def IS DISTINCT FROM (r.f <> 'public.sync_producto_categoria_id()') OR x.cfg IS DISTINCT FROM r.cfg THEN
       v_mal := v_mal || format(E'\n  %s (md5 %s, acl %s, definer %s, config %s)', r.f, x.h, x.a, x.def, x.cfg);
     END IF;
   END LOOP;
@@ -696,7 +927,7 @@ BEGIN
 
   FOR r IN SELECT * FROM (VALUES
     ('audit_productos_update',
-     'CREATE TRIGGER audit_productos_update AFTER UPDATE ON public.productos FOR EACH ROW WHEN (((NOT COALESCE(((new.stock < old.stock) AND (current_setting(''app.stock_origen''::text, true) = ANY (ARRAY[''pedido_creado''::text, ''pedido_creado_bot''::text, ''pedido_editado''::text])) AND (((to_jsonb(old.*) - ''stock''::text) - ''updated_at''::text) = ((to_jsonb(new.*) - ''stock''::text) - ''updated_at''::text))), false)) AND (NOT COALESCE(((current_setting(''app.rubro_masivo''::text, true) = ANY (ARRAY[''renombrar_rubro''::text, ''eliminar_rubro''::text])) AND ((to_jsonb(old.*) - ARRAY[''categoria''::text, ''categoria_id''::text, ''subcategoria_id''::text, ''updated_at''::text]) = (to_jsonb(new.*) - ARRAY[''categoria''::text, ''categoria_id''::text, ''subcategoria_id''::text, ''updated_at''::text]))), false)))) EXECUTE FUNCTION audit_log_changes()'),
+     'CREATE TRIGGER audit_productos_update AFTER UPDATE ON public.productos FOR EACH ROW WHEN (((NOT COALESCE(((new.stock < old.stock) AND (current_setting(''app.stock_origen''::text, true) = ANY (ARRAY[''pedido_creado''::text, ''pedido_creado_bot''::text, ''pedido_editado''::text])) AND (((to_jsonb(old.*) - ''stock''::text) - ''updated_at''::text) = ((to_jsonb(new.*) - ''stock''::text) - ''updated_at''::text))), false)) AND (NOT COALESCE(((current_setting(''app.rubro_masivo''::text, true) = ANY (ARRAY[''renombrar_rubro''::text, ''eliminar_rubro''::text])) AND (jsonb_populate_record(new.*, jsonb_build_object(''categoria'', old.categoria, ''categoria_id'', old.categoria_id, ''subcategoria_id'', old.subcategoria_id, ''updated_at'', old.updated_at)) *= old.*)), false)))) EXECUTE FUNCTION audit_log_changes()'),
     ('trg_productos_codigo_unico',
      'CREATE TRIGGER trg_productos_codigo_unico BEFORE INSERT ON public.productos FOR EACH ROW WHEN ((btrim((new.codigo)::text) <> ''''::text)) EXECUTE FUNCTION productos_codigo_unico()'),
     ('trg_productos_codigo_unico_upd',
@@ -708,6 +939,12 @@ BEGIN
       v_mal := v_mal || format(E'\n  el trigger %s: %s', r.tg, x.def);
     END IF;
   END LOOP;
+
+  IF to_regprocedure('public.renombrar_rubro(uuid,text,text)') IS NOT NULL
+     OR to_regprocedure('public.eliminar_rubro(uuid,text,boolean)') IS NOT NULL THEN
+    v_mal := v_mal || E'
+  quedó una firma vieja de las RPC de rubros (PGRST203)';
+  END IF;
 
   IF v_mal <> '' THEN
     RAISE EXCEPTION 'mig NNN · no quedaron como en el repo:%', v_mal;

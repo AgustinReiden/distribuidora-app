@@ -232,6 +232,8 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
     }
   };
 
+  // Un rubro grande va en tandas (1596-b9): mientras corre, cuántos productos van y cuántos faltan.
+  const avanceRubro = (renameMut.isPending && renameMut.avance) || (deleteMut.isPending && deleteMut.avance) || null;
   const working = crearSubMut.isPending || renameSubMut.isPending || deleteSubMut.isPending || crearMut.isPending || renameMut.isPending || deleteMut.isPending || toggleMut.isPending;
 
   return (
@@ -270,6 +272,12 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
             Agregar
           </Button>
         </div>
+
+        {avanceRubro && (
+          <div role="status" className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-700 dark:text-blue-300">
+            Procesando el rubro: {avanceRubro.hechos.toLocaleString('es-AR')} productos listos, faltan {avanceRubro.faltan.toLocaleString('es-AR')}.
+          </div>
+        )}
 
         {error && (
           <div role="alert" className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">

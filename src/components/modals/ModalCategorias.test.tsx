@@ -18,6 +18,9 @@ let crearPending = false
 
 const mutacionInerte = { mutateAsync: vi.fn(), isPending: false }
 const eliminarMutateAsync = vi.fn()
+// El avance de las tandas de eliminar (1596-b9); null = no está corriendo.
+let eliminarAvance: { hechos: number; faltan: number } | null = null
+let eliminarPending = false
 // Lo que la base dice que haría eliminar el rubro (#1561); null = no se pidió.
 let impacto: Record<string, unknown> | null = null
 const pedidoImpacto = vi.fn()
@@ -27,7 +30,7 @@ vi.mock('../../hooks/queries', () => ({
   useSubcategoriasQuery: () => ({ data: [] }),
   useCrearCategoriaMutation: () => ({ mutateAsync: crearMutateAsync, isPending: crearPending }),
   useRenombrarCategoriaMutation: () => mutacionInerte,
-  useEliminarCategoriaMutation: () => ({ mutateAsync: eliminarMutateAsync, isPending: false }),
+  useEliminarCategoriaMutation: () => ({ mutateAsync: eliminarMutateAsync, isPending: eliminarPending, avance: eliminarAvance }),
   useImpactoEliminarRubroQuery: (rubro: unknown) => {
     pedidoImpacto(rubro)
     return rubro ? { data: impacto, isLoading: false, isError: false, refetch: vi.fn() } : { data: undefined, isLoading: false, isError: false, refetch: vi.fn() }
@@ -54,6 +57,8 @@ beforeEach(() => {
   crearMutateAsync.mockReset()
   crearMutateAsync.mockResolvedValue(undefined)
   crearPending = false
+  eliminarAvance = null
+  eliminarPending = false
 })
 
 describe('ModalCategorias — campo "Nueva categoría"', () => {
@@ -176,3 +181,17 @@ describe('ModalCategorias — eliminar un rubro', () => {
   })
 })
 
+
+describe('ModalCategorias — avance de un rubro grande (1596-b9)', () => {
+  it('mientras corren las tandas muestra cuántos productos van y cuántos faltan', () => {
+    eliminarPending = true
+    eliminarAvance = { hechos: 10000, faltan: 20000 }
+    renderModal()
+    expect(screen.getByRole('status')).toHaveTextContent('Procesando el rubro: 10.000 productos listos, faltan 20.000.')
+  })
+
+  it('sin tandas corriendo no muestra nada', () => {
+    renderModal()
+    expect(screen.queryByText(/Procesando el rubro/)).not.toBeInTheDocument()
+  })
+})

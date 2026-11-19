@@ -144,7 +144,9 @@ suelta en `sucursales`.
   productos lleva la marca `app.rubro_masivo` (`set_config(…, true)`, que borran apenas termina), y el
   mismo `WHEN` saltea la fila sólo si lo único que cambió es el rubro (`categoria`, `categoria_id`,
   `subcategoria_id`, `updated_at`): con la marca, otro cambio se audita entero, y el rubro de un
-  producto desde la ficha se audita como siempre.
+  producto desde la ficha se audita como siempre. Van **en tandas** (`p_lote`; el front de a 5.000,
+  `rubroEnTandas.ts`): la fila de auditoría queda «en_curso» hasta la última, repetir la misma
+  operación retoma, y otra sobre el mismo rubro se rechaza mientras ésa está a medias.
 - **Toda tabla nueva** de `public` nace sin escritura REST y sin nada para `anon` (los
   defaults de la migración del barrido, #1135). Si el front la escribe por REST, o la escribe
   un trigger INVOKER como `authenticated`, la migración concede **el privilegio exacto** (por
