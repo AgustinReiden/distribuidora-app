@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { adicionalDeCompra, conAdicionalDeCompra, costoEditadoEnFicha } from './costoFinalProducto';
+import { adicionalConIvaDeCompra, adicionalDeCompra, conAdicionalDeCompra, costoEditadoEnFicha } from './costoFinalProducto';
 import { calcularCostoReal } from './calculations';
 
 // Números sintéticos: una gaseosa con neto 4.000, II 8,6957 %, y una compra con
@@ -64,5 +64,25 @@ describe('costoEditadoEnFicha', () => {
   it('cambiar el neto o la tasa de II es tocar el costo', () => {
     expect(costoEditadoEnFicha(gaseosa, { costo_sin_iva: 5000, impuestos_internos: gaseosa.impuestos_internos })).toBe(true);
     expect(costoEditadoEnFicha(gaseosa, { costo_sin_iva: gaseosa.costo_sin_iva, impuestos_internos: 4.1667 })).toBe(true);
+  });
+});
+
+describe('adicionalConIvaDeCompra (1593-b1)', () => {
+  it('es lo que el costo con IVA de la compra tiene por encima de neto + IVA + II: el flete y su IVA', () => {
+    // FC A 100 al 21 % con un flete de 10 por unidad y su IVA (2,10): la compra deja 133,10.
+    expect(adicionalConIvaDeCompra({ costo_sin_iva: 100, impuestos_internos: 0, porcentaje_iva: 21, costo_con_iva: 133.1 }, 'FC')).toBe(12.1);
+  });
+
+  it('en ZZ es lo pagado por encima del neto', () => {
+    expect(adicionalConIvaDeCompra({ costo_sin_iva: 100, costo_con_iva: 130 }, 'ZZ')).toBe(30);
+  });
+
+  it('un producto sin cargos da 0, aunque el centavo del redondeo no cierre', () => {
+    expect(adicionalConIvaDeCompra({ costo_sin_iva: 4000, impuestos_internos: 8.6957, porcentaje_iva: 21, costo_con_iva: 5187.83 }, 'FC')).toBe(0);
+  });
+
+  it('sin neto o sin costo con IVA no hay nada que medir', () => {
+    expect(adicionalConIvaDeCompra({ costo_sin_iva: null, costo_con_iva: 131 }, 'FC')).toBe(0);
+    expect(adicionalConIvaDeCompra({ costo_sin_iva: 100, costo_con_iva: null }, 'FC')).toBe(0);
   });
 });

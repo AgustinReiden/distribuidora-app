@@ -206,6 +206,19 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   que la recalcula desde una compra le aplica encima el mayor de los envíos aceptados después
   (`_reposicion_aplicar_envios`, D12), como hizo aceptarlos; un envío sin `origen_costo_real`
   (anterior a esa migración) no aplica nada, para no dejar la terna mezclada.
+- **El costo con IVA es el neto más el IVA de cada componente** (1593-b1 de #1593; decisión del dueño
+  del 19/11: «el costo neto sería: neto producto + imp internos + cargos netos + flete neto. El costo
+  con IVA sería la suma del neto más el IVA de los componentes (incluido el costo del flete y cargos,
+  e inclusive sus respectivos IVAs si llevan)»). El neto es `costo_real` (el del motor, con el II
+  declarado y los cargos que prorratean al costo); `costo_con_iva` le suma el IVA del producto a su
+  alícuota y el de cada cargo: uno gravado en factura, a la alícuota del renglón donde cae (como la
+  base de IVA del motor); uno de un tercero, su `iva_monto`; uno no gravado, exento o sin IVA cargado,
+  nada. Sin crédito fiscal (ZZ, FC B o C) es lo pagado: `costo_real`. La cuenta es una,
+  `_costo_con_iva_unitario` con `_compra_iva_cargos` (o `_compra_iva_cargos_de_linea` desde las filas):
+  el alta, la edición y `_reposicion_desde_ultima_compra`. La ficha lo muestra tal cual y, si se
+  corrige el neto, conserva lo que la compra sumó (`adicionalConIvaDeCompra`). No es base de ningún
+  precio, margen del server ni CMV: lo leen los envíos (su valor y la reposición del destino), la
+  ficha y la exportación.
 - **Dentro de una compra los renglones que fijan costo van antes que los regalos** (#1593 CMP-A):
   el alta y la edición los recorren e insertan así, y la cadena va por id. Un regalo primero sobre
   un producto agotado no diluía nada y el pagado de después se promediaba con esas unidades al

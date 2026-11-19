@@ -74,7 +74,7 @@ import {
   compraReducer, initialState,
   lineasParaMotor, cargosParaMotor, iiDeclaradoParaMotor,
   cuadreImpuestoInterno, DESVIO_II_TOLERADO,
-  cargosParaRPC, validarCargos, cargosNoGravadosEnFactura, noGravadoDeCargos,
+  cargosParaRPC, validarCargos, cargosNoGravadosEnFactura, noGravadoDeCargos, pisoNoGravado,
   resolucionBasesII, validarMedidasCargos, lineasSinMedida, lineaEnAlcance,
   aplicaComprobanteTercero, ivaTerceroEfectivo, sugerenciasBonificacion, alicuotasIIExplicadas,
   precargarVencimientos,
@@ -4665,7 +4665,8 @@ function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSection
               )}
             </label>
             <NumberInput
-              min={0}
+              min={pisoNoGravado(state.cargos)}
+              motivoMin={`No puede bajar de ${formatPrecio(pisoNoGravado(state.cargos))}: sólo un descuento no gravado o exento de la factura lo deja negativo`}
               emptyValue={0}
               value={state.noGravado}
               onChange={(n) => dispatch({ type: 'SET_EXTRAS', payload: { noGravado: n } })}

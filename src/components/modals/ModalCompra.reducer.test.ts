@@ -11,7 +11,7 @@ import {
   compraReducer, initialState, lineasParaMotor, cargosParaMotor,
   cuadreImpuestoInterno, DESVIO_II_TOLERADO, cargosPlantillaNuevos,
   cargosParaRPC, validarCargos, resolucionBasesII, construirCompraItemDesdeScan,
-  validarMedidasCargos, lineasSinMedida, lineaEnAlcance,
+  validarMedidasCargos, lineasSinMedida, lineaEnAlcance, pisoNoGravado,
 } from './ModalCompra.reducer'
 import type { CompraState } from './ModalCompra.reducer'
 import type { LineaImpresa, LineaRevision } from '../../utils/revisionEscaneo'
@@ -411,6 +411,35 @@ describe('cargos: banderas fiscales', () => {
 
     const vaciado = correr([{ type: 'SET_II_DECLARADO', payload: { tasa: 4.1667, monto: 0 } }], cargado)
     expect(vaciado.iiDeclarado).toEqual({})
+  })
+})
+
+describe('no gravado de cabecera: un descuento sobre renglones exentos o no gravados (#1590)', () => {
+  // Una FC A con un descuento exento o no gravado en la factura lo baja con su signo: la
+  // cabecera «No gravado» puede quedar negativa (hasta lo que suman esos descuentos), y el
+  // campo no lo pone en rojo. Antes el piso era 0 y la compra no se podía guardar.
+  const conDescuento = (monto: number, condicionIva: 'no_gravado' | 'exento' | 'gravado') => {
+    const base = correr([{ type: 'AGREGAR_ITEM', payload: producto('a', 100) }, { type: 'AGREGAR_CARGO' }])
+    return correr([{ type: 'ACTUALIZAR_CARGO', payload: { id: base.cargos[0].id,
+      cambios: { concepto: 'Descuento', monto, condicionIva, enFactura: true } } }], base)
+  }
+
+  it('un descuento no gravado de −150 deja el no gravado en −150 y el piso del campo en −150', () => {
+    const s = conDescuento(-150, 'no_gravado')
+    expect(s.noGravado).toBe(-150)
+    expect(pisoNoGravado(s.cargos)).toBe(-150)
+  })
+
+  it('uno exento cuenta igual', () => {
+    expect(pisoNoGravado(conDescuento(-50, 'exento').cargos)).toBe(-50)
+  })
+
+  it('uno gravado no: va a la bonificación, y el piso sigue en 0', () => {
+    expect(pisoNoGravado(conDescuento(-100, 'gravado').cargos)).toBe(0)
+  })
+
+  it('los cargos positivos no bajan el piso', () => {
+    expect(pisoNoGravado(conDescuento(300, 'no_gravado').cargos)).toBe(0)
   })
 })
 

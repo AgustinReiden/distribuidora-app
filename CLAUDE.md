@@ -554,7 +554,9 @@ suelta en `sucursales`.
 - **El total de una ZZ incluye sus cargos en factura** (#1593, decisión del dueño): es lo pagado,
   10 × 100 con un flete de 300 dan 1.300. La ZZ guarda `bonificaciones` y `no_gravado` en 0: el
   cuadre del alta y COMPRA-A1 suman los cargos `en_factura` de `compra_cargos`, y el front los
-  lleva en `cargosEnFactura`. En una FC no cambia: el cargo gravado va a `bonificaciones`.
+  lleva en `cargosEnFactura`. En una FC no cambia: el cargo gravado va a `bonificaciones`, y el no
+  gravado o exento a `no_gravado`, con su signo: un descuento sobre renglones exentos o no gravados lo
+  deja negativo, hasta lo que suman esos descuentos (#1590, tarjeta C3 de #1603).
 - **Una NC de compra no pasa lo que le queda a la compra** (su total menos sus notas vigentes): el ajuste
   siempre, y la devolución si la compra tiene un ajuste (#1557, #1565; decisión del dueño). La devolución
   se valúa neta de la bonificación y de los descuentos de cabecera (`_compra_factor_neto`, #1590 D16):

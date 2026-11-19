@@ -67,6 +67,9 @@ BEGIN;
 
 SET LOCAL lock_timeout = '5s';
 
+-- La sección 4 cambia un CHECK de compras: el lock de la tabla, primero y sin esperar.
+LOCK TABLE public.compras IN ACCESS EXCLUSIVE MODE NOWAIT;
+
 DO $lf$
 BEGIN
   IF position(E'\r' in current_query()) > 0 THEN
@@ -89,7 +92,10 @@ BEGIN
     ('public.registrar_nota_credito(bigint,character varying,text,numeric,numeric,numeric,uuid,jsonb,numeric)', 'b589e283f8ce0d611b1c2661890c2cfe'),
     ('public.registrar_nota_credito_lote(bigint,numeric,text,text)', '6a3b2d6a88e7cc7dc36ca1680f849888'),
     ('public._compra_factor_neto(bigint,bigint,bigint)', 'd7a38e7073d194fc170c57e08ba1144b'),
-    ('public.prorratear_cargo(numeric,jsonb)', '3d96a1fb66ba9549ec72892eb5f3ed59')
+    ('public.prorratear_cargo(numeric,jsonb)', '3d96a1fb66ba9549ec72892eb5f3ed59'),
+    ('public.registrar_compra_completa(bigint,character varying,character varying,date,numeric,numeric,numeric,numeric,character varying,text,uuid,jsonb,character varying,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,text)', '9f1c391db98056da0d89de7d16a3e171'),
+    ('public._reposicion_desde_ultima_compra(bigint,bigint)', '322d0edf2363c1ccf22785a1f8f54200'),
+    ('public.costo_real_unitario(numeric,numeric,text,numeric)', 'ce489a035552349e45549cf70bca4c23')
   ) AS t(f, h) LOOP
     IF to_regprocedure(r.f) IS NULL THEN
       RAISE EXCEPTION 'mig NNN · % no existe: rehacer sobre lo vigente', r.f;
@@ -101,9 +107,18 @@ BEGIN
   END LOOP;
   IF to_regprocedure('public._compra_factor(bigint,bigint,bigint,boolean)') IS NOT NULL
      OR to_regprocedure('public._compra_factor_iva(bigint,bigint,bigint)') IS NOT NULL
+     OR to_regprocedure('public._compra_iva_cargos(jsonb,jsonb)') IS NOT NULL
+     OR to_regprocedure('public._compra_iva_cargos_de_linea(bigint)') IS NOT NULL
+     OR to_regprocedure('public._costo_con_iva_unitario(numeric,numeric,numeric,boolean,numeric)') IS NOT NULL
      OR (SELECT count(*) FROM pg_proc
           WHERE pronamespace = 'public'::regnamespace AND proname = 'actualizar_compra_items') <> 1 THEN
     RAISE EXCEPTION 'mig NNN · algo de esta migración ya existe: revisar a mano';
+  END IF;
+  -- El CHECK de la cabecera de compras es el de la 530 (la sección 4 lo afloja en no_gravado).
+  IF (SELECT pg_get_constraintdef(oid) FROM pg_constraint
+       WHERE conname = 'compras_importes_validos' AND conrelid = 'public.compras'::regclass)
+     IS DISTINCT FROM 'CHECK (((subtotal >= (0)::numeric) AND (subtotal <> ''NaN''::numeric) AND (iva >= (0)::numeric) AND (iva <> ''NaN''::numeric) AND (otros_impuestos >= (0)::numeric) AND (otros_impuestos <> ''NaN''::numeric) AND (impuestos_internos >= (0)::numeric) AND (impuestos_internos <> ''NaN''::numeric) AND (percepcion_iva >= (0)::numeric) AND (percepcion_iva <> ''NaN''::numeric) AND (percepcion_iibb >= (0)::numeric) AND (percepcion_iibb <> ''NaN''::numeric) AND (no_gravado >= (0)::numeric) AND (no_gravado <> ''NaN''::numeric) AND (total >= (0)::numeric) AND (total <> ''NaN''::numeric) AND (bonificaciones <> ''NaN''::numeric)))' THEN
+    RAISE EXCEPTION 'mig NNN · compras_importes_validos no es el de la 530: rehacer la sección 4 sobre lo vigente';
   END IF;
 END
 $premisas$;
@@ -128,7 +143,7 @@ CREATE FUNCTION public._compra_factor(p_compra bigint, p_producto bigint, p_sucu
  RETURNS numeric
  LANGUAGE sql
  STABLE
- SET search_path TO 'public'
+ SET search_path TO 'public', 'pg_temp'
 AS $function$
   -- mig NNN (1590-b, #1590; decisión del dueño D16): lo que vale cada peso del neto de los
   -- renglones de un producto después de los descuentos de cabecera. Una devolución se valúa
@@ -189,7 +204,7 @@ CREATE OR REPLACE FUNCTION public._compra_factor_neto(p_compra bigint, p_product
  RETURNS numeric
  LANGUAGE sql
  STABLE
- SET search_path TO 'public'
+ SET search_path TO 'public', 'pg_temp'
 AS $function$
   -- mig NNN (1590-b, #1590; D16 y H5): el factor del NETO de una devolución, con todos los
   -- descuentos en factura (en una FC también los no gravados). Ver _compra_factor.
@@ -200,7 +215,7 @@ CREATE FUNCTION public._compra_factor_iva(p_compra bigint, p_producto bigint, p_
  RETURNS numeric
  LANGUAGE sql
  STABLE
- SET search_path TO 'public'
+ SET search_path TO 'public', 'pg_temp'
 AS $function$
   -- mig NNN (1590-b, #1590; H5): el factor del IVA de una devolución: en una FC, sólo los
   -- descuentos gravados le bajaron el IVA a la factura. Ver _compra_factor.
@@ -274,7 +289,194 @@ END
 $ncl$;
 
 -- =========================================================================
--- 1 · actualizar_compra_items: los lotes, en la misma transacción
+-- 3 · 1593-b1: el costo con IVA es el neto más el IVA de sus componentes
+-- =========================================================================
+-- El IVA de los cargos que entran al costo, por renglón: {id del renglón: IVA}. El reparto es
+-- el de costo_real (prorratear_cargo sobre los pesos del cargo, que ya vienen entre los
+-- renglones pagados). Un cargo gravado en factura lleva la alícuota del renglón en el que cae
+-- (como la base de IVA del motor: en un renglón exento o no gravado, 0); uno fuera de la
+-- factura con el comprobante de un tercero, su IVA cargado (iva_monto) en proporción; el
+-- resto (no gravado, exento, o gravado sin IVA cargado), 0. Sólo los que prorratean al costo.
+CREATE FUNCTION public._compra_iva_cargos(p_items jsonb, p_cargos jsonb)
+ RETURNS jsonb
+ LANGUAGE sql
+ IMMUTABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT COALESCE(jsonb_object_agg(t.item_id::text, t.iva), '{}'::jsonb)
+    FROM (
+      SELECT r.item_id,
+             SUM(r.monto * CASE
+               WHEN COALESCE(c.val->>'condicion_iva', 'no_gravado') = 'gravado'
+                    AND COALESCE(NULLIF(c.val->'en_factura', 'null'::jsonb), 'true'::jsonb) = 'true'::jsonb
+                 THEN CASE WHEN COALESCE(i.val->>'condicion_iva', 'gravado') = 'gravado'
+                           THEN COALESCE((i.val->>'porcentaje_iva')::numeric, 0) / 100 ELSE 0 END
+               WHEN COALESCE(NULLIF(c.val->'comprobante_tercero', 'null'::jsonb), 'false'::jsonb) = 'true'::jsonb
+                    AND COALESCE((c.val->>'monto')::numeric, 0) <> 0
+                 THEN COALESCE((c.val->>'iva_monto')::numeric, 0) / abs((c.val->>'monto')::numeric)
+               ELSE 0 END) AS iva
+        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_cargos) = 'array' THEN p_cargos ELSE '[]'::jsonb END) AS c(val)
+       CROSS JOIN LATERAL public.prorratear_cargo(COALESCE((c.val->>'monto')::numeric, 0),
+                                                  COALESCE(NULLIF(c.val->'pesos', 'null'::jsonb), '{}'::jsonb)) r
+        JOIN jsonb_array_elements(CASE WHEN jsonb_typeof(p_items) = 'array' THEN p_items ELSE '[]'::jsonb END) AS i(val)
+          ON (i.val->>'id')::bigint = r.item_id
+       WHERE COALESCE(NULLIF(c.val->'prorratea_al_costo', 'null'::jsonb), 'true'::jsonb) = 'true'::jsonb
+       GROUP BY r.item_id
+    ) t;
+$function$;
+REVOKE ALL ON FUNCTION public._compra_iva_cargos(jsonb, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._compra_iva_cargos(jsonb, jsonb) TO service_role;
+
+-- Lo mismo leído de las filas de una compra guardada, por unidad del renglón: la reposición
+-- recalcula desde acá, con la misma cuenta que el alta.
+CREATE FUNCTION public._compra_iva_cargos_de_linea(p_item bigint)
+ RETURNS numeric
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  WITH l AS (
+    SELECT ci.id, ci.compra_id, ci.sucursal_id, ci.cantidad FROM compra_items ci WHERE ci.id = p_item
+  ), items AS (
+    SELECT jsonb_agg(jsonb_build_object('id', ci.id, 'porcentaje_iva', ci.porcentaje_iva,
+                                        'condicion_iva', ci.condicion_iva)) AS j
+      FROM compra_items ci JOIN l ON ci.compra_id = l.compra_id AND ci.sucursal_id = l.sucursal_id
+  ), cargos AS (
+    SELECT jsonb_agg(jsonb_build_object(
+             'monto', cc.monto, 'condicion_iva', cc.condicion_iva, 'en_factura', cc.en_factura,
+             'prorratea_al_costo', cc.prorratea_al_costo, 'comprobante_tercero', cc.comprobante_tercero,
+             'iva_monto', cc.iva_monto,
+             'pesos', COALESCE((SELECT jsonb_object_agg(r.compra_item_id::text, r.peso)
+                                  FROM compra_cargo_repartos r WHERE r.cargo_id = cc.id), '{}'::jsonb))) AS j
+      FROM compra_cargos cc JOIN l ON cc.compra_id = l.compra_id AND cc.sucursal_id = l.sucursal_id
+  )
+  SELECT CASE WHEN l.cantidad > 0
+              THEN COALESCE((public._compra_iva_cargos(items.j, cargos.j)->>l.id::text)::numeric, 0) / l.cantidad
+              ELSE 0 END
+    FROM l, items, cargos;
+$function$;
+REVOKE ALL ON FUNCTION public._compra_iva_cargos_de_linea(bigint) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._compra_iva_cargos_de_linea(bigint) TO service_role;
+
+-- El costo con IVA por unidad (decisión del dueño, 19/11): el costo neto (costo_real: neto del
+-- producto + impuestos internos + cargos netos + flete neto) más el IVA de cada componente
+-- que lo lleva: el del producto a su alícuota y el de los cargos (p_iva_cargos, por unidad).
+-- Sin crédito fiscal (ZZ, FC B o C) lo pagado ya lo incluye todo: es el costo real.
+CREATE FUNCTION public._costo_con_iva_unitario(p_costo_real numeric, p_neto numeric, p_pct_iva numeric,
+                                               p_sin_credito boolean, p_iva_cargos numeric)
+ RETURNS numeric
+ LANGUAGE sql
+ IMMUTABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT CASE WHEN p_sin_credito THEN p_costo_real
+              ELSE round(p_costo_real + COALESCE(p_neto, 0) * COALESCE(p_pct_iva, 0) / 100
+                         + COALESCE(p_iva_cargos, 0), 4) END;
+$function$;
+REVOKE ALL ON FUNCTION public._costo_con_iva_unitario(numeric, numeric, numeric, boolean, numeric) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._costo_con_iva_unitario(numeric, numeric, numeric, boolean, numeric) TO service_role;
+
+-- La reposición desde la última compra (corregirla, anularla, una nota que la devuelve).
+DO $rep$
+DECLARE
+  v_def text := pg_get_functiondef('public._reposicion_desde_ultima_compra(bigint,bigint)'::regprocedure);
+BEGIN
+  v_def := pg_temp.parche(v_def,
+    $a$ SET search_path TO 'public'
+$a$,
+    $n$ SET search_path TO 'public', 'pg_temp'
+$n$,
+    '_reposicion_desde_ultima_compra (search_path)');
+  v_def := pg_temp.parche(v_def,
+    $a$  SELECT c.tipo_factura, c.letra_comprobante, c.created_at, ci.costo_unitario, ci.bonificacion,$a$,
+    $n$  SELECT ci.id AS item_id, c.tipo_factura, c.letra_comprobante, c.created_at, ci.costo_unitario, ci.bonificacion,$n$,
+    '_reposicion_desde_ultima_compra (el renglón)');
+  v_def := pg_temp.parche(v_def,
+    $a$         costo_con_iva      = public.costo_financiero_unitario(
+                                v_neto,
+                                COALESCE(v_ult.iva_linea, p.porcentaje_iva),
+                                COALESCE(v_ult.ii_linea, p.impuestos_internos),
+                                v_tipo),$a$,
+    $n$         -- mig NNN (1593-b1, #1593; decisión del dueño del 19/11): el costo neto más el IVA
+         -- de cada componente, con la cuenta del alta.
+         costo_con_iva      = public._costo_con_iva_unitario(
+                                COALESCE(v_ult.costo_real_unitario,
+                                  public.costo_real_unitario(v_neto, COALESCE(v_ult.ii_linea, p.impuestos_internos), v_tipo, 0)),
+                                v_neto,
+                                COALESCE(v_ult.iva_linea, p.porcentaje_iva),
+                                v_tipo = 'ZZ',
+                                public._compra_iva_cargos_de_linea(v_ult.item_id)),$n$,
+    '_reposicion_desde_ultima_compra (el costo con IVA)');
+  EXECUTE v_def;
+END
+$rep$;
+
+-- =========================================================================
+-- 3 y 4 · registrar_compra_completa: el costo con IVA y el no gravado negativo
+-- =========================================================================
+DO $rcc$
+DECLARE
+  v_def text := pg_get_functiondef(
+    'public.registrar_compra_completa(bigint,character varying,character varying,date,numeric,numeric,numeric,numeric,character varying,text,uuid,jsonb,character varying,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,text)'::regprocedure);
+BEGIN
+  v_def := pg_temp.parche(v_def,
+    $a$ SET search_path TO 'public'
+$a$,
+    $n$ SET search_path TO 'public', 'pg_temp'
+$n$,
+    'registrar_compra_completa (search_path)');
+  v_def := pg_temp.parche(v_def,
+    $a$  v_costos_por_linea    JSONB;       -- {indice: {costo_real, cargos, ...}}
+$a$,
+    $n$  v_costos_por_linea    JSONB;       -- {indice: {costo_real, cargos, ...}}
+  v_iva_cargos          JSONB := '{}'::JSONB;  -- mig NNN (1593-b1): {indice: IVA de sus cargos}
+$n$,
+    'registrar_compra_completa (declaración)');
+  v_def := pg_temp.parche(v_def,
+    $a$    v_costos := calcular_costos_compra(v_items_motor, v_cargos, v_ii_declarado);
+$a$,
+    $n$    v_costos := calcular_costos_compra(v_items_motor, v_cargos, v_ii_declarado);
+    v_iva_cargos := public._compra_iva_cargos(v_items_motor, v_cargos);  /* mig NNN (1593-b1) */
+$n$,
+    'registrar_compra_completa (el IVA de los cargos)');
+  v_def := pg_temp.parche(v_def,
+    $a$      v_costo_real  := costo_real_unitario(v_costo_neto, v_impuestos_internos, CASE WHEN v_sin_credito THEN 'ZZ' ELSE v_tipo_factura END, 0 /* mig 193: los cargos entran en la task 9 */);
+    END IF;
+$a$,
+    $n$      v_costo_real  := costo_real_unitario(v_costo_neto, v_impuestos_internos, CASE WHEN v_sin_credito THEN 'ZZ' ELSE v_tipo_factura END, 0 /* mig 193: los cargos entran en la task 9 */);
+    END IF;
+    /* mig NNN (1593-b1, #1593; decision del dueño del 19/11) · EL COSTO CON IVA ES EL NETO
+       MAS EL IVA DE SUS COMPONENTES: el costo real (neto, impuestos internos, cargos y flete
+       netos) mas el IVA del producto y el de cada cargo que lo lleva. Sin credito, lo pagado. */
+    v_costo_con_iva := public._costo_con_iva_unitario(v_costo_real, v_costo_neto, v_porcentaje_iva, v_sin_credito,
+                         CASE WHEN v_cantidad > 0
+                              THEN COALESCE((v_iva_cargos->>(v_idx - 1)::TEXT)::NUMERIC, 0) / v_cantidad
+                              ELSE 0 END);
+$n$,
+    'registrar_compra_completa (el costo con IVA)');
+  -- 4 · el no gravado de la cabecera puede bajar de 0 hasta los descuentos no gravados de la factura
+  v_def := pg_temp.parche(v_def,
+    $a$                                        p_impuestos_internos, p_percepcion_iva, p_percepcion_iibb,
+                                        p_no_gravado]::NUMERIC[]) AS x
+              WHERE x < 0) THEN$a$,
+    $n$                                        p_impuestos_internos, p_percepcion_iva, p_percepcion_iibb
+                                        ]::NUMERIC[]) AS x
+              WHERE x < 0)
+     /* mig NNN (#1590) · el no gravado puede bajar de 0 hasta lo que suman los descuentos no
+        gravados o exentos que trae la factura: van ahi, con su signo. */
+     OR (NOT v_es_zz AND COALESCE(p_no_gravado, 0) < LEAST(0, COALESCE((
+           SELECT sum((c.val->>'monto')::NUMERIC)
+             FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_cargos) = 'array' THEN p_cargos ELSE '[]'::JSONB END) AS c(val)
+            WHERE jsonb_typeof(c.val->'monto') = 'number' AND (c.val->>'monto')::NUMERIC < 0
+              AND COALESCE(c.val->>'condicion_iva', 'no_gravado') <> 'gravado'
+              AND COALESCE(NULLIF(c.val->'en_factura', 'null'::JSONB), 'true'::JSONB) = 'true'::JSONB), 0))) THEN$n$,
+    'registrar_compra_completa (el no gravado)');
+  EXECUTE v_def;
+END
+$rcc$;
+
+-- =========================================================================
+-- 1, 3 y 4 · actualizar_compra_items: los lotes, el costo con IVA y el no gravado
 -- =========================================================================
 DO $acu$
 DECLARE
@@ -297,6 +499,7 @@ $a$,
     $n$  v_fuera_de_rango   TEXT;      -- los rangos del renglon (los mismos que el alta)
   -- mig NNN (STK-13, #1542)
   v_lotes_res        JSONB;     -- lo que devolvio sincronizar_lotes_compra
+  v_iva_cargos       JSONB := '{}'::JSONB;  -- mig NNN (1593-b1): {indice: IVA de sus cargos}
 $n$,
     'actualizar_compra_items (declaración)');
   v_def := pg_temp.parche(v_def,
@@ -360,6 +563,43 @@ $a$,
                                     'warning_clamp', COALESCE(v_lotes_res->'warning_clamp', '[]'::JSONB)) END;
 $n$,
     'actualizar_compra_items (la respuesta)');
+  v_def := pg_temp.parche(v_def,
+    $a$    v_costos := calcular_costos_compra(v_items_motor, v_cargos, v_ii_declarado);
+$a$,
+    $n$    v_costos := calcular_costos_compra(v_items_motor, v_cargos, v_ii_declarado);
+    v_iva_cargos := public._compra_iva_cargos(v_items_motor, v_cargos);  /* mig NNN (1593-b1) */
+$n$,
+    'actualizar_compra_items (el IVA de los cargos)');
+  v_def := pg_temp.parche(v_def,
+    $a$      v_costo_real  := costo_real_unitario(v_costo_neto, v_impuestos_internos, CASE WHEN v_sin_credito THEN 'ZZ' ELSE v_compra.tipo_factura END, 0 /* mig 193: los cargos entran en la task 9 */);
+    END IF;
+$a$,
+    $n$      v_costo_real  := costo_real_unitario(v_costo_neto, v_impuestos_internos, CASE WHEN v_sin_credito THEN 'ZZ' ELSE v_compra.tipo_factura END, 0 /* mig 193: los cargos entran en la task 9 */);
+    END IF;
+    /* mig NNN (1593-b1, #1593; decision del dueño del 19/11) · el costo con IVA es el neto mas
+       el IVA de sus componentes (ver el alta). */
+    v_costo_con_iva := public._costo_con_iva_unitario(v_costo_real, v_costo_neto, v_porcentaje_iva, v_sin_credito,
+                         CASE WHEN v_cantidad > 0
+                              THEN COALESCE((v_iva_cargos->>(v_idx - 1)::TEXT)::NUMERIC, 0) / v_cantidad
+                              ELSE 0 END);
+$n$,
+    'actualizar_compra_items (el costo con IVA)');
+  v_def := pg_temp.parche(v_def,
+    $a$                                        p_percepcion_iva, p_percepcion_iibb, p_no_gravado,
+                                        p_otros_impuestos]::NUMERIC[]) AS x
+              WHERE x < 0) THEN$a$,
+    $n$                                        p_percepcion_iva, p_percepcion_iibb,
+                                        p_otros_impuestos]::NUMERIC[]) AS x
+              WHERE x < 0)
+     /* mig NNN (#1590) · el no gravado puede bajar de 0 hasta lo que suman los descuentos no
+        gravados o exentos que trae la factura (ver el alta). */
+     OR (v_compra.tipo_factura <> 'ZZ' AND COALESCE(p_no_gravado, 0) < LEAST(0, COALESCE((
+           SELECT sum((c.val->>'monto')::NUMERIC)
+             FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_cargos) = 'array' THEN p_cargos ELSE '[]'::JSONB END) AS c(val)
+            WHERE jsonb_typeof(c.val->'monto') = 'number' AND (c.val->>'monto')::NUMERIC < 0
+              AND COALESCE(c.val->>'condicion_iva', 'no_gravado') <> 'gravado'
+              AND COALESCE(NULLIF(c.val->'en_factura', 'null'::JSONB), 'true'::JSONB) = 'true'::JSONB), 0))) THEN$n$,
+    'actualizar_compra_items (el no gravado)');
   EXECUTE v_def;
 END
 $acu$;
@@ -372,6 +612,26 @@ REVOKE ALL ON FUNCTION public.actualizar_compra_items(bigint, jsonb, numeric, nu
 GRANT EXECUTE ON FUNCTION public.actualizar_compra_items(bigint, jsonb, numeric, numeric, numeric, uuid, numeric, numeric,
                                                          numeric, numeric, numeric, jsonb, jsonb, numeric, bigint[], jsonb)
   TO authenticated, service_role;
+
+-- =========================================================================
+-- 4 · el no gravado de la cabecera, con el signo de sus descuentos
+-- =========================================================================
+-- Era `no_gravado >= 0`. Ahora sólo el freno de NaN (la columna es numeric(12,2): sin
+-- infinitos); el piso lo ponen el alta y la edición (lo que suman los descuentos no gravados
+-- o exentos de la factura) y COMPRA-A1 cierra con el número con signo. Todo valor que hoy
+-- cumple el CHECK viejo cumple el nuevo.
+ALTER TABLE public.compras
+  DROP CONSTRAINT compras_importes_validos,
+  ADD CONSTRAINT compras_importes_validos CHECK (
+    subtotal >= 0 AND subtotal <> 'NaN' AND iva >= 0 AND iva <> 'NaN'
+    AND otros_impuestos >= 0 AND otros_impuestos <> 'NaN'
+    AND impuestos_internos >= 0 AND impuestos_internos <> 'NaN'
+    AND percepcion_iva >= 0 AND percepcion_iva <> 'NaN'
+    AND percepcion_iibb >= 0 AND percepcion_iibb <> 'NaN'
+    AND no_gravado <> 'NaN'
+    AND total >= 0 AND total <> 'NaN' AND bonificaciones <> 'NaN');
+COMMENT ON COLUMN public.compras.no_gravado IS
+  'Los conceptos no gravados o exentos de la factura, con el signo de sus descuentos (mig NNN, #1590): un descuento sobre renglones exentos o no gravados lo baja, y puede quedar negativo.';
 
 -- ---------------------------------------------------------------------------
 -- Poscondición
@@ -391,23 +651,44 @@ BEGIN
      'v_iva      := round(round(v_cant * v_costo_iva, 2) * v_tasa_iva / 100, 2);', true),
     ('public._compra_factor_neto(bigint,bigint,bigint)', 'public._compra_factor(p_compra, p_producto, p_sucursal, false)', false),
     ('public._compra_factor_iva(bigint,bigint,bigint)', 'public._compra_factor(p_compra, p_producto, p_sucursal, true)', false),
-    ('public._compra_factor(bigint,bigint,bigint,boolean)', 'NOT p_para_iva OR cc.condicion_iva = ''gravado''', false)
+    ('public._compra_factor(bigint,bigint,bigint,boolean)', 'NOT p_para_iva OR cc.condicion_iva = ''gravado''', false),
+    ('public.registrar_compra_completa(bigint,character varying,character varying,date,numeric,numeric,numeric,numeric,character varying,text,uuid,jsonb,character varying,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,text)',
+     'v_costo_con_iva := public._costo_con_iva_unitario(v_costo_real, v_costo_neto, v_porcentaje_iva, v_sin_credito,', true),
+    ('public.registrar_compra_completa(bigint,character varying,character varying,date,numeric,numeric,numeric,numeric,character varying,text,uuid,jsonb,character varying,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,text)',
+     'OR (NOT v_es_zz AND COALESCE(p_no_gravado, 0) < LEAST(0,', true),
+    ('public.actualizar_compra_items(bigint,jsonb,numeric,numeric,numeric,uuid,numeric,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,bigint[],jsonb)',
+     'v_costo_con_iva := public._costo_con_iva_unitario(v_costo_real, v_costo_neto, v_porcentaje_iva, v_sin_credito,', true),
+    ('public.actualizar_compra_items(bigint,jsonb,numeric,numeric,numeric,uuid,numeric,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,bigint[],jsonb)',
+     'OR (v_compra.tipo_factura <> ''ZZ'' AND COALESCE(p_no_gravado, 0) < LEAST(0,', true),
+    ('public._reposicion_desde_ultima_compra(bigint,bigint)', 'public._compra_iva_cargos_de_linea(v_ult.item_id)', false)
   ) AS t(f, marca, definer) LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = r.f::regprocedure
                     AND position(r.marca in prosrc) > 0 AND prosecdef = r.definer) THEN
       RAISE EXCEPTION 'mig NNN · el parche de % no entró', r.f;
     END IF;
   END LOOP;
-  -- Las tres definers que se reescribieron llevan pg_temp al final del search_path (B15).
+  -- Toda función que la migración crea o reescribe termina su search_path en pg_temp (B15).
   FOR r IN SELECT unnest(ARRAY[
       'public.actualizar_compra_items(bigint,jsonb,numeric,numeric,numeric,uuid,numeric,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,bigint[],jsonb)',
       'public.registrar_nota_credito(bigint,character varying,text,numeric,numeric,numeric,uuid,jsonb,numeric)',
-      'public.registrar_nota_credito_lote(bigint,numeric,text,text)']) AS f LOOP
+      'public.registrar_nota_credito_lote(bigint,numeric,text,text)',
+      'public.registrar_compra_completa(bigint,character varying,character varying,date,numeric,numeric,numeric,numeric,character varying,text,uuid,jsonb,character varying,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,text)',
+      'public._reposicion_desde_ultima_compra(bigint,bigint)',
+      'public._compra_factor(bigint,bigint,bigint,boolean)',
+      'public._compra_factor_neto(bigint,bigint,bigint)',
+      'public._compra_factor_iva(bigint,bigint,bigint)',
+      'public._compra_iva_cargos(jsonb,jsonb)',
+      'public._compra_iva_cargos_de_linea(bigint)',
+      'public._costo_con_iva_unitario(numeric,numeric,numeric,boolean,numeric)']) AS f LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = r.f::regprocedure
                     AND proconfig @> ARRAY['search_path=public, pg_temp']) THEN
       RAISE EXCEPTION 'mig NNN · % quedó sin pg_temp en su search_path', r.f;
     END IF;
   END LOOP;
+  IF position('no_gravado >= ' in (SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                                     WHERE conname = 'compras_importes_validos' AND conrelid = 'public.compras'::regclass)) > 0 THEN
+    RAISE EXCEPTION 'mig NNN · compras_importes_validos sigue frenando el no gravado negativo';
+  END IF;
   -- Una sola firma de la edición.
   IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'actualizar_compra_items') <> 1 THEN
     RAISE EXCEPTION 'mig NNN · quedó más de una firma de actualizar_compra_items';
@@ -423,7 +704,10 @@ BEGIN
   END LOOP;
   FOR r IN SELECT unnest(ARRAY['public._compra_factor(bigint,bigint,bigint,boolean)',
                                'public._compra_factor_neto(bigint,bigint,bigint)',
-                               'public._compra_factor_iva(bigint,bigint,bigint)']) AS f LOOP
+                               'public._compra_factor_iva(bigint,bigint,bigint)',
+                               'public._compra_iva_cargos(jsonb,jsonb)',
+                               'public._compra_iva_cargos_de_linea(bigint)',
+                               'public._costo_con_iva_unitario(numeric,numeric,numeric,boolean,numeric)']) AS f LOOP
     IF has_function_privilege('anon', r.f, 'EXECUTE') OR has_function_privilege('authenticated', r.f, 'EXECUTE') THEN
       RAISE EXCEPTION 'mig NNN · % quedó con EXECUTE para la API', r.f;
     END IF;

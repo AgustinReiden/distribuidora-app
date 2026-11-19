@@ -14,7 +14,7 @@
  * Sin tocar el costo, la ficha muestra exactamente lo guardado; si el admin
  * corrige el neto (una lista nueva del proveedor), el flete por unidad se queda.
  */
-import { calcularCostoReal, redondear } from './calculations';
+import { calcularCostoFinanciero, calcularCostoReal, redondear } from './calculations';
 
 /** Las columnas de `productos` que mira la ficha para el costo final. */
 export interface CostosFichaProducto {
@@ -42,6 +42,28 @@ export function adicionalDeCompra(
   const real = positivo(producto?.costo_real);
   if (neto === null || real === null) return 0;
   return redondear(real - calcularCostoReal(neto, producto?.impuestos_internos ?? 0, tipoCompra), 4);
+}
+
+/**
+ * Lo mismo para el costo CON IVA (1593-b1, #1593; decisión del dueño del 19/11):
+ * desde la migración de la tarjeta C3 la compra deja en `costo_con_iva` el costo
+ * neto más el IVA de cada componente (el producto, el flete y los cargos que lo
+ * llevan). Esto es lo que ese número tiene por encima de neto + IVA + II de la
+ * ficha: si el admin corrige el neto, se conserva. Diferencias de redondeo (menos
+ * de un centavo) dan 0. Sin neto o sin costo con IVA guardado, 0.
+ */
+export function adicionalConIvaDeCompra(
+  producto: (CostosFichaProducto & { costo_con_iva?: number | string | null; porcentaje_iva?: number | string | null }) | null | undefined,
+  tipoCompra: 'ZZ' | 'FC',
+): number {
+  const neto = positivo(producto?.costo_sin_iva);
+  const conIva = positivo(producto?.costo_con_iva);
+  if (neto === null || conIva === null) return 0;
+  const adicional = redondear(
+    conIva - calcularCostoFinanciero(neto, producto?.porcentaje_iva ?? 21, producto?.impuestos_internos ?? 0, tipoCompra),
+    4,
+  );
+  return Math.abs(adicional) < 0.01 ? 0 : adicional;
 }
 
 /** Un costo de la ficha más el adicional de la compra. Sin costo base, 0: el flete solo no es un costo. */
