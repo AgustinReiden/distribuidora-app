@@ -1,5 +1,5 @@
 -- Ensayo de la tarjeta C5 (tanda 5 de la ola 2, #1603): gastos, personal, auditorías y los dos lectores
--- de ventas que con estadísticas viejas se iban a nested loop. Va con migrations/NNN_gastos_personal_auditorias_y_tiempos.sql.
+-- de ventas que con estadísticas viejas se iban a nested loop. Va con migrations/532_gastos_personal_auditorias_y_tiempos.sql.
 --
 --   G   1562-b2  guardar_gasto: un infinito (y los litros fuera de su columna) se rechazan con su motivo.
 --   E   1597-b6  guardar_empleado: la fecha de ingreso no es futura ni 'infinity' (al cargarla y al cambiarla).
