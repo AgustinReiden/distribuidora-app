@@ -300,7 +300,8 @@ export function useRenombrarCategoriaMutation() {
       return renameCategoria({ ...args, sucursalId: currentSucursalId }, setAvance)
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: categoriasKeys.lists(currentSucursalId) })
+      // `all`: la lista y los cambios a medias (si una tanda se cortó, aparece «Terminar»).
+      queryClient.invalidateQueries({ queryKey: categoriasKeys.all(currentSucursalId) })
       // Los productos cambiaron su string de categoría; invalidar la lista
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
       // Y los descuentos por rubro de los clientes (#1561).
@@ -331,6 +332,64 @@ export function useEliminarCategoriaMutation() {
     mutationFn: (args: { id: string | null; nombre: string }) => {
       setAvance(null)
       return deleteCategoria(args, setAvance)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: categoriasKeys.all(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: ['clientes', currentSucursalId] })
+    },
+  })
+  return { ...mutation, avance }
+}
+
+/** Un cambio de rubro que quedó a medias entre tandas (`rubros_a_medias`, 1596-b9). */
+export interface RubroAMedias {
+  accion: 'renombrar' | 'eliminar'
+  /** El rubro con fila, o null si era sólo texto. */
+  id: string | null
+  /** El nombre de antes (el del texto que falta). */
+  nombre: string
+  /** Al que se estaba renombrando. */
+  nombre_nuevo: string | null
+  hechos: number
+  faltan: number
+}
+
+async function fetchRubrosAMedias(): Promise<RubroAMedias[]> {
+  const { data, error } = await supabase.rpc('rubros_a_medias')
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo ver si hay cambios de rubro a medias. Revisá la señal e intentá de nuevo.')
+  return (data ?? []) as RubroAMedias[]
+}
+
+/**
+ * Los cambios de rubro a medias (se cortaron entre tandas), para ofrecer «Terminar»: así ningún
+ * rubro queda trabado (1596-b9).
+ */
+export function useRubrosAMediasQuery() {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: [...categoriasKeys.all(currentSucursalId), 'a_medias'],
+    queryFn: fetchRubrosAMedias,
+    staleTime: 0,
+  })
+}
+
+/** Termina un cambio de rubro a medias: el mismo renombre (o eliminación), en tandas. */
+export function useTerminarRubroMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+  const [avance, setAvance] = useState<AvanceRubro | null>(null)
+
+  const mutation = useMutation({
+    mutationFn: (p: RubroAMedias) => {
+      setAvance(null)
+      if (p.accion === 'renombrar') {
+        return renameCategoria(
+          { id: p.id, nombreViejo: p.nombre, nombreNuevo: p.nombre_nuevo ?? '', sucursalId: currentSucursalId },
+          setAvance,
+        )
+      }
+      return deleteCategoria({ id: p.id, nombre: p.nombre }, setAvance)
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: categoriasKeys.all(currentSucursalId) })

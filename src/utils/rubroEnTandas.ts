@@ -5,11 +5,12 @@
  * dicen cuántos faltan; esto repite hasta terminar, avisando el avance.
  *
  * Si una tanda falla, lo hecho queda (cada tanda es su transacción) y el rubro sigue coherente: la
- * base retoma donde quedó con la misma operación, y rechaza otra mientras ésa está a medias. El
- * aviso dice cuánto se hizo y cómo terminar.
+ * base retoma donde quedó, y un cambio a medias aparece en Categorías con «Terminar»
+ * (`rubros_a_medias`). Si el rubro tenía otro cambio a medias, la base primero lo termina
+ * («retomado», `terminado` en false) y después hace lo pedido: esto sigue llamando.
  */
 
-/** Productos por llamada: medido, una tanda de 5.000 tarda 0,6–1,5 s con la máquina cargada. */
+/** Productos por llamada: medido, una tanda de 5.000 tarda 0,5–2,3 s con la máquina cargada. */
 export const TANDA_RUBRO = 5000
 
 export interface RespuestaTandaRubro {
@@ -17,9 +18,12 @@ export interface RespuestaTandaRubro {
   productos: number
   /** Los que faltan. Un server de antes de las tandas no lo manda: hizo todo de una vez. */
   faltan?: number
+  /** Si lo pedido quedó hecho. En false con `retomado`, se avanzó otro cambio a medias. */
   terminado?: boolean
   /** El id del rubro: el que sólo era texto lo recibe en la primera tanda. */
   id?: string | null
+  /** Esta llamada avanzó un renombre que había quedado a medias en el mismo rubro. */
+  retomado?: { de: string; a: string; faltan: number } | null
 }
 
 export interface AvanceRubro {
@@ -33,7 +37,8 @@ const comoError = (e: unknown): Error => (e instanceof Error ? e : new Error(Str
 export async function procesarRubroEnTandas(
   llamar: (id: string | null) => Promise<RespuestaTandaRubro>,
   idInicial: string | null,
-  operacion: 'renombrar' | 'eliminar',
+  // La operación: hoy sólo cambia el aviso de corte, que manda a «Terminar» en las dos.
+  _operacion: 'renombrar' | 'eliminar',
   onAvance?: (avance: AvanceRubro) => void,
 ): Promise<{ hechos: number }> {
   let id = idInicial
@@ -47,22 +52,23 @@ export async function procesarRubroEnTandas(
       // Sin nada hecho, el error llega tal cual (ya viene traducido por quien llama).
       if (hechos === 0) throw comoError(e)
       const motivo = (e instanceof Error ? e.message : String(e)).replace(/\.\s*$/, '')
-      const boton = operacion === 'renombrar' ? '«Renombrar» con el mismo nombre' : '«Eliminar»'
       throw new Error(
         `${motivo}. Ya se pasaron ${miles(hechos)} productos` +
         (faltanAntes != null ? ` y faltan ${miles(faltanAntes)}` : '') +
-        `: volvé a tocar ${boton} para terminar.`,
+        ': tocá «Terminar» en el aviso del rubro a medias para terminar.',
       )
     }
     if (r.id) id = r.id
-    hechos += r.productos ?? 0
+    const productos = r.productos ?? 0
+    hechos += productos
     const faltan = r.faltan ?? 0
     onAvance?.({ hechos, faltan })
-    if (r.terminado || faltan === 0) return { hechos }
-    if (faltanAntes != null && faltan >= faltanAntes || (r.productos ?? 0) === 0) {
+    // Un server de antes de las tandas no manda ni `terminado` ni `faltan`: hizo todo.
+    if (r.terminado === true || (r.terminado === undefined && r.faltan === undefined)) return { hechos }
+    if (!r.retomado && (productos === 0 || (faltanAntes != null && faltan >= faltanAntes))) {
       throw new Error(`La operación no avanzó (faltan ${miles(faltan)} productos). Recargá la pantalla e intentá de nuevo.`)
     }
-    faltanAntes = faltan
+    faltanAntes = r.retomado ? null : faltan
   }
   throw new Error('La operación no terminó. Recargá la pantalla e intentá de nuevo.')
 }

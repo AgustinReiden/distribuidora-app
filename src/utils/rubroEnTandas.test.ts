@@ -55,7 +55,7 @@ describe('procesarRubroEnTandas', () => {
       .mockRejectedValueOnce(new Error('Sin conexión'))
 
     await expect(procesarRubroEnTandas(llamar, 'r1', 'renombrar')).rejects.toThrow(
-      'Sin conexión. Ya se pasaron 5.000 productos y faltan 5.000: volvé a tocar «Renombrar» con el mismo nombre para terminar.',
+      'Sin conexión. Ya se pasaron 5.000 productos y faltan 5.000: tocá «Terminar» en el aviso del rubro a medias para terminar.',
     )
   })
 
@@ -68,5 +68,23 @@ describe('procesarRubroEnTandas', () => {
     const llamar = vi.fn().mockResolvedValue(resp(0, 300))
     await expect(procesarRubroEnTandas(llamar, 'r1', 'eliminar')).rejects.toThrow(/no avanzó/)
     expect(llamar).toHaveBeenCalledTimes(1)
+  })
+
+  it('con un renombre a medias del mismo rubro, primero lo termina (retomado) y después hace lo pedido', async () => {
+    const llamar = vi.fn()
+      .mockResolvedValueOnce({ productos: 5000, faltan: 3000, terminado: false, retomado: { de: 'A', a: 'B', faltan: 3000 } })
+      .mockResolvedValueOnce({ productos: 3000, faltan: 0, terminado: false, retomado: { de: 'A', a: 'B', faltan: 0 } })
+      .mockResolvedValueOnce(resp(400, 0))
+    const fin = await procesarRubroEnTandas(llamar, 'r1', 'renombrar')
+    expect(llamar).toHaveBeenCalledTimes(3)
+    expect(fin).toEqual({ hechos: 8400 })
+  })
+
+  it('un retomado que ya no tenía nada que pasar (0 productos) no cuenta como «no avanzó»', async () => {
+    const llamar = vi.fn()
+      .mockResolvedValueOnce({ productos: 0, faltan: 0, terminado: false, retomado: { de: 'A', a: 'B', faltan: 0 } })
+      .mockResolvedValueOnce(resp(20, 0))
+    await procesarRubroEnTandas(llamar, 'r1', 'eliminar')
+    expect(llamar).toHaveBeenCalledTimes(2)
   })
 })

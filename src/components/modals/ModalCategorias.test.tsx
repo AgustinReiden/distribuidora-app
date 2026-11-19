@@ -21,6 +21,9 @@ const eliminarMutateAsync = vi.fn()
 // El avance de las tandas de eliminar (1596-b9); null = no está corriendo.
 let eliminarAvance: { hechos: number; faltan: number } | null = null
 let eliminarPending = false
+// Los cambios de rubro a medias (1596-b9) y el «Terminar».
+let aMedias: Array<Record<string, unknown>> = []
+const terminarMutateAsync = vi.fn()
 // Lo que la base dice que haría eliminar el rubro (#1561); null = no se pidió.
 let impacto: Record<string, unknown> | null = null
 const pedidoImpacto = vi.fn()
@@ -36,6 +39,8 @@ vi.mock('../../hooks/queries', () => ({
     return rubro ? { data: impacto, isLoading: false, isError: false, refetch: vi.fn() } : { data: undefined, isLoading: false, isError: false, refetch: vi.fn() }
   },
   useToggleCategoriaActivaMutation: () => mutacionInerte,
+  useRubrosAMediasQuery: () => ({ data: aMedias }),
+  useTerminarRubroMutation: () => ({ mutateAsync: terminarMutateAsync, isPending: false, avance: null }),
   useCrearSubcategoriaMutation: () => mutacionInerte,
   useRenombrarSubcategoriaMutation: () => mutacionInerte,
   useEliminarSubcategoriaMutation: () => mutacionInerte,
@@ -59,6 +64,8 @@ beforeEach(() => {
   crearPending = false
   eliminarAvance = null
   eliminarPending = false
+  aMedias = []
+  terminarMutateAsync.mockReset()
 })
 
 describe('ModalCategorias — campo "Nueva categoría"', () => {
@@ -193,5 +200,37 @@ describe('ModalCategorias — avance de un rubro grande (1596-b9)', () => {
   it('sin tandas corriendo no muestra nada', () => {
     renderModal()
     expect(screen.queryByText(/Procesando el rubro/)).not.toBeInTheDocument()
+  })
+})
+
+describe('ModalCategorias — un cambio de rubro a medias se puede terminar (1596-b9)', () => {
+  const pendiente = { accion: 'renombrar', id: 'r1', nombre: 'Bebidas', nombre_nuevo: 'Drinks', hechos: 5000, faltan: 7000 }
+
+  it('lo avisa con lo que falta y ofrece «Terminar»', () => {
+    aMedias = [pendiente]
+    renderModal()
+    expect(screen.getByText(/«Bebidas» → «Drinks» quedó a medias: faltan 7\.000 productos/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /terminar/i })).toBeEnabled()
+  })
+
+  it('una tanda cortada: el error se ve, el aviso sigue, y el reintento termina', async () => {
+    aMedias = [pendiente]
+    terminarMutateAsync
+      .mockRejectedValueOnce(new Error('Sin conexión. Ya se pasaron 5.000 productos y faltan 2.000: tocá «Terminar» en el aviso del rubro a medias para terminar.'))
+      .mockResolvedValueOnce(undefined)
+    renderModal()
+
+    await userEvent.click(screen.getByRole('button', { name: /terminar/i }))
+    expect(terminarMutateAsync).toHaveBeenCalledWith(pendiente)
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Ya se pasaron 5\.000 productos/)
+
+    await userEvent.click(screen.getByRole('button', { name: /terminar/i }))
+    expect(terminarMutateAsync).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+  })
+
+  it('sin nada a medias no muestra el aviso', () => {
+    renderModal()
+    expect(screen.queryByRole('button', { name: /terminar/i })).not.toBeInTheDocument()
   })
 })

@@ -146,7 +146,10 @@ suelta en `sucursales`.
   `subcategoria_id`, `updated_at`): con la marca, otro cambio se audita entero, y el rubro de un
   producto desde la ficha se audita como siempre. Van **en tandas** (`p_lote`; el front de a 5.000,
   `rubroEnTandas.ts`): la fila de auditoría queda «en_curso» hasta la última, repetir la misma
-  operación retoma, y otra sobre el mismo rubro se rechaza mientras ésa está a medias.
+  operación retoma, y otra sobre el mismo rubro por id primero termina la que quedó a medias; ningún
+  rubro queda trabado (`rubros_a_medias()` y el botón «Terminar» de Categorías). Por el camino de
+  texto, lo que falta de un renombre a medias no se elimina ni se renombra a otra cosa, y un rubro
+  nuevo con ese nombre viejo se rechaza.
 - **Toda tabla nueva** de `public` nace sin escritura REST y sin nada para `anon` (los
   defaults de la migración del barrido, #1135). Si el front la escribe por REST, o la escribe
   un trigger INVOKER como `authenticated`, la migración concede **el privilegio exacto** (por

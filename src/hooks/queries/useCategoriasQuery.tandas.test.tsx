@@ -69,6 +69,6 @@ describe('rubros en tandas', () => {
     await act(async () => {
       error = await result.current.mutateAsync({ id: 'r1', nombre: 'Bebidas' }).catch(e => e)
     })
-    expect((error as Error).message).toBe('Algo falló. Ya se pasaron 5.000 productos y faltan 5.000: volvé a tocar «Eliminar» para terminar.')
+    expect((error as Error).message).toBe('Algo falló. Ya se pasaron 5.000 productos y faltan 5.000: tocá «Terminar» en el aviso del rubro a medias para terminar.')
   })
 })
