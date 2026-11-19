@@ -124,7 +124,8 @@ const PEDIDOS_UPDATE = {
   // las edita quien puede editar el pedido (la policy mt_pedidos_update)
   notas: 'libre',
   fecha_entrega_programada: 'libre',
-  updated_at: 'libre',
+  // updated_at ya no: la versión la pone el server (pedidos_proteger_columnas, 1595-b6), y la
+  // migración de cierres de la tarjeta C6 de #1603 le sacó el GRANT.
 };
 const pedidosUpdate = esperado.escrituras?.pedidos?.UPDATE;
 if (pedidosUpdate !== undefined && !Array.isArray(pedidosUpdate)) {

@@ -151,7 +151,7 @@ BEGIN
   -- ------------------------------------------------------------------- E1 ---
   PERFORM pg_temp.como(v_adm, v_suc);
   v_t := pg_temp.intenta(format(
-    'UPDATE public.pedidos SET estado = ''entregado'', fecha_entrega = %L, transportista_id = %L, updated_at = now() WHERE id = %s',
+    'UPDATE public.pedidos SET estado = ''entregado'', fecha_entrega = %L, transportista_id = %L WHERE id = %s',
     FTS, v_a, v_p1));
   PERFORM pg_temp.como(NULL, NULL);
   IF v_t <> 'PASA' OR pg_temp.sello(v_p1) <> format('entregado/%s/ahora', left(v_adm::text, 8)) THEN
@@ -175,7 +175,7 @@ BEGIN
   PERFORM pg_temp.como(v_adm, v_suc);
   v_t := pg_temp.intenta(format('UPDATE public.pedidos SET notas = ''ensayo 1555'' WHERE id = %s', v_p1));
   v_t := v_t || ' | ' || pg_temp.intenta(format(
-    'UPDATE public.pedidos SET estado = ''entregado'', updated_at = now() WHERE id = %s', v_p1));
+    'UPDATE public.pedidos SET estado = ''entregado'' WHERE id = %s', v_p1));
   PERFORM pg_temp.como(NULL, NULL);
   IF v_t <> 'PASA | PASA' OR pg_temp.sello(v_p1) <> format('entregado/%s/2000-01-01', left(v_adm::text, 8)) THEN
     v_fallas := v_fallas || format('E2 · el sello se movió sin transición: %s, sello %s', v_t, pg_temp.sello(v_p1));
@@ -184,14 +184,14 @@ BEGIN
   -- ------------------------------------------------------------------- E3 ---
   PERFORM pg_temp.como(v_adm, v_suc);
   v_t := pg_temp.intenta(format(
-    'UPDATE public.pedidos SET estado = ''asignado'', fecha_entrega = NULL, updated_at = now() WHERE id = %s', v_p1));
+    'UPDATE public.pedidos SET estado = ''asignado'', fecha_entrega = NULL WHERE id = %s', v_p1));
   PERFORM pg_temp.como(NULL, NULL);
   IF v_t <> 'PASA' OR pg_temp.sello(v_p1) <> 'asignado/-/-' THEN
     v_fallas := v_fallas || format('E3 · revertir la entrega: %s, sello %s (esperado asignado/-/-)', v_t, pg_temp.sello(v_p1));
   END IF;
   PERFORM pg_temp.como(v_a, v_suc);
   v_t := pg_temp.intenta(format(
-    'UPDATE public.pedidos SET estado = ''entregado'', fecha_entrega = %L, updated_at = now() WHERE id = %s', FTS, v_p1));
+    'UPDATE public.pedidos SET estado = ''entregado'', fecha_entrega = %L WHERE id = %s', FTS, v_p1));
   PERFORM pg_temp.como(NULL, NULL);
   IF v_t <> 'PASA' OR pg_temp.sello(v_p1) <> format('entregado/%s/ahora', left(v_a::text, 8)) THEN
     v_fallas := v_fallas || format('E3 · el chofer entrega su pedido: %s, sello %s (esperado entregado/%s/ahora)',

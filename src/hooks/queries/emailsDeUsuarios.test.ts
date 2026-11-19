@@ -1,25 +1,21 @@
 /**
- * 1601-b5 (#1601, D53): los emails de otros usuarios salen de la RPC `emails_de_usuarios`, y
- * de la tabla sólo mientras la RPC no exista (PGRST202). Nunca rompen la pantalla.
+ * 1601-b5 (#1601, D53): los emails de otros usuarios salen sólo de la RPC `emails_de_usuarios`
+ * (la tabla ya no los da por REST), y nunca rompen la pantalla.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const rpc = vi.fn()
-const inFn = vi.fn()
-const select = vi.fn(() => ({ in: inFn }))
-const from = vi.fn(() => ({ select }))
+const from = vi.fn()
 
 vi.mock('../supabase/base', () => ({
-  supabase: { rpc: (...a: unknown[]) => rpc(...a), from: (...a: unknown[]) => from(...(a as [])) },
+  supabase: { rpc: (...a: unknown[]) => rpc(...a), from: (...a: unknown[]) => from(...a) },
 }))
 
 import { fetchEmailsDeUsuarios } from './emailsDeUsuarios'
 
 beforeEach(() => {
   rpc.mockReset()
-  inFn.mockReset()
-  select.mockClear()
-  from.mockClear()
+  from.mockReset()
 })
 
 describe('fetchEmailsDeUsuarios', () => {
@@ -31,16 +27,9 @@ describe('fetchEmailsDeUsuarios', () => {
     expect([...mapa]).toEqual([['a', 'a@x.invalid']])
   })
 
-  it('sin la RPC (la migración todavía no está) los lee de la tabla, sólo id y email', async () => {
+  it('con un error (también si la RPC no existe), o sin red, devuelve vacío y no lee la tabla', async () => {
     rpc.mockResolvedValue({ data: null, error: { code: 'PGRST202', message: 'no existe' } })
-    inFn.mockResolvedValue({ data: [{ id: 'a', email: 'a@x.invalid' }], error: null })
-    const mapa = await fetchEmailsDeUsuarios(['a'])
-    expect(from).toHaveBeenCalledWith('perfiles')
-    expect(select).toHaveBeenCalledWith('id, email')
-    expect(mapa.get('a')).toBe('a@x.invalid')
-  })
-
-  it('con otro error, o sin red, devuelve vacío y no lee la tabla', async () => {
+    expect((await fetchEmailsDeUsuarios(['a'])).size).toBe(0)
     rpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'permiso' } })
     expect((await fetchEmailsDeUsuarios(['a'])).size).toBe(0)
     rpc.mockRejectedValue(new TypeError('Failed to fetch'))
