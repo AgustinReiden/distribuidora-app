@@ -1,6 +1,6 @@
 -- Ensayo de la tarjeta B15 (v2) de la ola 2 del plan #1603 (1564-b8 y 1564-g4): toda SECURITY DEFINER de
 -- public fija search_path, y toda función de public que lo fija (definer o no) lo termina en pg_temp.
--- Migración: NNN_search_path_pg_temp. Gate: scripts/check-search-path.mjs.
+-- Migración: 531_search_path_pg_temp (aplicada en producción el 19/11). Gate: scripts/check-search-path.mjs.
 --
 -- Un único DO que termina SIEMPRE en una excepción: no deja rastro (la tabla temporal es ON COMMIT DROP y
 -- se deshace con todo lo demás). Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ' con la lista.

@@ -85,7 +85,7 @@ suelta en `sucursales`.
   falla ante lo alcanzable con la **anon key**, no con una sesión—. Pasó con
   `bot_digest_destinatarios` (261, corregida en la 262): devolvía los `telegram_user_id` de
   todos los admins y cualquier preventista logueado podía enumerarlos.
-- **El search_path termina en `pg_temp`** (B15 de #1603), en dos mitades: toda `SECURITY DEFINER`
+- **El search_path termina en `pg_temp`** (mig 531, B15 de #1603), en dos mitades: toda `SECURITY DEFINER`
   nueva o reemplazada fija `SET search_path = public, pg_temp`; y **toda función que fije
   search_path, definer o no**, lo termina en `pg_temp` (`public, pg_temp`, o el suyo con `pg_temp`
   al final). Sin `pg_temp` escrito, Postgres busca primero en las tablas temporales de la sesión:
