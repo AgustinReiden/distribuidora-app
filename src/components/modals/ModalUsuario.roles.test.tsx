@@ -64,6 +64,20 @@ describe('ModalUsuario — capacidades extra en el mismo guardado (C4b v2)', () 
     expect(onSave.mock.calls[0][0].rolesExtra).toEqual([])
   })
 
+  it('con los roles cargados se puede tildar, y el tilde viaja en el guardado (H6 de la revisión)', async () => {
+    mocks.rolesGuardados = []
+    const onSave = vi.fn()
+    render(<ModalUsuario usuario={usuario} onSave={onSave} onClose={vi.fn()} guardando={false} />)
+    const casilla = screen.getByRole('checkbox', { name: /puede llevar la ruta/i })
+
+    expect(casilla).toBeEnabled()
+    fireEvent.click(casilla)
+    fireEvent.click(screen.getByRole('button', { name: /guardar/i }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0].rolesExtra).toEqual(['transportista'])
+  })
+
   it('el checkbox de la ruta queda deshabilitado mientras no cargan los roles', () => {
     mocks.rolesGuardados = undefined
     render(<ModalUsuario usuario={usuario} onSave={vi.fn()} onClose={vi.fn()} guardando={false} />)
