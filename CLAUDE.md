@@ -355,6 +355,16 @@ suelta en `sucursales`.
   lo frena `trg_promocion_no_se_borra_con_uso`: líneas de pedido de cualquier estado, ajustes de
   stock o salvedades. El front cuenta lo mismo antes de ofrecer "Eliminar"
   (`promocionesEliminacion.ts`): si cambia la regla de un lado, cambia del otro.
+- **Un guardado que escribe varias filas o tablas va en UNA RPC, y el front no compensa** (C4b de
+  #1603): la condición mayorista entera (`guardar_condicion_mayorista`), el alta de una promo
+  (`crear_promocion`), los roles extra (`guardar_roles_extra`) y los descuentos por categoría
+  (`guardar_descuentos_categoria`). Validan adentro lo de la policy, las restricciones y el
+  formulario, y un rechazo es un RAISE (un `{success:false}` después de escribir confirma lo
+  escrito). Un alta que un reintento duplicaría lleva la clave del formulario (`altas_por_clave`,
+  sólo de server). La edición de un combo o de una promo manda la versión que abrió
+  (`updated_at_esperado`, y en un combo las `versiones` del orden que reescribe): si otro guardó, no
+  se pisa y el formulario queda abierto con lo tipeado. La versión de una promo no la mueve la barra
+  (`usos_pendientes`).
 - **El stock por lote lo lleva un trigger, no las RPCs** (y cómo devolver, etiquetar y lockear) → `migrations/CLAUDE.md`.
 - **"Venta por vendedor" tiene UNA definición y se escribe siempre igual** (migs 241 y 318, #568):
   `estado = 'entregado'` · `canal <> 'cambio'` · `tipo_factura IS DISTINCT FROM 'VB'` · por

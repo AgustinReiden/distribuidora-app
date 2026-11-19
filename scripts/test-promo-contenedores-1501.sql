@@ -188,7 +188,8 @@ BEGIN
       FROM (VALUES
         ('public.promo_factor_bloquea_contenedores()', '859e10cd31a27610ef43c5b1b6f63eb7',
          '{postgres=X/postgres,service_role=X/postgres}'),
-        ('public.cambiar_regalo_promocion(bigint,bigint,bigint,boolean,jsonb)', '582dae61b953871c538470ccd69ce394',
+        -- C4b (ola 2 de #1603): el cuerpo con el control de versión (updated_at_esperado).
+        ('public.cambiar_regalo_promocion(bigint,bigint,bigint,boolean,jsonb)', '4ed8d6001cb8d9f885fcdc5232e6adee',
          '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
         ('public._rendicion_pagos(bigint,date,date,bigint)', '25f0aebcefe469fdc1a6e5205ea83efa',
          '{postgres=X/postgres,service_role=X/postgres}'),
