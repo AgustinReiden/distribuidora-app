@@ -212,11 +212,16 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   e inclusive sus respectivos IVAs si llevan)»). El neto es `costo_real` (el del motor, con el II
   declarado y los cargos que prorratean al costo); `costo_con_iva` le suma el IVA del producto a su
   alícuota y el de cada cargo: uno gravado en factura, a la alícuota del renglón donde cae (como la
-  base de IVA del motor); uno de un tercero, su `iva_monto`; uno no gravado, exento o sin IVA cargado,
-  nada. Sin crédito fiscal (ZZ, FC B o C) es lo pagado: `costo_real`. La cuenta es una,
+  base de IVA del motor: el sistema no tiene alícuota por cargo, y un flete al 21 % sobre un producto
+  al 10,5 % queda con el 10,5 %; H8 de la revisión, queda así); uno de un tercero, su `iva_monto`; uno
+  no gravado, exento o sin IVA cargado, nada. Sin crédito fiscal (ZZ, FC B o C) es lo pagado
+  (`costo_real`) más el IVA de un cargo de un tercero, que lo pagado no trae. La cuenta es una,
   `_costo_con_iva_unitario` con `_compra_iva_cargos` (o `_compra_iva_cargos_de_linea` desde las filas):
   el alta, la edición y `_reposicion_desde_ultima_compra`. La ficha lo muestra tal cual y, si se
-  corrige el neto, conserva lo que la compra sumó (`adicionalConIvaDeCompra`). No es base de ningún
+  corrige el neto, conserva lo que la compra sumó (`adicionalConIvaDeCompra`); el server hace lo mismo
+  con lo que guarde cualquier ficha (`trg_productos_costo_con_iva`), mande lo que mande. Los productos
+  que ya existían se recalcularon desde su última compra, salvo los corregidos a mano y los que tomaron
+  el costo de un envío (rastro en `costo_con_iva_recalculos`). No es base de ningún
   precio, margen del server ni CMV: lo leen los envíos (su valor y la reposición del destino), la
   ficha y la exportación.
 - **Dentro de una compra los renglones que fijan costo van antes que los regalos** (#1593 CMP-A):

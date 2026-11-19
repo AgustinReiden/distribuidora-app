@@ -5,9 +5,9 @@
 --
 -- Un único DO con datos propios que termina SIEMPRE en una excepción: no deja rastro (salvo
 -- valores de secuencia). Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ' con la lista. Sin la
--- migración fallan E1, E2, E4, H5, H5P, H5L, C2 a C10, N1 y N2 (19); E3, HG, HZ, C1, C11, RP,
--- ED y N3 son regresiones (dan igual antes y después). También 1593-b1 y el no gravado
--- negativo (#1590).
+-- migración fallan E1, E2, E4, H5 (con N1), C2 a C10, C12, C13, N2, H6, H10 y RC; E3, HG, HZ,
+-- C1, C11, RP, ED, N3, N4 y N5 son regresiones (dan igual antes y después). También 1593-b1,
+-- el no gravado negativo (#1590) y los hallazgos de la revisión adversarial (H1, H5, H6, H10).
 --
 --   E1  · STK-13 · Una ZZ de 100 u. con lotes de 60 y 40 (bolsa 0) corregida a 80 en UNA
 --         llamada que trae los lotes (50 y 30): stock 80, lotes 50/50 y 30/30, bolsa 0, y la
@@ -19,11 +19,12 @@
 --         sincronizar_lotes_compra deja lo mismo que E1 (regresión).
 --   E4  · STK-13 · Después de E1, repetir sincronizar_lotes_compra con la misma foto (el
 --         «Reintentar» de un PWA de antes) no cambia nada: es inocua.
---   H5  · 1590-b · FC A de 10 × 100 al 21 % con un descuento NO gravado de −150 en factura
---         (total 1.060, mandado directo: el front no la deja cargar): devolver todo acredita
---         1.060 (850 de neto y los 210 de IVA, que el descuento no gravado no bajó), no 1.210.
---   H5P · lo mismo devolviendo 5 u.: 530 (425 + 105).
---   H5L · lo mismo por lote (Vencimientos): las 10 u. del lote acreditan 1.060.
+--   H5  · 1590-b · FC A con P1 gravado (10 × 100 al 21 %) y P2 no gravado (10 × 20), y un
+--         descuento no gravado de −150 en factura (no gravado −150, total 1.260): devolver todo
+--         acredita 1.085 de P1 (875 + los 210 de IVA, que el descuento no gravado no bajó) y 175 de
+--         P2: 1.260, lo pagado. Sin la migración la compra no se puede cargar.
+--   H5P · lo mismo devolviendo 5 u. de P1: 542,50 (437,50 + 105).
+--   H5L · lo mismo por lote (Vencimientos): las 10 u. de P1 acreditan 1.085.
 --   HG  · FC A de 10 × 100 al 21 % con una bonificación de cabecera gravada de −100 (total
 --         1.089): devolver todo acredita 1.089 (900 + 189), como antes (regresión).
 --   HZ  · ZZ de 10 × 100 con un descuento en factura de −150 (total 850): 850 (regresión).
@@ -45,18 +46,29 @@
 --           C9  ZZ con flete de 300 en factura                      130,00    130,00 (100,00)
 --           C10 producto exento con cargo gravado en factura de 100 110,00    110,00 (100,00)
 --           C11 FC B de 10 × 121 (lo pagado)                        121,00    121,00 (121,00)
+--           C12 ZZ con flete de un tercero de 100 + IVA 21          110,00    112,10 (100,00)
+--           C13 FC B de 10 × 121 con el mismo flete                 131,00    133,10 (121,00)
+--         (C12 y C13: H1 de la revisión. Sin crédito, lo pagado ya trae el IVA del producto, pero
+--         no el del flete de un tercero.)
 --         Y el costo real y el promedio no cambian en ninguno (CR). La reposición recalculada
 --         desde la compra (_reposicion_desde_ultima_compra) da lo mismo que el alta (RP, sobre
 --         C8T), y editar la compra sin cambios también (ED, sobre C4).
 --   N*  · Un descuento sobre renglones exentos o no gravados va a la cabecera «No gravado» con
---         su signo (antes se rechazaba: «importe de la cabecera negativo»).
---           N1  FC A 10 × 100 al 21 % con −150 no gravado en factura, como la manda el front
---               (no gravado −150, total 1.060): entra, cierra COMPRA-A1 y devolver todo acredita
---               1.060.
+--         su signo (antes se rechazaba: «importe de la cabecera negativo»), con tope.
+--           N1  la compra de H5 entra, con no gravado −150 y total 1.260, y cierra COMPRA-A1.
 --           N2  FC A con P1 gravado 10 × 100 y P2 exento 10 × 50, y −50 exento en factura sólo
 --               sobre P2: no gravado −50, total 1.660; el costo de P2 queda en 45 (con IVA 45);
 --               devolver todo P2 acredita 450 y P1 1.210 (suma 1.660).
 --           N3  un no gravado de −200 con descuentos no gravados de −150: se rechaza.
+--           N4  H5 de la revisión: −1.100 no gravado sobre renglones gravados (pagó 110): se
+--               rechaza (antes entraba y devolver todo acreditaba 210).
+--           N5  −300 no gravado con 200 de renglones no gravados: se rechaza con su motivo.
+--   H6  · La ficha de un PWA viejo corrige el neto a 105 con el PATCH de siempre (costo con IVA
+--         127,05, sin el flete): el server lo compone, 139,15. Un PATCH con sólo el costo con IVA
+--         no lo cambia.
+--   H10 · Bajar una compra de 10 de la que salieron 8 a 5: «De “…” ya se vendieron 8: no se
+--         puede bajar la compra a menos de 8.» (antes, el mensaje crudo del CHECK); a 8 entra.
+--   RC  · La tabla del recálculo existe y es sólo de server.
 --
 --   docker exec -i <contenedor> psql -U postgres -h localhost -d postgres -f - < scripts/test-compras-edicion-lotes-y-nc-ola2-1603.sql
 
@@ -283,45 +295,67 @@ BEGIN
   END;
 
   -- ======================================================== H5, H5P, H5L ====
+  -- Una FC A con P1 gravado (10 × 100 al 21 %) y P2 no gravado (10 × 20), y un descuento no
+  -- gravado de −150 en la factura, sin reparto: no gravado −150, total 1.260 (lo pagado).
   DECLARE
-    v_desc jsonb := jsonb_build_array(jsonb_build_object('concepto', 'Descuento', 'monto', -150, 'condicion_iva', 'no_gravado',
-                      'en_factura', true, 'prorratea_al_costo', false, 'base_prorrateo', 'unidades', 'pesos', '{}'::jsonb));
-    v_p1 bigint := pg_temp.producto('H5');
-    v_p2 bigint := pg_temp.producto('H5P');
-    v_p3 bigint := pg_temp.producto('H5L');
-    v_c1 bigint; v_c2 bigint; v_c3 bigint; v_lote bigint;
+    v_lin jsonb;
+    v_c bigint; v_q1 bigint; v_q2 bigint; v_lote bigint;
+    v_t1 text; v_t2 text;
   BEGIN
-    -- Directo a la RPC, como lo dejó la revisión de B2: el no gravado de la cabecera en 0 y el
-    -- total del papel (1.060). La compra nace con el aviso de descuadre (y COMPRA-A1 la cuenta).
-    v_c1 := pg_temp.compra(v_adm, pg_temp.renglon(v_p1, 10, 100, 21), 'FC', 210, 1060, v_desc, 'A');
-    v_j := pg_temp.nc(v_adm, v_c1, v_p1, 10, 1000, 210);
-    v_t := format('%s | sub=%s iva=%s total=%s', v_j->>'success', v_j->>'subtotal', v_j->>'iva', v_j->>'total');
-    IF v_t IS DISTINCT FROM 'true | sub=850.00 iva=210.00 total=1060.00' THEN
-      v_fallas := v_fallas || format('H5 · devolver toda la FC A con −150 no gravado (total 1.060): esperaba sub=850 iva=210 total=1.060 y dio %s', v_t);
-    END IF;
-    v_notas := v_notas || format('H5 · %s', v_t);
-
-    v_c2 := pg_temp.compra(v_adm, pg_temp.renglon(v_p2, 10, 100, 21), 'FC', 210, 1060, v_desc, 'A');
-    v_j := pg_temp.nc(v_adm, v_c2, v_p2, 5, 500, 105);
-    v_t := format('%s | sub=%s iva=%s total=%s', v_j->>'success', v_j->>'subtotal', v_j->>'iva', v_j->>'total');
-    IF v_t IS DISTINCT FROM 'true | sub=425.00 iva=105.00 total=530.00' THEN
-      v_fallas := v_fallas || format('H5P · devolver 5 de la FC A con −150 no gravado: esperaba sub=425 iva=105 total=530 y dio %s', v_t);
-    END IF;
-
-    v_c3 := pg_temp.compra(v_adm, pg_temp.renglon(v_p3, 10, 100, 21), 'FC', 210, 1060, v_desc, 'A');
-    v_j := pg_temp.lotes_compra(v_adm, v_c3, jsonb_build_array(
-             jsonb_build_object('producto_id', v_p3, 'fecha_vencimiento', v_hoy + 30, 'cantidad', 10)));
-    SELECT id INTO v_lote FROM producto_lotes WHERE compra_id = v_c3;
-    PERFORM pg_temp.como(v_adm, 1);
-    BEGIN
-      v_j := public.registrar_nota_credito_lote(v_lote, 10, 'C3-L-' || left(gen_random_uuid()::text, 8), 'vencido c3');
-      v_t := format('sub=%s iva=%s total=%s', v_j->>'subtotal', v_j->>'iva', v_j->>'total');
-    EXCEPTION WHEN OTHERS THEN
-      v_t := 'error ' || SQLERRM;
-    END;
-    IF v_t IS DISTINCT FROM 'sub=850.00 iva=210.00 total=1060.00' THEN
-      v_fallas := v_fallas || format('H5L · la nota por lote de las 10 u.: esperaba sub=850 iva=210 total=1.060 y dio %s', v_t);
-    END IF;
+    FOR i IN 1..3 LOOP
+      v_q1 := pg_temp.producto('H5 gravado ' || i);
+      v_q2 := pg_temp.producto('H5 no gravado ' || i);
+      v_lin := pg_temp.lineas(jsonb_build_array(
+                 jsonb_build_object('producto_id', v_q1, 'cantidad', 10, 'costo_unitario', 100, 'porcentaje_iva', 21, 'condicion_iva', 'gravado'),
+                 jsonb_build_object('producto_id', v_q2, 'cantidad', 10, 'costo_unitario', 20, 'porcentaje_iva', 0, 'condicion_iva', 'no_gravado')));
+      v_j := pg_temp.alta(v_adm, v_lin, 'FC', 210, 1260,
+               jsonb_build_array(pg_temp.cargo(-150, 'no_gravado', true, NULL, '{}'::jsonb)
+                                 || jsonb_build_object('prorratea_al_costo', false)),
+               'A', 0, 0, '{}'::jsonb, -150);
+      IF NOT COALESCE((v_j->>'success')::boolean, false) THEN
+        v_fallas := v_fallas || format('H5 · la FC con P2 no gravado y −150 no gravado no entró: %s', v_j->>'error');
+        EXIT;
+      END IF;
+      v_c := (v_j->>'compra_id')::bigint;
+      IF i = 1 THEN
+        -- N1: entra y cierra COMPRA-A1.
+        v_t := format('no_gravado=%s total=%s A1=%s', (SELECT no_gravado FROM compras WHERE id = v_c),
+                      (SELECT total FROM compras WHERE id = v_c), pg_temp.a1(v_c));
+        IF v_t IS DISTINCT FROM 'no_gravado=-150.00 total=1260.00 A1=t' THEN
+          v_fallas := v_fallas || format('N1 · esperaba no_gravado=-150 total=1260 A1 cerrado y dio %s', v_t);
+        END IF;
+        -- H5: devolver todo acredita lo pagado (P1 875 + 210 de IVA, P2 175).
+        v_j := pg_temp.nc(v_adm, v_c, v_q1, 10, 1000, 210);
+        v_t1 := v_j->>'total';
+        v_j := pg_temp.nc(v_adm, v_c, v_q2, 10, 200, 0);
+        v_t2 := v_j->>'total';
+        v_t := format('P1=%s P2=%s suma=%s', v_t1, v_t2, COALESCE(v_t1::numeric, 0) + COALESCE(v_t2::numeric, 0));
+        IF v_t IS DISTINCT FROM 'P1=1085.00 P2=175.00 suma=1260.00' THEN
+          v_fallas := v_fallas || format('H5 · devolver todo debía acreditar 1.085 + 175 = 1.260 (lo pagado) y dio %s', v_t);
+        END IF;
+        v_notas := v_notas || format('H5 · %s', v_t);
+      ELSIF i = 2 THEN
+        v_j := pg_temp.nc(v_adm, v_c, v_q1, 5, 500, 105);
+        v_t := format('sub=%s iva=%s total=%s', v_j->>'subtotal', v_j->>'iva', v_j->>'total');
+        IF v_t IS DISTINCT FROM 'sub=437.50 iva=105.00 total=542.50' THEN
+          v_fallas := v_fallas || format('H5P · devolver 5 de P1: esperaba sub=437,50 iva=105 total=542,50 y dio %s', v_t);
+        END IF;
+      ELSE
+        v_j := pg_temp.lotes_compra(v_adm, v_c, jsonb_build_array(
+                 jsonb_build_object('producto_id', v_q1, 'fecha_vencimiento', v_hoy + 30, 'cantidad', 10)));
+        SELECT id INTO v_lote FROM producto_lotes WHERE compra_id = v_c;
+        PERFORM pg_temp.como(v_adm, 1);
+        BEGIN
+          v_j := public.registrar_nota_credito_lote(v_lote, 10, 'C3-L-' || left(gen_random_uuid()::text, 8), 'vencido c3');
+          v_t := format('sub=%s iva=%s total=%s', v_j->>'subtotal', v_j->>'iva', v_j->>'total');
+        EXCEPTION WHEN OTHERS THEN
+          v_t := 'error ' || SQLERRM;
+        END;
+        IF v_t IS DISTINCT FROM 'sub=875.00 iva=210.00 total=1085.00' THEN
+          v_fallas := v_fallas || format('H5L · la nota por lote de las 10 u. de P1: esperaba sub=875 iva=210 total=1.085 y dio %s', v_t);
+        END IF;
+      END IF;
+    END LOOP;
   END;
 
   -- ================================================================= HG ====
@@ -375,7 +409,9 @@ BEGIN
       ('C8T', 100, 21, 10, 'gravado', 'FC', 'A', 210, 1290, jsonb_build_array(pg_temp.cargo(100, 'gravado', false, 21)), 0, 80, '{"10": 80}'::jsonb, 0, 'real=118.00 con=141.10 cpp=118.00'),
       ('C9',  100, 0, 0, 'gravado', 'ZZ', NULL, 0, 1300, jsonb_build_array(pg_temp.cargo(300, 'no_gravado', true)), 0, 0, '{}'::jsonb, 0, 'real=130.00 con=130.00 cpp=130.00'),
       ('C10', 100, 0, 0, 'exento', 'FC', 'A', 0, 1100, jsonb_build_array(pg_temp.cargo(100, 'gravado', true)), 100, 0, '{}'::jsonb, 0, 'real=110.00 con=110.00 cpp=110.00'),
-      ('C11', 121, 0, 0, 'gravado', 'FC', 'B', 0, 1210, '[]'::jsonb, 0, 0, '{}'::jsonb, 0, 'real=121.00 con=121.00 cpp=121.00')
+      ('C11', 121, 0, 0, 'gravado', 'FC', 'B', 0, 1210, '[]'::jsonb, 0, 0, '{}'::jsonb, 0, 'real=121.00 con=121.00 cpp=121.00'),
+      ('C12', 100, 0, 0, 'gravado', 'ZZ', NULL, 0, 1000, jsonb_build_array(pg_temp.cargo(100, 'gravado', false, 21)), 0, 0, '{}'::jsonb, 0, 'real=110.00 con=112.10 cpp=110.00'),
+      ('C13', 121, 0, 0, 'gravado', 'FC', 'B', 0, 1210, jsonb_build_array(pg_temp.cargo(100, 'gravado', false, 21)), 0, 0, '{}'::jsonb, 0, 'real=131.00 con=133.10 cpp=131.00')
     ) AS t(caso, costo, pct, ii, cond, tipo, letra, iva, total, cargos, bonif, ii_hdr, ii_decl, no_grav, esperado) LOOP
       v_p := pg_temp.producto(r.caso);
       v_lin := pg_temp.lineas(jsonb_build_array(jsonb_build_object(
@@ -429,34 +465,13 @@ BEGIN
 
   -- ================================================================== N* ====
   DECLARE
-    v_p1 bigint := pg_temp.producto('N1');
     v_q1 bigint := pg_temp.producto('N2 gravado');
     v_q2 bigint := pg_temp.producto('N2 exento');
-    v_p3 bigint := pg_temp.producto('N3');
     v_c bigint;
     v_tot numeric := 0;
+    v_mixta jsonb;
   BEGIN
-    -- N1
-    v_j := pg_temp.alta(v_adm, pg_temp.renglon(v_p1, 10, 100, 21), 'FC', 210, 1060,
-             jsonb_build_array(pg_temp.cargo(-150, 'no_gravado', true, NULL, '{}'::jsonb)
-                               || jsonb_build_object('prorratea_al_costo', false)),
-             'A', 0, 0, '{}'::jsonb, -150);
-    IF NOT COALESCE((v_j->>'success')::boolean, false) THEN
-      v_fallas := v_fallas || format('N1 · la FC con −150 no gravado no entró: %s', v_j->>'error');
-    ELSE
-      v_c := (v_j->>'compra_id')::bigint;
-      v_t := format('no_gravado=%s total=%s A1=%s', (SELECT no_gravado FROM compras WHERE id = v_c),
-                    (SELECT total FROM compras WHERE id = v_c), pg_temp.a1(v_c));
-      IF v_t IS DISTINCT FROM 'no_gravado=-150.00 total=1060.00 A1=t' THEN
-        v_fallas := v_fallas || format('N1 · esperaba no_gravado=-150 total=1060 A1 cerrado y dio %s', v_t);
-      END IF;
-      v_j := pg_temp.nc(v_adm, v_c, v_p1, 10, 1000, 210);
-      IF (v_j->>'total') IS DISTINCT FROM '1060.00' THEN
-        v_fallas := v_fallas || format('N1 · devolver todo debía acreditar 1.060 y dio %s', v_j);
-      END IF;
-    END IF;
-
-    -- N2
+    -- N2 · −50 exento sólo sobre el renglón exento.
     v_j := pg_temp.alta(v_adm, pg_temp.lineas(jsonb_build_array(
              jsonb_build_object('producto_id', v_q1, 'cantidad', 10, 'costo_unitario', 100, 'porcentaje_iva', 21, 'condicion_iva', 'gravado'),
              jsonb_build_object('producto_id', v_q2, 'cantidad', 10, 'costo_unitario', 50, 'porcentaje_iva', 0, 'condicion_iva', 'exento'))),
@@ -481,15 +496,103 @@ BEGIN
       END IF;
     END IF;
 
-    -- N3
-    v_j := pg_temp.alta(v_adm, pg_temp.renglon(v_p3, 10, 100, 21), 'FC', 210, 1010,
-             jsonb_build_array(pg_temp.cargo(-150, 'no_gravado', true, NULL, '{}'::jsonb)
-                               || jsonb_build_object('prorratea_al_costo', false)),
+    -- Una FC A con P1 gravado 10 × 100 y P2 no gravado 10 × 20 (para N3 y N5).
+    v_mixta := pg_temp.lineas(jsonb_build_array(
+                 jsonb_build_object('producto_id', pg_temp.producto('N3 gravado'), 'cantidad', 10, 'costo_unitario', 100, 'porcentaje_iva', 21, 'condicion_iva', 'gravado'),
+                 jsonb_build_object('producto_id', pg_temp.producto('N3 no gravado'), 'cantidad', 10, 'costo_unitario', 20, 'porcentaje_iva', 0, 'condicion_iva', 'no_gravado')));
+
+    -- N3 · el no gravado de la cabecera (−200) no baja más que los descuentos no gravados (−150).
+    v_j := pg_temp.alta(v_adm, v_mixta, 'FC', 210, 1210,
+             jsonb_build_array(pg_temp.cargo(-150, 'no_gravado', true, NULL, '{}'::jsonb) || jsonb_build_object('prorratea_al_costo', false)),
              'A', 0, 0, '{}'::jsonb, -200);
     IF COALESCE((v_j->>'success')::boolean, true) THEN
       v_fallas := v_fallas || format('N3 · un no gravado de −200 con −150 de descuentos debía rechazarse y dio %s', v_j);
     END IF;
+
+    -- N4 · H5 de la revisión: −1.100 no gravado en una FC A sólo con renglones gravados (pagó 110).
+    v_j := pg_temp.alta(v_adm, pg_temp.renglon(pg_temp.producto('N4'), 10, 100, 21), 'FC', 210, 110,
+             jsonb_build_array(pg_temp.cargo(-1100, 'no_gravado', true, NULL, '{}'::jsonb) || jsonb_build_object('prorratea_al_costo', false)),
+             'A', 0, 0, '{}'::jsonb, -1100);
+    IF COALESCE((v_j->>'success')::boolean, true) THEN
+      v_fallas := v_fallas || format('N4 · un descuento no gravado sobre renglones gravados debía rechazarse y dio %s', v_j);
+    END IF;
+
+    -- N5 · −300 no gravado con sólo 200 de renglones no gravados: se rechaza con su motivo.
+    v_j := pg_temp.alta(v_adm, v_mixta, 'FC', 210, 1110,
+             jsonb_build_array(pg_temp.cargo(-300, 'no_gravado', true, NULL, '{}'::jsonb) || jsonb_build_object('prorratea_al_costo', false)),
+             'A', 0, 0, '{}'::jsonb, -300);
+    IF COALESCE((v_j->>'success')::boolean, true)
+       OR COALESCE(v_j->>'error', '') NOT LIKE 'El descuento no gravado de la factura (300.00) es mayor que lo que suman sus renglones no gravados (200.00)%' THEN
+      v_fallas := v_fallas || format('N5 · −300 no gravado contra 200 de renglones no gravados debía rechazarse con su motivo y dio %s', v_j);
+    END IF;
   END;
+
+  -- ================================================================= H6 ====
+  -- La ficha de un PWA viejo corrige el neto de un producto cuya compra dejó el flete de un
+  -- tercero en el costo con IVA (100 + 10 de flete + 2,10 de su IVA: 133,10): manda el PATCH
+  -- REST de siempre, con costo_con_iva = 105 × 1,21 = 127,05 (sin el flete). El server lo compone:
+  -- 105 × 1,21 + 12,10 = 139,15. Y un PATCH que sólo trae costo_con_iva no lo cambia.
+  DECLARE
+    v_p bigint := pg_temp.producto('H6');
+    v_lin jsonb;
+  BEGIN
+    v_lin := pg_temp.renglon(v_p, 10, 100, 21);
+    v_j := pg_temp.alta(v_adm, v_lin, 'FC', 210, 1210, jsonb_build_array(pg_temp.cargo(100, 'gravado', false, 21)),
+                        'A', 0, 0, '{}'::jsonb, 0);
+    PERFORM pg_temp.como(v_adm, 1);
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    EXECUTE format('UPDATE public.productos SET costo_sin_iva = 105, costo_con_iva = 127.05, costo_real = 115 WHERE id = %s', v_p);
+    EXECUTE 'RESET ROLE';
+    v_t := (SELECT format('sin=%s con=%s', costo_sin_iva, costo_con_iva) FROM productos WHERE id = v_p);
+    IF v_t IS DISTINCT FROM 'sin=105.00 con=139.15' THEN
+      v_fallas := v_fallas || format('H6 · la ficha vieja corrigió el neto a 105: esperaba con=139,15 (con el flete y su IVA) y dio %s', v_t);
+    END IF;
+    PERFORM pg_temp.como(v_adm, 1);
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    EXECUTE format('UPDATE public.productos SET costo_con_iva = 127.05 WHERE id = %s', v_p);
+    EXECUTE 'RESET ROLE';
+    v_t := (SELECT format('sin=%s con=%s', costo_sin_iva, costo_con_iva) FROM productos WHERE id = v_p);
+    IF v_t IS DISTINCT FROM 'sin=105.00 con=139.15' THEN
+      v_fallas := v_fallas || format('H6 · un PATCH con sólo el costo con IVA no lo cambia: esperaba con=139,15 y dio %s', v_t);
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    EXECUTE 'RESET ROLE';
+    v_fallas := v_fallas || format('H6 · %s %s', SQLSTATE, SQLERRM);
+  END;
+
+  -- ================================================================ H10 ====
+  -- Una ZZ de 10 u. de las que salieron 8: bajarla a 5 se rechaza con su motivo; a 8, entra.
+  DECLARE
+    v_p bigint := pg_temp.producto('H10');
+    v_c bigint;
+  BEGIN
+    v_c := pg_temp.compra(v_adm, pg_temp.renglon(v_p, 10, 10, 0), 'ZZ', 0, 100);
+    PERFORM set_config('app.stock_origen', 'ajuste_manual', true);
+    PERFORM set_config('app.stock_ref_tipo', 'ensayo', true);
+    PERFORM set_config('app.stock_ref_id', '1', true);
+    PERFORM set_config('app.stock_user_id', v_adm::text, true);
+    UPDATE public.productos SET stock = stock - 8 WHERE id = v_p;
+    PERFORM set_config('app.stock_origen', '', true);
+    v_j := pg_temp.editar(v_adm, v_c, pg_temp.renglon(v_p, 5, 10, 0), NULL);
+    IF COALESCE((v_j->>'success')::boolean, true)
+       OR COALESCE(v_j->>'error', '') NOT LIKE 'De «C3 H10 %» ya se vendieron 8: no se puede bajar la compra a menos de 8.' THEN
+      v_fallas := v_fallas || format('H10 · bajar a 5 una compra de la que salieron 8: esperaba el rechazo con su motivo y dio %s', v_j);
+    END IF;
+    v_j := pg_temp.editar(v_adm, v_c, pg_temp.renglon(v_p, 8, 10, 0), NULL);
+    IF NOT COALESCE((v_j->>'success')::boolean, false) OR (SELECT stock FROM productos WHERE id = v_p) <> 0 THEN
+      v_fallas := v_fallas || format('H10 · bajarla a 8 debía entrar y dejar stock 0, y dio %s', v_j);
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_fallas := v_fallas || format('H10 · %s %s', SQLSTATE, SQLERRM);
+  END;
+
+  -- ================================================================= RC ====
+  -- El rastro del recálculo: sólo de server.
+  IF to_regclass('public.costo_con_iva_recalculos') IS NULL
+     OR has_table_privilege('authenticated', 'public.costo_con_iva_recalculos', 'SELECT')
+     OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = to_regclass('public.costo_con_iva_recalculos')) THEN
+    v_fallas := v_fallas || 'RC · falta la tabla del recálculo, o la ve la API'::text;
+  END IF;
 
   RAISE EXCEPTION USING ERRCODE = 'ZZ001';
  EXCEPTION WHEN SQLSTATE 'ZZ001' THEN NULL;
@@ -499,7 +602,7 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = format(E'ENSAYO FALLÓ (%s fallas, todo revertido):\n- %s\nnotas:\n  %s',
       cardinality(v_fallas), array_to_string(v_fallas, E'\n- '), array_to_string(v_notas, E'\n  '));
   END IF;
-  RAISE EXCEPTION USING ERRCODE = 'ZZ0OK', MESSAGE = format(E'ENSAYO OK (todo revertido) · E1 E2 E3 E4 H5 H5P H5L HG HZ C1-C11 RP ED N1 N2 N3\nnotas:\n  %s',
+  RAISE EXCEPTION USING ERRCODE = 'ZZ0OK', MESSAGE = format(E'ENSAYO OK (todo revertido) · E1 E2 E3 E4 H5 H5P H5L HG HZ C1-C13 RP ED N1-N5 H6 H10 RC\nnotas:\n  %s',
     array_to_string(v_notas, E'\n  '));
 END
 $ensayo$;

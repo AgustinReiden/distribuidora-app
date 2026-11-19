@@ -7,7 +7,9 @@
 --
 -- Ensayo: scripts/test-compras-edicion-lotes-y-nc-ola2-1603.sql. Dos sesiones:
 -- scripts/concurrencia/c3-edicion-compra-y-venta.sh. Se aplica en LF.
--- Sólo reemplaza funciones: ninguna tabla cambia y no toma locks de tabla.
+-- Toma un lock de tabla: `LOCK TABLE compras ACCESS EXCLUSIVE NOWAIT` al principio, por el CHECK de
+-- la sección 4 (o lo consigue al instante o falla y se reintenta). Crea una tabla sólo de server (la
+-- del recálculo de la sección 5) y un trigger en productos (sección 6). Se aplica sobre la 531.
 --
 -- =========================================================================
 -- 1 · STK-13: LA EDICIÓN Y SUS LOTES, UNA SOLA TRANSACCIÓN
@@ -57,18 +59,21 @@
 --   · Las dos puertas: la nota por compra (registrar_nota_credito) y la nota
 --     por lote de Vencimientos (registrar_nota_credito_lote). La cuenta vive en
 --     una función, _compra_factor(compra, producto, sucursal, para_iva).
---   · Desde el front de hoy esa compra no se puede cargar: el front suma el
---     descuento a la cabecera «No gravado», que no puede ser negativa, y la RPC
---     la rechaza. Se llega mandándola directo (o tipeando el no gravado a mano),
---     y nace con el aviso de descuadre (COMPRA-A1 la cuenta, como siempre).
+--   · Un descuento no gravado sólo puede caer sobre renglones no gravados (y uno
+--     exento sobre exentos): la sección 4 le pone ese tope, así que «devolver todo»
+--     cierra contra lo pagado.
 -- =========================================================================
 
 BEGIN;
 
 SET LOCAL lock_timeout = '5s';
 
--- La sección 4 cambia un CHECK de compras: el lock de la tabla, primero y sin esperar.
+-- La sección 4 cambia un CHECK de compras, y la 5 y la 6 escriben productos y le crean un
+-- trigger: los locks de las dos tablas, primero, en el orden de la compra (compras, después
+-- productos) y sin esperar. Productos en SHARE ROW EXCLUSIVE: alcanza para el trigger y el
+-- recálculo, y deja leer el catálogo mientras tanto (frena las escrituras, segundos).
 LOCK TABLE public.compras IN ACCESS EXCLUSIVE MODE NOWAIT;
+LOCK TABLE public.productos IN SHARE ROW EXCLUSIVE MODE NOWAIT;
 
 DO $lf$
 BEGIN
@@ -79,7 +84,7 @@ END
 $lf$;
 
 -- ---------------------------------------------------------------------------
--- Premisas: los cuerpos vivos de producción en la 530.
+-- Premisas: los cuerpos vivos de producción en la 531 (los mismos md5 que la 530).
 -- ---------------------------------------------------------------------------
 DO $premisas$
 DECLARE
@@ -95,11 +100,16 @@ BEGIN
     ('public.prorratear_cargo(numeric,jsonb)', '3d96a1fb66ba9549ec72892eb5f3ed59'),
     ('public.registrar_compra_completa(bigint,character varying,character varying,date,numeric,numeric,numeric,numeric,character varying,text,uuid,jsonb,character varying,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,text)', '9f1c391db98056da0d89de7d16a3e171'),
     ('public._reposicion_desde_ultima_compra(bigint,bigint)', '322d0edf2363c1ccf22785a1f8f54200'),
-    ('public.costo_real_unitario(numeric,numeric,text,numeric)', 'ce489a035552349e45549cf70bca4c23')
+    ('public.costo_real_unitario(numeric,numeric,text,numeric)', 'ce489a035552349e45549cf70bca4c23'),
+    ('public.costo_financiero_unitario(numeric,numeric,numeric,text)', NULL),
+    ('public._tipo_compra_producto(text,text)', NULL),
+    ('public._cpp_fija_costo(numeric,numeric,numeric)', NULL),
+    ('public._compra_producto_devuelto(bigint,bigint,bigint)', NULL)
   ) AS t(f, h) LOOP
     IF to_regprocedure(r.f) IS NULL THEN
       RAISE EXCEPTION 'mig NNN · % no existe: rehacer sobre lo vigente', r.f;
     END IF;
+    IF r.h IS NULL THEN CONTINUE; END IF;
     SELECT md5(prosrc) INTO v FROM pg_proc WHERE oid = r.f::regprocedure;
     IF v IS DISTINCT FROM r.h THEN
       RAISE EXCEPTION 'mig NNN · % cambió desde que se leyó (md5 %): rehacer sobre el cuerpo vigente', r.f, v;
@@ -110,9 +120,16 @@ BEGIN
      OR to_regprocedure('public._compra_iva_cargos(jsonb,jsonb)') IS NOT NULL
      OR to_regprocedure('public._compra_iva_cargos_de_linea(bigint)') IS NOT NULL
      OR to_regprocedure('public._costo_con_iva_unitario(numeric,numeric,numeric,boolean,numeric)') IS NOT NULL
+     OR to_regprocedure('public._compra_descuento_fuera_de_tope(jsonb,jsonb,boolean)') IS NOT NULL
+     OR to_regprocedure('public.productos_componer_costo_con_iva()') IS NOT NULL
+     OR to_regclass('public.costo_con_iva_recalculos') IS NOT NULL
      OR (SELECT count(*) FROM pg_proc
           WHERE pronamespace = 'public'::regnamespace AND proname = 'actualizar_compra_items') <> 1 THEN
     RAISE EXCEPTION 'mig NNN · algo de esta migración ya existe: revisar a mano';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = 'public.registrar_compra_completa(bigint,character varying,character varying,date,numeric,numeric,numeric,numeric,character varying,text,uuid,jsonb,character varying,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,text)'::regprocedure
+                  AND proconfig @> ARRAY['search_path=public, pg_temp']) THEN
+    RAISE EXCEPTION 'mig NNN · la base no está en la 531 (search_path sin pg_temp): aplicar sobre la 531';
   END IF;
   -- El CHECK de la cabecera de compras es el de la 530 (la sección 4 lo afloja en no_gravado).
   IF (SELECT pg_get_constraintdef(oid) FROM pg_constraint
@@ -231,12 +248,6 @@ DECLARE
     'public.registrar_nota_credito(bigint,character varying,text,numeric,numeric,numeric,uuid,jsonb,numeric)'::regprocedure);
 BEGIN
   v_def := pg_temp.parche(v_def,
-    $a$ SET search_path TO 'public'
-$a$,
-    $n$ SET search_path TO 'public', 'pg_temp'
-$n$,
-    'registrar_nota_credito (search_path)');
-  v_def := pg_temp.parche(v_def,
     $a$               round(round(pe.cantidad * co.neto / co.comprado * fx.f, 2)
                      * COALESCE(co.base_iva / NULLIF(co.neto, 0), 0) / 100, 2) AS iva,$a$,
     $n$               -- mig NNN (H5): el IVA con su factor; un descuento no gravado no lo bajó.
@@ -257,12 +268,6 @@ DO $ncl$
 DECLARE
   v_def text := pg_get_functiondef('public.registrar_nota_credito_lote(bigint,numeric,text,text)'::regprocedure);
 BEGIN
-  v_def := pg_temp.parche(v_def,
-    $a$ SET search_path TO 'public'
-$a$,
-    $n$ SET search_path TO 'public', 'pg_temp'
-$n$,
-    'registrar_nota_credito_lote (search_path)');
   v_def := pg_temp.parche(v_def,
     $a$  v_aviso_rep  text;     -- mig NNN (1557-b5)
 $a$,
@@ -361,7 +366,9 @@ GRANT EXECUTE ON FUNCTION public._compra_iva_cargos_de_linea(bigint) TO service_
 -- El costo con IVA por unidad (decisión del dueño, 19/11): el costo neto (costo_real: neto del
 -- producto + impuestos internos + cargos netos + flete neto) más el IVA de cada componente
 -- que lo lleva: el del producto a su alícuota y el de los cargos (p_iva_cargos, por unidad).
--- Sin crédito fiscal (ZZ, FC B o C) lo pagado ya lo incluye todo: es el costo real.
+-- Sin crédito fiscal (ZZ, FC B o C) lo pagado ya trae el IVA del producto y de sus cargos en
+-- factura (el motor los ve a alícuota 0): se suma sólo el IVA que trae un cargo de un tercero
+-- (H1 de la revisión: ZZ de 10 × 100 con un flete de un tercero de 100 + 21 da 112,10).
 CREATE FUNCTION public._costo_con_iva_unitario(p_costo_real numeric, p_neto numeric, p_pct_iva numeric,
                                                p_sin_credito boolean, p_iva_cargos numeric)
  RETURNS numeric
@@ -369,24 +376,67 @@ CREATE FUNCTION public._costo_con_iva_unitario(p_costo_real numeric, p_neto nume
  IMMUTABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-  SELECT CASE WHEN p_sin_credito THEN p_costo_real
+  SELECT CASE WHEN p_sin_credito THEN round(p_costo_real + COALESCE(p_iva_cargos, 0), 4)
               ELSE round(p_costo_real + COALESCE(p_neto, 0) * COALESCE(p_pct_iva, 0) / 100
                          + COALESCE(p_iva_cargos, 0), 4) END;
 $function$;
 REVOKE ALL ON FUNCTION public._costo_con_iva_unitario(numeric, numeric, numeric, boolean, numeric) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._costo_con_iva_unitario(numeric, numeric, numeric, boolean, numeric) TO service_role;
 
+-- H5 de la revisión: el tope de un descuento no gravado o exento de la factura. En una FC con
+-- crédito fiscal, un descuento no gravado no pasa de lo que suman los renglones no gravados, y
+-- uno exento, de los exentos: un descuento sobre renglones gravados va como bonificación gravada
+-- (baja el neto y su IVA). Sin el tope, una FC A de 10 × 100 al 21 % con −1.100 no gravado
+-- (pagó 110) cerraba COMPRA-A1 y devolver todo acreditaba 210. En una FC B o C (sin crédito, sus
+-- renglones son todos «gravados» para el motor) la suma de esos descuentos no pasa del subtotal.
+-- Devuelve el motivo, o NULL si está dentro del tope. Lo usan el alta y la edición.
+CREATE FUNCTION public._compra_descuento_fuera_de_tope(p_items jsonb, p_cargos jsonb, p_sin_credito boolean)
+ RETURNS text
+ LANGUAGE sql
+ IMMUTABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  WITH lin AS (
+    SELECT CASE WHEN p_sin_credito THEN 'gravado'
+                WHEN COALESCE(i.val->>'condicion_iva', 'gravado') IN ('exento', 'no_gravado') THEN i.val->>'condicion_iva'
+                ELSE 'gravado' END AS cond,
+           CASE WHEN jsonb_typeof(i.val->'subtotal') = 'number' THEN round((i.val->>'subtotal')::numeric, 2) ELSE 0 END AS neto
+      FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_items) = 'array' THEN p_items ELSE '[]'::jsonb END) AS i(val)
+  ), des AS (
+    SELECT COALESCE(c.val->>'condicion_iva', 'no_gravado') AS cond, -round((c.val->>'monto')::numeric, 2) AS monto
+      FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_cargos) = 'array' THEN p_cargos ELSE '[]'::jsonb END) AS c(val)
+     WHERE jsonb_typeof(c.val->'monto') = 'number' AND (c.val->>'monto')::numeric < 0
+       AND COALESCE(c.val->>'condicion_iva', 'no_gravado') IN ('exento', 'no_gravado')
+       AND COALESCE(NULLIF(c.val->'en_factura', 'null'::jsonb), 'true'::jsonb) = 'true'::jsonb
+  ), por AS (
+    SELECT k.cond,
+           COALESCE((SELECT sum(d.monto) FROM des d WHERE p_sin_credito OR d.cond = k.cond), 0) AS descuento,
+           COALESCE((SELECT sum(l.neto) FROM lin l WHERE p_sin_credito OR l.cond = k.cond), 0) AS renglones
+      FROM (VALUES ('no_gravado'), ('exento')) AS k(cond)
+  )
+  SELECT CASE WHEN p_sin_credito
+              THEN format('El descuento de la factura (%s) es mayor que lo que suman sus renglones (%s): revisá el monto.',
+                          to_char(p.descuento, 'FM999999999990.00'), to_char(p.renglones, 'FM999999999990.00'))
+              ELSE format('El descuento %s de la factura (%s) es mayor que lo que suman sus renglones %s (%s): un descuento sobre renglones gravados va como bonificación gravada.',
+                          CASE p.cond WHEN 'exento' THEN 'exento' ELSE 'no gravado' END,
+                          to_char(p.descuento, 'FM999999999990.00'),
+                          CASE p.cond WHEN 'exento' THEN 'exentos' ELSE 'no gravados' END,
+                          to_char(p.renglones, 'FM999999999990.00'))
+         END
+    FROM por p
+   WHERE p.descuento > p.renglones
+     AND (NOT p_sin_credito OR p.cond = 'no_gravado')
+   ORDER BY p.cond DESC
+   LIMIT 1;
+$function$;
+REVOKE ALL ON FUNCTION public._compra_descuento_fuera_de_tope(jsonb, jsonb, boolean) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._compra_descuento_fuera_de_tope(jsonb, jsonb, boolean) TO service_role;
+
 -- La reposición desde la última compra (corregirla, anularla, una nota que la devuelve).
 DO $rep$
 DECLARE
   v_def text := pg_get_functiondef('public._reposicion_desde_ultima_compra(bigint,bigint)'::regprocedure);
 BEGIN
-  v_def := pg_temp.parche(v_def,
-    $a$ SET search_path TO 'public'
-$a$,
-    $n$ SET search_path TO 'public', 'pg_temp'
-$n$,
-    '_reposicion_desde_ultima_compra (search_path)');
   v_def := pg_temp.parche(v_def,
     $a$  SELECT c.tipo_factura, c.letra_comprobante, c.created_at, ci.costo_unitario, ci.bonificacion,$a$,
     $n$  SELECT ci.id AS item_id, c.tipo_factura, c.letra_comprobante, c.created_at, ci.costo_unitario, ci.bonificacion,$n$,
@@ -419,12 +469,6 @@ DECLARE
   v_def text := pg_get_functiondef(
     'public.registrar_compra_completa(bigint,character varying,character varying,date,numeric,numeric,numeric,numeric,character varying,text,uuid,jsonb,character varying,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,text)'::regprocedure);
 BEGIN
-  v_def := pg_temp.parche(v_def,
-    $a$ SET search_path TO 'public'
-$a$,
-    $n$ SET search_path TO 'public', 'pg_temp'
-$n$,
-    'registrar_compra_completa (search_path)');
   v_def := pg_temp.parche(v_def,
     $a$  v_costos_por_linea    JSONB;       -- {indice: {costo_real, cargos, ...}}
 $a$,
@@ -471,6 +515,20 @@ $n$,
               AND COALESCE(c.val->>'condicion_iva', 'no_gravado') <> 'gravado'
               AND COALESCE(NULLIF(c.val->'en_factura', 'null'::JSONB), 'true'::JSONB) = 'true'::JSONB), 0))) THEN$n$,
     'registrar_compra_completa (el no gravado)');
+  v_def := pg_temp.parche(v_def,
+    $a$      'Hay un importe de la cabecera negativo: sólo la bonificación de la factura puede serlo. Revisá los importes.');
+  END IF;
+$a$,
+    $n$      'Hay un importe de la cabecera negativo: sólo la bonificación de la factura puede serlo. Revisá los importes.');
+  END IF;
+  /* mig NNN (H5 de la revision de C3, #1590) · un descuento no gravado o exento no pasa de lo que
+     suman los renglones de esa condicion: si no, devolver todo acreditaba mas que lo pagado. */
+  v_motivo := CASE WHEN v_es_zz THEN NULL ELSE public._compra_descuento_fuera_de_tope(p_items, p_cargos, v_sin_credito) END;
+  IF v_motivo IS NOT NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', v_motivo);
+  END IF;
+$n$,
+    'registrar_compra_completa (el tope de los descuentos)');
   EXECUTE v_def;
 END
 $rcc$;
@@ -487,12 +545,6 @@ BEGIN
     $a$p_renglones_vistos bigint[] DEFAULT NULL::bigint[])$a$,
     $n$p_renglones_vistos bigint[] DEFAULT NULL::bigint[], p_lotes jsonb DEFAULT NULL::jsonb)$n$,
     'actualizar_compra_items (firma)');
-  v_def := pg_temp.parche(v_def,
-    $a$ SET search_path TO 'public'
-$a$,
-    $n$ SET search_path TO 'public', 'pg_temp'
-$n$,
-    'actualizar_compra_items (search_path)');
   v_def := pg_temp.parche(v_def,
     $a$  v_fuera_de_rango   TEXT;      -- los rangos del renglon (los mismos que el alta)
 $a$,
@@ -600,6 +652,51 @@ $n$,
               AND COALESCE(c.val->>'condicion_iva', 'no_gravado') <> 'gravado'
               AND COALESCE(NULLIF(c.val->'en_factura', 'null'::JSONB), 'true'::JSONB) = 'true'::JSONB), 0))) THEN$n$,
     'actualizar_compra_items (el no gravado)');
+  v_def := pg_temp.parche(v_def,
+    $a$      'Hay un importe de la cabecera negativo: sólo la bonificación de la factura puede serlo. Revisá los importes.');
+  END IF;
+$a$,
+    $n$      'Hay un importe de la cabecera negativo: sólo la bonificación de la factura puede serlo. Revisá los importes.');
+  END IF;
+  /* mig NNN (H5 de la revision de C3, #1590) · el tope de los descuentos no gravados o exentos (ver el alta). */
+  v_motivo := CASE WHEN v_compra.tipo_factura = 'ZZ' THEN NULL
+                   ELSE public._compra_descuento_fuera_de_tope(p_items_nuevos, p_cargos,
+                          COALESCE(v_compra.letra_comprobante, 'A') IN ('B', 'C')) END;
+  IF v_motivo IS NOT NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', v_motivo);
+  END IF;
+$n$,
+    'actualizar_compra_items (el tope de los descuentos)');
+  -- H10 de la revisión: bajar la compra por debajo de lo que ya salió, con su motivo y antes de tocar nada.
+  v_def := pg_temp.parche(v_def,
+    $a$  /* mig 482 (STK-2, #1516) · LO QUE LA EDICION LE SACA A UN PRODUCTO CON$a$,
+    $n$  /* mig NNN (H10 de la revision de C3) · BAJAR LA COMPRA POR DEBAJO DE LO QUE YA SALIO.
+     Daba el mensaje crudo del CHECK productos_stock_no_negativo (el chequeo amable de mas
+     abajo mira despues del UPDATE y nunca llegaba). Con los productos ya tomados: si lo que
+     la edicion le saca a un producto es mas que su stock de hoy, ya salieron unidades de
+     esta compra que la edicion no puede devolver. */
+  SELECT format('de «%s» ya se vendieron %s: no se puede bajar la compra a menos de %s',
+                pr.nombre, b.viejas - pr.stock, b.viejas - pr.stock)
+    INTO v_motivo
+    FROM (SELECT v.producto_id, v.qty_old AS viejas, COALESCE(n.qty_new, 0) AS nuevas
+            FROM (SELECT producto_id, SUM(cantidad)::INT AS qty_old
+                    FROM compra_items
+                   WHERE compra_id = p_compra_id AND sucursal_id = v_sucursal
+                   GROUP BY producto_id) v
+            LEFT JOIN (SELECT (item->>'producto_id')::BIGINT AS producto_id,
+                              SUM((item->>'cantidad')::INT)::INT AS qty_new
+                         FROM jsonb_array_elements(p_items_nuevos) AS item
+                        GROUP BY 1) n USING (producto_id)) b
+    JOIN productos pr ON pr.id = b.producto_id AND pr.sucursal_id = v_sucursal
+   WHERE b.viejas - b.nuevas > pr.stock
+   ORDER BY pr.id
+   LIMIT 1;
+  IF v_motivo IS NOT NULL THEN
+    RAISE EXCEPTION '%', upper(left(v_motivo, 1)) || substr(v_motivo, 2) || '.';
+  END IF;
+
+  /* mig 482 (STK-2, #1516) · LO QUE LA EDICION LE SACA A UN PRODUCTO CON$n$,
+    'actualizar_compra_items (lo ya vendido)');
   EXECUTE v_def;
 END
 $acu$;
@@ -633,6 +730,189 @@ ALTER TABLE public.compras
 COMMENT ON COLUMN public.compras.no_gravado IS
   'Los conceptos no gravados o exentos de la factura, con el signo de sus descuentos (mig NNN, #1590): un descuento sobre renglones exentos o no gravados lo baja, y puede quedar negativo.';
 
+-- =========================================================================
+-- 5 · El recálculo de los productos que ya existen (decisión del dueño, 19/11: «Sí, recalculalos»)
+-- =========================================================================
+-- Cada producto toma el costo con IVA que le dejaría volver a guardar su última compra con la
+-- regla nueva: la misma cuenta que _reposicion_desde_ultima_compra (la compra más nueva que fija
+-- costo, sin las devueltas enteras; la alícuota y el II del renglón, o los del producto si el
+-- renglón no los guardó). Sólo costo_con_iva: el neto, el real y el promedio no se tocan.
+--
+-- Resguardos (H2, H3 y H4 de la revisión):
+--   · Sólo un producto cuyos tres costos de hoy son EXACTAMENTE los que dejó esa compra con la
+--     regla vieja: costo_sin_iva = round(neto del renglón, 2), costo_real = el costo real del
+--     renglón (el que la reposición copia) y costo_con_iva = round(costo_financiero_unitario del
+--     renglón, 2) (lo que escribían el alta y la reposición). Uno corregido a mano en la ficha (o
+--     con un costo de otra época) no cierra con su compra y queda afuera: pisarle sólo el costo
+--     con IVA dejaba los tres costos sin cerrar entre sí.
+--   · Uno que tomó su costo de un envío aceptado después de esa compra, afuera (la reposición del
+--     destino es la del envío).
+--   · Rastro: cada cambio queda en costo_con_iva_recalculos (antes, después, la compra y el
+--     renglón de los que salió) y, como todo UPDATE de productos, en audit_logs por
+--     audit_productos_update. La tabla y no sólo audit_logs: audit_logs no dice de qué compra
+--     salió, se purga a los 24 meses y deshacer desde su JSON es frágil; el guion de deshacer lee
+--     la tabla.
+--   · Idempotente: reaplicarlo no cambia nada (un producto recalculado ya no tiene el costo con
+--     IVA de la regla vieja, y uno igual no se escribe).
+-- El UPDATE dispara, de productos: trigger_update_productos_timestamp (updated_at),
+-- audit_productos_update (la fila de auditoría), productos_proteger_columnas y
+-- trg_validar_subcategoria_producto (no hacen nada para el dueño de la migración ni con la
+-- subcategoría sin cambiar), trg_lotes_sincronizar y trg_stock_historico (no hacen nada sin
+-- cambio de stock). Ninguno de precios.
+CREATE TABLE public.costo_con_iva_recalculos (
+  id                     bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  producto_id            bigint NOT NULL,
+  sucursal_id            bigint NOT NULL,
+  costo_con_iva_antes    numeric(12,2),
+  costo_con_iva_despues  numeric(12,2) NOT NULL,
+  compra_id              bigint NOT NULL,
+  compra_item_id         bigint NOT NULL,
+  motivo                 text NOT NULL DEFAULT '1593-b1: recálculo de la migración NNN (decisión del dueño del 19/11)',
+  created_at             timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT costo_con_iva_recalculos_no_nan CHECK (costo_con_iva_antes <> 'NaN' AND costo_con_iva_despues <> 'NaN')
+);
+ALTER TABLE public.costo_con_iva_recalculos ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.costo_con_iva_recalculos FROM PUBLIC, anon, authenticated;
+GRANT ALL ON TABLE public.costo_con_iva_recalculos TO service_role;
+COMMENT ON TABLE public.costo_con_iva_recalculos IS
+  'Rastro del recálculo de productos.costo_con_iva de la migración NNN (1593-b1, #1593): un producto por fila, con el valor de antes y el nuevo y la compra de la que salió. Sólo de server (RLS sin policies, sin grants para la API). Deshacer: scratchpad de la tarjeta C3 (deshacer-recalculo.sql).';
+
+DO $recalculo$
+DECLARE
+  r record;
+  v_escritos int;
+BEGIN
+  DROP TABLE IF EXISTS pg_temp.c3_recalculo;
+  CREATE TEMP TABLE c3_recalculo ON COMMIT DROP AS
+  WITH ult AS (
+    SELECT DISTINCT ON (ci.producto_id, ci.sucursal_id)
+           ci.id AS item_id, ci.compra_id, ci.producto_id, ci.sucursal_id, ci.costo_neto_unitario,
+           ci.costo_unitario, ci.bonificacion, ci.costo_real_unitario,
+           ci.porcentaje_iva AS iva_linea, ci.impuestos_internos AS ii_linea,
+           c.tipo_factura, c.letra_comprobante, c.created_at
+      FROM public.compra_items ci
+      JOIN public.compras c ON c.id = ci.compra_id AND c.sucursal_id = ci.sucursal_id
+     WHERE c.estado <> 'cancelada'
+       AND public._cpp_fija_costo(ci.bonificacion, ci.costo_neto_unitario, ci.costo_unitario)
+       AND NOT public._compra_producto_devuelto(c.id, ci.producto_id, ci.sucursal_id)
+     ORDER BY ci.producto_id, ci.sucursal_id, c.fecha_compra DESC, c.created_at DESC, c.id DESC, ci.id DESC
+  ), base AS (
+    SELECT u.*, p.costo_sin_iva AS p_sin, p.costo_real AS p_real, p.costo_con_iva AS p_con,
+           CASE WHEN public._tipo_compra_producto(u.tipo_factura, u.letra_comprobante) = 'FC' THEN 'FC' ELSE 'ZZ' END AS tipo,
+           COALESCE(u.costo_neto_unitario, u.costo_unitario * (1 - COALESCE(u.bonificacion, 0) / 100)) AS neto,
+           COALESCE(u.iva_linea, p.porcentaje_iva) AS pct,
+           COALESCE(u.ii_linea, p.impuestos_internos) AS ii
+      FROM ult u
+      JOIN public.productos p ON p.id = u.producto_id AND p.sucursal_id = u.sucursal_id
+  ), calc AS (
+    SELECT b.*,
+           COALESCE(b.costo_real_unitario, public.costo_real_unitario(b.neto, b.ii, b.tipo, 0)) AS real_compra,
+           round(public.costo_financiero_unitario(b.neto, b.pct, b.ii, b.tipo), 2) AS con_viejo
+      FROM base b
+  )
+  SELECT c.*,
+         round(public._costo_con_iva_unitario(c.real_compra, c.neto, c.pct, c.tipo = 'ZZ',
+                                              public._compra_iva_cargos_de_linea(c.item_id)), 2) AS con_nuevo,
+         EXISTS (SELECT 1
+                   FROM public.movimiento_sucursal_items mi
+                   JOIN public.movimientos_sucursal m ON m.id = mi.movimiento_id
+                  WHERE mi.producto_destino_id = c.producto_id AND m.sucursal_destino_id = c.sucursal_id
+                    AND m.estado = 'aceptada' AND m.resuelto_at > c.created_at) AS envio_posterior,
+         (c.p_sin IS NOT DISTINCT FROM round(c.neto, 2)
+          AND c.p_real IS NOT DISTINCT FROM c.real_compra
+          AND c.p_con IS NOT DISTINCT FROM c.con_viejo) AS de_la_compra
+    FROM calc c;
+
+  SELECT count(*) AS candidatos,
+         count(*) FILTER (WHERE de_la_compra AND NOT envio_posterior AND con_nuevo IS DISTINCT FROM p_con) AS cambian,
+         count(*) FILTER (WHERE de_la_compra AND NOT envio_posterior AND con_nuevo > p_con) AS suben,
+         count(*) FILTER (WHERE de_la_compra AND NOT envio_posterior AND con_nuevo < p_con) AS bajan,
+         count(*) FILTER (WHERE de_la_compra AND NOT envio_posterior AND con_nuevo IS NOT DISTINCT FROM p_con) AS iguales,
+         count(*) FILTER (WHERE envio_posterior) AS por_envio,
+         count(*) FILTER (WHERE NOT envio_posterior AND NOT de_la_compra) AS no_son_de_su_compra,
+         max(abs(con_nuevo - p_con)) FILTER (WHERE de_la_compra AND NOT envio_posterior) AS dif_max
+    INTO r
+    FROM pg_temp.c3_recalculo;
+
+  WITH upd AS (
+    UPDATE public.productos p
+       SET costo_con_iva = x.con_nuevo
+      FROM pg_temp.c3_recalculo x
+     WHERE p.id = x.producto_id AND p.sucursal_id = x.sucursal_id
+       AND x.de_la_compra AND NOT x.envio_posterior
+       AND x.con_nuevo IS DISTINCT FROM x.p_con
+    RETURNING p.id, p.sucursal_id, x.p_con, p.costo_con_iva, x.compra_id, x.item_id
+  )
+  INSERT INTO public.costo_con_iva_recalculos
+         (producto_id, sucursal_id, costo_con_iva_antes, costo_con_iva_despues, compra_id, compra_item_id)
+  SELECT * FROM upd;
+  GET DIAGNOSTICS v_escritos = ROW_COUNT;
+
+  IF v_escritos <> r.cambian THEN
+    RAISE EXCEPTION 'mig NNN · el recálculo escribió % productos y se esperaban %', v_escritos, r.cambian;
+  END IF;
+  RAISE NOTICE 'mig NNN · recálculo del costo con IVA: % productos con compra; cambió % (suben %, bajan %, diferencia máxima %); afuera: % ya iguales, % con el costo de un envío posterior, % cuyos costos de hoy no son los de su última compra (corregidos a mano o de otra época)',
+    r.candidatos, r.cambian, r.suben, r.bajan, COALESCE(r.dif_max, 0), r.iguales, r.por_envio, r.no_son_de_su_compra;
+END
+$recalculo$;
+
+-- =========================================================================
+-- 6 · La ficha no le saca los cargos al costo con IVA (H6 de la revisión)
+-- =========================================================================
+-- La ficha escribe productos por REST. Una ficha de antes de esta migración (un PWA viejo) guarda
+-- costo_con_iva = neto + IVA + II sin los cargos cuando se corrige el neto, el IVA o el II. Desde
+-- acá el server compone el costo con IVA de lo que guarda la ficha, mande lo que mande: el de los
+-- datos nuevos más lo que el guardado tenía por encima de neto + IVA + II (los cargos y su IVA de
+-- la compra). Sin neto, deja lo que mandó la ficha. Sólo para la escritura directa de la ficha
+-- (authenticated, sin un trigger o una RPC en el medio): las compras y los envíos escriben el
+-- costo con IVA ellos mismos. Es la cuenta de la ficha nueva (adicionalConIvaDeCompra), así que con
+-- la ficha nueva no cambia nada.
+CREATE FUNCTION public.productos_componer_costo_con_iva()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_tipo text;
+  v_adicional numeric := 0;
+BEGIN
+  IF current_user <> 'authenticated' OR pg_trigger_depth() > 1 THEN
+    RETURN NEW;
+  END IF;
+  IF (NEW.costo_sin_iva, NEW.porcentaje_iva, NEW.impuestos_internos, NEW.costo_con_iva)
+     IS NOT DISTINCT FROM (OLD.costo_sin_iva, OLD.porcentaje_iva, OLD.impuestos_internos, OLD.costo_con_iva) THEN
+    RETURN NEW;
+  END IF;
+  -- Sin neto, o con un dato que no es un número o está fuera de rango, deja lo que mandó la ficha:
+  -- los CHECK de productos lo rechazan con su nombre (test-nan-y-rangos-1565-t1, P1).
+  IF COALESCE(NEW.costo_sin_iva, 0) <= 0
+     OR 'NaN' IN (NEW.costo_sin_iva, NEW.porcentaje_iva, NEW.impuestos_internos, NEW.costo_con_iva,
+                  OLD.costo_sin_iva, OLD.porcentaje_iva, OLD.impuestos_internos, OLD.costo_con_iva)
+     OR COALESCE(NEW.porcentaje_iva, 21) NOT BETWEEN 0 AND 100
+     OR COALESCE(NEW.impuestos_internos, 0) NOT BETWEEN 0 AND 9900 THEN
+    RETURN NEW;
+  END IF;
+  -- El tipo con el que la ficha costea (tipoParaCostoDeProducto): ZZ, B y C son lo pagado.
+  v_tipo := CASE WHEN NEW.ultimo_tipo_compra IN ('ZZ', 'FC B', 'FC C') THEN 'ZZ' ELSE 'FC' END;
+  IF COALESCE(OLD.costo_sin_iva, 0) > 0 AND COALESCE(OLD.costo_con_iva, 0) > 0 THEN
+    v_adicional := OLD.costo_con_iva
+      - public.costo_financiero_unitario(OLD.costo_sin_iva, COALESCE(OLD.porcentaje_iva, 21),
+                                         COALESCE(OLD.impuestos_internos, 0), v_tipo);
+  END IF;
+  NEW.costo_con_iva := round(public.costo_financiero_unitario(NEW.costo_sin_iva, COALESCE(NEW.porcentaje_iva, 21),
+                                                              COALESCE(NEW.impuestos_internos, 0), v_tipo)
+                             + v_adicional, 2);
+  RETURN NEW;
+END
+$function$;
+REVOKE ALL ON FUNCTION public.productos_componer_costo_con_iva() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.productos_componer_costo_con_iva() TO service_role;
+-- Después de trg_ii_derivado (que deriva el II del encuadre): los BEFORE van por nombre.
+CREATE TRIGGER trg_productos_costo_con_iva
+  BEFORE UPDATE OF costo_sin_iva, costo_con_iva, porcentaje_iva, impuestos_internos, ii_encuadre_id, condicion_iva
+  ON public.productos
+  FOR EACH ROW EXECUTE FUNCTION public.productos_componer_costo_con_iva();
+
 -- ---------------------------------------------------------------------------
 -- Poscondición
 -- ---------------------------------------------------------------------------
@@ -660,7 +940,14 @@ BEGIN
      'v_costo_con_iva := public._costo_con_iva_unitario(v_costo_real, v_costo_neto, v_porcentaje_iva, v_sin_credito,', true),
     ('public.actualizar_compra_items(bigint,jsonb,numeric,numeric,numeric,uuid,numeric,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,bigint[],jsonb)',
      'OR (v_compra.tipo_factura <> ''ZZ'' AND COALESCE(p_no_gravado, 0) < LEAST(0,', true),
-    ('public._reposicion_desde_ultima_compra(bigint,bigint)', 'public._compra_iva_cargos_de_linea(v_ult.item_id)', false)
+    ('public._reposicion_desde_ultima_compra(bigint,bigint)', 'public._compra_iva_cargos_de_linea(v_ult.item_id)', false),
+    ('public._costo_con_iva_unitario(numeric,numeric,numeric,boolean,numeric)', 'THEN round(p_costo_real + COALESCE(p_iva_cargos, 0), 4)', false),
+    ('public.registrar_compra_completa(bigint,character varying,character varying,date,numeric,numeric,numeric,numeric,character varying,text,uuid,jsonb,character varying,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,text)',
+     'public._compra_descuento_fuera_de_tope(p_items, p_cargos, v_sin_credito)', true),
+    ('public.actualizar_compra_items(bigint,jsonb,numeric,numeric,numeric,uuid,numeric,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,bigint[],jsonb)',
+     'public._compra_descuento_fuera_de_tope(p_items_nuevos, p_cargos,', true),
+    ('public.actualizar_compra_items(bigint,jsonb,numeric,numeric,numeric,uuid,numeric,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,bigint[],jsonb)',
+     'ya se vendieron %s: no se puede bajar la compra a menos de %s', true)
   ) AS t(f, marca, definer) LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = r.f::regprocedure
                     AND position(r.marca in prosrc) > 0 AND prosecdef = r.definer) THEN
@@ -679,7 +966,9 @@ BEGIN
       'public._compra_factor_iva(bigint,bigint,bigint)',
       'public._compra_iva_cargos(jsonb,jsonb)',
       'public._compra_iva_cargos_de_linea(bigint)',
-      'public._costo_con_iva_unitario(numeric,numeric,numeric,boolean,numeric)']) AS f LOOP
+      'public._costo_con_iva_unitario(numeric,numeric,numeric,boolean,numeric)',
+      'public._compra_descuento_fuera_de_tope(jsonb,jsonb,boolean)',
+      'public.productos_componer_costo_con_iva()']) AS f LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = r.f::regprocedure
                     AND proconfig @> ARRAY['search_path=public, pg_temp']) THEN
       RAISE EXCEPTION 'mig NNN · % quedó sin pg_temp en su search_path', r.f;
@@ -688,6 +977,16 @@ BEGIN
   IF position('no_gravado >= ' in (SELECT pg_get_constraintdef(oid) FROM pg_constraint
                                      WHERE conname = 'compras_importes_validos' AND conrelid = 'public.compras'::regclass)) > 0 THEN
     RAISE EXCEPTION 'mig NNN · compras_importes_validos sigue frenando el no gravado negativo';
+  END IF;
+  -- La tabla del recálculo: sólo de server.
+  IF has_table_privilege('authenticated', 'public.costo_con_iva_recalculos', 'SELECT')
+     OR has_table_privilege('anon', 'public.costo_con_iva_recalculos', 'SELECT')
+     OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.costo_con_iva_recalculos'::regclass) THEN
+    RAISE EXCEPTION 'mig NNN · costo_con_iva_recalculos quedó a la vista de la API o sin RLS';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_productos_costo_con_iva'
+                    AND tgrelid = 'public.productos'::regclass) THEN
+    RAISE EXCEPTION 'mig NNN · falta el trigger trg_productos_costo_con_iva';
   END IF;
   -- Una sola firma de la edición.
   IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'actualizar_compra_items') <> 1 THEN
@@ -707,7 +1006,9 @@ BEGIN
                                'public._compra_factor_iva(bigint,bigint,bigint)',
                                'public._compra_iva_cargos(jsonb,jsonb)',
                                'public._compra_iva_cargos_de_linea(bigint)',
-                               'public._costo_con_iva_unitario(numeric,numeric,numeric,boolean,numeric)']) AS f LOOP
+                               'public._costo_con_iva_unitario(numeric,numeric,numeric,boolean,numeric)',
+                               'public._compra_descuento_fuera_de_tope(jsonb,jsonb,boolean)',
+                               'public.productos_componer_costo_con_iva()']) AS f LOOP
     IF has_function_privilege('anon', r.f, 'EXECUTE') OR has_function_privilege('authenticated', r.f, 'EXECUTE') THEN
       RAISE EXCEPTION 'mig NNN · % quedó con EXECUTE para la API', r.f;
     END IF;

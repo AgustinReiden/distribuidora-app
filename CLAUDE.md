@@ -556,7 +556,9 @@ suelta en `sucursales`.
   cuadre del alta y COMPRA-A1 suman los cargos `en_factura` de `compra_cargos`, y el front los
   lleva en `cargosEnFactura`. En una FC no cambia: el cargo gravado va a `bonificaciones`, y el no
   gravado o exento a `no_gravado`, con su signo: un descuento sobre renglones exentos o no gravados lo
-  deja negativo, hasta lo que suman esos descuentos (#1590, tarjeta C3 de #1603).
+  deja negativo, hasta lo que suman esos descuentos (#1590, tarjeta C3 de #1603). Un descuento no
+  gravado no pasa de lo que suman los renglones no gravados, ni uno exento de los exentos
+  (`_compra_descuento_fuera_de_tope`): sobre renglones gravados va como bonificación gravada.
 - **Una NC de compra no pasa lo que le queda a la compra** (su total menos sus notas vigentes): el ajuste
   siempre, y la devolución si la compra tiene un ajuste (#1557, #1565; decisión del dueño). La devolución
   se valúa neta de la bonificación y de los descuentos de cabecera (`_compra_factor_neto`, #1590 D16):

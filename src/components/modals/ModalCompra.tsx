@@ -5,6 +5,7 @@
  * Validación con Zod
  */
 import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, useId, Suspense, createContext, useContext } from 'react'
+import CampoNoGravado from './CampoNoGravado'
 import type { ChangeEvent, FormEvent } from 'react'
 import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Camera, CheckCircle, AlertTriangle, Truck, ChevronDown, ChevronRight, Copy, Save, RefreshCw } from 'lucide-react'
 import { formatPrecio, fechaLocalISO, parseDateSafe } from '../../utils/formatters'
@@ -4664,13 +4665,13 @@ function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSection
                 </button>
               )}
             </label>
-            <NumberInput
-              min={pisoNoGravado(state.cargos)}
-              motivoMin={`No puede bajar de ${formatPrecio(pisoNoGravado(state.cargos))}: sólo un descuento no gravado o exento de la factura lo deja negativo`}
-              emptyValue={0}
-              value={state.noGravado}
+            {/* Puede ser negativo (#1590): un descuento sobre renglones exentos o no
+                gravados, hasta lo que suman esos descuentos. NumberInput no deja tipear
+                negativos (H7 de la revisión de C3): CampoNumero con `negativo`. */}
+            <CampoNoGravado
+              valor={state.noGravado}
+              piso={pisoNoGravado(state.cargos)}
               onChange={(n) => dispatch({ type: 'SET_EXTRAS', payload: { noGravado: n } })}
-              commitOnChange
               className="w-full px-2 py-1.5 border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
             />
             {/* De dónde sale el número. Sin esto el campo parece pedir un dato
