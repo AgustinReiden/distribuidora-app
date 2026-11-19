@@ -76,6 +76,14 @@
 --   C6 · [F] H5: un nulo en `vistos` se rechaza (no apaga la guarda).
 --   A1 · [F] H4: la clave de un alta guarda sólo un md5.
 --   (H1, el deadlock con la venta, lo prueba scripts/concurrencia/c4b-combo-y-venta.sh.)
+--   Segunda revisión:
+--   V1 · [F] N2: un cliente dado de alta por REST con la versión en 2099 la recibe del server; con una
+--        fila ya en el futuro, los descuentos la mueven y la ficha vieja no borra el 10 % del otro.
+--   V2 · [F] N2: lo mismo en una promo (el alta, y cambiar sólo productos sobre una fila en 2099).
+--   V3 · [F] N3: el preventista no mueve la versión de un cliente reservado ni del de otro; de uno
+--        libre, sí, y lo toma por guardar_cliente.
+--   V4 · [F] N4: con el tope de altas lleno, el reintento de una clave que entró devuelve el cliente.
+--   (N1, el combo con un grupo [B] antes de [A], lo prueba el mismo guion: E6.)
 --   S1 · [F] Las cuatro RPC nuevas: definer, pg_temp al final del search_path, EXECUTE sólo para
 --        authenticated (no PUBLIC ni anon); altas_por_clave con RLS, sin policies ni grants.
 --   S2 · [F] guardar_combo y cambiar_regalo_promocion: una sola firma cada una y pg_temp en el
@@ -118,7 +126,7 @@ DECLARE
   v_ca     bigint; v_cb bigint; v_cc bigint;
   v_n      bigint;
   v_fallas text[] := '{}';
-  v_casos  int := 40;
+  v_casos  int := 44;
   v_k      int;
   v_cl     bigint;
   v_cl2    bigint;
@@ -126,6 +134,8 @@ DECLARE
   v_cd     bigint;
   kc1      uuid := gen_random_uuid();
   kc2      uuid := gen_random_uuid();
+  kc3      uuid := gen_random_uuid();
+  v_cf     bigint;
 BEGIN
  BEGIN
   SET LOCAL lock_timeout = '5s';
@@ -951,6 +961,125 @@ BEGIN
     END;
   ELSE
     v_fallas := v_fallas || text 'A1 · no existe altas_por_clave';
+  END IF;
+
+  -- ======================================== v3 · segunda revisión (N2 a N4) -
+  -- V1 (N2) · un cliente dado de alta por REST con la versión en 2099: la pone el server. Y una fila
+  -- que ya quedó en el futuro: el movimiento del server (los descuentos) igual la mueve, y la ficha
+  -- vieja no borra los descuentos del otro.
+  v_t := pg_temp.intenta(v_adm, 1, $q$INSERT INTO public.clientes (razon_social, nombre_fantasia, direccion, sucursal_id, updated_at)
+    VALUES ('ZZ C4b futuro', 'ZZ C4b futuro', 'Calle C4b Futuro 2099', 1, '2099-01-01') RETURNING id::text$q$);
+  IF v_t NOT LIKE 'PASA %' THEN
+    v_fallas := v_fallas || ('V1 · no se pudo dar de alta el cliente por REST: ' || v_t);
+  ELSE
+    v_n := substr(v_t, 6)::bigint;
+    IF (SELECT updated_at FROM clientes WHERE id = v_n) >= '2099-01-01' THEN
+      v_fallas := v_fallas || text 'V1 · el alta por REST fijó la versión del cliente en 2099';
+    END IF;
+    SET LOCAL session_replication_role = replica;
+    UPDATE clientes SET updated_at = '2099-01-01' WHERE id = v_n;
+    SET LOCAL session_replication_role = origin;
+    v_t := pg_temp.desc_(v_adm, 1, v_n, '[{"categoria":"Gaseosas","descuento_porcentaje":10}]'::jsonb);
+    IF (SELECT updated_at FROM clientes WHERE id = v_n) = '2099-01-01' THEN
+      v_fallas := v_fallas || ('V1 · los descuentos no movieron una versión en el futuro: ' || v_t);
+    END IF;
+    v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+      jsonb_build_object('id', v_n, 'updated_at_esperado', '2099-01-01'::timestamptz, 'descuentos_categoria', '[]'::jsonb)));
+    IF pg_temp.j(v_t)->>'codigo' IS DISTINCT FROM 'cliente_cambiado' OR pg_temp.descuentos(v_n) <> 'Gaseosas=10.00' THEN
+      v_fallas := v_fallas || ('V1 · la ficha con la versión 2099 borró el 10 % del otro: ' || v_t);
+    END IF;
+  END IF;
+
+  -- V2 (N2) · lo mismo en una promo: el alta por REST no fija 2099, y con una fila en 2099 cambiar sólo
+  -- los productos mueve la versión, y el editor con la de antes no pisa.
+  v_t := pg_temp.intenta(v_adm, 1, format($q$INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, updated_at)
+    VALUES ('ZZ C4b promo futura', 'bonificacion', %L, 1, '2099-01-01') RETURNING (updated_at < '2099-01-01')::text$q$, v_hoy));
+  IF v_t IS DISTINCT FROM 'PASA true' THEN
+    v_fallas := v_fallas || ('V2 · el alta de una promo por REST fijó la versión en 2099: ' || v_t);
+  END IF;
+  IF v_pr IS NOT NULL THEN
+    SET LOCAL session_replication_role = replica;
+    UPDATE promociones SET updated_at = '2099-01-01' WHERE id = v_pr;
+    SET LOCAL session_replication_role = origin;
+    v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.cambiar_regalo_promocion(%s, %s, NULL, false, %L::jsonb)::text',
+      v_pr, (SELECT producto_regalo_id FROM promociones WHERE id = v_pr),
+      jsonb_build_object('updated_at_esperado', '2099-01-01'::timestamptz, 'producto_ids', jsonb_build_array(p1, p2))));
+    IF (pg_temp.j(v_t)->>'success')::boolean IS DISTINCT FROM true
+       OR (SELECT updated_at FROM promociones WHERE id = v_pr) = '2099-01-01' THEN
+      v_fallas := v_fallas || ('V2 · cambiar sólo los productos no movió una versión en el futuro: ' || v_t);
+    END IF;
+    v_n := (SELECT count(*) FROM promocion_productos WHERE promocion_id = v_pr);
+    v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.cambiar_regalo_promocion(%s, %s, NULL, false, %L::jsonb)::text',
+      v_pr, (SELECT producto_regalo_id FROM promociones WHERE id = v_pr),
+      jsonb_build_object('updated_at_esperado', '2099-01-01'::timestamptz, 'producto_ids', jsonb_build_array(p1))));
+    IF pg_temp.j(v_t)->>'codigo' IS DISTINCT FROM 'promocion_cambiada'
+       OR (SELECT count(*) FROM promocion_productos WHERE promocion_id = v_pr) <> v_n THEN
+      v_fallas := v_fallas || ('V2 · el editor con la versión 2099 pisó lo del otro: ' || v_t);
+    END IF;
+  END IF;
+
+  -- V3 (N3) · _cliente_mover_version sólo para quien puede editar el cliente: el preventista no le
+  -- mueve la versión a un reservado ni al de otro preventista; a uno libre, sí. Y tomar un cliente
+  -- libre por guardar_cliente le mueve la versión.
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.clientes'::regclass
+                    AND attname = 'updated_at' AND NOT attisdropped) THEN
+    v_fallas := v_fallas || text 'V3 · clientes no tiene versión';
+  ELSE
+  INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id, reservado_admin)
+  VALUES ('ZZ C4b reservado', 'ZZ C4b reservado', 'Calle C4b Reservada 1', 1, true) RETURNING id INTO v_n;
+  v_ts := (SELECT updated_at FROM clientes WHERE id = v_n);
+  v_t := pg_temp.intenta(v_pre, 1, format('SELECT public._cliente_mover_version(%s)::text', v_n));
+  IF v_t NOT LIKE '42501 %' OR (SELECT updated_at FROM clientes WHERE id = v_n) IS DISTINCT FROM v_ts THEN
+    v_fallas := v_fallas || ('V3 · el preventista le movió la versión a un cliente reservado: ' || v_t);
+  END IF;
+  INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
+  VALUES ('ZZ C4b de otro', 'ZZ C4b de otro', 'Calle C4b Ajena 1', 1) RETURNING id INTO v_n;
+  INSERT INTO cliente_preventistas (cliente_id, preventista_id) VALUES (v_n, v_u);
+  v_ts := (SELECT updated_at FROM clientes WHERE id = v_n);
+  v_t := pg_temp.intenta(v_pre, 1, format('SELECT public._cliente_mover_version(%s)::text', v_n));
+  IF v_t NOT LIKE '42501 %' OR (SELECT updated_at FROM clientes WHERE id = v_n) IS DISTINCT FROM v_ts THEN
+    v_fallas := v_fallas || ('V3 · el preventista le movió la versión al cliente de otro: ' || v_t);
+  END IF;
+  INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
+  VALUES ('ZZ C4b libre', 'ZZ C4b libre', 'Calle C4b Libre 1', 1) RETURNING id INTO v_n;
+  v_ts := (SELECT updated_at FROM clientes WHERE id = v_n);
+  v_t := pg_temp.intenta(v_pre, 1, format('SELECT public._cliente_mover_version(%s)::text', v_n));
+  IF v_t NOT LIKE 'PASA%' OR (SELECT updated_at FROM clientes WHERE id = v_n) IS NOT DISTINCT FROM v_ts THEN
+    v_fallas := v_fallas || ('V3 · el preventista no le movió la versión a un cliente libre: ' || v_t);
+  END IF;
+  v_ts := (SELECT updated_at FROM clientes WHERE id = v_n);
+  v_t := pg_temp.intenta(v_pre, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+    jsonb_build_object('id', v_n, 'updated_at_esperado', v_ts, 'preventista_ids', jsonb_build_array(v_pre),
+                       'preventista_ids_previos', '[]'::jsonb)));
+  IF (pg_temp.j(v_t)->>'success')::boolean IS DISTINCT FROM true
+     OR (SELECT updated_at FROM clientes WHERE id = v_n) IS NOT DISTINCT FROM v_ts
+     OR NOT EXISTS (SELECT 1 FROM cliente_preventistas WHERE cliente_id = v_n AND preventista_id = v_pre) THEN
+    v_fallas := v_fallas || ('V3 · el preventista no pudo tomar un cliente libre (o no movió la versión): ' || v_t);
+  END IF;
+  END IF;
+
+  -- V4 (N4) · con el tope de altas lleno, el reintento de una clave que ya entró devuelve el cliente;
+  -- una clave nueva, no.
+  IF to_regclass('public.altas_por_clave') IS NOT NULL THEN
+    v_cf := NULL;
+    v_j := jsonb_build_object('clave', kc3, 'campos', jsonb_build_object('razon_social', 'ZZ C4b tope',
+             'nombre_fantasia', 'ZZ C4b tope', 'direccion', 'Calle C4b Tope 300'));
+    v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text', v_j));
+    v_cf := (pg_temp.j(v_t)->'cliente'->>'id')::bigint;
+    EXECUTE format('INSERT INTO public.altas_por_clave (clave, operacion, usuario_id, sucursal_id, contenido) '
+                   'SELECT gen_random_uuid(), ''cliente'', %L, 1, md5(g::text) FROM generate_series(1, 300) g', v_adm);
+    v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text', v_j));
+    IF v_cf IS NULL OR (pg_temp.j(v_t)->>'replay')::boolean IS DISTINCT FROM true
+       OR (pg_temp.j(v_t)->'cliente'->>'id')::bigint IS DISTINCT FROM v_cf THEN
+      v_fallas := v_fallas || ('V4 · con el tope lleno, el reintento de un alta que entró no devolvió el cliente: ' || v_t);
+    END IF;
+    v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+      jsonb_set(v_j, '{clave}', to_jsonb(gen_random_uuid()))));
+    IF v_t NOT LIKE '54000 %' THEN
+      v_fallas := v_fallas || ('V4 · con el tope lleno, una clave nueva no se frenó: ' || v_t);
+    END IF;
+  ELSE
+    v_fallas := v_fallas || text 'V4 · no existe altas_por_clave';
   END IF;
 
   -- ============================================================= seguridad -

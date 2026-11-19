@@ -78,6 +78,11 @@
 -- mueven también cuando cambian sus filas hijas (productos y reglas; descuentos y preventistas), por
 -- el server (H2, H3); `altas_por_clave` guarda sólo el md5, con tope y purga de 30 días (H4); `vistos`
 -- sin nulos (H5); nadie se edita a sí mismo por guardar_usuario ni guardar_roles_extra (D1).
+-- Segunda revisión: guardar_combo toma los productos por id FOR KEY SHARE antes de reescribir los
+-- componentes (N1: un grupo [B] antes de [A] cruzaba con la venta, ya en la 531); la versión de un
+-- cliente o una promo nueva la pone el server y la del server se respeta si es distinta, no sólo
+-- mayor (N2); _cliente_mover_version, sólo para quien puede editar el cliente (N3); el tope de
+-- altas no frena el reintento de una clave que ya entró (N4).
 --
 -- Ensayo: scripts/test-guardados-atomicos-ola2-1603.sql. Se aplica en LF.
 -- =========================================================================
@@ -86,9 +91,10 @@ BEGIN;
 
 SET LOCAL lock_timeout = '5s';
 
--- La única tabla que se altera (la columna de la versión y su trigger, v2): de una vez y antes de
--- toda premisa. O se consigue o falla al instante y se reintenta.
-LOCK TABLE public.clientes IN ACCESS EXCLUSIVE MODE NOWAIT;
+-- Las tablas que se alteran (la columna de la versión y su trigger, v2; el trigger de la versión
+-- de la promo, que desde la v3 corre también en el alta): de una vez y antes de toda premisa. O se
+-- consiguen o falla al instante y se reintenta.
+LOCK TABLE public.clientes, public.promociones IN ACCESS EXCLUSIVE MODE NOWAIT;
 
 DO $lf$
 BEGIN
@@ -842,9 +848,18 @@ LANGUAGE plpgsql
 SET search_path = public, pg_temp
 AS $fn$
 BEGIN
+  -- v3 (N2 de la segunda revisión): en un alta de quien llama la pone el server. Un INSERT REST con
+  -- una versión en el futuro (2099) dejaba sin efecto el movimiento de las hijas.
+  IF TG_OP = 'INSERT' THEN
+    IF current_user = 'authenticated' THEN
+      NEW.updated_at := now();
+    END IF;
+    RETURN NEW;
+  END IF;
   -- v3 (H3): el server mueve la versión a mano cuando cambian los descuentos o los preventistas
   -- (guardar_descuentos_categoria, _cliente_mover_version). Sólo él: un PATCH REST no la fija.
-  IF current_user <> 'authenticated' AND NEW.updated_at > OLD.updated_at THEN
+  -- (N2: distinta, no mayor, así también mueve una versión que quedó en el futuro.)
+  IF current_user <> 'authenticated' AND NEW.updated_at IS DISTINCT FROM OLD.updated_at THEN
     RETURN NEW;
   END IF;
   IF (to_jsonb(NEW) - 'saldo_cuenta' - 'updated_at') = (to_jsonb(OLD) - 'saldo_cuenta' - 'updated_at') THEN
@@ -859,13 +874,13 @@ $fn$;
 REVOKE ALL ON FUNCTION public.clientes_version() FROM PUBLIC, anon, authenticated;
 
 CREATE TRIGGER trg_clientes_zz_version
-  BEFORE UPDATE ON public.clientes
+  BEFORE INSERT OR UPDATE ON public.clientes
   FOR EACH ROW EXECUTE FUNCTION public.clientes_version();
 
 -- v3 (H3): la versión del cliente cuando cambian sus preventistas. guardar_cliente corre como quien
 -- llama, y un UPDATE suyo de `updated_at` lo revertiría el trigger (o lo frenaría el de columnas
 -- protegidas del preventista): esta lo hace como server, sólo sobre un cliente de la sucursal activa
--- y para quien puede dar de alta clientes. No cambia nada más que la versión.
+-- y para quien lo puede editar. No cambia nada más que la versión.
 CREATE FUNCTION public._cliente_mover_version(p_cliente_id bigint)
 RETURNS void
 LANGUAGE plpgsql
@@ -875,6 +890,22 @@ AS $fn$
 BEGIN
   IF auth.uid() IS NULL OR NOT public.es_preventista() THEN
     RAISE EXCEPTION 'No podés cambiar clientes.' USING ERRCODE = '42501';
+  END IF;
+  -- v3 (N3 de la segunda revisión): sólo quien puede EDITAR ese cliente, con la regla de
+  -- mt_clientes_update (y la de verlo, _cliente_visible). Sin esto, cualquier preventista de la
+  -- sucursal le movía la versión (y dejaba una fila en audit_logs) a un cliente reservado o ajeno.
+  -- guardar_cliente la llama ANTES de cambiar los preventistas: quien se saca a sí mismo de la
+  -- lista sigue pudiendo guardar.
+  IF NOT EXISTS (
+       SELECT 1 FROM clientes c
+        WHERE c.id = p_cliente_id AND c.sucursal_id = public.current_sucursal_id()
+          AND EXISTS (SELECT 1 FROM public._cliente_visible(c.id, c.sucursal_id, c.reservado_admin))
+          AND (public.es_encargado_o_admin()
+               OR (NOT c.reservado_admin
+                   AND (NOT EXISTS (SELECT 1 FROM cliente_preventistas cp WHERE cp.cliente_id = c.id)
+                        OR EXISTS (SELECT 1 FROM cliente_preventistas cp
+                                    WHERE cp.cliente_id = c.id AND cp.preventista_id = auth.uid()))))) THEN
+    RAISE EXCEPTION 'No podés cambiar este cliente.' USING ERRCODE = '42501';
   END IF;
   UPDATE clientes SET updated_at = clock_timestamp()
    WHERE id = p_cliente_id AND sucursal_id = public.current_sucursal_id();
@@ -914,17 +945,23 @@ BEGIN
   IF p_contenido !~ '^[0-9a-f]{32}$' THEN
     RAISE EXCEPTION 'La clave del alta no tiene la forma esperada.' USING ERRCODE = '22023';
   END IF;
-  IF (SELECT count(*) FROM altas_por_clave
-       WHERE usuario_id = auth.uid() AND created_at > now() - interval '1 hour') >= 300 THEN
-    RAISE EXCEPTION 'Demasiadas altas seguidas: esperá un rato e intentá de nuevo.' USING ERRCODE = '54000';
-  END IF;
-  INSERT INTO altas_por_clave (clave, operacion, usuario_id, sucursal_id, contenido)
-  VALUES (p_clave, 'cliente', auth.uid(), v_suc, p_contenido)
-  ON CONFLICT (clave) DO NOTHING;
-  IF FOUND THEN
-    RETURN NULL;
-  END IF;
+  -- v3 (N4 de la segunda revisión): primero si la clave ya está (el reintento de un alta que entró
+  -- devuelve el cliente aunque el tope esté lleno); el tope cuenta sólo para una reserva nueva.
   SELECT * INTO v_previa FROM altas_por_clave WHERE clave = p_clave;
+  IF NOT FOUND THEN
+    IF (SELECT count(*) FROM altas_por_clave
+         WHERE usuario_id = auth.uid() AND created_at > now() - interval '1 hour') >= 300 THEN
+      RAISE EXCEPTION 'Demasiadas altas seguidas: esperá un rato e intentá de nuevo.' USING ERRCODE = '54000';
+    END IF;
+    INSERT INTO altas_por_clave (clave, operacion, usuario_id, sucursal_id, contenido)
+    VALUES (p_clave, 'cliente', auth.uid(), v_suc, p_contenido)
+    ON CONFLICT (clave) DO NOTHING;
+    IF FOUND THEN
+      RETURN NULL;
+    END IF;
+    -- La reservó otro intento a la vez (y ya confirmó): se mira como un reintento.
+    SELECT * INTO v_previa FROM altas_por_clave WHERE clave = p_clave;
+  END IF;
   IF v_previa.operacion <> 'cliente' OR v_previa.usuario_id IS DISTINCT FROM auth.uid()
      OR v_previa.sucursal_id <> v_suc THEN
     RAISE EXCEPTION 'Esta clave de alta ya se usó para otra operación: recargá la página e intentá de nuevo.' USING ERRCODE = '22023';
@@ -1021,8 +1058,6 @@ DECLARE
   v_sql        text;
   v_x          uuid;
   v_toca_dir   boolean;
-  v_filas      integer;
-  v_cambio     integer := 0;
 BEGIN
   IF auth.uid() IS NULL THEN
     RAISE EXCEPTION 'Sin sesión: volvé a entrar.' USING ERRCODE = '42501';
@@ -1139,20 +1174,24 @@ BEGIN
     IF v_previos IS NULL THEN
       v_previos := ARRAY(SELECT cp.preventista_id FROM cliente_preventistas cp WHERE cp.cliente_id = v_id);
     END IF;
+    -- v3 (H3): cambiar los preventistas es cambiar el cliente (en el alta no hace falta). Se mueve
+    -- ANTES de cambiarlos (N3): con la lista de antes, quien se saca de ella todavía lo edita.
+    IF v_viejo.id IS NOT NULL
+       AND (EXISTS (SELECT 1 FROM cliente_preventistas cp
+                     WHERE cp.cliente_id = v_id AND cp.preventista_id = ANY (v_previos)
+                       AND cp.preventista_id <> ALL (v_deseados))
+            OR EXISTS (SELECT 1 FROM unnest(v_deseados) x
+                        WHERE x <> ALL (v_previos)
+                          AND NOT EXISTS (SELECT 1 FROM cliente_preventistas cp
+                                           WHERE cp.cliente_id = v_id AND cp.preventista_id = x))) THEN
+      PERFORM public._cliente_mover_version(v_id);
+    END IF;
     DELETE FROM cliente_preventistas
      WHERE cliente_id = v_id AND preventista_id = ANY (v_previos) AND preventista_id <> ALL (v_deseados);
-    GET DIAGNOSTICS v_filas = ROW_COUNT;
-    v_cambio := v_cambio + v_filas;
     FOR v_x IN SELECT x FROM unnest(v_deseados) x WHERE x <> ALL (v_previos) ORDER BY x LOOP
       INSERT INTO cliente_preventistas (cliente_id, preventista_id) VALUES (v_id, v_x)
       ON CONFLICT DO NOTHING;
-      GET DIAGNOSTICS v_filas = ROW_COUNT;
-      v_cambio := v_cambio + v_filas;
     END LOOP;
-    -- v3 (H3): cambiar los preventistas es cambiar el cliente (en el alta no hace falta).
-    IF v_cambio > 0 AND v_viejo.id IS NOT NULL THEN
-      PERFORM public._cliente_mover_version(v_id);
-    END IF;
   END IF;
 
   -- ---------------------------------------------------------- descuentos -
@@ -1331,6 +1370,13 @@ $n$  -- C4b (1599-b8, decisión del dueño D47 para la edición de un gasto, mis
     -- pedido_items / pedido_combos en una venta del combo (H1 de la revisión: con FOR UPDATE,
     -- venta y guardado se bloqueaban en cruz, producto → combo y combo → producto).
     PERFORM 1 FROM combos WHERE id = v_x FOR NO KEY UPDATE;
+  END LOOP;
+  -- v3 (N1 de la segunda revisión): los productos de los lugares (y el que se mueve), por id y
+  -- FOR KEY SHARE, antes de reescribir los componentes. Las filas de combo_componentes toman ese
+  -- KEY SHARE por la FK en el orden del JSON, y la venta toma los productos FOR UPDATE por id: con
+  -- un grupo [B] antes de uno [A] (B > A) se cruzaban y caía la venta. Como la condición y la promo.
+  FOR v_x IN SELECT DISTINCT x FROM unnest(v_prods || v_mover) x WHERE x IS NOT NULL ORDER BY x LOOP
+    PERFORM 1 FROM productos WHERE id = v_x AND sucursal_id = v_sucursal FOR KEY SHARE;
   END LOOP;
   IF v_id IS NOT NULL AND v_esperado IS NOT NULL THEN
     SELECT co.updated_at INTO v_actual FROM combos co WHERE co.id = v_id AND co.sucursal_id = v_sucursal;
@@ -1556,9 +1602,17 @@ BEGIN
   -- C4b (ola 2 de #1603): updated_at es la versión de la promo que compara la edición
   -- (cambiar_regalo_promocion). La barra de regalos de fracción escribe usos_pendientes en cada
   -- venta: ese UPDATE, solo, no es cambiarla. Una UPDATE que no cambia nada tampoco.
+  -- v3 (N2 de la segunda revisión): en un alta de quien llama la pone el server (un INSERT REST con
+  -- una versión en el futuro dejaba sin efecto el movimiento de las hijas).
+  IF TG_OP = 'INSERT' THEN
+    IF current_user = 'authenticated' THEN
+      NEW.updated_at = now();
+    END IF;
+    RETURN NEW;
+  END IF;
   -- v3 (H2): cambiar_regalo_promocion la mueve a mano cuando cambian los productos o las reglas;
-  -- sólo el server (un PATCH REST no la fija).
-  IF current_user <> 'authenticated' AND NEW.updated_at > OLD.updated_at THEN
+  -- sólo el server (un PATCH REST no la fija). Distinta, no mayor (N2).
+  IF current_user <> 'authenticated' AND NEW.updated_at IS DISTINCT FROM OLD.updated_at THEN
     RETURN NEW;
   END IF;
   IF (to_jsonb(NEW) - 'usos_pendientes' - 'updated_at') = (to_jsonb(OLD) - 'usos_pendientes' - 'updated_at') THEN
@@ -1569,6 +1623,12 @@ BEGIN
   RETURN NEW;
 END;
 $function$;
+
+-- v3 (N2): el trigger corre también en el alta. Mismo nombre y misma función.
+DROP TRIGGER trigger_update_promociones_timestamp ON public.promociones;
+CREATE TRIGGER trigger_update_promociones_timestamp
+  BEFORE INSERT OR UPDATE ON public.promociones
+  FOR EACH ROW EXECUTE FUNCTION public.update_promociones_updated_at();
 
 -- =========================================================================
 -- 9 · v3 (H4) · La purga de retención suma las claves de alta (30 días)
@@ -1616,7 +1676,8 @@ DECLARE
 BEGIN
   IF position('''combo_cambiado''' in v_c) = 0 OR position('''orden_cambiado''' in v_c) = 0
      OR position('updated_at = now()' in v_c) = 0 OR position('FOR NO KEY UPDATE' in v_c) = 0
-     OR position('FROM combos WHERE id = v_x FOR UPDATE' in v_c) > 0 THEN
+     OR position('FROM combos WHERE id = v_x FOR UPDATE' in v_c) > 0
+     OR position('FROM productos WHERE id = v_x AND sucursal_id = v_sucursal FOR KEY SHARE' in v_c) = 0 THEN
     RAISE EXCEPTION 'mig NNN · el parche de guardar_combo no quedó';
   END IF;
   IF position('pg_advisory_xact_lock(hashtext(''guardar_combo'')' in v_c) = 0 OR position('v_vistos' in v_c) = 0 THEN
@@ -1679,6 +1740,13 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.clientes'::regclass
                    AND tgname = 'trg_clientes_zz_version' AND NOT tgisinternal) THEN
     RAISE EXCEPTION 'mig NNN · falta trg_clientes_zz_version';
+  END IF;
+  -- v3 (N2): las dos versiones las pone el server también en el alta.
+  IF (SELECT count(*) FROM pg_trigger
+       WHERE NOT tgisinternal AND (tgtype & 4) = 4 AND (tgtype & 16) = 16
+         AND ((tgrelid = 'public.clientes'::regclass AND tgname = 'trg_clientes_zz_version')
+              OR (tgrelid = 'public.promociones'::regclass AND tgname = 'trigger_update_promociones_timestamp'))) <> 2 THEN
+    RAISE EXCEPTION 'mig NNN · los triggers de la versión no corren en el alta';
   END IF;
   -- v3: la versión por las hijas, la purga de las claves y ningún FOR UPDATE nuevo.
   IF position('v_hijas > 0' in v_p) = 0 THEN

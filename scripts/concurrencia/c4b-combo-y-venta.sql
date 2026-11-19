@@ -94,6 +94,29 @@ CREATE FUNCTION c4bc.guardar() RETURNS text LANGUAGE sql AS $f$
                                      jsonb_build_object('cantidad', 1, 'productos', jsonb_build_array(c4bc.fx('b')::bigint))))))
 $f$;
 
+-- Guardar el combo con los lugares al revés: [B] antes que [A] (B tiene el id mayor). N1 de la segunda
+-- revisión: las filas de combo_componentes toman el KEY SHARE de la FK en el orden del JSON.
+CREATE FUNCTION c4bc.guardar_ba() RETURNS text LANGUAGE sql AS $f$
+  SELECT c4bc.como(format('SELECT public.guardar_combo(%L::jsonb)::text', jsonb_build_object(
+    'id', c4bc.fx('combo')::bigint, 'nombre', 'ZZ C4bc combo', 'precio', 1800, 'fecha_inicio', public._tablero_hoy(),
+    'componentes', jsonb_build_array(jsonb_build_object('cantidad', 1, 'productos', jsonb_build_array(c4bc.fx('b')::bigint)),
+                                     jsonb_build_object('cantidad', 1, 'productos', jsonb_build_array(c4bc.fx('a')::bigint))))))
+$f$;
+
+-- Control negativo de N1: guardar_combo sin tomar los productos por id antes de reescribir los
+-- componentes (como en la 531), y vuelta.
+CREATE FUNCTION c4bc.sin_key_share(p_si boolean) RETURNS text LANGUAGE plpgsql AS $f$
+DECLARE
+  v_def text := pg_get_functiondef('public.guardar_combo(jsonb)'::regprocedure);
+  v_con text := 'PERFORM 1 FROM productos WHERE id = v_x AND sucursal_id = v_sucursal FOR KEY SHARE;';
+  v_sin text := 'NULL; -- c4bc: sin el KEY SHARE de los productos';
+  v_nuevo text;
+BEGIN
+  v_nuevo := CASE WHEN p_si THEN replace(v_def, v_con, v_sin) ELSE replace(v_def, v_sin, v_con) END;
+  EXECUTE v_nuevo;
+  RETURN CASE WHEN v_nuevo = v_def THEN 'sin cambio' ELSE 'cambiado' END;
+END $f$;
+
 -- Control negativo: guardar_combo como lo dejaba la v2 (FOR UPDATE en el loop de los combos), y vuelta.
 CREATE FUNCTION c4bc.poner_for_update(p_si boolean) RETURNS text LANGUAGE plpgsql AS $f$
 DECLARE
