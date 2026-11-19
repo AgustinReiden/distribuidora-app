@@ -47,12 +47,21 @@
 --   5 · emails_de_usuarios(uuid[]) (D53): el email de otro, sólo para admin y encargado; a
 --       cada uno, el suyo. El front de la tarjeta (#1670) la usa, y mientras no existe lee
 --       la tabla como siempre.
+--   6 · Nadie edita su propia fila de perfiles ni sus propios roles extra, tampoco un admin
+--       (decisión del dueño; CLAUDE.md lo decía y la policy perfiles_update_admin lo dejaba:
+--       admin_abarca_sucursales_de(id) da true sobre uno mismo, y prevenir_autoescalada_perfil
+--       sólo frena a quien no es admin). trg_perfiles_nadie_se_edita (BEFORE UPDATE) y
+--       trg_perfil_roles_nadie_se_asigna (BEFORE INSERT/UPDATE/DELETE) rechazan, con el motivo y
+--       42501, la fila propia de quien escribe como authenticated: el REST, y las RPC INVOKER
+--       como guardar_usuario (C4b), que ya lo rechaza con el mismo texto. Las definer y el server
+--       no pasan por ahí. Un trigger y no la policy: con la policy, el bundle viejo recibía 0
+--       filas y decía «también trabaja en sucursales que no son tuyas»; así ve el motivo.
 --
 -- EMBEDS DE POSTGREST: no hay FK nuevas; ningún embed cambia, tampoco en un bundle viejo.
 --
--- LOCKS: un LOCK al principio y NOWAIT, SHARE ROW EXCLUSIVE sobre pagos, metas_preventista
--- y productos (lo que toman los CREATE TRIGGER; deja leer y frena las escrituras mientras
--- dura la migración, que no recorre ninguna tabla salvo las premisas).
+-- LOCKS: un LOCK al principio y NOWAIT, SHARE ROW EXCLUSIVE sobre pagos, metas_preventista,
+-- productos, perfiles y perfil_roles (lo que toman los CREATE TRIGGER; deja leer y frena las
+-- escrituras mientras dura la migración, que no recorre ninguna tabla salvo las premisas).
 -- =========================================================================
 
 BEGIN;
@@ -67,7 +76,8 @@ $lf$;
 
 SET LOCAL lock_timeout = '5s';
 
-LOCK TABLE public.pagos, public.metas_preventista, public.productos IN SHARE ROW EXCLUSIVE MODE NOWAIT;
+LOCK TABLE public.pagos, public.metas_preventista, public.productos, public.perfiles, public.perfil_roles
+  IN SHARE ROW EXCLUSIVE MODE NOWAIT;
 
 -- -------------------------------------------------------------------------
 -- 0 · Premisas: el esquema que se espera y los datos que cumplen
@@ -83,8 +93,15 @@ DECLARE
   v_def      text := pg_get_functiondef('public.auditoria_integridad()'::regprocedure);
 BEGIN
   IF to_regprocedure('public.emails_de_usuarios(uuid[])') IS NOT NULL
-     OR to_regprocedure('public.pagos_linaje_de_su_sucursal()') IS NOT NULL THEN
-    RAISE EXCEPTION 'premisa · emails_de_usuarios o pagos_linaje_de_su_sucursal ya existen: ¿la migración ya se aplicó?';
+     OR to_regprocedure('public.pagos_linaje_de_su_sucursal()') IS NOT NULL
+     OR to_regprocedure('public.perfiles_nadie_se_edita()') IS NOT NULL THEN
+    RAISE EXCEPTION 'premisa · emails_de_usuarios, pagos_linaje_de_su_sucursal o perfiles_nadie_se_edita ya existen: ¿la migración ya se aplicó?';
+  END IF;
+  -- Lo que el freno del punto 6 supone: authenticated escribe perfiles sólo con UPDATE (sin
+  -- INSERT ni DELETE) y perfil_roles con INSERT y DELETE.
+  IF has_table_privilege('authenticated', 'public.perfiles', 'INSERT')
+     OR has_table_privilege('authenticated', 'public.perfiles', 'DELETE') THEN
+    RAISE EXCEPTION 'premisa · authenticated tiene INSERT o DELETE sobre perfiles: revisar el freno del punto 6';
   END IF;
   IF to_regprocedure('public.perfil_de_sucursal_activa(uuid)') IS NULL
      OR to_regprocedure('public.admin_comparte_sucursal_con(uuid)') IS NULL THEN
@@ -294,18 +311,74 @@ REVOKE ALL ON FUNCTION public.emails_de_usuarios(uuid[]) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.emails_de_usuarios(uuid[]) TO authenticated;
 
 -- -------------------------------------------------------------------------
--- 6 · Poscondición
+-- 6 · Nadie edita su propia fila de perfiles ni sus propios roles extra
+-- -------------------------------------------------------------------------
+-- INVOKER a propósito: current_user es 'authenticated' sólo para quien escribe como la app
+-- (el REST o una RPC INVOKER); una definer, el server (service_role) y los triggers de otras
+-- tablas que corren como su dueño no pasan por el freno. auth.uid() es quien llama.
+CREATE FUNCTION public.perfiles_nadie_se_edita()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  -- Decisión del dueño: nadie edita su propio perfil, tampoco un admin (perfiles_update_admin
+  -- lo dejaba: admin_abarca_sucursales_de(id) da true sobre uno mismo). El mismo texto que
+  -- guardar_usuario (C4b).
+  IF current_user = 'authenticated' AND OLD.id = auth.uid() THEN
+    RAISE EXCEPTION 'No podés editar tu propio usuario: lo edita otro administrador.' USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.perfiles_nadie_se_edita() FROM PUBLIC, anon, authenticated;
+
+CREATE TRIGGER trg_perfiles_nadie_se_edita
+  BEFORE UPDATE ON public.perfiles
+  FOR EACH ROW
+  EXECUTE FUNCTION public.perfiles_nadie_se_edita();
+
+CREATE FUNCTION public.perfil_roles_nadie_se_asigna()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  -- Ni sus propios roles extra (perfil_roles_write_admin lo dejaba al admin). El mismo texto que
+  -- guardar_roles_extra (C4b).
+  IF current_user = 'authenticated'
+     AND (CASE WHEN TG_OP = 'DELETE' THEN OLD.usuario_id ELSE NEW.usuario_id END = auth.uid()
+          OR (TG_OP = 'UPDATE' AND OLD.usuario_id = auth.uid())) THEN
+    RAISE EXCEPTION 'No podés cambiar tus propios roles: los cambia otro administrador.' USING ERRCODE = '42501';
+  END IF;
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.perfil_roles_nadie_se_asigna() FROM PUBLIC, anon, authenticated;
+
+CREATE TRIGGER trg_perfil_roles_nadie_se_asigna
+  BEFORE INSERT OR UPDATE OR DELETE ON public.perfil_roles
+  FOR EACH ROW
+  EXECUTE FUNCTION public.perfil_roles_nadie_se_asigna();
+
+-- -------------------------------------------------------------------------
+-- 7 · Poscondición
 -- -------------------------------------------------------------------------
 DO $post$
 BEGIN
   IF (SELECT count(*) FROM pg_trigger
        WHERE NOT tgisinternal AND tgname IN ('trg_pagos_linaje_de_su_sucursal', 'trg_metas_productos_de_su_sucursal',
-                                             'trg_productos_rechazar_borrado_en_meta')) <> 3 THEN
+                                             'trg_productos_rechazar_borrado_en_meta', 'trg_perfiles_nadie_se_edita',
+                                             'trg_perfil_roles_nadie_se_asigna')) <> 5 THEN
     RAISE EXCEPTION 'poscondición · faltan triggers';
   END IF;
   IF has_function_privilege('authenticated', 'public.pagos_linaje_de_su_sucursal()', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.metas_productos_de_su_sucursal()', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.productos_rechazar_borrado_en_meta()', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.perfiles_nadie_se_edita()', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.perfil_roles_nadie_se_asigna()', 'EXECUTE')
      OR has_function_privilege('anon', 'public.emails_de_usuarios(uuid[])', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.emails_de_usuarios(uuid[])', 'EXECUTE') THEN
     RAISE EXCEPTION 'poscondición · los permisos de las funciones nuevas no son los esperados';
@@ -320,7 +393,9 @@ BEGIN
               WHERE oid IN ('public.pagos_linaje_de_su_sucursal()'::regprocedure,
                             'public.metas_productos_de_su_sucursal()'::regprocedure,
                             'public.productos_rechazar_borrado_en_meta()'::regprocedure,
-                            'public.emails_de_usuarios(uuid[])'::regprocedure)
+                            'public.emails_de_usuarios(uuid[])'::regprocedure,
+                            'public.perfiles_nadie_se_edita()'::regprocedure,
+                            'public.perfil_roles_nadie_se_asigna()'::regprocedure)
                 AND NOT ('search_path=public, pg_temp' = ANY(proconfig))) THEN
     RAISE EXCEPTION 'poscondición · una función nueva no termina su search_path en pg_temp';
   END IF;
