@@ -67,8 +67,8 @@ BEGIN
     -- auditoria_integridad va sin md5 (otras tarjetas le suman checks): se
     -- exige que su ancla aparezca una vez.
     ('public.auditoria_integridad()', NULL),
-    ('public._sql_sin_comentarios(text)', NULL),
-    ('public._sql_sin_comentarios_ni_literales(text)', NULL)
+    ('public._sql_sin_comentarios(text)', '77495f0fb0e449d5b19224cf8a9d44a9'),
+    ('public._sql_sin_comentarios_ni_literales(text)', '7a698f609b28af4e91ed313029dd255f')
   ) AS t(f, h) LOOP
     IF to_regprocedure(r.f) IS NULL THEN
       RAISE EXCEPTION 'mig NNN · % no existe: rehacer sobre lo vigente', r.f;
@@ -84,27 +84,9 @@ BEGIN
     RAISE EXCEPTION 'mig NNN · auditoria_integridad() ya tiene checks ROT-* o SEG-C: revisar a mano';
   END IF;
 
-  -- SEG-6: cada función de public con '\r' se puede limpiar sin cambiar nada.
-  FOR r IN SELECT p.oid::regprocedure AS f, p.prosrc, p.prokind
-             FROM pg_proc p
-            WHERE p.pronamespace = 'public'::regnamespace AND position(E'\r' IN p.prosrc) > 0
-              AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass
-                                 AND d.objid = p.oid AND d.deptype = 'e') LOOP
-    IF r.prokind NOT IN ('f', 'p') THEN
-      RAISE EXCEPTION 'mig NNN · % no es una función ni un procedimiento: revisar a mano', r.f;
-    END IF;
-    IF length(r.prosrc) - length(replace(r.prosrc, E'\r', ''))
-       <> length(r.prosrc) - length(replace(r.prosrc, E'\r\n', E'\n')) THEN
-      RAISE EXCEPTION 'mig NNN · % tiene un \r que no es de fin de línea: no se toca', r.f;
-    END IF;
-    IF (SELECT length(s) - length(replace(s, E'\r', '')) FROM (SELECT public._sql_sin_comentarios(r.prosrc) s) z)
-       <> (SELECT length(s) - length(replace(s, E'\r', '')) FROM (SELECT public._sql_sin_comentarios_ni_literales(r.prosrc) s) z) THEN
-      RAISE EXCEPTION 'mig NNN · % tiene un \r dentro de un literal: no se toca', r.f;
-    END IF;
-    IF r.prosrc ~ '\$[A-Za-z_]*\$' THEN
-      RAISE EXCEPTION 'mig NNN · % tiene una cadena entre $...$ en el cuerpo: revisar a mano', r.f;
-    END IF;
-  END LOOP;
+  -- SEG-6: la premisa de cada función con '\r' corre en el mismo recorrido que
+  -- la reescribe (más abajo, $lf$), fila por fila sobre la foto: así ninguna
+  -- función que aparezca entre una sentencia y otra se reescribe sin pasarla.
   SELECT count(*) INTO v_n FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(E'\r' IN prosrc) > 0;
   RAISE NOTICE 'mig NNN · % funciones de public con CRLF se pasan a LF', v_n;
 END
@@ -121,7 +103,9 @@ SELECT p.oid, p.oid::regprocedure::text AS firma, p.prosrc,
   FROM pg_proc p
  WHERE p.pronamespace = 'public'::regnamespace
    AND (position(E'\r' IN p.prosrc) > 0
-        OR p.oid IN ('public.auditoria_fechas_utc()'::regprocedure, 'public.auditoria_integridad()'::regprocedure))
+        OR p.oid IN ('public.auditoria_fechas_utc()'::regprocedure, 'public.auditoria_integridad()'::regprocedure,
+                     'public._sql_sin_comentarios(text)'::regprocedure,
+                     'public._sql_sin_comentarios_ni_literales(text)'::regprocedure))
    AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass
                       AND d.objid = p.oid AND d.deptype = 'e');
 
@@ -188,7 +172,38 @@ $n$  v_dos := COALESCE(v_dos, v_viejo.de_las_dos, false);
 $n$);
 
 -- =========================================================================
--- 1, 2 y 3 · Las de CRLF, en LF (y los dos parches)
+-- El lector de código entiende las cadenas E'…' con \' (H1 de la revisión de
+-- C5). Antes, en E'it\'s', la comilla escapada cerraba el literal y lo que
+-- seguía quedaba al revés: un '\r' dentro de un literal posterior pasaba por
+-- código, y auditoria_fechas_utc() dejaba de ver un ::date que seguía a
+-- E'it\'s -- '. Una E pegada a otra palabra (ELSE'x') no es un prefijo (\m).
+-- El literal común sigue igual (con standard_conforming_strings, '\' es una
+-- barra). Espejo: scripts/lib/locks.mjs. Sobre la 530, el resultado de
+-- _sql_sin_comentarios no cambia en ninguna función; el de
+-- _sql_sin_comentarios_ni_literales cambia en tres (E'\n' queda '' en vez de
+-- E''), y ninguna auditoría cambia de resultado.
+-- =========================================================================
+CREATE OR REPLACE FUNCTION public._sql_sin_comentarios(p_src text)
+ RETURNS text
+ LANGUAGE sql
+ IMMUTABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT regexp_replace(p_src, '(\m[Ee]''(?:[^''\\]|\\.|'''')*''|''(?:[^'']|'''')*'')|--[^\n]*|/\*(?:[^*]|\*+[^*/])*\*+/', '\1', 'g');
+$function$;
+
+CREATE OR REPLACE FUNCTION public._sql_sin_comentarios_ni_literales(p_src text)
+ RETURNS text
+ LANGUAGE sql
+ IMMUTABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT regexp_replace(public._sql_sin_comentarios(p_src), '\m[Ee]''(?:[^''\\]|\\.|'''')*''|''(?:[^'']|'''')*''', '''''', 'g');
+$function$;
+
+-- =========================================================================
+-- 1, 2 y 3 · Las de CRLF, en LF (y los dos parches). La premisa de cada una va
+-- acá, sobre la foto y en el mismo recorrido que la reescribe (H2).
 -- =========================================================================
 DO $lf$
 DECLARE
@@ -199,7 +214,29 @@ BEGIN
   IF (SELECT count(*) FROM c5_parches pa WHERE NOT EXISTS (SELECT 1 FROM c5_antes a WHERE a.oid = pa.fn AND a.crlf)) > 0 THEN
     RAISE EXCEPTION 'mig NNN · _guardar_gasto o guardar_empleado ya no tienen CRLF: revisar a mano';
   END IF;
-  FOR r IN SELECT a.oid, a.firma FROM c5_antes a WHERE a.crlf ORDER BY a.firma LOOP
+  FOR r IN SELECT a.oid, a.firma, a.prosrc, a.prokind FROM c5_antes a WHERE a.crlf ORDER BY a.firma LOOP
+    -- Premisa: es la de la foto, y se puede limpiar sin cambiar nada.
+    IF (SELECT prosrc FROM pg_proc WHERE oid = r.oid) IS DISTINCT FROM r.prosrc THEN
+      RAISE EXCEPTION 'mig NNN · % cambió durante la migración: reintentar', r.firma;
+    END IF;
+    IF r.prokind NOT IN ('f', 'p') THEN
+      RAISE EXCEPTION 'mig NNN · % no es una función ni un procedimiento: revisar a mano', r.firma;
+    END IF;
+    IF length(r.prosrc) - length(replace(r.prosrc, E'\r', ''))
+       <> length(r.prosrc) - length(replace(r.prosrc, E'\r\n', E'\n')) THEN
+      RAISE EXCEPTION 'mig NNN · % tiene un \r que no es de fin de línea: no se toca', r.firma;
+    END IF;
+    -- Con una barra invertida no se confía en el lector (H1): ninguna de la 530 la tiene.
+    IF position(chr(92) IN r.prosrc) > 0 THEN
+      RAISE EXCEPTION 'mig NNN · % tiene CRLF y una barra invertida: revisar a mano', r.firma;
+    END IF;
+    IF (SELECT length(s) - length(replace(s, E'\r', '')) FROM (SELECT public._sql_sin_comentarios(r.prosrc) s) z)
+       <> (SELECT length(s) - length(replace(s, E'\r', '')) FROM (SELECT public._sql_sin_comentarios_ni_literales(r.prosrc) s) z) THEN
+      RAISE EXCEPTION 'mig NNN · % tiene un \r dentro de un literal: no se toca', r.firma;
+    END IF;
+    IF r.prosrc ~ '\$[A-Za-z_]*\$' THEN
+      RAISE EXCEPTION 'mig NNN · % tiene una cadena entre $...$ en el cuerpo: revisar a mano', r.firma;
+    END IF;
     v_def := replace(pg_get_functiondef(r.oid), E'\r', '');
     FOR p IN SELECT * FROM c5_parches WHERE fn = r.oid LOOP
       v_def := pg_temp.parche(v_def, p.ancla, p.nuevo, r.firma);
@@ -366,6 +403,11 @@ BEGIN
   SELECT count(*) INTO v_n FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(E'\r' IN prosrc) > 0;
   IF v_n <> 0 THEN
     RAISE EXCEPTION 'mig NNN · quedan % funciones de public con CRLF', v_n;
+  END IF;
+  -- El lector entiende E'…\'…'.
+  IF public._sql_sin_comentarios_ni_literales($x$a := E'it\'s -- '; b := c; d := 'e\'$x$)
+       IS DISTINCT FROM $x$a := ''; b := c; d := ''$x$ THEN
+    RAISE EXCEPTION 'mig NNN · el lector de código no entiende E''…\''…''';
   END IF;
   -- Los parches entraron.
   IF (SELECT prosrc FROM pg_proc WHERE oid = 'public._guardar_gasto(jsonb,boolean)'::regprocedure)

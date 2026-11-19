@@ -245,6 +245,14 @@ BEGIN
   v_fallas := v_fallas || pg_temp.chk(NOT EXISTS (SELECT 1 FROM jsonb_array_elements(public.auditoria_fechas_utc()->'funciones') f
                                                    WHERE f->>'nombre' = 'zz_c5_fecha_en_literal'),
                                       'F2 auditoria_fechas_utc ve el día del servidor dentro de un literal');
+  -- H1 de la revisión: una cadena E'…' con \' no cierra en la comilla escapada.
+  EXECUTE format($q$CREATE FUNCTION public.zz_c5_fecha_tras_e() RETURNS date LANGUAGE sql AS
+    $f$ SELECT CASE WHEN E'it\'s -- ' = 'x' THEN NULL ELSE %s END $f$$q$, 'now()' || '::date');
+  v_fallas := v_fallas || pg_temp.chk(EXISTS (SELECT 1 FROM jsonb_array_elements(public.auditoria_fechas_utc()->'funciones') f
+                                               WHERE f->>'nombre' = 'zz_c5_fecha_tras_e'),
+                                      $m$F3 auditoria_fechas_utc no ve el día del servidor que sigue a E'it\'s -- '$m$);
+  v_txt := public._sql_sin_comentarios_ni_literales($x$a := E'it\'s'; b := 'x'$x$);
+  v_fallas := v_fallas || pg_temp.chk(v_txt = $x$a := ''; b := ''$x$, format('F4 el lector deja %s', v_txt));
 
   -- --------------------------------------------- V · las mismas filas ---
   -- Datos: boletas entregadas ZZ y FC, una VB, una del bot y una pendiente (un canje no se puede entregar a mano);
@@ -345,6 +353,6 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · % · %', cardinality(v_fallas), array_to_string(v_fallas, ' | ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · C5: gastos con infinitos y litros fuera de la columna (G1-G6); fecha de ingreso (E1-E7); SEG-6 sin CRLF y SEG-C (L1-L4); ROT-A, ROT-B y ROT-C (R0-R11); auditoria_fechas_utc con literales (F1-F2); _tablero_ventas y _ventas_nc con las mismas filas (V1-V4)';
+  RAISE EXCEPTION 'ENSAYO OK · C5: gastos con infinitos y litros fuera de la columna (G1-G6); fecha de ingreso (E1-E7); SEG-6 sin CRLF y SEG-C (L1-L4); ROT-A, ROT-B y ROT-C (R0-R11); auditoria_fechas_utc y el lector con literales y E-strings (F1-F4); _tablero_ventas y _ventas_nc con las mismas filas (V1-V4)';
 END
 $ensayo$;

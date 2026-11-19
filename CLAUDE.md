@@ -133,7 +133,8 @@ suelta en `sucursales`.
   necesita quien vende, va a esa lista; si no, a la RPC. El REVOKE de lo reservado para
   `authenticated` (la parte 2) va después, con su issue.
 - **Una `auditoria_*` que lee código limpia el cuerpo con `_sql_sin_comentarios` o
-  `_sql_sin_comentarios_ni_literales`** (#1541): una sola pasada que entiende las comillas. Sacar
+  `_sql_sin_comentarios_ni_literales`** (#1541): una sola pasada que entiende las comillas (también
+  la `\'` de un `E'…'`, C5 de #1603). Sacar
   primero los `--` y después los literales rompe la paridad con un literal `' -- '` y esconde lo
   que sigue. Espejo en `scripts/lib/locks.mjs`.
 - **Los avisos se guardan 90 días y `audit_logs` 24 meses** (1561-b10 y 1596-b10, decisión del
