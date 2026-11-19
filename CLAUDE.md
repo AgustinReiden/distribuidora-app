@@ -137,6 +137,14 @@ suelta en `sucursales`.
   de stock por venta (`pedido_creado`, `pedido_creado_bot` y `pedido_editado` para abajo) no se
   audita en `productos` porque ya está en `stock_historico`: la filtra el `WHEN` de
   `audit_productos_update`. Un origen de venta nuevo que baje stock se suma ahí.
+  **Renombrar o eliminar un rubro anota UNA fila, en el rubro, no una por producto** (1596-b9,
+  decisión del dueño del 19/11): `renombrar_rubro` y `eliminar_rubro` (DEFINER) escriben en
+  `audit_logs` la fila de `categorias` con el nombre viejo y el nuevo (o la baja), cuántos productos
+  alcanzó y, en `old_data.productos`, el antes de cada uno agrupado con sus ids. Su UPDATE de
+  productos lleva la marca `app.rubro_masivo` (`set_config(…, true)`, que borran apenas termina), y el
+  mismo `WHEN` saltea la fila sólo si lo único que cambió es el rubro (`categoria`, `categoria_id`,
+  `subcategoria_id`, `updated_at`): con la marca, otro cambio se audita entero, y el rubro de un
+  producto desde la ficha se audita como siempre.
 - **Toda tabla nueva** de `public` nace sin escritura REST y sin nada para `anon` (los
   defaults de la migración del barrido, #1135). Si el front la escribe por REST, o la escribe
   un trigger INVOKER como `authenticated`, la migración concede **el privilegio exacto** (por
@@ -594,7 +602,10 @@ suelta en `sucursales`.
   bordes** (1561-b1, decisión del dueño D31), como los rubros: índice
   `productos_codigo_unico_por_sucursal` sobre `upper(btrim(codigo))`, sin los vacíos (un producto
   sin código no choca con nadie), y `trg_productos_codigo_unico` da el mensaje con el producto que
-  ya lo tiene, sólo a quien lo ve (el server, o un usuario en su sucursal activa). Busca por el índice
+  ya lo tiene, sólo a quien pasa la policy de escritura (el server, o un admin en su sucursal
+  activa): corre antes que la RLS, y a cualquier otro le devuelve la fila para que la RLS dé su 42501
+  (el depósito no lee productos y no puede sondearlos por código). El encargado que acepta un envío
+  recibe el 23505 del índice, que el front traduce (`mensajeAlAceptarEnvio`). Busca por el índice
   (DEFINER, sin `ORDER BY` y con `plan_cache_mode = force_custom_plan`): un trigger por fila cuyo
   plan guardado recorre la sucursal hace cuadrática un alta masiva en una base nueva. Espejo en `src/utils/codigoProducto.ts`. Un camino nuevo que escriba
   `productos.codigo` no lo valida aparte: lo frena la base.

@@ -10,6 +10,7 @@ import {
   errorCodigoDuplicado,
   esCodigoDuplicadoDeBase,
   INDICE_CODIGO_PRODUCTO_UNICO,
+  mensajeAlAceptarEnvio,
   mismoCodigoProducto,
   patronCodigoProducto,
 } from './codigoProducto'
@@ -96,6 +97,22 @@ describe('esCodigoDuplicadoDeBase', () => {
   it('otro código de error no lo es', () => {
     expect(esCodigoDuplicadoDeBase({ code: '42501', message: INDICE_CODIGO_PRODUCTO_UNICO })).toBe(false)
     expect(esCodigoDuplicadoDeBase(null)).toBe(false)
+  })
+})
+
+describe('mensajeAlAceptarEnvio', () => {
+  it('el choque del índice al crear el producto del envío dice qué hacer', () => {
+    expect(mensajeAlAceptarEnvio(`duplicate key value violates unique constraint "${INDICE_CODIGO_PRODUCTO_UNICO}"`))
+      .toBe('En esta sucursal ya hay un producto con el código de uno de los del envío. Elegilo como destino en lugar de crear uno nuevo (si está desactivado, confirmá que se reactive).')
+  })
+
+  it('cualquier otro motivo llega tal cual', () => {
+    expect(mensajeAlAceptarEnvio('Tenés que estar en la sucursal destino para aceptar')).toBe('Tenés que estar en la sucursal destino para aceptar')
+    expect(mensajeAlAceptarEnvio('Ya existe un producto con el código «X» en esta sucursal: «Y».')).toBe('Ya existe un producto con el código «X» en esta sucursal: «Y».')
+  })
+
+  it('sin motivo, el genérico', () => {
+    expect(mensajeAlAceptarEnvio(undefined)).toBe('Error al aceptar el movimiento')
   })
 })
 

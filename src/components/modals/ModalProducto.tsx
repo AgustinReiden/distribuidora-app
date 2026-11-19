@@ -29,6 +29,7 @@ import { adicionalDeCompra, conAdicionalDeCompra, costoEditadoEnFicha } from '..
 import { tipoParaCostoDeProducto } from '../../utils/letraComprobante';
 import { lazyWithReload } from '../../utils/lazyWithReload';
 import { soloLoCambiado } from '../../utils/fichaProductoCambios';
+import { codigoParaGuardar } from '../../utils/codigoProducto';
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles';
 import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo';
 
@@ -644,6 +645,11 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
               type="text"
               value={form.codigo || ''}
               onChange={(e: ChangeEvent<HTMLInputElement>) => handleFieldChange('codigo', e.target.value)}
+              // Se guarda sin los espacios de los bordes (1561-b1): se muestra así al salir.
+              onBlur={(e) => {
+                const limpio = codigoParaGuardar(e.target.value) ?? ''
+                if (limpio !== e.target.value) handleFieldChange('codigo', limpio)
+              }}
               className="w-full px-3 py-2 border rounded-lg"
               placeholder="SKU o codigo interno"
             />

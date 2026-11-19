@@ -18,11 +18,29 @@
 --   C9 · [F] el server (postgres, sin usuario) tampoco lo puede repetir.
 --   C10 · [R] el mensaje no muestra un producto de una sucursal que quien escribe no ve:
 --        un admin de la sucursal 1 que escribe en la 2 recibe el 42501 de la RLS.
+--   C11 · [R] el depósito, que no lee productos, recibe el 42501 sin el producto (no puede
+--        sondear el catálogo código por código; H1 de la revisión).
+--   C12 · [R] el preventista y el encargado, que no dan de alta productos, reciben el 42501,
+--        no «ya existe… usá ese producto»; tampoco al editar.
+--   C13 · [R] un encargado de otra sucursal, igual.  C14 · [R] un desactivado, igual.
+--   C15 · [F] el encargado que acepta un envío que crea el producto choca con el índice (la
+--        RPC lo devuelve en `error` y el front lo traduce), sin el nombre, y no se crea nada.
+-- Los caminos legítimos nombran el producto: el admin en la ficha (C1, C2, C6; el alta rápida
+-- de una compra es la misma escritura), el admin que acepta un envío (C7) y el server (C9).
 -- La auditoría por fila (1596-b9): lo que anota `audit_log_changes()` es IGUAL, fila por
 -- fila, a lo que anotaba el cuerpo de antes (`pg_temp.ref_audit` es ese cuerpo, copiado
 -- tal cual sobre el antes y el después de cada fila):
 --   A1 · [R] un UPDATE suelto como authenticated (admin, REST).
---   A2 · [R] un UPDATE masivo como authenticated: renombrar un rubro de 30 productos.
+--   A2 · [R] un UPDATE masivo como authenticated (REST, 30 productos, también el rubro).
+-- Renombrar o eliminar un rubro (1596-b9, decisión del dueño del 19/11): una fila en el rubro.
+--   R1 · [F] renombrar un rubro de 30 productos deja UNA fila (categorias, UPDATE, nombre
+--        viejo → nuevo, 30 productos, el antes de cada uno agrupado con sus ids), ninguna
+--        de productos.
+--   R2 · [F] eliminarlo deja UNA fila DELETE con los ids y su subrubro, ninguna de productos.
+--   R3 · [R] cambiarle el rubro a un producto desde la ficha deja su fila de siempre, también
+--        después de renombrar un rubro en la misma transacción (la marca no sobrevive).
+--   R4 · [R] con la marca puesta a mano, un UPDATE de rubro y precio se audita entero.
+--   R5 · [R] con la marca puesta a mano, un UPDATE de otra columna se audita entero.
 --   A3 · [R] como service_role (sin usuario): productos y perfiles (sin sucursal_id).
 --   A4 · [R] por una RPC definer (actualizar_precios_masivo) de un admin.
 --   A5 · [R] con el token de un usuario desactivado: productos y perfiles.
@@ -364,6 +382,68 @@ BEGIN
     v_fallas := v_fallas || ('C10 · escribir en una sucursal ajena tenía que dar el 42501 de la RLS sin mostrar nada: ' || v_t);
   END IF;
 
+  -- ============================================================= C11 a C14 ==
+  -- El trigger corre antes que la RLS: el que no pasa la policy de escritura no recibe el
+  -- nombre (ni siquiera «ya existe»), sino el 42501 de la RLS.
+  DECLARE
+    v_dep uuid := pg_temp.u('deposito', 1);
+    v_pre uuid := pg_temp.u('preventista', 1);
+    v_enc uuid := pg_temp.u('encargado', 1);
+    v_enc2 uuid := pg_temp.u('encargado', 2);
+    v_quien text; v_uid uuid; v_suc bigint; v_dest bigint;
+  BEGIN
+    PERFORM pg_temp.prod(1, 'C11 secreto de deposito', 'C11-SEC', false);
+    FOR v_quien, v_uid, v_suc, v_dest IN
+      SELECT * FROM (VALUES ('C11 · el depósito', v_dep, 1::bigint, 1::bigint),
+                            ('C12 · el preventista', v_pre, 1, 1),
+                            ('C12 · el encargado', v_enc, 1, 1),
+                            ('C13 · un encargado de otra sucursal', v_enc2, 2, 1),
+                            ('C14 · un desactivado', v_des, 1, 1)) t(a, b, c, d)
+    LOOP
+      v_t := pg_temp.intenta(v_uid, v_suc, format($q$INSERT INTO public.productos (nombre, precio, sucursal_id, codigo)
+                                                     VALUES ('ZZ C4a C11 intento', 100, %s, 'c11-sec') RETURNING id::text$q$, v_dest));
+      IF v_t NOT LIKE '42501 %' OR v_t LIKE '%secreto%' OR v_t LIKE '%Ya existe%' THEN
+        v_fallas := v_fallas || format('%s tenía que recibir el 42501 de la RLS, sin el producto: %s', v_quien, v_t);
+      END IF;
+    END LOOP;
+    -- y por UPDATE: el preventista que le cambia el código a un producto (la RLS no le deja)
+    v_a := pg_temp.prod(1, 'C12 otro', 'C12-OTRO');
+    v_t := pg_temp.intenta(v_pre, 1, format($q$UPDATE public.productos SET codigo = 'c11-sec' WHERE id = %s RETURNING id::text$q$, v_a));
+    IF v_t LIKE '%secreto%' OR v_t LIKE '%Ya existe%' THEN
+      v_fallas := v_fallas || ('C12 · la edición del preventista no tenía que mostrar el producto: ' || v_t);
+    END IF;
+
+    -- ================================================================ C15 ==
+    -- El encargado acepta envíos (RPC definer, sin RLS): no pasa la policy, así que el trigger
+    -- no lo nombra; lo frena el índice, la RPC lo devuelve en `error` y no se crea nada.
+    DECLARE
+      v_o bigint; v_mov bigint; v_item bigint; v_r text;
+    BEGIN
+      v_o := pg_temp.prod(2, 'C15 origen', 'ENV-15');
+      UPDATE productos SET stock = 10 WHERE id = v_o;
+      PERFORM pg_temp.prod(1, 'C15 secreto en el destino', ' env-15');
+      PERFORM pg_temp.como(v_adm, 2);
+      v_j := public.crear_movimiento_sucursal(1, 'ensayo c4a 15', jsonb_build_array(jsonb_build_object('producto_id', v_o, 'cantidad', 5)));
+      v_mov := (v_j->>'movimiento_id')::bigint;
+      SELECT id INTO v_item FROM movimiento_sucursal_items WHERE movimiento_id = v_mov;
+      PERFORM pg_temp.como(v_enc, 1);
+      BEGIN
+        v_j := public.aceptar_movimiento_sucursal(v_mov, jsonb_build_array(jsonb_build_object('item_id', v_item, 'accion', 'crear_nuevo')));
+        v_r := CASE WHEN COALESCE((v_j->>'success')::boolean, false) THEN 'PASA ' || v_j::text
+                    ELSE 'RECHAZA ' || COALESCE(v_j->>'error', v_j::text) END;
+      EXCEPTION WHEN OTHERS THEN
+        v_r := SQLSTATE || ' ' || SQLERRM;
+      END;
+      IF v_r NOT LIKE 'RECHAZA %productos_codigo_unico_por_sucursal%' OR v_r LIKE '%secreto%' THEN
+        v_fallas := v_fallas || ('C15 · el encargado que acepta el envío tenía que chocar con el índice, sin el producto: ' || v_r);
+      END IF;
+      SELECT count(*) INTO v_n FROM productos WHERE sucursal_id = 1 AND upper(btrim(codigo)) = 'ENV-15';
+      IF v_n <> 1 THEN
+        v_fallas := v_fallas || format('C15 · en el destino quedaron %s productos con el código', v_n);
+      END IF;
+    END;
+  END;
+
   -- ===================================================================== A1 ==
   v_a := pg_temp.prod(1, 'A1', 'A1-COD');
   v_ids := ARRAY[v_a::text];
@@ -384,16 +464,108 @@ BEGIN
     SELECT array_agg(pg_temp.prod(1, 'A2 ' || g, NULL, true, 'ZZ C4a rubro')::text) INTO v_ids FROM generate_series(1, 30) g;
     v_antes := pg_temp.filas('productos', v_ids);
     v_foto := pg_temp.audit_foto();
-    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT public.renombrar_rubro(%L, NULL, 'ZZ C4a rubro nuevo')->>'productos'$q$, v_cat));
+    v_t := pg_temp.intenta(v_adm, 1, format($q$WITH x AS (UPDATE public.productos SET stock_minimo = 3, categoria = NULL
+                                                 WHERE id = ANY (%L::bigint[]) RETURNING 1) SELECT count(*)::text FROM x$q$, v_ids));
     v_desp := pg_temp.filas('productos', v_ids);
     PERFORM pg_temp.como(v_adm, 1);
     v_esp := pg_temp.esperado('productos', 'UPDATE', v_antes, v_desp);
     v_real := ARRAY(SELECT x FROM unnest(pg_temp.audit_nuevas(v_foto)) x WHERE x->>'tabla' = 'productos' ORDER BY x::text);
     IF v_t IS DISTINCT FROM 'PASA 30' OR cardinality(v_real) <> 30 OR v_real IS DISTINCT FROM v_esp THEN
-      v_fallas := v_fallas || format('A2 · UPDATE masivo (renombrar un rubro): %s; anotó %s filas de productos distintas de las %s esperadas',
+      v_fallas := v_fallas || format('A2 · UPDATE masivo (REST, 30 productos): %s; anotó %s filas de productos distintas de las %s esperadas',
                                      v_t, cardinality(v_real), cardinality(v_esp));
     END IF;
   END;
+
+  -- ===================================================================== R1 ==
+  -- Renombrar un rubro de 30 productos (dos con otra caja en el texto, uno con subrubro):
+  -- UNA fila, en el rubro, con el antes de cada uno; ninguna de productos.
+  DECLARE v_cat uuid; v_sub uuid; v_fila jsonb; v_grupos jsonb; v_todos bigint[];
+  BEGIN
+    INSERT INTO categorias (nombre, sucursal_id) VALUES ('ZZ C4a R1', 1) RETURNING id INTO v_cat;
+    INSERT INTO categorias (nombre, sucursal_id, parent_id) VALUES ('ZZ C4a R1 sub', 1, v_cat) RETURNING id INTO v_sub;
+    SELECT array_agg(pg_temp.prod(1, 'R1 ' || g, NULL, true, CASE WHEN g <= 2 THEN 'zz c4a r1' ELSE 'ZZ C4a R1' END)::text)
+      INTO v_ids FROM generate_series(1, 30) g;
+    UPDATE productos SET subcategoria_id = v_sub WHERE id = v_ids[3]::bigint;
+    v_antes := pg_temp.filas('productos', v_ids);
+    v_foto := pg_temp.audit_foto();
+    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT public.renombrar_rubro(%L, NULL, 'ZZ C4a R1 nuevo')->>'productos'$q$, v_cat));
+    v_real := pg_temp.audit_nuevas(v_foto);
+    v_fila := v_real[1];
+    v_grupos := v_fila->'old_data'->'productos';
+    SELECT array_agg(i::bigint ORDER BY i::bigint) INTO v_todos
+      FROM jsonb_array_elements(v_grupos) g, jsonb_array_elements_text(g->'ids') i;
+    IF v_t IS DISTINCT FROM 'PASA 30' OR cardinality(v_real) <> 1
+       OR v_fila->>'tabla' <> 'categorias' OR v_fila->>'registro_id' <> v_cat::text OR v_fila->>'accion' <> 'UPDATE'
+       OR v_fila->'old_data'->>'nombre' <> 'ZZ C4a R1' OR v_fila->'new_data'->>'nombre' <> 'ZZ C4a R1 nuevo'
+       OR (v_fila->'new_data'->>'cantidad_productos')::int <> 30 OR v_fila->'campos_modificados' <> '["nombre"]'::jsonb
+       OR v_fila->>'usuario_id' <> v_adm::text OR v_fila->>'usuario_rol' <> 'admin' OR (v_fila->>'sucursal_id')::bigint <> 1
+       OR v_todos IS DISTINCT FROM (SELECT array_agg(x::bigint ORDER BY x::bigint) FROM unnest(v_ids) x)
+       OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_grupos) g
+                       WHERE g->>'categoria' = 'zz c4a r1' AND jsonb_array_length(g->'ids') = 2)
+       OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_grupos) g
+                       WHERE g->>'subcategoria_id' = v_sub::text AND g->'ids' = jsonb_build_array(v_ids[3]::bigint)) THEN
+      v_fallas := v_fallas || format('R1 · renombrar un rubro de 30 tenía que dejar una fila en el rubro con el antes de cada uno: %s; anotó %s filas, la primera %s',
+                                     v_t, cardinality(v_real), left(v_real[1]::text, 300));
+    END IF;
+
+    -- R2 · eliminarlo: UNA fila DELETE con los ids (y su subrubro), ninguna de productos.
+    v_foto := pg_temp.audit_foto();
+    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT public.eliminar_rubro(%L, NULL, false)->>'productos'$q$, v_cat));
+    v_real := pg_temp.audit_nuevas(v_foto);
+    v_fila := v_real[1];
+    SELECT array_agg(i::bigint ORDER BY i::bigint) INTO v_todos
+      FROM jsonb_array_elements(v_fila->'old_data'->'productos') g, jsonb_array_elements_text(g->'ids') i;
+    IF v_t IS DISTINCT FROM 'PASA 30' OR cardinality(v_real) <> 1
+       OR v_fila->>'tabla' <> 'categorias' OR v_fila->>'accion' <> 'DELETE' OR v_fila->'new_data' <> 'null'::jsonb
+       OR v_fila->'old_data'->>'nombre' <> 'ZZ C4a R1 nuevo' OR (v_fila->'old_data'->>'cantidad_productos')::int <> 30
+       OR v_todos IS DISTINCT FROM (SELECT array_agg(x::bigint ORDER BY x::bigint) FROM unnest(v_ids) x)
+       OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_fila->'old_data'->'productos') g
+                       WHERE g->>'subcategoria_id' = v_sub::text) THEN
+      v_fallas := v_fallas || format('R2 · eliminar un rubro de 30 tenía que dejar una fila DELETE en el rubro con los ids: %s; anotó %s filas, la primera %s',
+                                     v_t, cardinality(v_real), left(v_real[1]::text, 300));
+    END IF;
+  END;
+
+  -- ===================================================================== R3 ==
+  -- Cambiarle el rubro a UN producto desde la ficha deja su fila de siempre; y la marca no
+  -- sobrevive a renombrar: en la misma transacción, después, también.
+  DECLARE v_cat uuid;
+  BEGIN
+    INSERT INTO categorias (nombre, sucursal_id) VALUES ('ZZ C4a R3', 1) RETURNING id INTO v_cat;
+    v_a := pg_temp.prod(1, 'R3', NULL, true, 'ZZ C4a R3');
+    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT public.renombrar_rubro(%L, NULL, 'ZZ C4a R3 b')->>'productos'$q$, v_cat));
+    v_antes := pg_temp.filas('productos', ARRAY[v_a::text]);
+    v_foto := pg_temp.audit_foto();
+    v_t := pg_temp.intenta(v_adm, 1, format($q$UPDATE public.productos SET categoria = NULL WHERE id = %s RETURNING id::text$q$, v_a));
+    v_desp := pg_temp.filas('productos', ARRAY[v_a::text]);
+    PERFORM pg_temp.como(v_adm, 1);
+    v_esp := pg_temp.esperado('productos', 'UPDATE', v_antes, v_desp);
+    v_real := pg_temp.audit_nuevas(v_foto);
+    IF v_t NOT LIKE 'PASA %' OR cardinality(v_real) <> 1 OR v_real IS DISTINCT FROM v_esp THEN
+      v_fallas := v_fallas || format('R3 · el rubro de un producto desde la ficha tenía que auditarse como siempre: %s; anotó %s y tenía que anotar %s',
+                                     v_t, v_real, v_esp);
+    END IF;
+  END;
+
+  -- ============================================================= R4 y R5 ==
+  -- Con la marca puesta a mano (como sólo podría hacerlo el server): un UPDATE que cambia el
+  -- rubro Y el precio se audita entero, y uno que cambia otra columna, también.
+  v_a := pg_temp.prod(1, 'R4', NULL, true, 'ZZ C4a R4');
+  v_b := pg_temp.prod(1, 'R5', NULL, true, 'ZZ C4a R4');
+  v_antes := pg_temp.filas('productos', ARRAY[v_a::text, v_b::text]);
+  v_foto := pg_temp.audit_foto();
+  PERFORM pg_temp.como(v_adm, 1);
+  PERFORM set_config('app.rubro_masivo', 'renombrar_rubro', true);
+  UPDATE productos SET categoria = 'ZZ C4a R4 b', precio = 999 WHERE id = v_a;
+  UPDATE productos SET stock_minimo = 9 WHERE id = v_b;
+  v_desp := pg_temp.filas('productos', ARRAY[v_a::text, v_b::text]);
+  PERFORM set_config('app.rubro_masivo', '', true);
+  v_esp := pg_temp.esperado('productos', 'UPDATE', v_antes, v_desp);
+  v_real := pg_temp.audit_nuevas(v_foto);
+  IF cardinality(v_real) <> 2 OR v_real IS DISTINCT FROM v_esp THEN
+    v_fallas := v_fallas || format('R4/R5 · con la marca a mano, un cambio de otra columna tenía que auditarse entero: anotó %s y tenía que anotar %s',
+                                   v_real, v_esp);
+  END IF;
 
   -- ===================================================================== A3 ==
   v_a := pg_temp.prod(1, 'A3', NULL);
@@ -494,7 +666,7 @@ BEGIN
   END IF;
 
   IF cardinality(v_fallas) = 0 THEN
-    RAISE EXCEPTION 'ENSAYO OK · código único por sucursal (C1-C10) y auditoría igual fila por fila (A1-A7), permisos (K1)'
+    RAISE EXCEPTION 'ENSAYO OK · código único por sucursal (C1-C15) y auditoría igual fila por fila (A1-A7), rubros con una fila (R1-R5), permisos (K1)'
       USING ERRCODE = 'P0001';
   END IF;
   RAISE EXCEPTION 'ENSAYO FALLÓ (%):%', cardinality(v_fallas), E'\n  ' || array_to_string(v_fallas, E'\n  ')

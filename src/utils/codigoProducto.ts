@@ -58,6 +58,21 @@ export function esCodigoDuplicadoDeBase(error: unknown): boolean {
 }
 
 /**
+ * El motivo con que `aceptar_movimiento_sucursal` rechaza un envío, para mostrarlo. Si un
+ * renglón «crear nuevo» choca con el código de un producto del destino, el trigger del server
+ * da el mensaje con el producto sólo al admin (la regla de la policy de escritura de
+ * `productos`): al encargado, que también acepta envíos, le llega el 23505 crudo del índice,
+ * que la RPC devuelve en `error`. Acá se dice qué hacer.
+ */
+export function mensajeAlAceptarEnvio(error: string | null | undefined): string {
+  if (!error) return 'Error al aceptar el movimiento'
+  if (error.includes(INDICE_CODIGO_PRODUCTO_UNICO)) {
+    return 'En esta sucursal ya hay un producto con el código de uno de los del envío. Elegilo como destino en lugar de crear uno nuevo (si está desactivado, confirmá que se reactive).'
+  }
+  return error
+}
+
+/**
  * El aviso de código repetido, el mismo en el alta, en la edición y cuando lo frena el índice.
  * Tiene que decir qué hacer: quien lo lee casi siempre está cargando una factura y no sabe que
  * el producto ya lo creó él mismo un minuto antes. Con `status = 409`: un duplicado no deja de
