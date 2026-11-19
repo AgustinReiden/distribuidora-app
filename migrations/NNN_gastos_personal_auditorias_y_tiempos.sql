@@ -20,8 +20,8 @@
 --     prueba la poscondición), con su dueño, sus permisos, SECURITY DEFINER,
 --     volatilidad y SET iguales. Todos los '\r' estaban al final de una línea y
 --     ninguno dentro de un literal (medido en la 530), así que no cambia ningún
---     mensaje. A las que son SECURITY DEFINER se les suma pg_temp al final del
---     search_path (regla de B15).
+--     mensaje. A todas las que se recrean (definer o invoker, las siete y las
+--     tres de abajo) se les suma pg_temp al final del search_path (regla de B15).
 -- 4 · 1332-f (#1332) · auditoria_integridad(): tres checks de las roturas a
 --     cargo del empleado (gastos 7, mig 450), que se habían dejado para después:
 --     ROT-A una rotura viva apunta a una salvedad «A cargo de empleados» o a
@@ -277,7 +277,7 @@ CREATE OR REPLACE FUNCTION public._ventas_nc(p_sucs bigint[], p_desde date, p_ha
  RETURNS TABLE(nota_credito_id bigint, fecha date, sucursal_id bigint, pedido_id bigint, cliente_id bigint, zona_id bigint, usuario_id uuid, tipo_factura text, pedido_item_id bigint, producto_id bigint, cantidad integer, monto numeric, iva numeric, ingreso_real numeric, costo_al_crear numeric, cantidad_mercaderia integer)
  LANGUAGE sql
  STABLE
- SET search_path TO 'public'
+ SET search_path TO 'public', 'pg_temp'
 AS $function$
   SELECT n.id, n.fecha, n.sucursal_id, n.pedido_id, n.cliente_id,
          (SELECT c.zona_id FROM clientes c WHERE c.id = n.cliente_id), pe.usuario_id,
@@ -340,15 +340,17 @@ AS $function$
 $function$;
 
 -- =========================================================================
--- pg_temp al final del search_path de las SECURITY DEFINER que se recrearon
--- (regla de B15; si B15 ya se aplicó, no hace nada)
+-- pg_temp al final del search_path de toda función que se recreó y fija uno,
+-- definer o invoker (regla de B15; si B15 ya se aplicó, no hace nada). Todas
+-- tienen hoy search_path = public.
 -- =========================================================================
 DO $pgtemp$
 DECLARE
   r record;
 BEGIN
   FOR r IN SELECT a.oid FROM c5_antes a JOIN pg_proc p ON p.oid = a.oid
-            WHERE p.prosecdef
+            WHERE (p.prosecdef OR EXISTS (SELECT 1 FROM unnest(COALESCE(p.proconfig, '{}')) c
+                                           WHERE c LIKE 'search_path=%'))
               AND NOT EXISTS (SELECT 1 FROM unnest(COALESCE(p.proconfig, '{}')) c
                                WHERE c LIKE 'search_path=%' AND c ~ 'pg_temp\s*$') LOOP
     EXECUTE format('ALTER FUNCTION %s SET search_path = public, pg_temp', r.oid::regprocedure);
@@ -381,15 +383,15 @@ BEGIN
        OR v_new.proretset <> a.proretset OR v_new.prolang <> a.prolang THEN
       RAISE EXCEPTION 'mig NNN · % cambió de dueño, permisos o atributos', a.firma;
     END IF;
-    -- El SET: el mismo, más pg_temp al final del search_path si es definer.
+    -- El SET: el mismo, más pg_temp al final del search_path.
     IF v_new.proconfig IS DISTINCT FROM a.proconfig
-       AND NOT (a.prosecdef AND a.proconfig = ARRAY['search_path=public']
+       AND NOT (a.proconfig = ARRAY['search_path=public']
                 AND v_new.proconfig = ARRAY['search_path=public, pg_temp']) THEN
       RAISE EXCEPTION 'mig NNN · % quedó con SET %, antes %', a.firma, v_new.proconfig, a.proconfig;
     END IF;
-    IF v_new.prosecdef AND NOT EXISTS (SELECT 1 FROM unnest(v_new.proconfig) c
+    IF (v_new.prosecdef OR v_new.proconfig IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM unnest(v_new.proconfig) c
                                         WHERE c LIKE 'search_path=%' AND c ~ 'pg_temp\s*$') THEN
-      RAISE EXCEPTION 'mig NNN · % es definer y quedó sin pg_temp', a.firma;
+      RAISE EXCEPTION 'mig NNN · % fija search_path (o es definer) y quedó sin pg_temp', a.firma;
     END IF;
     IF position(E'\r' IN v_new.prosrc) > 0 THEN
       RAISE EXCEPTION 'mig NNN · % sigue con CRLF', a.firma;
