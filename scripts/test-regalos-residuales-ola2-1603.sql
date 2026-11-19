@@ -7,7 +7,8 @@
 --        rubro): la línea queda W×1 con corte 10.
 --        P1a · el encargado edita sin bajar la venta y manda W×1: entra (corte 10, tope 10).
 --        P1b · el encargado baja la venta a V×10 (le tocan R×5) y manda W×1: se rechaza con el
---              motivo, y el pedido queda como estaba. Antes entraba con un regalo de R×10.
+--              motivo, que nombra R y W y dice «no puede pasar de 5» y «W × 1 … cuenta como 10 de
+--              R», sin ids; el pedido queda como estaba. Antes entraba con un regalo de R×10.
 --        P1c · regresión: el mismo encargado manda R×10 (la unidad de la promo): se rechaza.
 --        P1d · regresión: el admin baja la venta y manda W×1: entra (el admin no tiene tope).
 --   P2 · PRM-2 residual (#1592; N2 de la revisión de B1). Promo de fracción (R cada 10 V, factor
@@ -22,9 +23,24 @@
 --        P2c · regresión: con K2 en 2 el cambio entra, cierra los dos bloques (K2 0, barra 0).
 --        P2d · regresión: por la RPC del front (cambiar_regalo_promocion con p_datos), con K2 en 0,
 --              vuelve {success: false, codigo: contenedor_sin_stock} con el nombre del contenedor.
+--   P3 · H1 de la revisión de C2 (#1592, decisión del dueño del 19/11: «No deja guardar así: o
+--        vuelve al regalo original (R) o el pedido queda como está. Este bloqueo no es silencioso
+--        sino que se avisa»). Promo 2 V → 1 R, R a $ 100; un admin cambió R×10 por X×1 (X a $ 1.000,
+--        otro rubro) o por W×1 (W a $ 1.000, mismo rubro).
+--        P3a · S2c: el encargado baja a V×10 y la pantalla manda R×5: rechazo regalo_sustituto_sobre_tope
+--              («el regalo «X» × 1 vale más … («R» × 5)», con las promos en `promociones`).
+--        P3b · S2d: baja a V×2 y manda R×1: rechazo («R» × 1).
+--        P3c · S1n: sube a V×30 y manda X×2 (que se lee R×2): rechazo («R» × 2).
+--        P3d · mismo rubro, V×2 y R×1: entra (W×1, corte 1).
+--        P3e · el admin, V×2 y R×1: entra (X×1, corte 1: sin tope).
+--        P3f · el encargado no baja el derecho (V×20, R×10): entra, X×1 corte 10.
+--        P3g · sube la venta (V×30, R×15): entra, X×2 corte 15 (se conserva y no crece de más).
+--        P3h · baja a V×2 y vuelve el regalo a su producto (`regalo_original`): entra, R×1 corte 1,
+--              sin cadena; R sale del stock y X vuelve.
 --   A1 · ningún check de auditoria_integridad() suma violaciones.
 --
--- Sin la migración tiene que FALLAR en P1b, P2a y P2b. P1a, P1c, P1d, P2c y P2d son regresión.
+-- Sin la migración tiene que FALLAR en P1b, P2a, P2b, P3a, P3b, P3c y P3h. P1a, P1c, P1d, P2c, P2d,
+-- P3d, P3e, P3f y P3g son regresión.
 -- Corre contra una base con el schema de prod SIN dejar rastro (salvo valores de secuencia): un
 -- único DO que termina SIEMPRE en una excepción. Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ …'.
 --
@@ -47,6 +63,8 @@ DECLARE
   v_it     bigint;
   v_j      jsonb;
   v_res    text;
+  xs       bigint;
+  v_caso   record;
   v_antes  jsonb;
   v_checks jsonb;
   v_fallas text[] := '{}';
@@ -94,14 +112,15 @@ BEGIN
   END $f$;
 
   -- Un producto con lotes [{dias, cantidad, restante}] y p_bolsa unidades sin lote.
-  CREATE FUNCTION pg_temp.prod(p_lotes jsonb, p_bolsa int, p_precio numeric DEFAULT 100) RETURNS bigint LANGUAGE plpgsql AS $f$
+  CREATE FUNCTION pg_temp.prod(p_lotes jsonb, p_bolsa int, p_precio numeric DEFAULT 100,
+                               p_cat text DEFAULT 'ZZ ensayo C2 cat') RETURNS bigint LANGUAGE plpgsql AS $f$
   DECLARE v_prod bigint; l jsonb; v_s bigint := current_setting('e1603c2.suc')::bigint;
   BEGIN
     INSERT INTO productos (nombre, precio, stock, costo_promedio, costo_real, costo_sin_iva, costo_con_iva,
                            sucursal_id, categoria)
     VALUES ('ZZ ensayo C2 ' || gen_random_uuid(), p_precio,
             p_bolsa + (SELECT COALESCE(SUM((x->>'restante')::int), 0) FROM jsonb_array_elements(p_lotes) x),
-            60, 60, 60, 60, v_s, 'ZZ ensayo C2 cat') RETURNING id INTO v_prod;
+            60, 60, 60, 60, v_s, p_cat) RETURNING id INTO v_prod;
     FOR l IN SELECT * FROM jsonb_array_elements(p_lotes) LOOP
       INSERT INTO producto_lotes (producto_id, sucursal_id, fecha_vencimiento, cantidad, cantidad_restante, origen)
       VALUES (v_prod, v_s, public._tablero_hoy() + (l->>'dias')::int,
@@ -224,8 +243,12 @@ BEGIN
     END IF;
 
     v_res := pg_temp.editar(v_x, v_enc, jsonb_build_array(pg_temp.it(vv, 10), pg_temp.reg(w, 1, v_promo)));
-    IF v_res = 'ok' OR position('cuenta, para el tope de la promo' IN v_res) = 0
-       OR position('no puede pasar de 5' IN v_res) = 0 THEN
+    -- El rechazo dice el regalo de la promo, lo que se mandó y en qué unidad cuenta cada número.
+    IF v_res = 'ok'
+       OR position(format('es «%s» y, con lo que lleva el pedido, no puede pasar de 5.', (SELECT nombre FROM productos WHERE id = r)) IN v_res) = 0
+       OR position(format('Mandaste «%s» × 1, que lo reemplazó y cuenta como 10 de «%s».',
+                          (SELECT nombre FROM productos WHERE id = w), (SELECT nombre FROM productos WHERE id = r)) IN v_res) = 0
+       OR v_res ~ 'ID [0-9]' THEN
       v_fallas := v_fallas || format('P1b el encargado baja la venta a V×10 y manda W×1: %s', left(v_res, 220));
     END IF;
     IF pg_temp.regalos(v_x) <> w || '×1/10'
@@ -325,7 +348,76 @@ BEGIN
     v_fallas := v_fallas || format('P2 error: %s', SQLERRM);
   END;
 
+  -- ==================================================================== P3 ===
+  -- H1 de la revisión de C2 (decisión del dueño del 19/11: «No deja guardar así: o vuelve al
+  -- regalo original (R) o el pedido queda como está»). Promo 2 V → 1 R (mueve stock), R a $ 100.
+  -- Un admin carga V×20 + R×10 y cambia el regalo por X×1 (X a $ 1.000, OTRO rubro) o por W×1
+  -- (W a $ 1.000, el MISMO rubro). Cada caso arranca de un pedido nuevo.
+  FOR v_caso IN SELECT * FROM (VALUES
+      -- caso, sustituto (X/W), quién edita (enc/adm), venta, regalo que manda (R/S), cantidad, al original, ¿entra?, regalos después
+      ('P3a S2c el encargado baja a V×10 y la pantalla manda R×5',          'X', 'enc', 10, 'R', 5,  false, false, 'X×1/10'),
+      ('P3b S2d el encargado baja a V×2 y la pantalla manda R×1',           'X', 'enc', 2,  'R', 1,  false, false, 'X×1/10'),
+      ('P3c S1n el encargado sube a V×30 y manda X×2 (se lee R×2)',         'X', 'enc', 30, 'S', 2,  false, false, 'X×1/10'),
+      ('P3d mismo rubro: el encargado baja a V×2 y manda R×1',              'W', 'enc', 2,  'R', 1,  false, true,  'W×1/1'),
+      ('P3e el admin baja a V×2 y manda R×1 (sin tope)',                    'X', 'adm', 2,  'R', 1,  false, true,  'X×1/1'),
+      ('P3f el encargado no baja el derecho (V×20, R×10)',                  'X', 'enc', 20, 'R', 10, false, true,  'X×1/10'),
+      ('P3g el encargado sube la venta (V×30, R×15)',                       'X', 'enc', 30, 'R', 15, false, true,  'X×2/15'),
+      ('P3h el encargado baja a V×2 y vuelve el regalo a R×1',              'X', 'enc', 2,  'R', 1,  true,  true,  'R×1/1')
+    ) AS t(caso, sust, quien, venta, manda, cant, original, entra, despues)
+  LOOP
+    BEGIN
+      vv := pg_temp.prod('[]', 500);
+      r  := pg_temp.prod('[]', 500);
+      xs := pg_temp.prod('[]', 500, 1000, CASE WHEN v_caso.sust = 'X' THEN 'ZZ ensayo C2 otro rubro' ELSE 'ZZ ensayo C2 cat' END);
+      INSERT INTO promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id, limite_usos)
+      VALUES ('ZZ ensayo C2 2V1R h1', 'bonificacion', public._tablero_hoy() - 1, v_suc, true, r, 100) RETURNING id INTO v_promo;
+      INSERT INTO promocion_reglas (promocion_id, clave, valor, sucursal_id)
+      VALUES (v_promo, 'cantidad_compra', 2, v_suc), (v_promo, 'cantidad_bonificacion', 1, v_suc);
+      INSERT INTO promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v_promo, vv, v_suc);
+      v_x := pg_temp.alta(v_cli, v_adm, jsonb_build_array(pg_temp.it(vv, 20), pg_temp.reg(r, 10, v_promo)));
+      PERFORM pg_temp.como(v_adm);
+      v_j := public.sustituir_regalo_pedido((SELECT id FROM pedido_items WHERE pedido_id = v_x AND es_bonificacion),
+                                            xs, 1, 'ensayo C2 H1', NULL, NULL);
+      PERFORM pg_temp.limpiar();
+      IF NOT COALESCE((v_j->>'success')::boolean, false) THEN RAISE EXCEPTION 'sustituir: %', v_j; END IF;
+
+      v_j := pg_temp.reg(CASE WHEN v_caso.manda = 'R' THEN r ELSE xs END, v_caso.cant, v_promo);
+      IF v_caso.original THEN v_j := v_j || jsonb_build_object('regalo_original', true); END IF;
+      v_res := pg_temp.editar(v_x, CASE WHEN v_caso.quien = 'adm' THEN v_adm ELSE v_enc END,
+                              jsonb_build_array(pg_temp.it(vv, v_caso.venta), v_j));
+      IF v_caso.entra AND v_res <> 'ok' THEN
+        v_fallas := v_fallas || format('%s: se rechazó (%s)', v_caso.caso, left(v_res, 240));
+      ELSIF NOT v_caso.entra AND (v_res = 'ok'
+            OR position('"codigo": "regalo_sustituto_sobre_tope"' IN v_res) = 0
+            OR position(format('el regalo «%s» × 1 vale más', (SELECT nombre FROM productos WHERE id = xs)) IN v_res) = 0
+            OR position(format('(«%s» × %s)', (SELECT nombre FROM productos WHERE id = r),
+                               CASE WHEN v_caso.manda = 'R' THEN v_caso.cant ELSE 2 END) IN v_res) = 0
+            OR position(format('"promociones": [%s]', v_promo) IN v_res) = 0
+            OR v_res ~ 'ID [0-9]') THEN
+        v_fallas := v_fallas || format('%s: esperaba el rechazo con su motivo, vino %s', v_caso.caso, left(v_res, 300));
+      END IF;
+      v_res := replace(replace(pg_temp.regalos(v_x), xs::text || '×', CASE WHEN v_caso.sust = 'X' THEN 'X×' ELSE 'W×' END),
+                       r::text || '×', 'R×');
+      IF v_res <> v_caso.despues
+         OR (SELECT cantidad FROM pedido_items WHERE pedido_id = v_x AND producto_id = vv)
+            <> (CASE WHEN v_caso.entra THEN v_caso.venta ELSE 20 END) THEN
+        v_fallas := v_fallas || format('%s: quedó %s, V×%s (esperado %s)', v_caso.caso, v_res,
+                                       (SELECT cantidad FROM pedido_items WHERE pedido_id = v_x AND producto_id = vv), v_caso.despues);
+      END IF;
+      -- Volver al original: R vuelve a salir del stock y X vuelve (mueve stock), sin cadena.
+      IF v_caso.original AND (
+           (SELECT stock FROM productos WHERE id = r) <> 499 OR (SELECT stock FROM productos WHERE id = xs) <> 500
+           OR EXISTS (SELECT 1 FROM pedido_items WHERE pedido_id = v_x AND es_bonificacion AND regalo_cadena_id IS NOT NULL)) THEN
+        v_fallas := v_fallas || format('%s: stock R %s, X %s o la línea siguió con su cadena', v_caso.caso,
+          (SELECT stock FROM productos WHERE id = r), (SELECT stock FROM productos WHERE id = xs));
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      v_fallas := v_fallas || format('%s error: %s', v_caso.caso, SQLERRM);
+    END;
+  END LOOP;
+
   -- ------------------------------------------------------------------- A1 ---
+  PERFORM pg_temp.como(v_adm);
   SELECT jsonb_object_agg(x->>'id', (x->>'violaciones')::bigint) INTO v_checks
     FROM jsonb_array_elements(public.auditoria_integridad()->'checks') x;
   FOR k IN SELECT jsonb_object_keys(v_checks) LOOP
@@ -335,7 +427,7 @@ BEGIN
   END LOOP;
 
   IF cardinality(v_fallas) = 0 THEN
-    RAISE EXCEPTION 'ENSAYO OK · P1a–P1d, P2a–P2d y A1 (el tope de un regalo cambiado por valor va en su corte, y el cambio de factor sin stock en el contenedor se rechaza con su motivo)';
+    RAISE EXCEPTION 'ENSAYO OK · P1a–P1d, P2a–P2d, P3a–P3h y A1 (el tope de un regalo cambiado por valor va en su corte, el sustituto de otro rubro no vale más que lo que da la promo cuando baja, y el cambio de factor sin stock se rechaza con su motivo)';
   END IF;
   RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' || ');
 END

@@ -38,7 +38,8 @@ import { debeReiniciarLineas, huellaLineasGuardadas, type InicioDeLineas } from 
 import type { CambioDeVersion } from '../../utils/versionPedido';
 import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasComercialesQuery';
 import { cargoTrasEdicion, franjaCargo, reglaMinimoDe, ventaDePedido, type CargoEnvioEstado, type DecisionEnvio } from '../../utils/montoMinimo';
-import { esRechazoDeEnvio } from '../../utils/rechazoDeNegocio';
+import { esRechazoDeEnvio, RechazoDeNegocioError } from '../../utils/rechazoDeNegocio';
+import { regaloSustitutoCaro, CODIGO_REGALO_SUSTITUTO_SOBRE_TOPE } from '../../utils/regaloSustitutoCaro';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../ui/Dialog';
 import { useFotosCombosPedidoQuery } from '../../hooks/queries/useCombosQuery';
 import { aplicarCombosAlPedido, camposCombo, type CamposCombo } from '../../utils/combosPedido';
@@ -78,6 +79,11 @@ export interface PedidoEditItem extends CamposCombo {
   iva_unitario?: number;
   impuestos_internos_unitario?: number;
   porcentaje_iva?: number;
+  /**
+   * H1 de la revisión de C2 (decisión del dueño del 19/11): el regalo vuelve a su producto de
+   * la promo, sin el cambio que había hecho un admin. Viaja como `regalo_original`.
+   */
+  regaloOriginal?: boolean;
 }
 
 /** Datos a guardar del pedido. Pago se gestiona en ModalRegistrarPago. */
@@ -213,6 +219,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // de las que no tiene regalo arrancan quitadas (ver promosSinRegaloEnElPedido).
   // Acá van las que el usuario pidió agregar.
   const [promosAgregadas, setPromosAgregadas] = useState<string[]>([]);
+  // H1 de la revisión de C2 (#1592, decisión del dueño del 19/11): «No deja guardar así: o
+  // vuelve al regalo original (R) o el pedido queda como está. Este bloqueo no es silencioso
+  // sino que se avisa». Las promos cuyo regalo el usuario volvió a su producto, y el rechazo
+  // del server cuando el aviso no se pudo dar antes.
+  const [regalosAlOriginal, setRegalosAlOriginal] = useState<string[]>([]);
+  const [rechazoRegaloCaro, setRechazoRegaloCaro] = useState<{ mensaje: string; promos: string[] } | null>(null);
 
   // Zod validation (solo notas; el pago se maneja en ModalRegistrarPago)
   const { validate } = useZodValidation(modalEditarPedidoSchema);
@@ -309,11 +321,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // de promos regenera una bonificacion con el producto original, mapeamos
   // al sustituto vigente para no pisar la decision del admin al guardar
   // (defensa en profundidad junto al trigger SQL trg_aplicar_sustituciones_regalo).
+  const sustitucionesQuery = usePedidoSustitucionesQuery(pedido?.id);
   const {
     data: sustituciones = [],
     isLoading: sustitucionesLoading,
     isFetching: sustitucionesFetching,
-  } = usePedidoSustitucionesQuery(pedido?.id);
+  } = sustitucionesQuery;
   // #1191: la foto de los combos que el pedido ya tiene (pedido_combos).
   const fotosCombosQuery = useFotosCombosPedidoQuery(pedido?.id ? String(pedido.id) : undefined);
   const fotosCombos = fotosCombosQuery.data;
@@ -681,12 +694,18 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const datosPrecio = resumirDatosDePrecio([
     ...entradasDatosPrecio.filter(e => e.nombre !== 'las promociones'),
     ...(pedido?.id ? [entradaDeConsulta('los combos del pedido', fotosCombosQuery)] : []),
+    // H3 de la revisión de C2 (#1603): si las sustituciones del pedido no cargan, `data`
+    // queda en [] sin «cargando» y el regalo viajaba como el producto final con la cantidad
+    // de la promo: el server lo leía como la línea de hoy (1592-b1) y lo rechazaba, o lo
+    // guardaba sin su cadena. Sin ellas no se guardan los ítems: se ofrece reintentar.
+    ...(pedido?.id ? [entradaDeConsulta('los cambios de regalo del pedido', sustitucionesQuery)] : []),
   ]);
   const motivoDatosPrecio = motivoDatosDePrecio(datosPrecio, opcionesMotivoDatos);
   const sePuedeReintentarDatosPrecio = sePuedeReintentarDatos(datosPrecio, opcionesMotivoDatos);
   const reintentarDatos = () => {
     reintentarDatosPrecio();
     void fotosCombosQuery.refetch?.();
+    void sustitucionesQuery.refetch?.();
   };
   const esperandoPromos = guardaItems && (promosNoListas || motivoDatosPrecio !== null);
 
@@ -773,7 +792,43 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         // #1057: la cadena de la línea, no la de toda la promo.
         const cadenaId = cadenaDelRegalo(pedido?.items ?? [], sustituciones, bonif.promoId, bonif.productoId);
         const { envio, muestra } = regaloParaEditar(sustituciones, bonif.promoId, cadenaId, bonif.productoId, bonif.cantidad);
+        const regaloPromo = productos.find(p => String(p.id) === envio.productoId);
+        // H1 (decisión del dueño del 19/11): el regalo que el usuario volvió a su producto se
+        // muestra y viaja como el regalo de la promo, con lo que da ahora, sin el cambio.
+        const alOriginal = muestra.productoId !== envio.productoId
+          && regalosAlOriginal.includes(String(bonif.promoId));
+        if (alOriginal) {
+          return {
+            productoId: envio.productoId,
+            nombre: regaloPromo?.nombre || bonif.promoNombre || 'Regalo',
+            cantidad: envio.cantidad,
+            promoNombre: bonif.promoNombre,
+            promocionId: bonif.promoId,
+            esSustituido: false,
+            productoIdEnvio: envio.productoId,
+            cantidadEnvio: envio.cantidad,
+            regaloOriginal: true,
+            sustitutoCaro: false,
+            nombreRegaloPromo: regaloPromo?.nombre ?? null,
+          };
+        }
         const producto = productos.find(p => String(p.id) === muestra.productoId);
+        // H1: ¿el sustituto de otro rubro pasa a valer más que lo que da la promo ahora?
+        const lineaGuardada = (pedido?.items ?? []).find(i => i.es_bonificacion
+          && String(i.promocion_id) === String(bonif.promoId)
+          && String(i.producto_id) === muestra.productoId
+          && (i.regalo_cadena_id ?? null) === (cadenaId ?? null));
+        const sustitutoCaro = muestra.productoId !== envio.productoId && regaloSustitutoCaro({
+          esAdmin: !!isAdmin,
+          regalo: regaloPromo,
+          sustituto: producto,
+          corteNuevo: envio.cantidad,
+          corteGuardado: lineaGuardada
+            ? cantidadBaseDeLinea(sustituciones, lineaGuardada.promocion_id, lineaGuardada.regalo_cadena_id, Number(lineaGuardada.cantidad))
+            : null,
+          cantidadSustituto: muestra.cantidad,
+          porLinea: promoInfoMap.get(String(bonif.promoId))?.mueveStock ?? false,
+        });
         return {
           productoId: muestra.productoId,
           nombre: producto?.nombre || bonif.promoNombre || 'Regalo',
@@ -783,6 +838,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           esSustituido: muestra.productoId !== envio.productoId,
           productoIdEnvio: envio.productoId,
           cantidadEnvio: envio.cantidad,
+          regaloOriginal: false,
+          sustitutoCaro,
+          nombreRegaloPromo: regaloPromo?.nombre ?? null,
         };
       });
     const { bonificaciones, repartosPerdidos: perdidos } = conservarRepartos(
@@ -803,13 +861,26 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           productoIdEnvio: productoId,
           cantidadEnvio: cantidadBaseDeLinea(sustituciones, linea.promocion_id, linea.regalo_cadena_id,
             Number(linea.cantidad)),
+          // Un reparto conservado va tal cual (el server no lo mide).
+          regaloOriginal: false,
+          sustitutoCaro: false,
         };
       },
       // #1090: el reparto se compara contra la promo en cortes, como el server.
       linea => cantidadBaseDeLinea(sustituciones, linea.promocion_id, linea.regalo_cadena_id, Number(linea.cantidad)),
     );
     return { bonificacionesCalculadas: bonificaciones, repartosPerdidos: perdidos };
-  }, [itemsFinales, productos, sustituciones, pedido]);
+  }, [itemsFinales, productos, sustituciones, pedido, regalosAlOriginal, isAdmin, promoInfoMap]);
+
+  // H1: lo que el aviso tiene que decir, antes de tocar Guardar (con lo que el modal sabe) o
+  // con el rechazo del server. Nada se cambia solo: el usuario elige volver al regalo de la
+  // promo o dejar el pedido como estaba.
+  const regalosCaros = bonificacionesCalculadas.filter(b => b.sustitutoCaro);
+  const volverRegalosAlOriginal = (promos: string[]): void => {
+    setRegalosAlOriginal(prev => Array.from(new Set([...prev, ...promos])));
+    setRechazoRegaloCaro(null);
+    setErrorValidacion('');
+  };
 
   // #1283: el cupo se mide en cortes, y una línea sustituida muestra otra unidad.
   const { data: cuposPromo } = usePromoCuposQuery(pedido?.id ? String(pedido.id) : undefined);
@@ -1124,6 +1195,10 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           setErrorValidacion(motivoDatosPrecio);
           return;
         }
+        // H1 (decisión del dueño del 19/11): el aviso está a la vista y el botón deshabilitado.
+        if (regalosCaros.length > 0) {
+          return;
+        }
         const tipoFactura = pedido?.tipo_factura || 'ZZ';
 
         // Items no-bonif con precio resuelto + desglose fiscal. #1191: salen de
@@ -1163,6 +1238,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         // Bonificaciones recalculadas → precio 0, promocionId del hook. Van
         // como las calcula la promo (#965): el server aplica la sustitucion.
         const itemsBonif: PedidoEditItem[] = bonificacionesCalculadas.map(bonif => ({
+          ...(bonif.regaloOriginal ? { regaloOriginal: true } : {}),
           productoId: bonif.productoIdEnvio,
           nombre: bonif.nombre,
           cantidad: bonif.cantidadEnvio,
@@ -1242,6 +1318,15 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         ...(fechaEntregaProgramadaCambio ? { fechaEntregaProgramada } : {})
       });
     } catch (err) {
+      // H1: el server rechazó el regalo cambiado que vale más que lo que da la promo ahora.
+      // Se muestra el aviso con las dos salidas, no un error suelto.
+      if (err instanceof RechazoDeNegocioError && err.codigo === CODIGO_REGALO_SUSTITUTO_SOBRE_TOPE) {
+        const promos = Array.isArray(err.detalle?.promociones)
+          ? (err.detalle.promociones as unknown[]).map(String)
+          : bonificacionesCalculadas.filter(b => b.esSustituido).map(b => String(b.promocionId));
+        setRechazoRegaloCaro({ mensaje: err.message, promos });
+        return;
+      }
       const error = err as Error;
       setErrorValidacion(error.message || 'Error al guardar los cambios');
     }
@@ -2013,6 +2098,33 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </div>
       )}
 
+      {/* H1 (decisión del dueño del 19/11): el regalo cambiado vale más que lo que da la promo ahora. */}
+      {guardaItems && (regalosCaros.length > 0 || rechazoRegaloCaro) && (
+        <div role="alert" aria-label="Regalo cambiado" className="mx-4 mb-2 p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-600 rounded-lg text-sm text-amber-900 dark:text-amber-200 space-y-2">
+          {rechazoRegaloCaro ? (
+            <p><strong>No se puede guardar así:</strong> {rechazoRegaloCaro.mensaje}</p>
+          ) : (
+            <p>
+              <strong>No se puede guardar así:</strong>{' '}
+              {regalosCaros.map(b => `el regalo «${b.nombre}» × ${b.cantidad} vale más, a precio de lista, que lo que da la promo${b.promoNombre ? ` «${b.promoNombre}»` : ''} ahora («${b.nombreRegaloPromo ?? 'su regalo'}» × ${b.cantidadEnvio})`).join('; ')}.
+              {' '}Volvé el regalo a su producto o dejá el pedido como estaba.
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2 justify-end">
+            <Button onClick={onClose} variant="ghost" size="sm">
+              Dejar el pedido como estaba
+            </Button>
+            <Button
+              onClick={() => volverRegalosAlOriginal(rechazoRegaloCaro?.promos ?? regalosCaros.map(b => String(b.promocionId)))}
+              variant="primary"
+              size="sm"
+            >
+              Volver al regalo original
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Error de validación */}
       {errorValidacion && (
         <div className="mx-4 mb-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -2028,7 +2140,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         </Button>
         <Button
           onClick={handleGuardar}
-          disabled={ilegibles.hay || guardando || guardandoLocal || sustitucionesCargando || esperandoPromos || bloqueoMOQ.length > 0 || (puedeEditarItems && !pedidoEntregado && items.length === 0)}
+          disabled={ilegibles.hay || guardando || guardandoLocal || sustitucionesCargando || esperandoPromos || bloqueoMOQ.length > 0 || (guardaItems && regalosCaros.length > 0) || (puedeEditarItems && !pedidoEntregado && items.length === 0)}
           loading={guardando || guardandoLocal}
           variant="primary"
           size="md"
