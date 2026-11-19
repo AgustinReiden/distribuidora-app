@@ -15,7 +15,10 @@
 --   L11 · H4 de la revisión de C1 (decisión de la coordinadora): el empleado se da de baja entre la salvedad y la
 --        anulación. Reponerle el adelanto se rechaza con «Ese cliente es la ficha de un empleado dado de baja…»,
 --        sea la raíz, un pedazo o un adelanto vivo al que se le suma lo recortado; la cuenta no cambia (antes el
---        pedazo y el que se suma entraban y le volvían a cargar el adelanto al ex empleado).
+--        pedazo y el que se suma entraban y le volvían a cargar el adelanto al ex empleado). N1 de la segunda
+--        pasada: lo mismo si después de la baja le sacan la ficha al ex empleado o se la pasan a otro (el trigger
+--        carga al de los movimientos de esa familia de pagos, no al de la ficha). N4: si no hay nada que reponer
+--        (la boleta ya no debe nada), la anulación entra y no le carga nada.
 --
 --   COB-b6 · al aplicar un crédito se limpian todas las marcas de saldo a favor
 --   L3 · Una boleta cobrada en efectivo se cancela con otra boleta del cliente impaga: el cobro pasa a la otra
@@ -386,7 +389,9 @@ $fn$;
 -- L11 · H4 de la revisión: el empleado se da de baja entre la salvedad y la anulación.
 -- p_caso: 'raiz' (el adelanto de la boleta, borrado), 'pedazo' (el pedazo de una boleta posterior, borrado)
 -- o 'sumar' (la salvedad recortó parte del adelanto, que sigue vivo: anular se lo vuelve a sumar).
-CREATE OR REPLACE FUNCTION pg_temp.c1_l11(a jsonb, p_caso text)
+-- p_ficha (N1): 'igual' (la ficha sigue siendo del ex empleado), 'sin' (se la sacan) u 'otro' (se la pasan a
+-- un empleado activo nuevo).
+CREATE OR REPLACE FUNCTION pg_temp.c1_l11(a jsonb, p_caso text, p_ficha text DEFAULT 'igual')
 RETURNS text[] LANGUAGE plpgsql AS $fn$
 DECLARE
   f     text[] := '{}';
@@ -400,6 +405,7 @@ DECLARE
   v_s   bigint;
   v_cuenta numeric;
   v_r   text;
+  v_otro bigint;
 BEGIN
   v_b1 := pg_temp.c1_boleta(v_cli, v_adm, v_suc, pg_temp.c1_linea(v_pr, 6, 10));
   PERFORM pg_temp.c1_fifo_adelanto(v_cli, 100, v_adm, v_suc);   -- 60 a la boleta (raíz), 40 sueltos
@@ -408,12 +414,52 @@ BEGIN
                      WHEN 'pedazo' THEN pg_temp.c1_salvedad(v_b3, 3, v_adm, v_suc)
                      ELSE pg_temp.c1_salvedad(v_b1, 2, v_adm, v_suc) END;
   UPDATE public.empleados SET activo = false, fecha_baja = public._tablero_hoy() WHERE id = v_emp;
+  IF p_ficha IN ('sin', 'otro') THEN
+    UPDATE public.empleados SET cliente_id = NULL WHERE id = v_emp;   -- lo que hace guardar_empleado
+  END IF;
+  IF p_ficha = 'otro' THEN
+    v_otro := pg_temp.c1_empleado(v_suc, v_cli, v_adm);
+  END IF;
   v_cuenta := pg_temp.c1_cuenta(v_emp);
   v_r := pg_temp.c1_anu_err(v_s, v_adm, v_suc);
   f := pg_temp.c1_si(f, v_r LIKE '%Ese cliente es la ficha de un empleado dado de baja: ya no se le dan adelantos de sueldo%',
-                     format('%s: anular dio %s', p_caso, v_r));
+                     format('%s, ficha %s: anular dio %s', p_caso, p_ficha, v_r));
   f := pg_temp.c1_si(f, pg_temp.c1_cuenta(v_emp) = v_cuenta,
-                     format('%s: la cuenta del ex empleado pasó de %s a %s', p_caso, v_cuenta, pg_temp.c1_cuenta(v_emp)));
+                     format('%s, ficha %s: la cuenta del ex empleado pasó de %s a %s', p_caso, p_ficha, v_cuenta, pg_temp.c1_cuenta(v_emp)));
+  RETURN f;
+END
+$fn$;
+
+-- N4: la salvedad recortó 20 del adelanto; después la boleta se terminó de pagar con 20 en efectivo y el empleado
+-- se dio de baja. Anular no repone nada (la boleta no debe nada): entra, y la cuenta del ex empleado no cambia.
+CREATE OR REPLACE FUNCTION pg_temp.c1_l11_sin_deuda(a jsonb)
+RETURNS text[] LANGUAGE plpgsql AS $fn$
+DECLARE
+  f     text[] := '{}';
+  v_suc bigint := (a->>'suc')::bigint;
+  v_adm uuid := (a->>'adm')::uuid;
+  v_cli bigint := pg_temp.c1_cliente(v_suc, 'C1 empleado L11 N4');
+  v_pr  bigint := pg_temp.c1_producto(v_suc, 'C1 L11 N4 fardo', 10);
+  v_emp bigint := pg_temp.c1_empleado(v_suc, v_cli, v_adm);
+  v_b1  bigint;
+  v_s   bigint;
+  v_cuenta numeric;
+  v_r   text;
+BEGIN
+  v_b1 := pg_temp.c1_boleta(v_cli, v_adm, v_suc, pg_temp.c1_linea(v_pr, 6, 10));
+  PERFORM pg_temp.c1_fifo_adelanto(v_cli, 60, v_adm, v_suc);
+  v_s := pg_temp.c1_salvedad(v_b1, 2, v_adm, v_suc);              -- el adelanto queda en 40
+  -- 20 en efectivo que deja la boleta pagada aunque vuelva a 60 (como un cobro cargado de más a mano).
+  INSERT INTO public.pagos (cliente_id, pedido_id, sucursal_id, monto, forma_pago, fecha, usuario_id, notas)
+  VALUES (v_cli, v_b1, v_suc, 20, 'efectivo', public._tablero_hoy(), v_adm, 'ensayo C1 N4');
+  UPDATE public.empleados SET activo = false, fecha_baja = public._tablero_hoy() WHERE id = v_emp;
+  v_cuenta := pg_temp.c1_cuenta(v_emp);
+  v_r := pg_temp.c1_anu_err(v_s, v_adm, v_suc);
+  f := pg_temp.c1_si(f, v_r = 'ok', format('sin deuda: anular dio %s', v_r));
+  f := pg_temp.c1_si(f, pg_temp.c1_cuenta(v_emp) = v_cuenta,
+                     format('sin deuda: la cuenta del ex empleado pasó de %s a %s', v_cuenta, pg_temp.c1_cuenta(v_emp)));
+  f := pg_temp.c1_si(f, (SELECT monto FROM public.pagos WHERE pedido_id = v_b1 AND forma_pago = 'adelanto_sueldo') = 40,
+                     format('sin deuda: el adelanto quedó en %s', (SELECT monto FROM public.pagos WHERE pedido_id = v_b1 AND forma_pago = 'adelanto_sueldo')));
   RETURN f;
 END
 $fn$;
@@ -424,13 +470,18 @@ DECLARE
   f text[] := '{}';
   v_caso text;
 BEGIN
-  FOREACH v_caso IN ARRAY ARRAY['raiz', 'pedazo', 'sumar'] LOOP
+  FOREACH v_caso IN ARRAY ARRAY['raiz/igual', 'pedazo/igual', 'sumar/igual', 'pedazo/sin', 'sumar/sin', 'pedazo/otro', 'sumar/otro'] LOOP
     BEGIN
-      f := f || pg_temp.c1_l11(a, v_caso);
+      f := f || pg_temp.c1_l11(a, split_part(v_caso, '/', 1), split_part(v_caso, '/', 2));
       RAISE EXCEPTION USING ERRCODE = 'ZZ002';
     EXCEPTION WHEN SQLSTATE 'ZZ002' THEN NULL;
     END;
   END LOOP;
+  BEGIN
+    f := f || pg_temp.c1_l11_sin_deuda(a);
+    RAISE EXCEPTION USING ERRCODE = 'ZZ002';
+  EXCEPTION WHEN SQLSTATE 'ZZ002' THEN NULL;
+  END;
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;

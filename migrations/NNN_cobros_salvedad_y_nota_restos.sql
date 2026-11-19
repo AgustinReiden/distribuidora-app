@@ -26,10 +26,13 @@
 -- dos, el cobro nace sin marcas, como antes. anular_salvedad se parcha por
 -- ancla con premisa de forma (otra tarjeta de la tanda puede tocarla).
 -- H4 de la revisión (decisión de la coordinadora, conservadora como la 530):
--- reponer un adelanto de sueldo a la ficha de un empleado dado de baja se
--- rechaza siempre, con el mensaje de hoy. Antes sólo lo frenaba el trigger de la
--- cuenta del empleado en la raíz nueva; con las marcas, el pedazo repuesto (y el
--- pago que vuelve a crecer) le volvían a cargar el adelanto al ex empleado.
+-- reponer un adelanto de sueldo a un empleado dado de baja se rechaza siempre,
+-- con el mensaje de hoy. Antes sólo lo frenaba el trigger de la cuenta del
+-- empleado en la raíz nueva; con las marcas, el pedazo repuesto (y el pago que
+-- vuelve a crecer) le volvían a cargar el adelanto al ex empleado. Se mira el
+-- empleado de la ficha de hoy y el de los movimientos de esa familia de pagos
+-- (a quien el trigger carga aunque le hayan sacado o cambiado la ficha), y sólo
+-- cuando hay algo que reponer (si la boleta ya no debe nada, no se frena).
 --
 -- =========================================================================
 -- 2 · COB-b6 (#1545): AL REAPLICAR UN CRÉDITO SE LIMPIAN TODAS SUS NOTAS
@@ -279,6 +282,8 @@ $a$,
     $a$  v_resultado     JSONB := '[]'::jsonb;
   -- 1595-b2 (#1595): las marcas del cobro que se repone como nuevo.
   v_marcas        JSONB;
+  -- H4 de la revisión de C1: la raíz de la familia del adelanto que se repone.
+  v_raiz          BIGINT;
 $a$,
     1, v_que || ' (declaración)');
 
@@ -291,16 +296,6 @@ $a$,
       -- sueldo del FIFO de la ficha sigue siendo un pago a cuenta, y desimputar_pago
       -- lo acepta. Del pago vivo (foto de una rendición cerrada o caja cerrada) o, si
       -- el recorte lo borró, de la fila de su DELETE en audit_logs.
-      -- H4 de la revisión de C1 (decisión de la coordinadora, conservadora como la 530): reponer
-      -- un adelanto de sueldo es volver a cargárselo al empleado de la ficha. A uno dado de baja no
-      -- se le carga, sea la raíz o un pedazo, se sume al pago o vuelva como uno nuevo: se rechaza
-      -- con el mensaje del trigger de la cuenta del empleado (que sólo lo miraba en la raíz nueva).
-      IF v_accion <> 'nada' AND r_rec.e->>'forma_pago' = 'adelanto_sueldo'
-         AND EXISTS (SELECT 1 FROM empleados em
-                      WHERE em.cliente_id = (r_rec.e->>'cliente_id')::bigint AND NOT em.activo) THEN
-        RAISE EXCEPTION 'Ese cliente es la ficha de un empleado dado de baja: ya no se le dan adelantos de sueldo';
-      END IF;
-
       v_marcas := NULL;
       IF v_accion = 'nuevo' THEN
         SELECT jsonb_build_object('a_cuenta', pg.a_cuenta, 'pago_origen_id', pg.pago_origen_id,
@@ -354,6 +349,36 @@ $a$,
 $a$,
     1, v_que || ' (cobro nuevo)');
 
+  -- H4 de la revisión de C1 (decisión de la coordinadora, conservadora como la 530), con N1 y N4
+  -- de su segunda pasada: reponer un adelanto de sueldo es volver a cargarlo a la cuenta de un
+  -- empleado. Si lo que se repone (v_rep > 0) iría a un empleado dado de baja, se rechaza con el
+  -- mensaje del trigger de la cuenta del empleado (que sólo lo miraba en la raíz nueva): el de la
+  -- ficha de hoy, y también el de los movimientos de esa familia de pagos, que es a quien el trigger
+  -- carga un pedazo o el pago que vuelve a crecer aunque después le hayan sacado o cambiado la ficha.
+  v_def := pg_temp.parche(v_def,
+    $a$    IF v_rep > 0 AND r_rec.e->>'accion' = 'sumar' THEN
+$a$,
+    $a$    -- H4 de la revisión de C1 (con N1 y N4): no se le repone un adelanto de sueldo a un empleado
+    -- dado de baja, sea el de la ficha de hoy o el de los movimientos de esa familia de pagos (raíz,
+    -- pedazo o el pago que vuelve a crecer). Si no hay nada que reponer (v_rep = 0), no se frena.
+    IF v_rep > 0 AND r_rec.e->>'forma_pago' = 'adelanto_sueldo' THEN
+      v_raiz := COALESCE((SELECT pg.pago_origen_id FROM pagos pg WHERE pg.id = (r_rec.e->>'pago_id')::bigint),
+                         (r_rec.e->'marcas'->>'pago_origen_id')::bigint,
+                         (r_rec.e->>'pago_id')::bigint);
+      IF EXISTS (SELECT 1 FROM empleados em
+                  WHERE em.cliente_id = (r_rec.e->>'cliente_id')::bigint AND NOT em.activo)
+         OR EXISTS (SELECT 1 FROM empleado_movimientos m
+                      JOIN empleados em ON em.id = m.empleado_id
+                     WHERE NOT em.activo
+                       AND (m.pago_id = (r_rec.e->>'pago_id')::bigint OR m.pago_raiz_id = v_raiz)) THEN
+        RAISE EXCEPTION 'Ese cliente es la ficha de un empleado dado de baja: ya no se le dan adelantos de sueldo';
+      END IF;
+    END IF;
+
+    IF v_rep > 0 AND r_rec.e->>'accion' = 'sumar' THEN
+$a$,
+    1, v_que || ' (H4)');
+
   -- 1592-b5 residual (sección 5): la transacción de una salvedad sobre el regalo no cuenta como recorte.
   v_def := pg_temp.parche(v_def,
     $a$    WITH tx AS (
@@ -402,7 +427,9 @@ BEGIN
     ('public.anular_salvedad(bigint,text)', '''pagos'' AND a.accion = ''DELETE''', 1, true),
     ('public.anular_salvedad(bigint,text)', 'HAVING NOT bool_and(COALESCE(s.es_bonificacion, false) AND s.promocion_id IS NOT NULL)', 1, true),
     ('public.anular_salvedad(bigint,text)', 'SELECT DISTINCT s.created_at', 0, true),
-    ('public.anular_salvedad(bigint,text)', 'WHERE em.cliente_id = (r_rec.e->>''cliente_id'')::bigint AND NOT em.activo', 1, true)
+    ('public.anular_salvedad(bigint,text)', 'WHERE em.cliente_id = (r_rec.e->>''cliente_id'')::bigint AND NOT em.activo', 1, true),
+    ('public.anular_salvedad(bigint,text)', 'AND (m.pago_id = (r_rec.e->>''pago_id'')::bigint OR m.pago_raiz_id = v_raiz)', 1, true),
+    ('public.anular_salvedad(bigint,text)', 'IF v_rep > 0 AND r_rec.e->>''forma_pago'' = ''adelanto_sueldo'' THEN', 1, true)
   ) AS t(f, marca, n, definer) LOOP
     IF (SELECT (length(prosrc) - length(replace(prosrc, r.marca, ''))) / length(r.marca)
           FROM pg_proc WHERE oid = r.f::regprocedure) <> r.n
