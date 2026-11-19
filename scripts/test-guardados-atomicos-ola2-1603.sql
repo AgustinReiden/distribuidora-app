@@ -66,6 +66,16 @@
 --   U1 · [F] v2 · guardar_usuario: el admin que abarca al usuario le cambia el nombre y el rol extra
 --        en una llamada; si el rol extra es inválido no queda ni el nombre; el admin de una sola
 --        sucursal no edita a uno de dos.
+--   v3 (revisión adversarial):
+--   P7 · [F] H2: la versión de la promo se mueve si cambian sólo productos, sólo reglas, sólo el
+--        regalo o los tres; con la de antes, el guardado se rechaza y no borra lo del otro.
+--   K8 · [F] H3: la del cliente se mueve si cambian sólo los descuentos o sólo los preventistas (la
+--        ficha vieja no borra los descuentos del otro); el saldo no la mueve.
+--   K9 · [R] D2: el admin no le asigna el cliente a un preventista de otra sucursal (#1374).
+--   U2 · [F] D1: nadie se edita a sí mismo (perfil ni roles extra), como dice CLAUDE.md.
+--   C6 · [F] H5: un nulo en `vistos` se rechaza (no apaga la guarda).
+--   A1 · [F] H4: la clave de un alta guarda sólo un md5.
+--   (H1, el deadlock con la venta, lo prueba scripts/concurrencia/c4b-combo-y-venta.sh.)
 --   S1 · [F] Las cuatro RPC nuevas: definer, pg_temp al final del search_path, EXECUTE sólo para
 --        authenticated (no PUBLIC ni anon); altas_por_clave con RLS, sin policies ni grants.
 --   S2 · [F] guardar_combo y cambiar_regalo_promocion: una sola firma cada una y pg_temp en el
@@ -108,7 +118,8 @@ DECLARE
   v_ca     bigint; v_cb bigint; v_cc bigint;
   v_n      bigint;
   v_fallas text[] := '{}';
-  v_casos  int := 34;
+  v_casos  int := 40;
+  v_k      int;
   v_cl     bigint;
   v_cl2    bigint;
   v_zona   bigint;
@@ -830,6 +841,116 @@ BEGIN
     jsonb_build_object('id', v_u, 'campos', jsonb_build_object('nombre', 'ZZ C4b U de a1'))));
   IF v_t NOT LIKE '%No podés editar a este usuario%' OR (SELECT nombre FROM perfiles WHERE id = v_u) IS DISTINCT FROM 'ZZ C4b U nuevo' THEN
     v_fallas := v_fallas || ('U1 · el admin de una sola sucursal editó a uno de dos: ' || v_t);
+  END IF;
+
+  -- ================================================ v3 · revisión adversarial -
+  -- P7 (H2) · la versión de la promo se mueve si cambian sólo productos, sólo reglas, sólo el regalo o
+  -- los tres; y con la versión de antes, el guardado se rechaza y no borra lo que puso el otro.
+  IF v_pr IS NOT NULL THEN
+    FOR v_k IN 1..4 LOOP
+      v_ts := (SELECT updated_at FROM promociones WHERE id = v_pr);
+      v_j := jsonb_build_object('updated_at_esperado', v_ts,
+        'producto_ids', CASE WHEN v_k IN (1, 4) THEN jsonb_build_array(p1, p2, CASE WHEN v_k = 1 THEN p4 ELSE p3 END)
+                             ELSE (SELECT jsonb_agg(producto_id ORDER BY producto_id) FROM promocion_productos WHERE promocion_id = v_pr) END,
+        'reglas', CASE WHEN v_k IN (2, 4) THEN jsonb_build_array(jsonb_build_object('clave', 'cantidad_compra', 'valor', 10 + v_k),
+                                                                  jsonb_build_object('clave', 'cantidad_bonificacion', 'valor', 1))
+                       ELSE (SELECT jsonb_agg(jsonb_build_object('clave', clave, 'valor', valor) ORDER BY clave) FROM promocion_reglas WHERE promocion_id = v_pr) END);
+      v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.cambiar_regalo_promocion(%s, %s, NULL, false, %L::jsonb)::text',
+        v_pr, CASE WHEN v_k IN (3, 4) THEN p4 ELSE (SELECT producto_regalo_id FROM promociones WHERE id = v_pr) END, v_j));
+      IF (pg_temp.j(v_t)->>'success')::boolean IS DISTINCT FROM true
+         OR (SELECT updated_at FROM promociones WHERE id = v_pr) IS NOT DISTINCT FROM v_ts THEN
+        v_fallas := v_fallas || format('P7.%s · el cambio (%s) no movió la versión de la promo: %s', v_k,
+          (ARRAY['sólo productos', 'sólo reglas', 'sólo el regalo', 'los tres'])[v_k], v_t);
+      END IF;
+      -- B, con la versión de antes, manda la lista de antes: se rechaza.
+      v_n := (SELECT count(*) FROM promocion_productos WHERE promocion_id = v_pr);
+      v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.cambiar_regalo_promocion(%s, %s, NULL, false, %L::jsonb)::text',
+        v_pr, (SELECT producto_regalo_id FROM promociones WHERE id = v_pr),
+        jsonb_build_object('updated_at_esperado', v_ts, 'producto_ids', jsonb_build_array(p1))));
+      IF pg_temp.j(v_t)->>'codigo' IS DISTINCT FROM 'promocion_cambiada'
+         OR (SELECT count(*) FROM promocion_productos WHERE promocion_id = v_pr) <> v_n THEN
+        v_fallas := v_fallas || format('P7.%s · con la versión de antes pisó lo del otro: %s', v_k, v_t);
+      END IF;
+    END LOOP;
+  ELSE
+    v_fallas := v_fallas || text 'P7 · sin promo (P1 falló)';
+  END IF;
+
+  -- K8 (H3) · la versión del cliente se mueve si cambian sólo los descuentos o sólo los preventistas.
+  IF v_cl IS NOT NULL THEN
+    v_ts := (SELECT updated_at FROM clientes WHERE id = v_cl);
+    v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+      jsonb_build_object('id', v_cl, 'updated_at_esperado', v_ts, 'descuentos_categoria', '[{"categoria":"Gaseosas","descuento_porcentaje":10}]'::jsonb)));
+    IF (pg_temp.j(v_t)->>'success')::boolean IS DISTINCT FROM true
+       OR (SELECT updated_at FROM clientes WHERE id = v_cl) IS NOT DISTINCT FROM v_ts THEN
+      v_fallas := v_fallas || ('K8 · cambiar sólo los descuentos no movió la versión del cliente: ' || v_t);
+    END IF;
+    v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+      jsonb_build_object('id', v_cl, 'updated_at_esperado', v_ts, 'campos', jsonb_build_object('notas', 'pisa'),
+                         'descuentos_categoria', '[]'::jsonb)));
+    IF pg_temp.j(v_t)->>'codigo' IS DISTINCT FROM 'cliente_cambiado' OR pg_temp.descuentos(v_cl) <> 'Gaseosas=10.00' THEN
+      v_fallas := v_fallas || ('K8 · la ficha vieja borró los descuentos del otro: ' || v_t);
+    END IF;
+    v_ts := (SELECT updated_at FROM clientes WHERE id = v_cl);
+    v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+      jsonb_build_object('id', v_cl, 'updated_at_esperado', v_ts, 'preventista_ids', '[]'::jsonb,
+                         'preventista_ids_previos', jsonb_build_array(v_pre))));
+    IF (pg_temp.j(v_t)->>'success')::boolean IS DISTINCT FROM true
+       OR (SELECT updated_at FROM clientes WHERE id = v_cl) IS NOT DISTINCT FROM v_ts THEN
+      v_fallas := v_fallas || ('K8 · cambiar sólo los preventistas no movió la versión del cliente: ' || v_t);
+    END IF;
+    v_ts := (SELECT updated_at FROM clientes WHERE id = v_cl);
+    UPDATE clientes SET saldo_cuenta = saldo_cuenta + 1 WHERE id = v_cl;
+    IF (SELECT updated_at FROM clientes WHERE id = v_cl) IS DISTINCT FROM v_ts THEN
+      v_fallas := v_fallas || text 'K8 · el saldo movió la versión del cliente';
+    END IF;
+  END IF;
+
+  -- K9 (D2) · el admin elige a alguien de la sucursal del cliente (#1374): uno sólo de la 2, no.
+  IF v_cl IS NOT NULL THEN
+    v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_cliente(%L::jsonb)::text',
+      jsonb_build_object('id', v_cl, 'preventista_ids', jsonb_build_array(v_u2), 'preventista_ids_previos', '[]'::jsonb)));
+    IF v_t NOT LIKE '42501 %' OR EXISTS (SELECT 1 FROM cliente_preventistas WHERE cliente_id = v_cl AND preventista_id = v_u2) THEN
+      v_fallas := v_fallas || ('K9 · el admin asignó a un preventista de otra sucursal: ' || v_t);
+    END IF;
+  END IF;
+
+  -- U2 (D1) · nadie se edita a sí mismo: ni el perfil ni los roles extra.
+  v_t := pg_temp.intenta(v_adm, 1, format('SELECT public.guardar_usuario(%L::jsonb)::text',
+    jsonb_build_object('id', v_adm, 'campos', jsonb_build_object('nombre', 'ZZ C4b yo'))));
+  IF v_t NOT LIKE '%No podés editar tu propio usuario%' OR (SELECT nombre FROM perfiles WHERE id = v_adm) = 'ZZ C4b yo' THEN
+    v_fallas := v_fallas || ('U2 · el admin se editó a sí mismo: ' || v_t);
+  END IF;
+  v_t := pg_temp.roles(v_adm, 1, v_adm, ARRAY['transportista']);
+  IF v_t NOT LIKE '%No podés cambiar tus propios roles%' OR EXISTS (SELECT 1 FROM perfil_roles WHERE usuario_id = v_adm) THEN
+    v_fallas := v_fallas || ('U2 · el admin se dio un rol extra a sí mismo: ' || v_t);
+  END IF;
+
+  -- C6 (H5) · un nulo en `vistos` no apaga la guarda: se rechaza el formato.
+  IF v_ca IS NOT NULL THEN
+    v_t := pg_temp.combo(v_adm, 1, jsonb_build_object('id', v_ca, 'nombre', 'ZZ C4b combo A', 'precio', 150, 'fecha_inicio', v_hoy,
+      'componentes', jsonb_build_array(jsonb_build_object('cantidad', 1, 'productos', jsonb_build_array(p1)),
+                                       jsonb_build_object('cantidad', 1, 'productos', jsonb_build_array(p2))),
+      'vistos', '[null]'::jsonb));
+    IF v_t NOT LIKE '%formato inválido%' THEN
+      v_fallas := v_fallas || ('C6 · un nulo en vistos no se rechazó: ' || v_t);
+    END IF;
+  END IF;
+
+  -- A1 (H4) · la clave guarda sólo un md5.
+  v_t := pg_temp.intenta(v_pre, 1, format('SELECT public._alta_cliente_tomar_clave(%L::uuid, %L)::text', gen_random_uuid(), repeat('x', 10000)));
+  IF v_t NOT LIKE '%no tiene la forma esperada%' THEN
+    v_fallas := v_fallas || ('A1 · la clave aceptó un contenido que no es un md5: ' || left(v_t, 200));
+  END IF;
+  IF to_regclass('public.altas_por_clave') IS NOT NULL THEN
+    BEGIN
+      EXECUTE format('INSERT INTO public.altas_por_clave (clave, operacion, usuario_id, sucursal_id, contenido) VALUES (%L, %L, %L, 1, %L)',
+                     gen_random_uuid(), 'cliente', v_pre, repeat('x', 100));
+      v_fallas := v_fallas || text 'A1 · altas_por_clave aceptó un contenido que no es un md5';
+    EXCEPTION WHEN check_violation THEN NULL;
+    END;
+  ELSE
+    v_fallas := v_fallas || text 'A1 · no existe altas_por_clave';
   END IF;
 
   -- ============================================================= seguridad -

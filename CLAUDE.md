@@ -365,6 +365,11 @@ suelta en `sucursales`.
   (`updated_at_esperado`, y en un combo las `versiones` del orden que reescribe): si otro guardó, no
   se pisa y el formulario queda abierto con lo tipeado. La versión de una promo no la mueve la barra
   (`usos_pendientes`), ni la de un cliente su saldo (`clientes.updated_at`, `trg_clientes_zz_version`).
+  Un cambio sólo en las hijas (los productos o reglas de una promo, los descuentos o preventistas de
+  un cliente) la mueve la RPC que lo hace (el trigger respeta ese movimiento si viene del server):
+  una RPC nueva que escriba las hijas hace lo mismo. Estas RPC toman la fila padre `FOR NO KEY
+  UPDATE`, nunca `FOR UPDATE`, que choca con el `KEY SHARE` de la FK de una venta y da deadlock
+  (`scripts/concurrencia/c4b-combo-y-venta.sh`). Nadie se edita a sí mismo por estas RPC.
   El alta y la edición de un cliente (`guardar_cliente`) y el guardado de un usuario (`guardar_usuario`)
   corren como quien llama (INVOKER), a propósito: los triggers de `clientes` y `perfiles` se eximen
   cuando `current_user` no es 'authenticated', y una definer los salteaba. Mientras sean INVOKER

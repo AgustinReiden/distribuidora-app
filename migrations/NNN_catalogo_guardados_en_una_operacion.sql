@@ -50,7 +50,8 @@
 --     del combo al abrirlo) y `versiones` (el de cada combo del orden que
 --     reescribe). Si otro guardó el combo, o reordenó o cambió uno del grupo,
 --     no escribe nada y devuelve `codigo` 'combo_cambiado' u 'orden_cambiado'.
---     Toma el combo y los del orden FOR UPDATE, por id, antes de comparar. Y al
+--     Toma el combo y los del orden FOR NO KEY UPDATE (no choca con el KEY SHARE de la FK que
+--     toma una venta del combo), por id, antes de comparar. Y al
 --     reordenar les mueve el `updated_at` a los que cambian de prioridad: es un
 --     cambio suyo. Sin las claves (un PWA de antes) no compara.
 --   · `cambiar_regalo_promocion` recibe `updated_at_esperado` dentro de
@@ -71,6 +72,12 @@
 -- (regla de B15), y también el trigger reemplazado. Y `guardar_combo` deja de
 -- reusar una temporal `_combo_resuelto` de quien llama (hallazgo de B15): la tira y
 -- la crea calificada. No hay DDL sobre tablas existentes: no hace falta LOCK.
+--
+-- v3 (revisión adversarial): ningún lock nuevo choca con la FK de una venta (FOR NO KEY UPDATE; H1,
+-- guion scripts/concurrencia/c4b-combo-y-venta.sh); la versión de la promo y la del cliente se
+-- mueven también cuando cambian sus filas hijas (productos y reglas; descuentos y preventistas), por
+-- el server (H2, H3); `altas_por_clave` guarda sólo el md5, con tope y purga de 30 días (H4); `vistos`
+-- sin nulos (H5); nadie se edita a sí mismo por guardar_usuario ni guardar_roles_extra (D1).
 --
 -- Ensayo: scripts/test-guardados-atomicos-ola2-1603.sql. Se aplica en LF.
 -- =========================================================================
@@ -111,7 +118,9 @@ BEGIN
     -- estas guardas de clientes, cliente_preventistas y perfiles sigan como en la 530.
     ('public.verificar_duplicado_cliente(numeric,numeric,text,bigint)', '3f95ea7d1843c7dade9bbc84baf50dd9'),
     ('public._cliente_visible(bigint,bigint,boolean)', '7698df4ccb647b9760d60efca9ac4437'),
-    ('public.perfiles_guard_desactivacion()', 'e5f88a02905ba3dc4118db7fb8ef39de')
+    ('public.perfiles_guard_desactivacion()', 'e5f88a02905ba3dc4118db7fb8ef39de'),
+    -- v3: la purga de retención suma altas_por_clave.
+    ('public.purgar_retencion(integer)', '5747284331e2cc4a116071910f5df329')
   ) AS t(f, h) LOOP
     IF to_regprocedure(r.f) IS NULL THEN
       RAISE EXCEPTION 'mig NNN · % no existe: rehacer sobre lo vigente', r.f;
@@ -132,6 +141,7 @@ BEGIN
      OR to_regprocedure('public._alta_cliente_tomar_clave(uuid,text)') IS NOT NULL
      OR to_regprocedure('public._alta_cliente_cerrar_clave(uuid,bigint)') IS NOT NULL
      OR to_regprocedure('public.clientes_version()') IS NOT NULL
+     OR to_regprocedure('public._cliente_mover_version(bigint)') IS NOT NULL
      OR EXISTS (SELECT 1 FROM information_schema.columns
                  WHERE table_schema = 'public' AND table_name = 'clientes' AND column_name = 'updated_at') THEN
     RAISE EXCEPTION 'mig NNN · alguno de los objetos nuevos ya existe';
@@ -188,13 +198,14 @@ CREATE TABLE public.altas_por_clave (
   operacion   text        NOT NULL CHECK (operacion IN ('condicion_mayorista', 'promocion', 'cliente')),
   usuario_id  uuid        NOT NULL,
   sucursal_id bigint      NOT NULL,
-  contenido   text        NOT NULL,
+  -- El md5 del JSON pedido, nunca el JSON (H4 de la revisión).
+  contenido   text        NOT NULL CHECK (contenido ~ '^[0-9a-f]{32}$'),
   entidad_id  bigint,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 
 COMMENT ON TABLE public.altas_por_clave IS
-  'C4b (ola 2 de #1603): la clave de cada alta de condición mayorista, de promo o de cliente, para que un reintento después de una respuesta perdida devuelva la misma y no cree otra. `contenido` es el md5 del JSON pedido sin la clave: con la misma clave y otro contenido se rechaza. Sólo de server: RLS sin policies y sin grants para anon ni authenticated. La escriben guardar_condicion_mayorista y crear_promocion, y la del cliente _alta_cliente_tomar_clave / _alta_cliente_cerrar_clave (guardar_cliente corre como quien llama).';
+  'C4b (ola 2 de #1603): la clave de cada alta de condición mayorista, de promo o de cliente, para que un reintento después de una respuesta perdida devuelva la misma y no cree otra. `contenido` es el md5 del JSON pedido sin la clave (sólo el md5: lo frena un CHECK): con la misma clave y otro contenido se rechaza. purgar_retencion() borra las de más de 30 días: una clave sólo sirve para el reintento inmediato. Sólo de server: RLS sin policies y sin grants para anon ni authenticated. La escriben guardar_condicion_mayorista y crear_promocion, y la del cliente _alta_cliente_tomar_clave / _alta_cliente_cerrar_clave (guardar_cliente corre como quien llama).';
 
 ALTER TABLE public.altas_por_clave ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.altas_por_clave FROM PUBLIC, anon, authenticated;
@@ -401,7 +412,8 @@ BEGIN
     RETURNING id INTO v_id;
     UPDATE altas_por_clave SET entidad_id = v_id WHERE clave = v_clave;
   ELSE
-    PERFORM 1 FROM grupos_precio WHERE id = v_id AND sucursal_id = v_suc FOR UPDATE;
+    -- NO KEY UPDATE: no cambia la clave, y así no choca con el KEY SHARE de una FK (H1).
+    PERFORM 1 FROM grupos_precio WHERE id = v_id AND sucursal_id = v_suc FOR NO KEY UPDATE;
     IF NOT FOUND THEN
       RAISE EXCEPTION 'La condición no existe en esta sucursal (puede que otro la haya eliminado).' USING ERRCODE = '22023';
     END IF;
@@ -683,6 +695,10 @@ BEGIN
   IF p_usuario_id IS NULL THEN
     RAISE EXCEPTION 'Falta el usuario.' USING ERRCODE = '22023';
   END IF;
+  -- v3 (D1): nadie edita su propio perfil, tampoco sus roles extra.
+  IF p_usuario_id = auth.uid() THEN
+    RAISE EXCEPTION 'No podés cambiar tus propios roles: los cambia otro administrador.' USING ERRCODE = '42501';
+  END IF;
   IF NOT public.admin_abarca_sucursales_de(p_usuario_id) THEN
     RAISE EXCEPTION 'No podés editar a este usuario: también trabaja en sucursales que no son tuyas. Lo edita un admin de todas ellas.' USING ERRCODE = '42501';
   END IF;
@@ -725,6 +741,8 @@ DECLARE
   v_r        record;
   v_cat      text;
   v_pct      numeric;
+  v_filas    integer;
+  v_cambio   integer := 0;
 BEGIN
   -- Lo de las policies cdc_insert y cdc_delete: admin activo y cliente de la sucursal activa.
   IF NOT public.es_admin() THEN
@@ -767,11 +785,21 @@ BEGIN
    WHERE c.cliente_id = p_cliente_id
      AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_deseados) d
                       WHERE d->>'categoria' = c.categoria AND (d->>'pct')::numeric = c.descuento_porcentaje);
+  GET DIAGNOSTICS v_filas = ROW_COUNT;
+  v_cambio := v_cambio + v_filas;
   INSERT INTO cliente_descuentos_categoria (cliente_id, categoria, descuento_porcentaje)
   SELECT p_cliente_id, d->>'categoria', (d->>'pct')::numeric
     FROM jsonb_array_elements(v_deseados) d
    ORDER BY d->>'categoria'
   ON CONFLICT (cliente_id, categoria) DO NOTHING;
+  GET DIAGNOSTICS v_filas = ROW_COUNT;
+  v_cambio := v_cambio + v_filas;
+
+  -- v3 (H3): cambiar los descuentos es cambiar el cliente: se le mueve la versión, así otro que
+  -- tenía la ficha abierta no los pisa. Lo mueve el server (el trigger lo respeta sólo de él).
+  IF v_cambio > 0 THEN
+    UPDATE clientes SET updated_at = clock_timestamp() WHERE id = p_cliente_id;
+  END IF;
 
   RETURN jsonb_build_object('descuentos', (
     SELECT COALESCE(jsonb_agg(jsonb_build_object('categoria', c.categoria,
@@ -814,10 +842,15 @@ LANGUAGE plpgsql
 SET search_path = public, pg_temp
 AS $fn$
 BEGIN
+  -- v3 (H3): el server mueve la versión a mano cuando cambian los descuentos o los preventistas
+  -- (guardar_descuentos_categoria, _cliente_mover_version). Sólo él: un PATCH REST no la fija.
+  IF current_user <> 'authenticated' AND NEW.updated_at > OLD.updated_at THEN
+    RETURN NEW;
+  END IF;
   IF (to_jsonb(NEW) - 'saldo_cuenta' - 'updated_at') = (to_jsonb(OLD) - 'saldo_cuenta' - 'updated_at') THEN
     NEW.updated_at := OLD.updated_at;
   ELSE
-    NEW.updated_at := now();
+    NEW.updated_at := clock_timestamp();  -- la hora del cambio, no la del principio de la transacción
   END IF;
   RETURN NEW;
 END
@@ -828,6 +861,28 @@ REVOKE ALL ON FUNCTION public.clientes_version() FROM PUBLIC, anon, authenticate
 CREATE TRIGGER trg_clientes_zz_version
   BEFORE UPDATE ON public.clientes
   FOR EACH ROW EXECUTE FUNCTION public.clientes_version();
+
+-- v3 (H3): la versión del cliente cuando cambian sus preventistas. guardar_cliente corre como quien
+-- llama, y un UPDATE suyo de `updated_at` lo revertiría el trigger (o lo frenaría el de columnas
+-- protegidas del preventista): esta lo hace como server, sólo sobre un cliente de la sucursal activa
+-- y para quien puede dar de alta clientes. No cambia nada más que la versión.
+CREATE FUNCTION public._cliente_mover_version(p_cliente_id bigint)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $fn$
+BEGIN
+  IF auth.uid() IS NULL OR NOT public.es_preventista() THEN
+    RAISE EXCEPTION 'No podés cambiar clientes.' USING ERRCODE = '42501';
+  END IF;
+  UPDATE clientes SET updated_at = clock_timestamp()
+   WHERE id = p_cliente_id AND sucursal_id = public.current_sucursal_id();
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION public._cliente_mover_version(bigint) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public._cliente_mover_version(bigint) TO authenticated, service_role;
 
 -- =========================================================================
 -- 5c · v2 · La clave del alta de un cliente
@@ -854,6 +909,14 @@ BEGIN
   END IF;
   IF v_suc IS NULL OR p_clave IS NULL OR p_contenido IS NULL THEN
     RAISE EXCEPTION 'Falta la clave del alta o la sucursal activa: recargá la página e intentá de nuevo.' USING ERRCODE = '22023';
+  END IF;
+  -- v3 (H4): sólo un md5 (el del JSON del alta), y un tope de reservas por hora.
+  IF p_contenido !~ '^[0-9a-f]{32}$' THEN
+    RAISE EXCEPTION 'La clave del alta no tiene la forma esperada.' USING ERRCODE = '22023';
+  END IF;
+  IF (SELECT count(*) FROM altas_por_clave
+       WHERE usuario_id = auth.uid() AND created_at > now() - interval '1 hour') >= 300 THEN
+    RAISE EXCEPTION 'Demasiadas altas seguidas: esperá un rato e intentá de nuevo.' USING ERRCODE = '54000';
   END IF;
   INSERT INTO altas_por_clave (clave, operacion, usuario_id, sucursal_id, contenido)
   VALUES (p_clave, 'cliente', auth.uid(), v_suc, p_contenido)
@@ -958,6 +1021,8 @@ DECLARE
   v_sql        text;
   v_x          uuid;
   v_toca_dir   boolean;
+  v_filas      integer;
+  v_cambio     integer := 0;
 BEGIN
   IF auth.uid() IS NULL THEN
     RAISE EXCEPTION 'Sin sesión: volvé a entrar.' USING ERRCODE = '42501';
@@ -1031,7 +1096,8 @@ BEGIN
   ELSE
     -- ------------------------------------------------------------ edición -
     -- Tomada con la RLS de quien guarda: si no la ve o no la puede editar, no hay fila.
-    SELECT * INTO v_viejo FROM clientes WHERE id = v_id FOR UPDATE;
+    -- NO KEY UPDATE: no cambia la clave, y no choca con el KEY SHARE de la FK de un pedido o un cobro (H1).
+    SELECT * INTO v_viejo FROM clientes WHERE id = v_id FOR NO KEY UPDATE;
     IF NOT FOUND THEN
       RAISE EXCEPTION 'El cliente no existe o no lo podés editar.' USING ERRCODE = '42501';
     END IF;
@@ -1075,10 +1141,18 @@ BEGIN
     END IF;
     DELETE FROM cliente_preventistas
      WHERE cliente_id = v_id AND preventista_id = ANY (v_previos) AND preventista_id <> ALL (v_deseados);
+    GET DIAGNOSTICS v_filas = ROW_COUNT;
+    v_cambio := v_cambio + v_filas;
     FOR v_x IN SELECT x FROM unnest(v_deseados) x WHERE x <> ALL (v_previos) ORDER BY x LOOP
       INSERT INTO cliente_preventistas (cliente_id, preventista_id) VALUES (v_id, v_x)
       ON CONFLICT DO NOTHING;
+      GET DIAGNOSTICS v_filas = ROW_COUNT;
+      v_cambio := v_cambio + v_filas;
     END LOOP;
+    -- v3 (H3): cambiar los preventistas es cambiar el cliente (en el alta no hace falta).
+    IF v_cambio > 0 AND v_viejo.id IS NOT NULL THEN
+      PERFORM public._cliente_mover_version(v_id);
+    END IF;
   END IF;
 
   -- ---------------------------------------------------------- descuentos -
@@ -1152,6 +1226,11 @@ BEGIN
   IF v_id IS NULL THEN
     RAISE EXCEPTION 'Falta el usuario.' USING ERRCODE = '22023';
   END IF;
+  -- v3 (D1): «Nadie edita su propio perfil» (decisión del dueño, CLAUDE.md). La policy REST de
+  -- perfiles hoy lo deja al admin; acá se cumple la regla escrita.
+  IF v_id = auth.uid() THEN
+    RAISE EXCEPTION 'No podés editar tu propio usuario: lo edita otro administrador.' USING ERRCODE = '42501';
+  END IF;
   v_campos := COALESCE(p_usuario->'campos', '{}'::jsonb);
   SELECT k INTO v_malo FROM jsonb_object_keys(v_campos) k WHERE k <> ALL (c_campos) ORDER BY k LIMIT 1;
   IF FOUND THEN
@@ -1222,8 +1301,13 @@ $n$    v_mover   := NULLIF(p_combo->>'producto_a_mover_id', '')::bigint;
     END IF;
     -- v2: los combos que tenía la lista de quien edita (todos los de la sucursal que vio).
     IF jsonb_typeof(p_combo->'vistos') = 'array' THEN
+      -- v3 (H5): sólo números; un nulo apagaba la guarda (`<> ALL` con un NULL da NULL).
+      IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_combo->'vistos') e WHERE jsonb_typeof(e) <> 'number') THEN
+        RAISE EXCEPTION USING ERRCODE = '22P02';
+      END IF;
       SELECT COALESCE(array_agg((e #>> '{}')::bigint), '{}') INTO v_vistos
         FROM jsonb_array_elements(p_combo->'vistos') e;
+      v_vistos := array_remove(v_vistos, NULL);
     ELSIF COALESCE(jsonb_typeof(p_combo->'vistos'), 'null') <> 'null' THEN
       RAISE EXCEPTION USING ERRCODE = '22P02';
     END IF;
@@ -1243,7 +1327,10 @@ $n$  -- C4b (1599-b8, decisión del dueño D47 para la edición de un gasto, mis
               WHERE co.sucursal_id = v_sucursal
                 AND (co.id = v_id OR co.id = ANY (COALESCE(v_orden, '{}')))
               ORDER BY co.id LOOP
-    PERFORM 1 FROM combos WHERE id = v_x FOR UPDATE;
+    -- NO KEY UPDATE: no cambia la clave, y así no choca con el KEY SHARE que toma la FK de
+    -- pedido_items / pedido_combos en una venta del combo (H1 de la revisión: con FOR UPDATE,
+    -- venta y guardado se bloqueaban en cruz, producto → combo y combo → producto).
+    PERFORM 1 FROM combos WHERE id = v_x FOR NO KEY UPDATE;
   END LOOP;
   IF v_id IS NOT NULL AND v_esperado IS NOT NULL THEN
     SELECT co.updated_at INTO v_actual FROM combos co WHERE co.id = v_id AND co.sucursal_id = v_sucursal;
@@ -1304,8 +1391,11 @@ $n$       SET prioridad = cardinality(v_orden) - e.o::integer + 1,
 $a$  CREATE TEMP TABLE IF NOT EXISTS _combo_resuelto (lugar integer, producto bigint) ON COMMIT DROP;
   TRUNCATE _combo_resuelto;
 $a$,
-$n$  -- C4b (hallazgo de B15): nunca la temporal de quien llama.
-  DROP TABLE IF EXISTS pg_temp._combo_resuelto;
+$n$  -- C4b (hallazgo de B15): nunca la temporal de quien llama. (Con to_regclass y no IF EXISTS: sin
+  -- esquema temporal en la sesión, IF EXISTS deja un NOTICE en el log.)
+  IF to_regclass('pg_temp._combo_resuelto') IS NOT NULL THEN
+    DROP TABLE pg_temp._combo_resuelto;
+  END IF;
   CREATE TEMP TABLE pg_temp._combo_resuelto (lugar integer, producto bigint) ON COMMIT DROP;
 $n$, 'guardar_combo · la temporal');
   -- El resto de las menciones, calificadas: son cuatro (el INSERT y tres lecturas).
@@ -1331,6 +1421,9 @@ BEGIN$a$,
 $n$  v_tomados      BOOLEAN := false;
   -- C4b (1599-b8): el updated_at de la promo al abrirla.
   v_esperado     TIMESTAMPTZ;
+  -- v3 (H2): cuántas filas de productos y reglas cambió (si cambió alguna, se mueve la versión).
+  v_hijas        INTEGER := 0;
+  v_filas        INTEGER;
 BEGIN$n$, 'cambiar_regalo_promocion · declaraciones');
 
   v_def := pg_temp.parche(v_def,
@@ -1371,6 +1464,59 @@ $n$  IF NOT FOUND THEN
   END IF;
 $n$, 'cambiar_regalo_promocion · la comparación');
 
+  v_def := pg_temp.parche(v_def,
+$a$      DELETE FROM promocion_productos
+       WHERE promocion_id = p_promocion_id AND sucursal_id = v_sucursal
+         AND producto_id <> ALL (v_prod_ids);
+      INSERT INTO promocion_productos (promocion_id, producto_id, sucursal_id)
+      SELECT p_promocion_id, x, v_sucursal FROM unnest(v_prod_ids) x ORDER BY x
+      ON CONFLICT (promocion_id, producto_id) DO NOTHING;
+$a$,
+$n$      DELETE FROM promocion_productos
+       WHERE promocion_id = p_promocion_id AND sucursal_id = v_sucursal
+         AND producto_id <> ALL (v_prod_ids);
+      GET DIAGNOSTICS v_filas = ROW_COUNT;
+      v_hijas := v_hijas + v_filas;
+      INSERT INTO promocion_productos (promocion_id, producto_id, sucursal_id)
+      SELECT p_promocion_id, x, v_sucursal FROM unnest(v_prod_ids) x ORDER BY x
+      ON CONFLICT (promocion_id, producto_id) DO NOTHING;
+      GET DIAGNOSTICS v_filas = ROW_COUNT;
+      v_hijas := v_hijas + v_filas;
+$n$, 'cambiar_regalo_promocion · cuenta los productos');
+
+  v_def := pg_temp.parche(v_def,
+$a$      DELETE FROM promocion_reglas
+       WHERE promocion_id = p_promocion_id AND sucursal_id = v_sucursal
+         AND clave <> ALL (v_claves);
+$a$,
+$n$      DELETE FROM promocion_reglas
+       WHERE promocion_id = p_promocion_id AND sucursal_id = v_sucursal
+         AND clave <> ALL (v_claves);
+      GET DIAGNOSTICS v_filas = ROW_COUNT;
+      v_hijas := v_hijas + v_filas;
+$n$, 'cambiar_regalo_promocion · cuenta las reglas borradas');
+
+  v_def := pg_temp.parche(v_def,
+$a$      ON CONFLICT (promocion_id, clave) DO UPDATE
+         SET valor = EXCLUDED.valor
+       WHERE promocion_reglas.valor IS DISTINCT FROM EXCLUDED.valor;
+    END IF;
+$a$,
+$n$      ON CONFLICT (promocion_id, clave) DO UPDATE
+         SET valor = EXCLUDED.valor
+       WHERE promocion_reglas.valor IS DISTINCT FROM EXCLUDED.valor;
+      GET DIAGNOSTICS v_filas = ROW_COUNT;
+      v_hijas := v_hijas + v_filas;
+    END IF;
+
+    -- v3 (H2): cambiar los productos o las reglas es cambiar la promo: se le mueve la versión (la
+    -- fila de promociones puede no haber cambiado). Lo hace el server, y el trigger se lo respeta.
+    IF v_hijas > 0 THEN
+      UPDATE promociones SET updated_at = clock_timestamp()
+       WHERE id = p_promocion_id AND sucursal_id = v_sucursal;
+    END IF;
+$n$, 'cambiar_regalo_promocion · la versión por las hijas');
+
   EXECUTE v_def;
 END
 $promo$;
@@ -1410,14 +1556,54 @@ BEGIN
   -- C4b (ola 2 de #1603): updated_at es la versión de la promo que compara la edición
   -- (cambiar_regalo_promocion). La barra de regalos de fracción escribe usos_pendientes en cada
   -- venta: ese UPDATE, solo, no es cambiarla. Una UPDATE que no cambia nada tampoco.
+  -- v3 (H2): cambiar_regalo_promocion la mueve a mano cuando cambian los productos o las reglas;
+  -- sólo el server (un PATCH REST no la fija).
+  IF current_user <> 'authenticated' AND NEW.updated_at > OLD.updated_at THEN
+    RETURN NEW;
+  END IF;
   IF (to_jsonb(NEW) - 'usos_pendientes' - 'updated_at') = (to_jsonb(OLD) - 'usos_pendientes' - 'updated_at') THEN
     NEW.updated_at = OLD.updated_at;
   ELSE
-    NEW.updated_at = NOW();
+    NEW.updated_at = clock_timestamp();  -- la hora del cambio, no la del principio de la transacción
   END IF;
   RETURN NEW;
 END;
 $function$;
+
+-- =========================================================================
+-- 9 · v3 (H4) · La purga de retención suma las claves de alta (30 días)
+-- =========================================================================
+DO $purga$
+DECLARE
+  v_def text := pg_get_functiondef('public.purgar_retencion(integer)'::regprocedure);
+BEGIN
+  v_def := pg_temp.parche(v_def,
+$a$  v_auditoria      integer;
+BEGIN$a$,
+$n$  v_auditoria      integer;
+  -- C4b v3 (H4): una clave de alta sólo sirve para el reintento inmediato.
+  v_corte_claves   timestamptz := now() - interval '30 days';
+  v_claves         integer;
+BEGIN$n$, 'purgar_retencion · declaraciones');
+  v_def := pg_temp.parche(v_def,
+$a$  GET DIAGNOSTICS v_auditoria = ROW_COUNT;
+$a$,
+$n$  GET DIAGNOSTICS v_auditoria = ROW_COUNT;
+
+  DELETE FROM altas_por_clave
+   WHERE clave IN (SELECT k.clave FROM altas_por_clave k
+                    WHERE k.created_at < v_corte_claves
+                    ORDER BY k.created_at, k.clave
+                    LIMIT v_lote);
+  GET DIAGNOSTICS v_claves = ROW_COUNT;
+$n$, 'purgar_retencion · borra las claves');
+  v_def := pg_temp.parche(v_def,
+$a$    'quedan', v_avisos = v_lote OR v_auditoria = v_lote,$a$,
+$n$    'altas_por_clave', v_claves,
+    'quedan', v_avisos = v_lote OR v_auditoria = v_lote OR v_claves = v_lote,$n$, 'purgar_retencion · el resultado');
+  EXECUTE v_def;
+END
+$purga$;
 
 -- =========================================================================
 -- Poscondiciones
@@ -1429,13 +1615,14 @@ DECLARE
   v_p text := replace(pg_get_functiondef('public.cambiar_regalo_promocion(bigint,bigint,bigint,boolean,jsonb)'::regprocedure), E'\r\n', E'\n');
 BEGIN
   IF position('''combo_cambiado''' in v_c) = 0 OR position('''orden_cambiado''' in v_c) = 0
-     OR position('updated_at = now()' in v_c) = 0 OR position('FOR UPDATE' in v_c) = 0 THEN
+     OR position('updated_at = now()' in v_c) = 0 OR position('FOR NO KEY UPDATE' in v_c) = 0
+     OR position('FROM combos WHERE id = v_x FOR UPDATE' in v_c) > 0 THEN
     RAISE EXCEPTION 'mig NNN · el parche de guardar_combo no quedó';
   END IF;
   IF position('pg_advisory_xact_lock(hashtext(''guardar_combo'')' in v_c) = 0 OR position('v_vistos' in v_c) = 0 THEN
     RAISE EXCEPTION 'mig NNN · guardar_combo no quedó con la guarda del combo nuevo';
   END IF;
-  IF position('CREATE TEMP TABLE IF NOT EXISTS' in v_c) > 0 OR position('DROP TABLE IF EXISTS pg_temp._combo_resuelto' in v_c) = 0
+  IF position('CREATE TEMP TABLE IF NOT EXISTS' in v_c) > 0 OR position('DROP TABLE pg_temp._combo_resuelto' in v_c) = 0
      OR (SELECT count(*) FROM regexp_matches(v_c, '([^._])_combo_resuelto', 'g')) > 0 THEN
     RAISE EXCEPTION 'mig NNN · guardar_combo sigue pudiendo usar la temporal de quien llama';
   END IF;
@@ -1474,7 +1661,7 @@ BEGIN
   -- v2: las de quien llama, las dos claves del cliente y el trigger de la versión.
   FOREACH v_f IN ARRAY ARRAY['public.guardar_cliente(jsonb)', 'public.guardar_usuario(jsonb)',
                              'public._alta_cliente_tomar_clave(uuid,text)', 'public._alta_cliente_cerrar_clave(uuid,bigint)',
-                             'public.clientes_version()'] LOOP
+                             'public._cliente_mover_version(bigint)', 'public.clientes_version()'] LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_proc, unnest(proconfig) c
                     WHERE oid = v_f::regprocedure AND c LIKE 'search_path=%pg_temp') THEN
       RAISE EXCEPTION 'mig NNN · % no tiene pg_temp al final del search_path', v_f;
@@ -1492,6 +1679,22 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.clientes'::regclass
                    AND tgname = 'trg_clientes_zz_version' AND NOT tgisinternal) THEN
     RAISE EXCEPTION 'mig NNN · falta trg_clientes_zz_version';
+  END IF;
+  -- v3: la versión por las hijas, la purga de las claves y ningún FOR UPDATE nuevo.
+  IF position('v_hijas > 0' in v_p) = 0 THEN
+    RAISE EXCEPTION 'mig NNN · cambiar_regalo_promocion no mueve la versión por las hijas';
+  END IF;
+  IF position('altas_por_clave' in pg_get_functiondef('public.purgar_retencion(integer)'::regprocedure)) = 0
+     OR NOT EXISTS (SELECT 1 FROM pg_proc, unnest(proconfig) c
+                     WHERE oid = 'public.purgar_retencion(integer)'::regprocedure AND c LIKE 'search_path=%pg_temp') THEN
+    RAISE EXCEPTION 'mig NNN · purgar_retencion no quedó con las claves de alta';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_proc p
+              WHERE p.oid IN ('public.guardar_condicion_mayorista(jsonb)'::regprocedure, 'public.crear_promocion(jsonb)'::regprocedure,
+                              'public.guardar_roles_extra(uuid,text[])'::regprocedure, 'public.guardar_descuentos_categoria(bigint,jsonb)'::regprocedure,
+                              'public.guardar_cliente(jsonb)'::regprocedure, 'public.guardar_usuario(jsonb)'::regprocedure)
+                AND public._sql_sin_comentarios(p.prosrc) ~* '\mFOR\s+UPDATE\M') THEN
+    RAISE EXCEPTION 'mig NNN · una RPC nueva toma un FOR UPDATE (tiene que ser FOR NO KEY UPDATE)';
   END IF;
   IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.altas_por_clave'::regclass)
      OR has_table_privilege('authenticated', 'public.altas_por_clave', 'SELECT')
