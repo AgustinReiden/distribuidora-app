@@ -207,6 +207,28 @@ export function esEmbebido(f) {
   return f.tipo === 'or' && (f.columnas ?? []).some((c) => c.includes('.'))
 }
 
+/**
+ * El embed de primer nivel que se llama `nombre` en el select, como lo pide PostgREST en un filtro de
+ * la raíz: por su alias si lo tiene, si no por el nombre del recurso.
+ */
+function embedDeRaiz(nodos, nombre) {
+  return nodos.find((n) => n.tipo === 'embed' && (n.alias ? n.alias === nombre : n.nombre === nombre)) ?? null
+}
+
+/**
+ * ¿Es un `.is(x, null)` de la raíz? Si `x` es un embed de primer nivel del select, es el filtro de
+ * nulos de PostgREST sobre el recurso embebido (`x=is.null`, el anti-join de 1598-b4), no una columna.
+ */
+function esNuloDeRaiz(f) {
+  return f.tipo === 'filtro' && f.metodo === 'is' && f.nulo === true && !f.ruta?.length && f.columnas?.length === 1
+}
+
+/** Los `.is(x, null)` de la raíz que nombran un embed de primer nivel de alguna variante del select. */
+function nulosDeEmbed(consulta, nodosPorVariante) {
+  return consulta.filtros.filter((f) => esNuloDeRaiz(f)
+    && nodosPorVariante.some((nodos) => nodos && embedDeRaiz(nodos, f.columnas[0])))
+}
+
 /** Rutas de embed que el filtro necesita en el select para resolver. */
 function rutasDe(f) {
   if (f.ruta?.length) return [f.ruta]
@@ -254,17 +276,29 @@ export function pruebasDe(consulta) {
   const embebidos = consulta.filtros.filter(esEmbebido)
   const aplicado = new Set()
   const errores = []
-  for (const v of consulta.variantes) {
-    let nodos
+  const nodosPorVariante = consulta.variantes.map((v) => {
     try {
-      nodos = parsearSelect(v)
+      return parsearSelect(v)
     } catch (e) {
       errores.push({ select: v, mensaje: e.message })
-      continue
+      return null
     }
+  })
+  // 1598-b4: el `x=is.null` de la raíz sobre un embed también viaja a PostgREST, con cada variante
+  // que embebe `x` (y se informa contra las que no), como los filtros de un embed.
+  const nulos = nulosDeEmbed(consulta, nodosPorVariante)
+  for (const [i, v] of consulta.variantes.entries()) {
+    const nodos = nodosPorVariante[i]
+    if (!nodos) continue
     const aplican = []
     for (const f of embebidos) {
       if (rutasDe(f).every((r) => buscarRuta(nodos, r))) {
+        aplican.push(f)
+        aplicado.add(f)
+      } else noAplicados.push({ filtro: f, select: v })
+    }
+    for (const f of nulos) {
+      if (embedDeRaiz(nodos, f.columnas[0])) {
         aplican.push(f)
         aplicado.add(f)
       } else noAplicados.push({ filtro: f, select: v })
@@ -273,7 +307,8 @@ export function pruebasDe(consulta) {
     const params = []
     const ordenes = []
     for (const f of aplican) {
-      for (const [k, val] of parametrosDe(f)) {
+      const pares = nulos.includes(f) ? [[f.columnas[0], 'is.null']] : parametrosDe(f)
+      for (const [k, val] of pares) {
         if (k === 'order') ordenes.push(val)
         else if (!params.some(([a, b]) => a === k && b === val)) params.push([k, val])
       }
@@ -456,8 +491,7 @@ export function verificarGrants(consultas, mapa) {
   const errores = []
   for (const c of consultas) {
     if (!c.archivo.startsWith('src/') || !c.tabla) continue
-    // Los recursos embebidos de primer nivel de alguna variante del select, por nombre y por alias.
-    const embebidosRaiz = new Set()
+    const nodosPorVariante = []
     for (const s of c.selects) {
       for (const v of s.valores ?? []) {
         let nodos
@@ -467,22 +501,19 @@ export function verificarGrants(consultas, mapa) {
           continue // lo informa el chequeo de parseo
         }
         revisarNodos(nodos, c.tabla, mapa, { archivo: s.archivo, linea: s.linea }, errores)
-        for (const n of nodos) {
-          if (n.tipo !== 'embed') continue
-          embebidosRaiz.add(n.nombre)
-          if (n.alias) embebidosRaiz.add(n.alias)
-        }
+        nodosPorVariante.push(nodos)
       }
     }
+    // `x=is.null` de la raíz sobre un embed (por su alias si lo tiene): no es una columna. Su embed ya lo
+    // revisa el select, y la prueba contra PostgREST lo manda con cada variante que lo embebe.
+    const nulos = new Set(nulosDeEmbed(c, nodosPorVariante))
     for (const f of c.filtros) {
       if (!f.columnas) continue
       const tabla = tablaDeRuta(c, f.ruta ?? [], mapa)
       const t = tabla && mapa.tablas[tabla]
       if (!t) continue // lo informa la prueba del filtro (huérfano) o el select
       for (const col of f.columnas) {
-        // `rel=is.null` en la raíz no es una columna: es el filtro de nulos sobre un recurso
-        // embebido (el anti-join de PostgREST, 1598-b4). Su embed ya lo revisa el select.
-        if (!f.ruta?.length && embebidosRaiz.has(col)) continue
+        if (nulos.has(f)) continue
         if (col.includes('.')) {
           // Columna de otro recurso dentro de un .or() de primer nivel.
           const partes = col.split('.')

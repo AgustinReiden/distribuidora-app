@@ -438,13 +438,54 @@ describe('verificarGrants (mapa de privilegios de mentira)', () => {
       .toMatchObject([{ tabla: 'productos', columna: 'costo_real', linea: 1 }])
   })
 
-  // 1598-b4: el anti-join de PostgREST (`rel=is.null` con `rel` embebido) filtra por el recurso, no por una
-  // columna de la raíz. Sin el embed en el select, sí es una columna que no existe.
-  it('`rel=is.null` sobre un recurso embebido (por nombre o alias) no es una columna de la raíz', () => {
-    expect(errores(`supabase.from('pedidos').select('id, pedido_items(id)').is('pedido_items', null)`)).toEqual([])
-    expect(errores(`supabase.from('pedidos').select('id, items:pedido_items(id)').is('items', null)`)).toEqual([])
-    expect(errores(`supabase.from('pedidos').select('id').is('pedido_items', null)`))
-      .toMatchObject([{ tabla: 'pedidos', columna: 'pedido_items', motivo: 'no existe en la tabla' }])
+  // 1598-b4: el anti-join de PostgREST (`rel=is.null` en la raíz, con `rel` embebido) filtra por el recurso,
+  // no por una columna. Se saltea sólo `.is(x, null)`, y `x` es el alias del embed si lo tiene (es lo que
+  // pide PostgREST); cualquier otra forma sigue siendo una columna de la raíz que tiene que existir.
+  describe('`x=is.null` sobre un recurso embebido (el anti-join)', () => {
+    it('por el nombre del recurso, o por su alias si lo tiene, no es una columna', () => {
+      expect(errores(`supabase.from('pedidos').select('id, pedido_items(id)').is('pedido_items', null)`)).toEqual([])
+      expect(errores(`supabase.from('pedidos').select('id, items:pedido_items(id)').is('items', null)`)).toEqual([])
+    })
+
+    it('con alias, el nombre del recurso sí es una columna (PostgREST pide el alias)', () => {
+      expect(errores(`supabase.from('pedidos').select('id, items:pedido_items(id)').is('pedido_items', null)`))
+        .toMatchObject([{ tabla: 'pedidos', columna: 'pedido_items', motivo: 'no existe en la tabla' }])
+    })
+
+    it('un eq o un order sobre el nombre del embed no es el anti-join: columna que no existe', () => {
+      expect(errores(`supabase.from('pedidos').select('id, pedido_items(id)').eq('pedido_items', 1)`))
+        .toMatchObject([{ tabla: 'pedidos', columna: 'pedido_items', motivo: 'no existe en la tabla' }])
+      expect(errores(`supabase.from('pedidos').select('id, pedido_items(id)').order('pedido_items')`))
+        .toMatchObject([{ tabla: 'pedidos', columna: 'pedido_items', motivo: 'no existe en la tabla' }])
+    })
+
+    it('sin el embed en ningún select, es una columna que no existe', () => {
+      expect(errores(`supabase.from('pedidos').select('id').is('pedido_items', null)`))
+        .toMatchObject([{ tabla: 'pedidos', columna: 'pedido_items', motivo: 'no existe en la tabla' }])
+    })
+
+    it('viaja a PostgREST con cada variante que embebe el recurso, y se informa contra la que no', () => {
+      // Como los filtros de un embed: la lectura de texto no ve que el filtro y el embed van juntos (la
+      // misma condición en el front), así que se prueba con la variante que lo tiene y se informa la otra.
+      const [c] = uno([
+        `function f(sin: boolean) {`,
+        `  let q = supabase.from('pedidos').select(sin ? 'id, pedido_items!pedido_items_pedido_id_fkey(id)' : 'id')`,
+        `  if (sin) q = q.neq('pedido_items.estado', 'x').is('pedido_items', null)`,
+        `}`,
+      ].join('\n')).consultas
+      const r = pruebasDe(c)
+      expect(r.pruebas.map(qs)).toEqual([
+        'select=id,pedido_items!pedido_items_pedido_id_fkey(id)&pedido_items.estado=is.null&pedido_items=is.null&limit=0',
+      ])
+      expect(r.noAplicados.map((n) => n.select)).toEqual(['id', 'id'])
+      expect(errores(`supabase.from('pedidos').select(x ? 'id, pedido_items(id)' : 'id').is('pedido_items', null)`)).toEqual([])
+    })
+
+    it('un .is(col, null) sobre una columna de verdad sigue siendo un filtro común (y no viaja)', () => {
+      const [c] = uno(`supabase.from('pedidos').select('id, pedido_items(id)').is('total', null)`).consultas
+      expect(pruebas(c).map(qs)).toEqual(['select=id,pedido_items(id)&limit=0'])
+      expect(errores(`supabase.from('pedidos').select('id, pedido_items(id)').is('total', null)`)).toEqual([])
+    })
   })
 
   it('las consultas de supabase/functions corren con service_role: no se les exige nada', () => {

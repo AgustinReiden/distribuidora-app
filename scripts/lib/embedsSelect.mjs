@@ -988,7 +988,13 @@ function describir(ctx, F, ll) {
     if (!v) return { ...base, tipo: 'filtro', ruta: [], columnas: null }
     // Cada variante puede apuntar a otra ruta; en este repo no pasa, se toma la primera forma.
     const partes = v[0].split('.')
-    return { ...base, tipo: 'filtro', ruta: partes.slice(0, -1), columnas: [...new Set(v.map((x) => x.split('.').at(-1)))] }
+    // `.is(x, null)`: en la raíz, si `x` es un recurso embebido, es el filtro de nulos de PostgREST
+    // sobre el embed (el anti-join), no una columna (1598-b4). Lo decide embedsPostgrest.mjs.
+    const nulo = m === 'is' && args[1] && F.src.slice(args[1].ini, args[1].fin).trim() === 'null'
+    return {
+      ...base, tipo: 'filtro', ruta: partes.slice(0, -1), columnas: [...new Set(v.map((x) => x.split('.').at(-1)))],
+      ...(nulo ? { nulo: true } : {}),
+    }
   }
   if (m === 'match') {
     if (!args[0] || F.src[args[0].ini] !== '{') return { ...base, tipo: 'otro' }
