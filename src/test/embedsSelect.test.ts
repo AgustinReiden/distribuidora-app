@@ -438,6 +438,15 @@ describe('verificarGrants (mapa de privilegios de mentira)', () => {
       .toMatchObject([{ tabla: 'productos', columna: 'costo_real', linea: 1 }])
   })
 
+  // 1598-b4: el anti-join de PostgREST (`rel=is.null` con `rel` embebido) filtra por el recurso, no por una
+  // columna de la raíz. Sin el embed en el select, sí es una columna que no existe.
+  it('`rel=is.null` sobre un recurso embebido (por nombre o alias) no es una columna de la raíz', () => {
+    expect(errores(`supabase.from('pedidos').select('id, pedido_items(id)').is('pedido_items', null)`)).toEqual([])
+    expect(errores(`supabase.from('pedidos').select('id, items:pedido_items(id)').is('items', null)`)).toEqual([])
+    expect(errores(`supabase.from('pedidos').select('id').is('pedido_items', null)`))
+      .toMatchObject([{ tabla: 'pedidos', columna: 'pedido_items', motivo: 'no existe en la tabla' }])
+  })
+
   it('las consultas de supabase/functions corren con service_role: no se les exige nada', () => {
     expect(errores(`sb.from('productos').select('*')`, 'supabase/functions/bot/index.ts')).toEqual([])
   })

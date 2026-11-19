@@ -456,6 +456,8 @@ export function verificarGrants(consultas, mapa) {
   const errores = []
   for (const c of consultas) {
     if (!c.archivo.startsWith('src/') || !c.tabla) continue
+    // Los recursos embebidos de primer nivel de alguna variante del select, por nombre y por alias.
+    const embebidosRaiz = new Set()
     for (const s of c.selects) {
       for (const v of s.valores ?? []) {
         let nodos
@@ -465,6 +467,11 @@ export function verificarGrants(consultas, mapa) {
           continue // lo informa el chequeo de parseo
         }
         revisarNodos(nodos, c.tabla, mapa, { archivo: s.archivo, linea: s.linea }, errores)
+        for (const n of nodos) {
+          if (n.tipo !== 'embed') continue
+          embebidosRaiz.add(n.nombre)
+          if (n.alias) embebidosRaiz.add(n.alias)
+        }
       }
     }
     for (const f of c.filtros) {
@@ -473,6 +480,9 @@ export function verificarGrants(consultas, mapa) {
       const t = tabla && mapa.tablas[tabla]
       if (!t) continue // lo informa la prueba del filtro (huérfano) o el select
       for (const col of f.columnas) {
+        // `rel=is.null` en la raíz no es una columna: es el filtro de nulos sobre un recurso
+        // embebido (el anti-join de PostgREST, 1598-b4). Su embed ya lo revisa el select.
+        if (!f.ruta?.length && embebidosRaiz.has(col)) continue
         if (col.includes('.')) {
           // Columna de otro recurso dentro de un .or() de primer nivel.
           const partes = col.split('.')
