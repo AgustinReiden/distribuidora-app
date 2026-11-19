@@ -431,10 +431,53 @@ describe('PedidosContainer — el alta directa devuelve un pedido propio que ya 
     await waitFor(() => expect(avisos().some(t => /ya estaba cargado/.test(t))).toBe(true))
     const texto = avisos().find(t => /ya estaba cargado/.test(t))!
     expect(texto).toContain('#9')
-    expect(texto).toMatch(/no se cargó otro/)
+    expect(texto).toMatch(/ahora su total es \$\s8\.500,00/)
+    expect(texto).toMatch(/No se cargó otro pedido y el cobro NO se registró/)
+    expect(texto).toMatch(/Cobralo desde el pedido/)
     expect(notify.success).not.toHaveBeenCalled()
     // El aviso queda en pantalla hasta que se cierra (con el pedido ya cerrado, un toast de 5 s se pierde).
     expect(notify.warning.mock.calls.find(c => /ya estaba cargado/.test(String(c[0])))?.[1]).toEqual({ persist: true })
+  })
+
+  // Decisión 5 del dueño: con el pedido cambiado NO se registra ningún cobro, sea cual sea el estado de
+  // pago que se tipeó, y no salen los avisos de recorte ni de envío (el único aviso es el de arriba).
+  it.each([
+    ['más chico (8.000 + 500)', { cargoEnvio: 500, total: 8500 }],
+    ['cancelado (total 0)', { cargoEnvio: 0, total: 0 }],
+    ['más grande (15.000 + 500)', { cargoEnvio: 500, total: 15500 }],
+  ])('pedido %s con «Pagado»: no registra ningún cobro y avisa una sola cosa', async (_caso, resto) => {
+    mutateAlta.mockResolvedValue({ id: '9', idempotente: true, clienteId: '9', ...resto })
+    await altaCon(['Pagado'])
+
+    await waitFor(() => expect(avisos().some(t => /ya estaba cargado/.test(t))).toBe(true))
+    expect(registrarPago).not.toHaveBeenCalled()
+    expect(avisos()).toHaveLength(1)
+    expect(notify.error).not.toHaveBeenCalled()
+  })
+
+  it('pedido cambiado con un parcial: tampoco registra ningún cobro', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', idempotente: true, clienteId: '9', cargoEnvio: 500, total: 8500 })
+    await altaCon(['Parcial 20000'])
+
+    await waitFor(() => expect(avisos().some(t => /ya estaba cargado/.test(t))).toBe(true))
+    expect(registrarPago).not.toHaveBeenCalled()
+  })
+
+  it('el mismo total (a un centavo) sí registra el cobro como siempre', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', idempotente: true, clienteId: '9', cargoEnvio: 500, total: 12500.01 })
+    await altaCon(['Pagado'])
+
+    await waitFor(() => expect(registrarPago).toHaveBeenCalledTimes(1))
+    expect(avisos().filter(t => /ya estaba cargado/.test(t))).toEqual([])
+  })
+
+  it('sólo cambió el envío: es el mismo pedido, el cobro sigue al total que guardó el server', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', idempotente: true, clienteId: '9', cargoEnvio: 800, total: 12800 })
+    await altaCon(['Pagado'])
+
+    await waitFor(() => expect(registrarPago).toHaveBeenCalledTimes(1))
+    expect(registrarPago.mock.calls[0][0]).toMatchObject({ monto: 12800 })
+    expect(avisos().filter(t => /ya estaba cargado/.test(t))).toEqual([])
   })
 
   it('un pedido propio cancelado (total 0) tampoco se anuncia como creado', async () => {
@@ -459,5 +502,64 @@ describe('PedidosContainer — el alta directa devuelve un pedido propio que ya 
 
     await waitFor(() => expect(notify.success).toHaveBeenCalledWith('Pedido creado correctamente'))
     expect(avisos().filter(t => /ya estaba cargado/.test(t))).toEqual([])
+  })
+})
+
+// H4 de la revisión de C7: lo que el aviso del pedido que ya había entrado no cubría.
+describe('PedidosContainer — el alta directa que devuelve un pedido ya cargado: los cabos sueltos (H4)', () => {
+  const avisos = () => notify.warning.mock.calls.map(c => String(c[0]))
+
+  // (a) El pedido no se pudo leer (lo más probable con la señal floja que provocó el reintento): llega
+  // sin cliente, con el total de la RPC. La clave es por intención y la RPC sólo le contesta a quien lo
+  // cargó (mig 519): es el propio. Con otro total, igual avisa.
+  it('(a) si la fila no se pudo leer y el total de la RPC no es el del carrito, avisa igual', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', idempotente: true, clienteId: null, cargoEnvio: 500, total: 8500 })
+    await altaCon([])
+
+    await waitFor(() => expect(avisos().some(t => /ya estaba cargado/.test(t))).toBe(true))
+    expect(notify.success).not.toHaveBeenCalled()
+  })
+
+  it('(a) si la fila no se pudo leer y el total de la RPC es el del carrito, sigue diciendo que se creó', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', idempotente: true, clienteId: null, cargoEnvio: 500, total: 12500 })
+    await altaCon([])
+
+    await waitFor(() => expect(notify.success).toHaveBeenCalledWith('Pedido creado correctamente'))
+    expect(avisos().filter(t => /ya estaba cargado/.test(t))).toEqual([])
+  })
+
+  // (b) El saldo a favor aplicado se sigue diciendo junto al aviso.
+  it('(b) el saldo a favor aplicado no se pierde: va en el mismo aviso', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', idempotente: true, clienteId: '9', cargoEnvio: 500, total: 8500, saldoAFavorAplicado: 400 })
+    await altaCon([])
+
+    await waitFor(() => expect(avisos().some(t => /ya estaba cargado/.test(t))).toBe(true))
+    const texto = avisos().find(t => /ya estaba cargado/.test(t))!
+    expect(texto).toMatch(/saldo a favor/)
+    expect(texto).toMatch(/400/)
+    expect(texto).toMatch(/el cobro NO se registró/)
+    expect(notify.success).not.toHaveBeenCalled()
+  })
+
+  // (c) Si el server rechaza el cobro del reintento, el error no puede decir «se creó».
+  it('(c) si el cobro del reintento falla, el error dice que el pedido ya existía, no que se creó', async () => {
+    // Mismo total: el cobro se intenta como siempre, y si el server lo rechaza el error dice «ya existía».
+    mutateAlta.mockResolvedValue({ id: '9', idempotente: true, clienteId: '9', cargoEnvio: 500, total: 12500 })
+    registrarPago.mockRejectedValue(new Error('El pedido ya está pagado'))
+    await altaCon(['Pagado'])
+
+    await waitFor(() => expect(notify.error).toHaveBeenCalled())
+    const texto = String(notify.error.mock.calls[0][0])
+    expect(texto).toMatch(/^El pedido #9 ya existía, pero no se pudo registrar el cobro/)
+    expect(texto).not.toMatch(/se creó/)
+  })
+
+  it('(c) un alta nueva con el cobro rechazado sigue diciendo que se creó', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', cargoEnvio: 500, total: 12500 })
+    registrarPago.mockRejectedValue(new Error('El pedido ya está pagado'))
+    await altaCon(['Pagado'])
+
+    await waitFor(() => expect(notify.error).toHaveBeenCalled())
+    expect(String(notify.error.mock.calls[0][0])).toMatch(/^El pedido #9 se creó, pero no se pudo registrar el cobro/)
   })
 })

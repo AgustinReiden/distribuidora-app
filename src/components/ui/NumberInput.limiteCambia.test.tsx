@@ -109,3 +109,30 @@ describe('NumberInput · el límite cambia después de confirmar el valor (H5)',
     expect(screen.getByLabelText('num')).not.toHaveAttribute('aria-invalid', 'true')
   })
 })
+
+// H3 de la revisión de C7: un límite NaN (una cuenta que dio mal) es «sin límite», como era antes. La
+// comparación `!==` de los límites vistos lo daba siempre distinto y el campo tiraba «Too many re-renders».
+describe('NumberInput · un límite NaN vale como sin límite (H3)', () => {
+  it('max={NaN} no cuelga el campo ni lo pone en rojo', () => {
+    expect(() => render(<Formulario inicial={8} limites={{ max: NaN }} onGuardar={vi.fn()} />)).not.toThrow()
+    expect(screen.getByLabelText('num')).not.toHaveAttribute('aria-invalid', 'true')
+  })
+
+  it('min={NaN} tampoco, y se puede seguir tipeando', async () => {
+    const user = userEvent.setup()
+    render(<Formulario inicial={8} limites={{ min: NaN }} onGuardar={vi.fn()} />)
+    const input = screen.getByLabelText('num')
+    await user.clear(input)
+    await user.type(input, '3')
+    expect(input).toHaveValue('3')
+    expect(input).not.toHaveAttribute('aria-invalid', 'true')
+  })
+
+  it('un límite que pasa a NaN y vuelve a un número no se cuelga; el número que vuelve es un límite que aparece', () => {
+    const { rerender } = render(<Formulario inicial={8} limites={{ max: 10 }} onGuardar={vi.fn()} />)
+    rerender(<Formulario inicial={8} limites={{ max: NaN }} onGuardar={vi.fn()} />)
+    expect(screen.getByLabelText('num')).not.toHaveAttribute('aria-invalid', 'true')
+    rerender(<Formulario inicial={8} limites={{ max: 5 }} onGuardar={vi.fn()} />)
+    expect(screen.getByLabelText('num')).not.toHaveAttribute('aria-invalid', 'true')
+  })
+})

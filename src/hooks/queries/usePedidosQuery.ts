@@ -1067,32 +1067,9 @@ export async function fetchPedidosParaEntregaYPago(sucursalId: number | null): P
   const data = (await traerTodo<Record<string, unknown>>(construirQuery, { etiqueta: 'los pedidos para entrega y pago' }))
     .filter(pedido => pedido.canal !== 'cambio')
 
-  // Enrich with transportista names
-  const transportistaIds = new Set<string>()
-  for (const pedido of data) {
-    if (pedido.transportista_id) transportistaIds.add(pedido.transportista_id as string)
-  }
-
-  let perfilesMap: Record<string, PerfilDB> = {}
-  if (transportistaIds.size > 0) {
-    const { data: perfiles, error: errorPerfiles } = await supabase
-      .from('perfiles')
-      .select('id, nombre, email')
-      .in('id', Array.from(transportistaIds))
-    // 1598-b7: sin perfiles el chofer salía en blanco, sin aviso.
-    if (errorPerfiles) throw errorDeSupabase(errorPerfiles, 'Sin conexión: no se pudo cargar quién reparte cada pedido. Revisá la señal e intentá de nuevo.')
-
-    if (perfiles) {
-      perfilesMap = Object.fromEntries(
-        (perfiles as PerfilDB[]).map(p => [p.id, p])
-      )
-    }
-  }
-
-  return data.map(pedido => ({
-    ...pedido,
-    transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id as string] : null,
-  })) as PedidoDB[]
+  // Esta pantalla no muestra el chofer de cada pedido: no se lo pide a `perfiles` (H2 de la revisión de
+  // C7: un fallo de esa consulta no tiene por qué tirar la lista de lo que hay que cobrar o entregar).
+  return data as unknown as PedidoDB[]
 }
 
 /**
@@ -1335,32 +1312,9 @@ export async function fetchPedidosNoPagados(sucursalId: number | null): Promise<
 
   const data = await traerTodo<Record<string, unknown>>(construirQuery, { etiqueta: 'los pedidos no pagados' })
 
-  // Enrich with transportista names
-  const transportistaIds = new Set<string>()
-  for (const pedido of data) {
-    if (pedido.transportista_id) transportistaIds.add(pedido.transportista_id as string)
-  }
-
-  let perfilesMap: Record<string, PerfilDB> = {}
-  if (transportistaIds.size > 0) {
-    const { data: perfiles, error: errorPerfiles } = await supabase
-      .from('perfiles')
-      .select('id, nombre, email')
-      .in('id', Array.from(transportistaIds))
-    // 1598-b7: sin perfiles el chofer salía en blanco, sin aviso.
-    if (errorPerfiles) throw errorDeSupabase(errorPerfiles, 'Sin conexión: no se pudo cargar quién reparte cada pedido. Revisá la señal e intentá de nuevo.')
-
-    if (perfiles) {
-      perfilesMap = Object.fromEntries(
-        (perfiles as PerfilDB[]).map(p => [p.id, p])
-      )
-    }
-  }
-
-  return data.map(pedido => ({
-    ...pedido,
-    transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id as string] : null,
-  })) as PedidoDB[]
+  // Esta pantalla no muestra el chofer de cada pedido: no se lo pide a `perfiles` (H2 de la revisión de
+  // C7: un fallo de esa consulta no tiene por qué tirar la lista de lo que hay que cobrar o entregar).
+  return data as unknown as PedidoDB[]
 }
 
 /**

@@ -336,13 +336,18 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const inicioLineasRef = useRef<InicioDeLineas | null>(null);
   // Lo escribe el efecto que detecta cambios (abajo): ¿las líneas difieren de lo guardado?
   const lineasTocadasRef = useRef(false);
+  // H1 de la revisión de C7: los renglones ya se guardaron pero el `pedido` que recibe el modal todavía es
+  // el de antes (la edición quedó a medias: fallaron las fechas o las notas). Un refresco de `productos` no
+  // tiene que volver las líneas a ese `pedido` viejo: lo guardado vale más que lo que dice la foto.
+  const lineasGuardadasSinRefrescarRef = useRef(false);
   useEffect(() => {
     if (pedido?.items) {
       const inicio: InicioDeLineas = {
         pedidoId: String(pedido.id),
         huella: huellaLineasGuardadas(pedido.items),
       };
-      if (!debeReiniciarLineas(inicioLineasRef.current, inicio, lineasTocadasRef.current)) return;
+      if (!debeReiniciarLineas(inicioLineasRef.current, inicio, lineasTocadasRef.current || lineasGuardadasSinRefrescarRef.current)) return;
+      lineasGuardadasSinRefrescarRef.current = false;
       inicioLineasRef.current = inicio;
       // #1191: un producto en combo se guarda en dos líneas (la del combo y la
       // suelta). Acá es UNA fila por producto: los combos se vuelven a armar
@@ -1216,6 +1221,13 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         }
         try {
           await onSaveItems(todosLosItems, origenes, decisionEnvio);
+          // H1 de la revisión de C7: los renglones ya están guardados. Si lo que sigue (fechas, notas) falla y
+          // el modal queda abierto, lo guardado es lo «original»: el disponible (stock + lo que el pedido
+          // tiene), el piso de venta, el aviso de cambios y el «Anterior» se miden contra eso. Con lo que había
+          // al abrir, el refetch del stock ya descontado ponía en rojo lo recién guardado.
+          lineasGuardadasSinRefrescarRef.current = true;
+          setItemsOriginales(JSON.parse(JSON.stringify(items)));
+          setItems(items.map(i => ({ ...i, cantidadOriginal: i.cantidad })));
         } catch (err) {
           // La política cambió mientras el modal estaba abierto: el server pide
           // la decisión que el modal no supo pedir. Se pregunta y se reintenta.

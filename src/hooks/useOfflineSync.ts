@@ -413,7 +413,7 @@ export function avisoPedidoQueYaHabiaEntrado(resultado: unknown, payload: Record
   const r = resultado as RespuestaIdempotente | null
   if (!r || r.idempotente !== true || r.clienteId == null || typeof r.total !== 'number') return null
   if (String(r.clienteId) !== String(payload.clienteId) || mismoTotalEncolado(r, payload)) return null
-  return mensajePedidoQueYaHabiaEntrado(r.id)
+  return mensajePedidoQueYaHabiaEntrado(r.id, r.total)
 }
 
 /**

@@ -1,6 +1,7 @@
 import { useState, useMemo, memo } from 'react'
 import { Loader2, Search, Calendar } from 'lucide-react'
 import ModalBase from './ModalBase'
+import QueryErrorState from '../layout/QueryErrorState'
 import { Button } from '../ui/Button'
 // DENTRO del ModalBase: es un Radix Dialog portaleado con z-50 y un hermano
 // `fixed inset-0 z-50` queda detrás del overlay. Ver ModalPedido.
@@ -43,7 +44,7 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
   const [fechaEntrega, setFechaEntrega] = useState<string>(fechaLocalISO())
   const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null)
 
-  const { data: pedidos = [], isLoading } = usePedidosNoEntregadosQuery(true)
+  const { data: pedidos = [], isLoading, isError, refetch } = usePedidosNoEntregadosQuery(true)
 
   const pedidosFiltrados = useMemo(() => {
     let resultado = pedidos
@@ -200,6 +201,9 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
               <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
               <span className="ml-2 text-gray-500">Cargando pedidos...</span>
             </div>
+          ) : isError ? (
+            // H2 de la revisión de C7: un error de lectura no es «no hay pedidos».
+            <QueryErrorState onRetry={() => { void refetch() }} />
           ) : pedidosFiltrados.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               No hay pedidos disponibles para entregar

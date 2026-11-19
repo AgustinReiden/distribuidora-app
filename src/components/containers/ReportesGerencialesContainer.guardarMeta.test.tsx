@@ -51,6 +51,7 @@ vi.mock('../vistas/VistaReportesGerenciales', () => ({
 }))
 
 import ReportesGerencialesContainer from './ReportesGerencialesContainer'
+import { ErrorDeSupabase } from '../../utils/errorDeSupabase'
 
 async function guardar() {
   render(
@@ -68,25 +69,50 @@ describe('ReportesGerencialesContainer › guardar la meta (1600-b5)', () => {
 
   it('si el server rechaza la meta de venta, avisa cuál no se guardó y por qué, y el aviso queda', async () => {
     mutateAsync.mockImplementation(async (vars: { metrica: string }) => {
-      if (vars.metrica === 'venta') throw new Error('Solo un administrador puede cargar la meta')
+      // Lo que lanza `errorDeSupabase` cuando el server contestó: lleva su `code`.
+      if (vars.metrica === 'venta') throw new ErrorDeSupabase('Solo un administrador puede cargar la meta', { code: 'P0001' }, false)
     })
     await guardar()
 
     expect(notifyError).toHaveBeenCalledTimes(1)
     const [mensaje, opciones] = notifyError.mock.calls[0]
     expect(mensaje).toMatch(/meta de venta/i)
-    expect(mensaje).toMatch(/no se guard/i)
+    expect(mensaje).toMatch(/^No se guardó/)
+    expect(mensaje).not.toMatch(/confirmar/i)
     expect(mensaje).toMatch(/Solo un administrador puede cargar la meta/)
     expect(opciones).toEqual({ persist: true })
   })
 
   it('si no hay señal y fallan las dos, avisa de las dos (la segunda no tapa a la primera)', async () => {
-    mutateAsync.mockRejectedValue(new Error('Sin conexión: no se pudo confirmar que la meta se guardó.'))
+    mutateAsync.mockRejectedValue(new ErrorDeSupabase('Sin conexión: no se pudo confirmar que la meta se guardó.', {}, true))
     await guardar()
 
     const textos = notifyError.mock.calls.map(c => c[0] as string)
     expect(textos.some(t => /meta de venta/i.test(t))).toBe(true)
     expect(textos.some(t => /meta de margen/i.test(t))).toBe(true)
+  })
+
+  // H5 de la revisión de C7: sin señal a mitad de la llamada no se sabe si el server la guardó. Decir
+  // «No se guardó» era afirmar lo que no se sabe, y quien confía en eso la vuelve a cargar a ciegas.
+  it('sin señal NO dice «No se guardó»: dice que no se pudo confirmar y que revise la meta', async () => {
+    mutateAsync.mockImplementation(async (vars: { metrica: string }) => {
+      if (vars.metrica === 'venta') throw new ErrorDeSupabase('Sin conexión: no se pudo confirmar que la meta se guardó.', {}, true)
+    })
+    await guardar()
+
+    expect(notifyError).toHaveBeenCalledTimes(1)
+    const [mensaje, opciones] = notifyError.mock.calls[0]
+    expect(mensaje).toMatch(/^No se pudo confirmar si se guardó la meta de venta/)
+    expect(mensaje).toMatch(/revisá la meta/i)
+    expect(mensaje).not.toMatch(/^No se guardó/)
+    expect(opciones).toEqual({ persist: true })
+  })
+
+  it('un 5xx de gateway (la base pudo haber terminado) también es «sin confirmar»', async () => {
+    mutateAsync.mockRejectedValue(new ErrorDeSupabase('Error del servidor (HTTP 524): no se pudo confirmar la operación.', { code: 'HTTP_524' }, false))
+    await guardar()
+
+    expect(notifyError.mock.calls.every(c => /^No se pudo confirmar si se guardó/.test(String(c[0])))).toBe(true)
   })
 
   it('si las dos guardan bien, no sale ningún aviso de error', async () => {

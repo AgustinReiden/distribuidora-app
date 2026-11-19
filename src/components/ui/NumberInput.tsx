@@ -234,7 +234,9 @@ export function NumberInput({
   // se resuelve durante el render y no en un efecto (que mostraría un cuadro con el valor en limpio).
   const [limitesVistos, setLimitesVistos] = useState({ min, max })
   const [limiteVencido, setLimiteVencido] = useState(false)
-  if (limitesVistos.min !== min || limitesVistos.max !== max) {
+  // `Object.is`: con un límite NaN (una cuenta que dio mal, que vale como sin límite) `!==` daba siempre
+  // distinto y el campo se re-renderizaba sin fin (H3 de la revisión de C7).
+  if (!Object.is(limitesVistos.min, min) || !Object.is(limitesVistos.max, max)) {
     const antes = limitesVistos
     setLimitesVistos({ min, max })
     const sobra = value !== null && typeof max === 'number' && value > max && typeof antes.max === 'number' && value <= antes.max

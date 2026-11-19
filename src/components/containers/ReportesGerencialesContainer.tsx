@@ -5,6 +5,7 @@ import { useReporteGerencialQuery, useReporteCombosQuery, useReporteCombosRotaci
 import { useSucursal } from '../../contexts/SucursalContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { getErrorMessage } from '../../utils/errorHandling'
+import { contestoElServidor } from '../../utils/idempotencia'
 import { useAlertasCombos } from '../../hooks/useAlertasCombos'
 import { useDiaArgentino } from '../../hooks/useDiaArgentino'
 import type { PeriodoOpt, SucursalOpt } from '../vistas/VistaReportesGerenciales'
@@ -211,7 +212,12 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
     if (margenNeto != null) pedidos.push({ nombre: 'margen', guardar: guardarMeta.mutateAsync({ sucursalId: sucParam, periodo, metrica: 'margen_neto', valor: margenNeto }) })
     for (const { nombre, guardar } of pedidos) {
       guardar.catch((err: unknown) => {
-        notify.error(`No se guardó la meta de ${nombre}: ${getErrorMessage(err)}`, { persist: true })
+        // H5 de la revisión de C7: si el server contestó, la meta NO se guardó; si se cortó la señal (o un
+        // gateway contestó en su lugar) no se sabe, y el aviso no puede afirmar lo que no sabe.
+        const aviso = contestoElServidor(err)
+          ? `No se guardó la meta de ${nombre}: ${getErrorMessage(err)}`
+          : `No se pudo confirmar si se guardó la meta de ${nombre}: revisá la meta antes de volver a cargarla.`
+        notify.error(aviso, { persist: true })
       })
     }
   }

@@ -452,7 +452,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
                             value={montosTexto[l.pedidoItemId] ?? ''}
                             onChange={t => setMontosTexto(prev => ({ ...prev, [l.pedidoItemId]: t }))}
                             motivo={motivoMontoNC(montosTexto[l.pedidoItemId] ?? '', l.montoDisponible)}
-                            disabled={l.montoDisponible <= 0}
+                            disabled={l.montoDisponible <= 0 && (montosTexto[l.pedidoItemId] ?? '').trim() === ''}
                             aria-label={`Monto a descontar de ${l.nombre}`}
                             className="w-28 rounded border px-2 py-1 text-right dark:border-gray-600 dark:bg-gray-700 dark:text-white"
                           />
@@ -500,7 +500,9 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
                           motivoMax={`Quedan ${l.disponible} para acreditar`}
                           value={cant}
                           commitOnChange
-                          disabled={l.disponible <= 0}
+                          // H6a de la revisión de C7: con un valor cargado no se deshabilita (si lo que queda bajó a 0
+                          // queda en rojo y hay que poder corregirlo).
+                          disabled={l.disponible <= 0 && cant <= 0}
                           onChange={v => setCantidades(prev => ({ ...prev, [l.pedidoItemId]: v }))}
                           aria-label={`Cantidad a acreditar de ${l.nombre}`}
                           className="w-20 rounded border px-2 py-1 text-center dark:border-gray-600 dark:bg-gray-700 dark:text-white"
