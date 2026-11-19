@@ -55,7 +55,9 @@ export default function UsuariosContainer(): React.ReactElement {
           nombre: usuario.nombre,
           rol: usuario.rol,
           activo: usuario.activo,
-          zona: usuario.rol === 'preventista' ? usuario.zona || null : null
+          zona: usuario.rol === 'preventista' ? usuario.zona || null : null,
+          // C4b v2: los roles extra en el mismo guardado (si el modal los tenía cargados).
+          ...(usuario.rolesExtra !== undefined ? { rolesExtra: usuario.rolesExtra } : {}),
         }
       })
       notify.success('Usuario actualizado')

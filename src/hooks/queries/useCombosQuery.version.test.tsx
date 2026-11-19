@@ -58,6 +58,12 @@ describe('guardarCombo · versión (1599-b8)', () => {
     expect(p.versiones).toEqual({ 8: '2026-11-18T09:00:00+00:00' })
   })
 
+  it('manda los combos que tenía la lista (C4b v2)', async () => {
+    await guardarCombo({ ...BASE, vistos: [7, 8, 9] })
+
+    expect((m.rpcs[0].args.p_combo as Record<string, unknown>).vistos).toEqual([7, 8, 9])
+  })
+
   it('un combo nuevo no manda versión propia; sin orden no manda versiones', async () => {
     await guardarCombo({ ...BASE, id: undefined, updatedAtEsperado: '2026-11-18T10:00:00+00:00', versiones: { 8: null } })
 

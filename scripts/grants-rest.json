@@ -28,7 +28,8 @@
   "por_invoker": {
     "stock_historico": "trigger INVOKER registrar_cambio_stock (la ficha edita productos.stock por REST); la policy mt_stock_historico_insert_ficha sólo admite su fila, a pg_trigger_depth() = 1 (#1134)",
     "pedido_historial": "triggers INVOKER registrar_cambio_pedido / registrar_creacion_pedido; la policy exige pg_trigger_depth() > 0",
-    "clientes": "el front escribe clientes (ClientesContainer). Desde #1151 ningún PATCH de pedidos nombra total ni monto_pagado, así que el trigger INVOKER actualizar_saldo_pedido ya no corre como authenticated"
+    "clientes": "el front escribe clientes (ClientesContainer). Desde #1151 ningún PATCH de pedidos nombra total ni monto_pagado, así que el trigger INVOKER actualizar_saldo_pedido ya no corre como authenticated",
+    "cliente_preventistas": "C4b v2 (#1603): guardar_cliente corre como quien llama (INVOKER, para que rijan las mismas policies y triggers que con el REST) e inserta y borra las filas como authenticated; no se revoca mientras sea INVOKER"
   },
   "bundle_viejo": {
     "_que_es": "Escrituras que el front de hoy ya no usa pero un bundle viejo del PWA sí: siguen concedidas para no cortarlo y se revocan en el issue de cada una. Sólo se achica.",

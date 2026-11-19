@@ -37,6 +37,11 @@ interface UsuarioUpdateInput {
   rol?: string
   zona?: string | null
   activo?: boolean
+  /**
+   * Los roles extra de la sucursal activa (C4b v2): van en el mismo guardado que el perfil. Sin
+   * la clave no se tocan.
+   */
+  rolesExtra?: string[]
 }
 
 // Fetch functions
@@ -200,22 +205,21 @@ async function fetchVendedoresComisionables(sucursalId: number | null): Promise<
 const MENSAJE_USUARIO_AJENO =
   'No podés editar a este usuario: también trabaja en sucursales que no son tuyas. Lo edita un admin de todas ellas.'
 
+/**
+ * El perfil (nombre, rol, activo, zona) y los roles extra de la sucursal activa en UNA llamada
+ * (`guardar_usuario`, C4b v2 de #1603). Antes eran el PATCH de `perfiles` y después
+ * `guardar_roles_extra`: si fallaba la segunda, el perfil quedaba y los roles no. La RPC corre
+ * como quien llama, así que rigen la misma policy (`perfiles_update_admin`) y los mismos triggers
+ * que con el REST. Devuelve sólo lo que escribe (no el email).
+ */
 async function updateUsuario({ id, data: usuario }: { id: string; data: UsuarioUpdateInput }): Promise<PerfilDB> {
-  const { data, error } = await supabase
-    .from('perfiles')
-    .update(usuario)
-    .eq('id', id)
-    .select()
-    .single()
-
-  // Cero filas (PGRST116): la policy perfiles_update_admin (mig 404, #1244) no
-  // deja que el admin edite a quien también trabaja en una sucursal que no es
-  // suya. Sin esto, la pantalla mostraría "Cannot coerce the result…".
-  if (error?.code === 'PGRST116') {
-    throw new Error(MENSAJE_USUARIO_AJENO)
-  }
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar los cambios del usuario. Revisá la ficha del usuario antes de reintentar, puede haber quedado hecho.')
-  return data as PerfilDB
+  const { rolesExtra, ...campos } = usuario
+  const { data, error } = await supabase.rpc('guardar_usuario', {
+    p_usuario: { id, campos, ...(rolesExtra !== undefined ? { roles_extra: rolesExtra } : {}) },
+  })
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar los cambios del usuario. Podés volver a guardar: deja el usuario como lo cargaste.')
+  const r = data as { perfil?: Partial<PerfilDB> | null } | null
+  return { id, ...(r?.perfil ?? {}) } as PerfilDB
 }
 
 async function toggleUsuarioActivo(id: string, activo: boolean): Promise<PerfilDB> {
@@ -382,14 +386,17 @@ export function useActualizarUsuarioMutation() {
 
   return useMutation({
     mutationFn: updateUsuario,
-    onSuccess: (updatedUsuario) => {
-      // Actualizar cache de detalle
-      queryClient.setQueryData(usuariosKeys.detail(currentSucursalId, updatedUsuario.id), updatedUsuario)
-      // Actualizar cache de lista
+    onSuccess: (updatedUsuario, variables) => {
+      // Lo que devolvió el server se suma a lo que ya había (la RPC no devuelve el email).
+      queryClient.setQueryData<PerfilDB>(usuariosKeys.detail(currentSucursalId, updatedUsuario.id),
+        (old) => (old ? { ...old, ...updatedUsuario } : old))
       queryClient.setQueryData<PerfilDB[]>(usuariosKeys.lists(currentSucursalId), (old) => {
-        if (!old) return [updatedUsuario]
-        return old.map(u => u.id === updatedUsuario.id ? updatedUsuario : u)
+        if (!old) return old
+        return old.map(u => u.id === updatedUsuario.id ? { ...u, ...updatedUsuario } : u)
       })
+      if (variables.data.rolesExtra !== undefined) {
+        queryClient.invalidateQueries({ queryKey: usuariosKeys.rolesExtra(currentSucursalId, updatedUsuario.id) })
+      }
       // Invalidar listas por rol
       if (updatedUsuario.rol) {
         queryClient.invalidateQueries({ queryKey: usuariosKeys.byRol(currentSucursalId, updatedUsuario.rol) })

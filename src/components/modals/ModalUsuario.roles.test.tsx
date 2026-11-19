@@ -1,9 +1,11 @@
 /**
- * ModalUsuario y las capacidades extra (perfil_roles) al guardar (#1561, 1561-b12).
+ * ModalUsuario y las capacidades extra (perfil_roles) al guardar (#1561, 1561-b12; C4b v2).
  *
- *  - Si la consulta de los roles guardados no volvió, no se escriben roles: el estado local
- *    arranca en «sin capacidades» y guardar así las borraba.
- *  - Si guardar las capacidades falla (el perfil ya se guardó), se avisa: antes se tragaba.
+ *  - El perfil y sus capacidades viajan en UN guardado (`guardar_usuario`): el modal le pasa los
+ *    roles extra a `onSave`, no los escribe aparte. Antes se guardaba el perfil y después los roles,
+ *    y si fallaba lo segundo el perfil ya había quedado.
+ *  - Si la consulta de los roles guardados no volvió, los roles no viajan: el estado local arranca
+ *    en «sin capacidades» y guardar así las borraba.
  */
 import '@testing-library/jest-dom/vitest'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -13,27 +15,21 @@ import type { PerfilDB } from '../../types'
 
 const mocks = vi.hoisted(() => ({
   rolesGuardados: undefined as string[] | undefined,
-  asignar: vi.fn(),
-  notifyError: vi.fn(),
 }))
 
 vi.mock('../../hooks/queries', () => ({
   usePerfilRolesQuery: () => ({ data: mocks.rolesGuardados }),
-  useAsignarPerfilRolesMutation: () => ({ mutateAsync: mocks.asignar, isPending: false }),
 }))
 vi.mock('../../contexts/SucursalContext', () => ({
   useSucursal: () => ({ currentSucursalNombre: 'Sucursal de prueba' }),
-}))
-vi.mock('../../contexts/NotificationContext', () => ({
-  useNotification: () => ({ success: vi.fn(), error: mocks.notifyError, warning: vi.fn() }),
 }))
 
 const usuario = {
   id: 'u1', nombre: 'Persona Prueba', email: 'prueba@example.com', rol: 'deposito', activo: true, zona: '',
 } as unknown as PerfilDB
 
-function guardar(onSave = vi.fn()) {
-  render(<ModalUsuario usuario={usuario} onSave={onSave} onClose={vi.fn()} guardando={false} />)
+function guardar(onSave = vi.fn(), u: PerfilDB = usuario) {
+  render(<ModalUsuario usuario={u} onSave={onSave} onClose={vi.fn()} guardando={false} />)
   fireEvent.click(screen.getByRole('button', { name: /guardar/i }))
   return onSave
 }
@@ -41,47 +37,37 @@ function guardar(onSave = vi.fn()) {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.rolesGuardados = undefined
-  mocks.asignar.mockResolvedValue(undefined)
 })
 
-describe('ModalUsuario — capacidades extra', () => {
-  it('sin los roles guardados cargados no escribe roles (no borra las capacidades)', async () => {
+describe('ModalUsuario — capacidades extra en el mismo guardado (C4b v2)', () => {
+  it('sin los roles guardados cargados, los roles no viajan (no se borran las capacidades)', async () => {
     mocks.rolesGuardados = undefined
     const onSave = guardar()
 
     await waitFor(() => expect(onSave).toHaveBeenCalled())
-    expect(mocks.asignar).not.toHaveBeenCalled()
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty('rolesExtra')
   })
 
-  it('con los roles cargados los escribe', async () => {
+  it('con los roles cargados viajan con el perfil', async () => {
     mocks.rolesGuardados = ['transportista']
-    guardar()
+    const onSave = guardar()
 
-    await waitFor(() => expect(mocks.asignar).toHaveBeenCalledWith({ usuarioId: 'u1', roles: ['transportista'] }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0]).toMatchObject({ id: 'u1', nombre: 'Persona Prueba', rolesExtra: ['transportista'] })
   })
 
-  it('si guardar las capacidades falla, lo avisa y dice que el usuario sí se guardó', async () => {
-    mocks.rolesGuardados = []
-    mocks.asignar.mockRejectedValue(new Error('Se quitaron los roles x, pero no se pudieron agregar y'))
-    guardar()
+  it('a quien ya lleva la ruta por su rol se le limpian', async () => {
+    mocks.rolesGuardados = ['transportista']
+    const onSave = guardar(vi.fn(), { ...usuario, rol: 'transportista' } as unknown as PerfilDB)
 
-    await waitFor(() => expect(mocks.notifyError).toHaveBeenCalled())
-    const aviso = String(mocks.notifyError.mock.calls[0][0])
-    expect(aviso).toMatch(/Se guardó el usuario, pero no se pudieron guardar sus capacidades extra/)
-    expect(aviso).toContain('Se quitaron los roles x')
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0].rolesExtra).toEqual([])
   })
 
-  it('hasta que cargan los roles guardados, «Puede llevar la ruta» está deshabilitado', () => {
+  it('el checkbox de la ruta queda deshabilitado mientras no cargan los roles', () => {
     mocks.rolesGuardados = undefined
     render(<ModalUsuario usuario={usuario} onSave={vi.fn()} onClose={vi.fn()} guardando={false} />)
 
-    expect(screen.getByRole('checkbox', { name: /Puede llevar la ruta/ })).toBeDisabled()
-  })
-
-  it('con los roles cargados se puede tildar', () => {
-    mocks.rolesGuardados = []
-    render(<ModalUsuario usuario={usuario} onSave={vi.fn()} onClose={vi.fn()} guardando={false} />)
-
-    expect(screen.getByRole('checkbox', { name: /Puede llevar la ruta/ })).toBeEnabled()
+    expect(screen.getByRole('checkbox', { name: /puede llevar la ruta/i })).toBeDisabled()
   })
 })

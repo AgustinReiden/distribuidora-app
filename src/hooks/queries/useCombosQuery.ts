@@ -287,6 +287,11 @@ export interface ComboFormInput {
    * uno, 'orden_cambiado'.
    */
   versiones?: Record<string, string | null>
+  /**
+   * Todos los combos que tenía la lista de quien edita (C4b v2): si otro creó en el medio uno que
+   * compite con éste, `guardar_combo` no guarda y devuelve 'orden_cambiado'.
+   */
+  vistos?: number[]
 }
 
 export async function guardarCombo(input: ComboFormInput): Promise<string> {
@@ -310,6 +315,7 @@ export async function guardarCombo(input: ComboFormInput): Promise<string> {
       ...(input.orden ? { orden: input.orden } : {}),
       ...(input.id && input.updatedAtEsperado ? { updated_at_esperado: input.updatedAtEsperado } : {}),
       ...(input.orden && input.versiones ? { versiones: input.versiones } : {}),
+      ...(input.vistos ? { vistos: input.vistos } : {}),
     },
   })
   if (error) throw errorDeSupabase(error, 'No se pudo guardar el combo')

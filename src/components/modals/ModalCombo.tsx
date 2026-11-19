@@ -367,6 +367,8 @@ export default function ModalCombo({
       // «Otro lo cambió» (1599-b8): la versión del combo al abrirlo y la de cada combo del orden.
       ...(combo ? { updatedAtEsperado: combo.updatedAt ?? null } : {}),
       ...(orden ? { versiones: versionesDelOrden(ordenParaGuardar(orden), combos, combo?.id) } : {}),
+      // Los combos que tenía la lista (C4b v2): uno que compite y no está, lo creó otro en el medio.
+      vistos: combos.map(c => Number(c.id)),
     }
     setSaving(true)
     try {

@@ -39,6 +39,10 @@ vi.mock('../supabase/base', () => ({
     },
     rpc: async (fn: string, args: Record<string, unknown>) => {
       estado.rpcs.push({ fn, args })
+      if (fn === 'guardar_usuario') {
+        const p = args.p_usuario as { id: string; campos: Record<string, unknown> }
+        return { data: estado.errorRpc ? null : { success: true, perfil: { id: p.id, ...p.campos } }, error: estado.errorRpc }
+      }
       return { data: estado.errorRpc ? null : { roles: args.p_roles }, error: estado.errorRpc }
     },
   },
@@ -48,7 +52,7 @@ vi.mock('../../contexts/SucursalContext', () => ({
   useSucursal: () => ({ currentSucursalId: 1 }),
 }))
 
-import { useAsignarPerfilRolesMutation, useToggleUsuarioActivoMutation } from './useUsuariosQuery'
+import { useActualizarUsuarioMutation, useAsignarPerfilRolesMutation, useToggleUsuarioActivoMutation } from './useUsuariosQuery'
 
 function wrapper() {
   const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
@@ -115,5 +119,35 @@ describe('roles extra del usuario (1561-b12, C4b)', () => {
 
     await expect(result.current.mutateAsync({ usuarioId: 'u1', roles: ['transportista'] }))
       .rejects.toThrow(/Podés volver a guardar/)
+  })
+})
+
+describe('guardar un usuario: el perfil y los roles extra en una sola llamada (C4b v2)', () => {
+  it('llama a guardar_usuario con los campos y los roles, sin escribir perfiles ni perfil_roles por REST', async () => {
+    const { result } = renderHook(() => useActualizarUsuarioMutation(), { wrapper: wrapper() })
+
+    await result.current.mutateAsync({ id: 'u1', data: { nombre: 'Nuevo', rol: 'deposito', activo: true, zona: null, rolesExtra: ['transportista'] } })
+
+    expect(estado.llamadas).toEqual([])
+    expect(estado.rpcs).toEqual([{
+      fn: 'guardar_usuario',
+      args: { p_usuario: { id: 'u1', campos: { nombre: 'Nuevo', rol: 'deposito', activo: true, zona: null }, roles_extra: ['transportista'] } },
+    }])
+  })
+
+  it('sin roles extra (no cargaron) no los manda', async () => {
+    const { result } = renderHook(() => useActualizarUsuarioMutation(), { wrapper: wrapper() })
+
+    await result.current.mutateAsync({ id: 'u1', data: { nombre: 'Nuevo' } })
+
+    expect((estado.rpcs[0].args.p_usuario as Record<string, unknown>)).not.toHaveProperty('roles_extra')
+  })
+
+  it('un rechazo llega con su motivo (y no quedó nada: es una transacción)', async () => {
+    estado.errorRpc = { code: '42501', message: 'No podés editar a este usuario: también trabaja en sucursales que no son tuyas. Lo edita un admin de todas ellas.' }
+    const { result } = renderHook(() => useActualizarUsuarioMutation(), { wrapper: wrapper() })
+
+    await expect(result.current.mutateAsync({ id: 'u1', data: { nombre: 'X', rolesExtra: [] } }))
+      .rejects.toThrow('No podés editar a este usuario')
   })
 })

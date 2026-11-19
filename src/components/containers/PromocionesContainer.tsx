@@ -324,7 +324,8 @@ export default function PromocionesContainer(): React.ReactElement {
         notify.warning(activar ? 'El combo ya estaba activo: se actualizó la lista.' : 'El combo ya estaba desactivado: se actualizó la lista.')
         return
       }
-      const input: ComboFormInput = { ...inputDesdeCombo(combo), activo: activar }
+      // Los combos que se acaban de leer (C4b v2): uno nuevo que compite y no está, lo creó otro.
+      const input: ComboFormInput = { ...inputDesdeCombo(combo), activo: activar, vistos: frescos.map(c => Number(c.id)) }
       if (activar) {
         const orden = ordenDelGrupo(
           ordenableDe({ ...combo, activo: true }, productos),

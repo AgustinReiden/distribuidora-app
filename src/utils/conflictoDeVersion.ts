@@ -1,6 +1,6 @@
 /**
- * «Otro lo cambió mientras lo editabas» en combos y promos (C4b de #1603, 1599-b8; el molde es la
- * edición de un gasto, 1599-b9).
+ * «Otro lo cambió mientras lo editabas» en combos, promos y clientes (C4b de #1603, 1599-b8; el
+ * molde es la edición de un gasto, 1599-b9).
  *
  * `guardar_combo` y `cambiar_regalo_promocion` comparan la versión (`updated_at`) que vio quien
  * edita con la de ahora y, si otro guardó en el medio, no escriben nada y devuelven un `codigo`:
@@ -8,9 +8,9 @@
  * 'promocion_cambiada'. El formulario sigue abierto con lo tipeado: el mensaje lo dice.
  */
 
-export type CodigoConflicto = 'combo_cambiado' | 'orden_cambiado' | 'promocion_cambiada'
+export type CodigoConflicto = 'combo_cambiado' | 'orden_cambiado' | 'promocion_cambiada' | 'cliente_cambiado'
 
-const CODIGOS: ReadonlySet<string> = new Set<CodigoConflicto>(['combo_cambiado', 'orden_cambiado', 'promocion_cambiada'])
+const CODIGOS: ReadonlySet<string> = new Set<CodigoConflicto>(['combo_cambiado', 'orden_cambiado', 'promocion_cambiada', 'cliente_cambiado'])
 
 /** El rechazo por versión. 409: el retry global no lo repite (reintentar no lo destraba). */
 export class ConflictoDeVersionError extends Error {

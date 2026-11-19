@@ -392,6 +392,8 @@ describe('ModalCombo · guardado', () => {
       orden: [0],
       // Ningún otro combo en el orden: ninguna versión que comparar (1599-b8).
       versiones: {},
+      // Ni otros combos en la lista (C4b v2).
+      vistos: [],
     })
   })
 
@@ -417,6 +419,7 @@ describe('ModalCombo · guardado', () => {
       ],
       // La versión que se abrió (1599-b8): este combo de prueba no la trae.
       updatedAtEsperado: null,
+      vistos: [],
     })
   })
 
@@ -556,6 +559,8 @@ describe('ModalCombo · compite con (#1213)', () => {
     expect(onSave.mock.calls[0][0].orden).toEqual([0, 50])
     // Con la versión de cada combo del orden que se reescribe (1599-b8).
     expect(onSave.mock.calls[0][0].versiones).toEqual({ 50: null })
+    // Y los combos que tenía la lista (C4b v2).
+    expect(onSave.mock.calls[0][0].vistos).toEqual([50, 60])
   })
 
   it('las flechas cambian el orden y avisan si el de abajo nunca se arma', async () => {
