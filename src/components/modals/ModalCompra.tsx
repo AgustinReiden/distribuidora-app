@@ -2828,6 +2828,10 @@ function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster
                 type="text"
                 value={itemRapido.codigo}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setItemRapido(prev => ({ ...prev, codigo: e.target.value }))}
+                // Al salir, sin los espacios de los bordes: es el mismo criterio que `codigoParaGuardar`
+                // (src/utils/codigoProducto, tarjeta C4a de #1603), que todavía no está en esta rama;
+                // el código es único por sucursal sobre ese texto. Lo que se ve es lo que se guarda.
+                onBlur={(e: ChangeEvent<HTMLInputElement>) => { const limpio = e.target.value.trim(); if (limpio !== e.target.value) setItemRapido(prev => ({ ...prev, codigo: limpio })) }}
                 placeholder="Codigo"
                 className="w-full px-3 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
               />

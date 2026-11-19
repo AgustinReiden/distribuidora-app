@@ -266,6 +266,15 @@ describe('ModalCompra — alta rápida: un costo en rojo', () => {
 describe('ModalCompra — alta rápida: código', () => {
   // El código de un producto es único por sucursal sobre el texto sin los espacios de los bordes
   // (tarjeta C4a de #1603): el alta lo manda recortado, para que «  A-12 » no sea otro código.
+  it('al salir del campo se ve sin los espacios de los bordes: lo que se ve es lo que se guarda', async () => {
+    const { user } = renderModal()
+    await abrirAltaRapida(user)
+    const campo = screen.getByPlaceholderText('Codigo')
+    await user.type(campo, ' 0802 ')
+    await user.tab()
+    expect(campo).toHaveValue('0802')
+  })
+
   it('viaja sin los espacios de los bordes', async () => {
     const { user, onCrearProductoRapido } = renderModal()
     await abrirAltaRapida(user)
