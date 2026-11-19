@@ -23,6 +23,15 @@
 --        un producto que no está en ninguna meta se borra.
 --   E1 · emails_de_usuarios: admin y encargado reciben el email de otro de su sucursal;
 --        preventista, chofer y un encargado desactivado, sólo el suyo.
+--   P1 · un admin no edita su propia fila de perfiles por REST (nombre, email, zona): 42501 con el
+--        motivo.
+--   P2 · tampoco su propio rol, aunque quede otro admin activo.
+--   P3 · ni se asigna ni se quita sus propios roles extra (perfil_roles).
+--   P4 · regresión · el admin edita a OTRO usuario que abarca (perfiles y perfil_roles), y lo
+--        desactiva (perfiles_guard_desactivacion sigue andando).
+--   P5 · regresión · el server (service_role) edita cualquier perfil, también el del admin que
+--        firma; asignar_usuario_sucursal (definer) y generar_codigo_vinculacion_bot andan.
+--   P6 · regresión · un preventista sobre su propia fila sigue sin poder (0 filas, como hoy).
 --
 -- Los ids de pago se toman de los propios: nada de recorrer la secuencia (en el CI está en 10^9).
 --
@@ -35,6 +44,7 @@ DECLARE
   v_pre      uuid;
   v_tra      uuid;
   v_des      uuid;
+  v_adm2     uuid;
   v_cli1     bigint;
   v_cli2     bigint;
   v_p1       bigint;
@@ -292,6 +302,82 @@ BEGIN
   IF pg_temp.check_de(v_aud, 'PAGO-B') IS DISTINCT FROM 1 OR pg_temp.check_de(v_aud, 'META-A') IS DISTINCT FROM 1 THEN
     v_fallas := v_fallas || format('L6 · con un pedazo y una meta cruzados: PAGO-B %s, META-A %s (esperado 1 y 1)',
                                    pg_temp.check_de(v_aud, 'PAGO-B'), pg_temp.check_de(v_aud, 'META-A'));
+  END IF;
+
+  -- ----------------------------------------------------------------- P1..P6 -
+  -- El admin que se edita (v_adm, de la 1) tiene otro admin activo (v_adm2, de la 1 y la 2), así
+  -- que el guard del último admin no es lo que frena.
+  v_adm2 := pg_temp.u('admin', 1);
+  INSERT INTO usuario_sucursales (usuario_id, sucursal_id, es_default) VALUES (v_adm2, 2, false);
+  FOR v_t IN
+    SELECT format('%s · %s: %s (esperado %s)', caso, que, s.visto, esperado) FROM (VALUES
+        ('P1', 'el admin se cambia el nombre, el email y la zona', v_adm,
+         format('UPDATE perfiles SET nombre = ''C6 yo'', email = ''c6-yo@ensayo.invalid'', zona = ''Z'' WHERE id = %L RETURNING id::text', v_adm),
+         '42501 No podés editar tu propio usuario'),
+        ('P2', 'el admin se baja a preventista', v_adm,
+         format('UPDATE perfiles SET rol = ''preventista'' WHERE id = %L RETURNING id::text', v_adm),
+         '42501 No podés editar tu propio usuario'),
+        ('P3', 'el admin se da el extra de chofer', v_adm,
+         format('INSERT INTO perfil_roles (usuario_id, sucursal_id, rol) VALUES (%L, 1, ''transportista'') RETURNING usuario_id::text', v_adm),
+         '42501 No podés cambiar tus propios roles'),
+        ('P4', 'el admin edita a un preventista de la 1', v_adm,
+         format('UPDATE perfiles SET nombre = ''C6 otro'' WHERE id = %L RETURNING nombre', v_pre),
+         'PASA C6 otro'),
+        ('P4', 'el admin le da el extra de chofer a un preventista de la 1', v_adm,
+         format('INSERT INTO perfil_roles (usuario_id, sucursal_id, rol) VALUES (%L, 1, ''transportista'') RETURNING rol', v_pre),
+         'PASA transportista'),
+        ('P4', 'el admin le saca ese extra', v_adm,
+         format('DELETE FROM perfil_roles WHERE usuario_id = %L AND sucursal_id = 1 AND rol = ''transportista'' RETURNING rol', v_pre),
+         'PASA transportista'),
+        ('P5', 'asignar_usuario_sucursal (definer) suma la 2 a un preventista', v_adm2,
+         format('SELECT (public.asignar_usuario_sucursal(%L, 2, false) IS NOT NULL)::text', v_pre),
+         'PASA true'),
+        ('P5', 'generar_codigo_vinculacion_bot', v_adm,
+         'SELECT (public.generar_codigo_vinculacion_bot() IS NOT NULL)::text',
+         'PASA true'),
+        ('P6', 'el preventista se cambia el nombre', v_pre,
+         format('UPDATE perfiles SET nombre = ''C6 yo'' WHERE id = %L RETURNING id::text', v_pre),
+         'PASA')
+      ) AS t(caso, que, u, sql, esperado),
+      LATERAL (SELECT pg_temp.como_usuario(u, 1, sql) AS visto) s
+     WHERE CASE WHEN esperado = 'PASA' THEN s.visto <> 'PASA' ELSE s.visto NOT LIKE esperado || '%' END
+  LOOP
+    v_fallas := v_fallas || v_t;
+  END LOOP;
+  -- P3 al revés: un extra propio que ya tenía (lo puso el server) no se lo quita.
+  INSERT INTO perfil_roles (usuario_id, sucursal_id, rol) VALUES (v_adm, 1, 'transportista') ON CONFLICT DO NOTHING;
+  v_r := pg_temp.como_usuario(v_adm, 1, format(
+    'DELETE FROM perfil_roles WHERE usuario_id = %L AND sucursal_id = 1 RETURNING rol', v_adm));
+  IF v_r NOT LIKE '42501 No podés cambiar tus propios roles%' THEN
+    v_fallas := v_fallas || ('P3 · el admin se sacó su propio extra: ' || v_r);
+  END IF;
+  -- P4: el admin desactiva a otro (el chofer); queda un admin activo, el guard lo deja.
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'auth.users'::regclass AND attname = 'banned_until') THEN
+    ALTER TABLE public.perfiles DISABLE TRIGGER trg_perfiles_sync_acceso_auth;
+  END IF;
+  v_r := pg_temp.como_usuario(v_adm, 1, format('UPDATE perfiles SET activo = false WHERE id = %L RETURNING activo::text', v_tra));
+  IF v_r <> 'PASA false' THEN
+    v_fallas := v_fallas || ('P4 · el admin no pudo desactivar a otro: ' || v_r);
+  END IF;
+  -- P5: el server (service_role) edita al admin que firma.
+  PERFORM pg_temp.como(v_adm, 1);
+  EXECUTE 'SET LOCAL ROLE service_role';
+  BEGIN
+    UPDATE perfiles SET zona = 'C6 server' WHERE id = v_adm;
+  EXCEPTION WHEN OTHERS THEN
+    v_fallas := v_fallas || ('P5 · el server no pudo editar el perfil del admin: ' || SQLSTATE || ' ' || SQLERRM);
+  END;
+  EXECUTE 'RESET ROLE';
+  PERFORM pg_temp.como(NULL, NULL);
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'auth.users'::regclass AND attname = 'banned_until') THEN
+    ALTER TABLE public.perfiles ENABLE TRIGGER trg_perfiles_sync_acceso_auth;
+  END IF;
+  IF (SELECT nombre FROM perfiles WHERE id = v_pre) IS DISTINCT FROM 'C6 otro'
+     OR (SELECT rol FROM perfiles WHERE id = v_adm) <> 'admin'
+     OR (SELECT zona FROM perfiles WHERE id = v_adm) IS DISTINCT FROM 'C6 server' THEN
+    v_fallas := v_fallas || format('P · cómo quedaron: nombre del preventista %s, rol del admin %s, zona del admin %s',
+      (SELECT nombre FROM perfiles WHERE id = v_pre), (SELECT rol FROM perfiles WHERE id = v_adm),
+      (SELECT zona FROM perfiles WHERE id = v_adm));
   END IF;
 
   -- -------------------------------------------------------------------- E1 -

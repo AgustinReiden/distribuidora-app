@@ -112,7 +112,11 @@ suelta en `sucursales`.
   sin `activo` (1564-b11 de #1603): usa los helpers o suma `COALESCE(activo, true)` a la subconsulta
   sobre `perfiles` (el depósito no tiene helper), y el mismo gate falla ante cualquiera, sin lista
   de permitidas. Nadie edita su propio
-  perfil (decisión del dueño): `perfiles` se escribe sólo por `perfiles_update_admin`. Y ningún
+  perfil ni sus propios roles extra, tampoco un admin (decisión del dueño): `perfiles` se escribe por
+  `perfiles_update_admin` (un admin que abarca las sucursales del otro), y `trg_perfiles_nadie_se_edita`
+  y `trg_perfil_roles_nadie_se_asigna` rechazan con el motivo la fila propia de quien escribe como
+  `authenticated` (el REST y las RPC INVOKER; el server y las definer no pasan por ahí). Al único admin
+  lo corrige el server. Y ningún
   `UPDATE` ni `DELETE` de `perfiles` deja la base sin un admin activo (`perfiles_guard_desactivacion`).
 - **El rol es uno solo en toda sucursal: `perfiles.rol`** (mig 486, #1519). Lo que cambia por
   sucursal son los extra de `perfil_roles`. `usuario_sucursales` ya no tiene columna `rol`
