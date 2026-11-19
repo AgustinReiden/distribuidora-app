@@ -7,8 +7,9 @@
 --   3 · ANALYZE de todo, con los datos cargados.
 -- En la 530, en la situación 2, _tablero_ventas y _ventas_nc se planean como nested loops que recorren
 -- clientes, pedidos y pedido_items enteros por cada fila, y los cuatro reportes pasan los 8 s de la API.
--- La migración de C5 sólo cambia _ventas_nc; los joins de quienes llaman (pedido_items por boleta en
--- tablero_categorias, el gerencial y el bot; _nc_rendimiento) siguen igual y siguen pasando los 8 s.
+-- No se cambió código (decisión de la coordinadora, 19/11): la receta que lo evita (buscar por índice
+-- fila por fila) empeora el caso normal, y en producción las estadísticas están al día (autoanalyze).
+-- La regla es correr ANALYZE después de una carga masiva (CLAUDE.md, «Correr y verificar»).
 -- Ojo: la situación 2 depende de cuántas páginas muertas tengan las tablas (el planner estima por
 -- páginas): corré el guion dos veces seguidas sobre la misma base para verla.
 --

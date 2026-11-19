@@ -3,7 +3,7 @@
 --
 --   G   1562-b2  guardar_gasto: un infinito (y los litros fuera de su columna) se rechazan con su motivo.
 --   E   1597-b6  guardar_empleado: la fecha de ingreso no es futura ni 'infinity' (al cargarla y al cambiarla).
---   L   SEG-6    las siete de gastos y personal sin CRLF, y andando.
+--   L   SEG-6    ninguna función de public con CRLF (eran 29), SEG-C la vigila, y las de personal andan.
 --   R   1332-f   auditoria_integridad(): ROT-A, ROT-B y ROT-C en 0 con el camino de la app, y en rojo con
 --                cada rotura mal armada a mano.
 --   F   auditoria_fechas_utc(): un literal con dos guiones ya no esconde el día del servidor que lo sigue.
@@ -161,14 +161,17 @@ BEGIN
   END IF;
 
   -- ---------------------------------------------------------- L · SEG-6 ---
-  SELECT count(*) INTO v_n FROM pg_proc
-   WHERE oid IN ('public._guardar_gasto(jsonb,boolean)'::regprocedure, 'public.guardar_empleado(jsonb)'::regprocedure,
-                 'public._empleado_json(empleados)'::regprocedure, 'public.listar_personal()'::regprocedure,
-                 'public.pagos_cuenta_empleado()'::regprocedure,
-                 'public._cuenta_empleado_conciliar(text,bigint,bigint,bigint,bigint,bigint,numeric,date,bigint,text)'::regprocedure,
-                 'public.calcular_comisiones(date,date,bigint[])'::regprocedure)
-     AND position(E'\r' IN prosrc) > 0;
-  v_fallas := v_fallas || pg_temp.chk(v_n = 0, format('L1 quedan %s funciones de gastos y personal con CRLF', v_n));
+  -- En la 530 eran 29 (gastos, personal, liquidaciones y cuatro triggers de updated_at).
+  SELECT count(*) INTO v_n FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(E'\r' IN prosrc) > 0;
+  v_fallas := v_fallas || pg_temp.chk(v_n = 0, format('L1 quedan %s funciones de public con CRLF', v_n));
+  -- SEG-C las cuenta, y se pone en rojo con una nueva.
+  IF pg_temp.rot('SEG-C') IS NULL THEN
+    v_fallas := v_fallas || 'L4 auditoria_integridad() no tiene el check SEG-C'::text;
+  ELSE
+    EXECUTE format('CREATE FUNCTION public.zz_c5_crlf() RETURNS int LANGUAGE sql AS %L', E'SELECT 1\r\n');
+    v_fallas := v_fallas || pg_temp.chk(pg_temp.rot('SEG-C') = 1, format('L4 SEG-C con una función en CRLF da %s', pg_temp.rot('SEG-C')));
+    DROP FUNCTION public.zz_c5_crlf();
+  END IF;
   v_txt := pg_temp.como('SELECT jsonb_typeof(public.listar_personal())');
   v_fallas := v_fallas || pg_temp.chk(v_txt IN ('array', 'object'), format('L2 listar_personal dio %s', v_txt));
   v_txt := pg_temp.como(format('SELECT jsonb_typeof(to_jsonb(public.calcular_comisiones(%L::date, %L::date, ARRAY[1]::bigint[])))',
@@ -342,6 +345,6 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · % · %', cardinality(v_fallas), array_to_string(v_fallas, ' | ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · C5: gastos con infinitos y litros fuera de la columna (G1-G6); fecha de ingreso (E1-E7); SEG-6 sin CRLF (L1-L3); ROT-A, ROT-B y ROT-C (R0-R11); auditoria_fechas_utc con literales (F1-F2); _tablero_ventas y _ventas_nc con las mismas filas (V1-V4)';
+  RAISE EXCEPTION 'ENSAYO OK · C5: gastos con infinitos y litros fuera de la columna (G1-G6); fecha de ingreso (E1-E7); SEG-6 sin CRLF y SEG-C (L1-L4); ROT-A, ROT-B y ROT-C (R0-R11); auditoria_fechas_utc con literales (F1-F2); _tablero_ventas y _ventas_nc con las mismas filas (V1-V4)';
 END
 $ensayo$;

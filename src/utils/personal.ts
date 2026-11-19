@@ -367,6 +367,18 @@ export function errorDeDesdeArreglo(desde: string, hoy: string): string | null {
   return `El arreglo vale desde una fecha entre el ${fechaCompleta(min)} y el ${fechaCompleta(max)} (hasta ${DIAS_TOPE_ARREGLO} días antes o después de hoy)`
 }
 
+/** El mensaje de `guardar_empleado` ante una fecha de ingreso futura (1597-b6, #1597). */
+export const MENSAJE_INGRESO_FUTURO = 'La fecha de ingreso no puede ser futura'
+
+/**
+ * La fecha de ingreso no es futura. Como en el server, rige al cargarla o al cambiarla: una ficha
+ * que ya la tiene así (`original`) se sigue editando sin tocarla. Vacía no se mide.
+ */
+export function errorDeFechaIngreso(fecha: string, original: string | null, hoy: string): string | null {
+  if (!fecha || fecha === (original ?? '')) return null
+  return fecha > hoy ? MENSAJE_INGRESO_FUTURO : null
+}
+
 /**
  * La fecha de un gasto, de un movimiento de empleado y del pago de una liquidación va hasta estos
  * días antes de hoy, para todos (GTO-A, #1545; decisión del dueño, 12/11).

@@ -1,9 +1,10 @@
 -- =========================================================================
--- NNN · GASTOS, PERSONAL, AUDITORÍAS Y DOS LECTORES DE VENTAS SIN NESTED LOOP
+-- NNN · GASTOS, PERSONAL, FUNCIONES SIN CRLF Y DOS AUDITORÍAS
 --       (plan #1603, ola 2, tanda 5, tarjeta C5)
 --
--- Ensayo: scripts/test-gastos-y-auditorias-ola2-1603.sql. Tiempos:
--- scripts/tiempos-ventas-estadisticas-viejas-ola2-1603.sql. Se aplica en LF.
+-- Ensayo: scripts/test-gastos-y-auditorias-ola2-1603.sql. Se aplica en LF, y da
+-- lo mismo en una sola transacción (producción) que sentencia por sentencia
+-- (el CI): abre y cierra la suya, como la 529 y la 530.
 --
 -- 1 · 1562-b2 (#1562) · _guardar_gasto: un 'Infinity' (o '-Infinity') en un
 --     importe o en los litros pasaba la guarda del NaN y los litros llegaban
@@ -14,64 +15,55 @@
 -- 2 · 1597-b6 (#1597) · guardar_empleado: la fecha de ingreso no puede ser
 --     futura ni 'infinity'. Rige al cargarla y al cambiarla: una ficha que ya
 --     la tiene así se sigue editando sin tocarla (como la fecha de un gasto).
--- 3 · SEG-6 (#1545) · siete funciones de gastos y personal tenían el cuerpo
---     con CRLF (las migraciones las fueron parchando respetando el fin de
---     línea). Se recrean con LF: el texto es el MISMO salvo los '\r' (lo
---     prueba la poscondición), con su dueño, sus permisos, SECURITY DEFINER,
---     volatilidad y SET iguales. Todos los '\r' estaban al final de una línea y
---     ninguno dentro de un literal (medido en la 530), así que no cambia ningún
---     mensaje. A todas las que se recrean (definer o invoker, las siete y las
---     tres de abajo) se les suma pg_temp al final del search_path (regla de B15).
+-- 3 · SEG-6 (#1545) · TODA función de public con '\r' en el cuerpo (29 en la
+--     530: gastos, personal, liquidaciones y cuatro triggers de updated_at) se
+--     recrea en LF. Se eligen por el catálogo, no por una lista escrita a mano
+--     que se desactualiza; la premisa es que en cada una todos los '\r' son de
+--     fin de línea (van seguidos de '\n'), que ninguno está dentro de un literal
+--     y que el cuerpo no tiene cadenas con '$...$' adentro: si una no cumple, la
+--     migración aborta y la nombra. La poscondición prueba que el texto nuevo es
+--     el de antes sin los '\r' (más los parches de 1 y 2) y que dueño, permisos,
+--     SECURITY DEFINER, volatilidad, costo, ROWS y lo demás quedan iguales, y
+--     que no queda ninguna función de public con '\r'. NO cambia ninguna lógica.
+--     El search_path de cada función que se recrea termina en pg_temp (B15).
 -- 4 · 1332-f (#1332) · auditoria_integridad(): tres checks de las roturas a
---     cargo del empleado (gastos 7, mig 450), que se habían dejado para después:
---     ROT-A una rotura viva apunta a una salvedad «A cargo de empleados» o a
---     una merma sin anular; ROT-B una salvedad «A cargo de empleados» tiene al
---     menos una rotura viva; ROT-C la compensación de una rotura es su espejo.
---     Se suman por ancla, sin premisa de md5 (otras tarjetas también le suman
---     checks): el ancla es el cierre de la lista y aparece una vez.
+--     cargo del empleado (gastos 7, mig 450): ROT-A una rotura viva apunta a
+--     una salvedad «A cargo de empleados» o a una merma sin anular; ROT-B una
+--     salvedad «A cargo de empleados» tiene al menos una rotura viva; ROT-C la
+--     compensación de una rotura es su espejo. Y SEG-C: ninguna función de
+--     public con '\r' (así no vuelve a entrar; el gate «auditoria_integridad()
+--     estructural» del CI lo corre). Se suman por ancla, sin premisa de md5
+--     (otras tarjetas también le suman checks): el ancla aparece una vez.
 -- 5 · auditoria_fechas_utc(): sacaba los comentarios de línea antes que los
 --     literales, así que un literal con '--' escondía el resto de la línea. Usa
---     _sql_sin_comentarios y _sql_sin_comentarios_ni_literales (#1541), como
---     las demás auditorías que leen código.
--- 6 · N8 de la revisión de B22 · _ventas_nc: con estadísticas viejas (el
---     planner cree que pedidos, pedido_items y clientes tienen una fila) armaba
---     nested loops que recorrían esas tablas enteras por cada renglón de nota
---     (3 s con 8.000 boletas y 500 notas). Los joins van ahora por subconsulta
---     (escalar, o LATERAL con OFFSET 0), que siempre es una búsqueda por índice;
---     con estadísticas al día tarda lo mismo (las notas son pocas). El resultado
---     es el mismo fila por fila: cada join era por una PK (o la FK de los
---     renglones de la nota), así que trae la misma fila o ninguna; el filtro de
---     la boleta va dentro del LATERAL, que con CROSS JOIN descarta igual que el
---     JOIN de antes. _tablero_ventas NO se toca: la misma receta, una búsqueda
---     por boleta, la hacía 17 veces más lenta con estadísticas al día (20 → 350
---     ms con 8.000 boletas). Y el resto del tiempo con estadísticas viejas está
---     en los joins de quienes las llaman (pedido_items por boleta), que no son
---     de esta tarjeta: ver el informe de C5.
+--     _sql_sin_comentarios y _sql_sin_comentarios_ni_literales (#1541).
+--
+-- N8 (tiempos con estadísticas viejas) no cambia código: decisión de la
+-- coordinadora (19/11). La regla de correr ANALYZE después de una carga masiva
+-- está en CLAUDE.md, y se mide con scripts/tiempos-ventas-estadisticas-viejas-ola2-1603.sql.
 --
 -- SIN DDL DE TABLAS: sólo CREATE OR REPLACE / ALTER FUNCTION, no toma locks de
 -- tablas. No cambia firmas ni permisos.
 -- =========================================================================
 
+BEGIN;
+
 SET LOCAL lock_timeout = '5s';
 
 -- =========================================================================
--- 0 · Premisas: los cuerpos vivos son los de la 530
+-- 0 · Premisas
 -- =========================================================================
 DO $premisas$
 DECLARE
   r record;
   v text;
+  v_n int;
 BEGIN
+  -- Las que se parchan: los cuerpos de la 530.
   FOR r IN SELECT * FROM (VALUES
     ('public._guardar_gasto(jsonb,boolean)', 'be65ace1cf3f5cd26a72e95c4cb1ecdc'),
     ('public.guardar_empleado(jsonb)', '3765d0525746dbee35083f05d7da631b'),
-    ('public._empleado_json(empleados)', 'c2346c3499099cfcbab4b1fde37f6d7a'),
-    ('public.listar_personal()', 'db5b90ed607b54779f7a7f80b41311ad'),
-    ('public.pagos_cuenta_empleado()', 'f613660dd9309e64debcdc05390ea1a1'),
-    ('public._cuenta_empleado_conciliar(text,bigint,bigint,bigint,bigint,bigint,numeric,date,bigint,text)', 'd52526732e94f60e625f36f12347e038'),
-    ('public.calcular_comisiones(date,date,bigint[])', '46903c046e900740f4c5ba552044941f'),
     ('public.auditoria_fechas_utc()', 'e1ee6c6cf4fc0736bb386d27fb32c17f'),
-    ('public._ventas_nc(bigint[],date,date)', 'a4200429ef13b37b4d55960983a0309c'),
     -- auditoria_integridad va sin md5 (otras tarjetas le suman checks): se
     -- exige que su ancla aparezca una vez.
     ('public.auditoria_integridad()', NULL),
@@ -88,30 +80,50 @@ BEGIN
     END IF;
   END LOOP;
   IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = 'public.auditoria_integridad()'::regprocedure
-                AND prosrc ~ '''ROT-[ABC]''') THEN
-    RAISE EXCEPTION 'mig NNN · auditoria_integridad() ya tiene checks ROT-*: revisar a mano';
+                AND prosrc ~ '''(ROT-[ABC]|SEG-C)''') THEN
+    RAISE EXCEPTION 'mig NNN · auditoria_integridad() ya tiene checks ROT-* o SEG-C: revisar a mano';
   END IF;
+
+  -- SEG-6: cada función de public con '\r' se puede limpiar sin cambiar nada.
+  FOR r IN SELECT p.oid::regprocedure AS f, p.prosrc, p.prokind
+             FROM pg_proc p
+            WHERE p.pronamespace = 'public'::regnamespace AND position(E'\r' IN p.prosrc) > 0
+              AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass
+                                 AND d.objid = p.oid AND d.deptype = 'e') LOOP
+    IF r.prokind NOT IN ('f', 'p') THEN
+      RAISE EXCEPTION 'mig NNN · % no es una función ni un procedimiento: revisar a mano', r.f;
+    END IF;
+    IF length(r.prosrc) - length(replace(r.prosrc, E'\r', ''))
+       <> length(r.prosrc) - length(replace(r.prosrc, E'\r\n', E'\n')) THEN
+      RAISE EXCEPTION 'mig NNN · % tiene un \r que no es de fin de línea: no se toca', r.f;
+    END IF;
+    IF (SELECT length(s) - length(replace(s, E'\r', '')) FROM (SELECT public._sql_sin_comentarios(r.prosrc) s) z)
+       <> (SELECT length(s) - length(replace(s, E'\r', '')) FROM (SELECT public._sql_sin_comentarios_ni_literales(r.prosrc) s) z) THEN
+      RAISE EXCEPTION 'mig NNN · % tiene un \r dentro de un literal: no se toca', r.f;
+    END IF;
+    IF r.prosrc ~ '\$[A-Za-z_]*\$' THEN
+      RAISE EXCEPTION 'mig NNN · % tiene una cadena entre $...$ en el cuerpo: revisar a mano', r.f;
+    END IF;
+  END LOOP;
+  SELECT count(*) INTO v_n FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(E'\r' IN prosrc) > 0;
+  RAISE NOTICE 'mig NNN · % funciones de public con CRLF se pasan a LF', v_n;
 END
 $premisas$;
 
--- La foto de antes, para la poscondición (dueño, permisos, atributos y texto).
+-- La foto de antes, para la poscondición (dueño, permisos, atributos y texto):
+-- las de CRLF y las dos auditorías que se parchan.
 CREATE TEMP TABLE c5_antes ON COMMIT DROP AS
 SELECT p.oid, p.oid::regprocedure::text AS firma, p.prosrc,
-       p.oid IN ('public.auditoria_fechas_utc()'::regprocedure, 'public.auditoria_integridad()'::regprocedure,
-                 'public._ventas_nc(bigint[],date,date)'::regprocedure) AS reescrita, p.proowner, p.proacl, p.prosecdef,
-       p.provolatile, p.proparallel, p.proisstrict, p.proleakproof, p.procost, p.prorows,
-       p.proconfig, p.prorettype, p.proretset, p.prolang
+       position(E'\r' IN p.prosrc) > 0 AS crlf,
+       p.proowner, p.proacl, p.prosecdef, p.provolatile, p.proparallel, p.proisstrict,
+       p.proleakproof, p.procost, p.prorows, p.proconfig, p.prorettype, p.proretset,
+       p.prolang, p.prokind, p.prosupport, p.proargnames, p.proargdefaults
   FROM pg_proc p
- WHERE p.oid IN ('public._guardar_gasto(jsonb,boolean)'::regprocedure,
-                 'public.guardar_empleado(jsonb)'::regprocedure,
-                 'public._empleado_json(empleados)'::regprocedure,
-                 'public.listar_personal()'::regprocedure,
-                 'public.pagos_cuenta_empleado()'::regprocedure,
-                 'public._cuenta_empleado_conciliar(text,bigint,bigint,bigint,bigint,bigint,numeric,date,bigint,text)'::regprocedure,
-                 'public.calcular_comisiones(date,date,bigint[])'::regprocedure,
-                 'public.auditoria_fechas_utc()'::regprocedure,
-                 'public.auditoria_integridad()'::regprocedure,
-                 'public._ventas_nc(bigint[],date,date)'::regprocedure);
+ WHERE p.pronamespace = 'public'::regnamespace
+   AND (position(E'\r' IN p.prosrc) > 0
+        OR p.oid IN ('public.auditoria_fechas_utc()'::regprocedure, 'public.auditoria_integridad()'::regprocedure))
+   AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass
+                      AND d.objid = p.oid AND d.deptype = 'e');
 
 -- Reemplaza una sola aparición de un ancla en una definición.
 CREATE FUNCTION pg_temp.parche(p_def text, p_ancla text, p_nuevo text, p_que text)
@@ -127,7 +139,7 @@ END
 $f$;
 
 -- Los parches de los puntos 1 y 2 (anclas en LF: se aplican después de sacar
--- los '\r'). La poscondición los deshace para comparar con el cuerpo de antes.
+-- los '\r'). La poscondición los rehace sobre el cuerpo de antes y compara.
 CREATE TEMP TABLE c5_parches (fn regprocedure, ancla text, nuevo text) ON COMMIT DROP;
 INSERT INTO c5_parches VALUES
 ('public._guardar_gasto(jsonb,boolean)',
@@ -176,7 +188,7 @@ $n$  v_dos := COALESCE(v_dos, v_viejo.de_las_dos, false);
 $n$);
 
 -- =========================================================================
--- 1, 2 y 3 · Las siete de gastos y personal, en LF (y los dos parches)
+-- 1, 2 y 3 · Las de CRLF, en LF (y los dos parches)
 -- =========================================================================
 DO $lf$
 DECLARE
@@ -184,7 +196,10 @@ DECLARE
   p record;
   v_def text;
 BEGIN
-  FOR r IN SELECT a.oid, a.firma FROM c5_antes a WHERE NOT a.reescrita ORDER BY a.firma LOOP
+  IF (SELECT count(*) FROM c5_parches pa WHERE NOT EXISTS (SELECT 1 FROM c5_antes a WHERE a.oid = pa.fn AND a.crlf)) > 0 THEN
+    RAISE EXCEPTION 'mig NNN · _guardar_gasto o guardar_empleado ya no tienen CRLF: revisar a mano';
+  END IF;
+  FOR r IN SELECT a.oid, a.firma FROM c5_antes a WHERE a.crlf ORDER BY a.firma LOOP
     v_def := replace(pg_get_functiondef(r.oid), E'\r', '');
     FOR p IN SELECT * FROM c5_parches WHERE fn = r.oid LOOP
       v_def := pg_temp.parche(v_def, p.ancla, p.nuevo, r.firma);
@@ -225,7 +240,7 @@ END
 $fechas$;
 
 -- =========================================================================
--- 4 · auditoria_integridad(): los checks de las roturas a cargo del empleado
+-- 4 · auditoria_integridad(): las roturas a cargo del empleado y SEG-C
 -- =========================================================================
 DO $integridad$
 DECLARE
@@ -265,96 +280,36 @@ BEGIN
         WHERE (rv.tipo = 'rotura' OR m.tipo = 'rotura')
           AND (rv.tipo IS DISTINCT FROM m.tipo OR rv.empleado_id <> m.empleado_id OR rv.monto <> -m.monto
                OR rv.merma_id IS DISTINCT FROM m.merma_id OR rv.salvedad_id IS DISTINCT FROM m.salvedad_id
-               OR m.revierte_id IS NOT NULL)))$n$ || v_ancla, 'auditoria_integridad');
+               OR m.revierte_id IS NOT NULL))),
+    -- SEG-6 (#1545): un cuerpo con CRLF no se encuentra con un ancla en LF y
+    -- las migraciones lo van arrastrando. Las de extensiones no cuentan.
+    ('SEG-C','high','funciones de public con CRLF en el cuerpo (SEG-6, #1545)',
+      (SELECT count(*) FROM pg_proc p
+        WHERE p.pronamespace = 'public'::regnamespace AND position(E'\r' IN p.prosrc) > 0
+          AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass
+                             AND d.objid = p.oid AND d.deptype = 'e')))$n$ || v_ancla, 'auditoria_integridad');
   EXECUTE v_def;
 END
 $integridad$;
 
 -- =========================================================================
--- 6 · _ventas_nc: los joins, por índice
--- =========================================================================
-CREATE OR REPLACE FUNCTION public._ventas_nc(p_sucs bigint[], p_desde date, p_hasta date)
- RETURNS TABLE(nota_credito_id bigint, fecha date, sucursal_id bigint, pedido_id bigint, cliente_id bigint, zona_id bigint, usuario_id uuid, tipo_factura text, pedido_item_id bigint, producto_id bigint, cantidad integer, monto numeric, iva numeric, ingreso_real numeric, costo_al_crear numeric, cantidad_mercaderia integer)
- LANGUAGE sql
- STABLE
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-  SELECT n.id, n.fecha, n.sucursal_id, n.pedido_id, n.cliente_id,
-         (SELECT c.zona_id FROM clientes c WHERE c.id = n.cliente_id), pe.usuario_id,
-         COALESCE(pe.tipo_factura, 'ZZ')::text, i.pedido_item_id, i.producto_id, i.cantidad,
-         i.subtotal,
-         i.subtotal * n.iva / n.total,
-         -- B22 (#1603): un renglón por monto (cantidad 0) o uno por unidades que
-         -- acredita menos que cantidad × precio (la línea tenía un descuento) da el
-         -- ingreso real como su plata menos lo que no es ingreso real, al centavo:
-         -- en una FC, el neto de la parte (el de _nc_venta_desglose), así que la
-         -- suma de la nota da su neto (H6). Los de siempre, como siempre.
-         CASE WHEN pi.id IS NOT NULL AND i.subtotal = i.cantidad * pi.precio_unitario
-              THEN i.cantidad * COALESCE(pi.ingreso_real_unitario,
-                                         CASE WHEN pe.tipo_factura = 'FC'
-                                              THEN COALESCE(pi.neto_unitario, pi.precio_unitario)
-                                              ELSE pi.precio_unitario END)
-              WHEN pi.id IS NOT NULL AND pi.precio_unitario > 0
-              THEN i.subtotal
-                   - round(i.subtotal * (pi.precio_unitario
-                                         - COALESCE(pi.ingreso_real_unitario,
-                                                    CASE WHEN pe.tipo_factura = 'FC'
-                                                         THEN COALESCE(pi.neto_unitario, pi.precio_unitario)
-                                                         ELSE pi.precio_unitario END))
-                           / pi.precio_unitario, 2)
-              ELSE i.subtotal * CASE WHEN pe.tipo_factura = 'FC' THEN n.neto ELSE n.total END / n.total
-         END,
-         pi.costo_unitario_al_crear,
-         -- B22 v3 (decisión del dueño del 18/11): las unidades que la nota devolvió
-         -- de verdad (reingresaron o fueron a merma). Son las que salen del CMV; un
-         -- renglón que no movió mercadería da 0.
-         CASE WHEN i.lotes_devueltos IS NOT NULL OR i.merma_id IS NOT NULL THEN i.cantidad ELSE 0 END
-    FROM notas_credito_venta n
-    -- C5 (N8 de #1603): cada join va por subconsulta con OFFSET 0, que el planner
-    -- no aplana: es siempre una búsqueda por índice (los renglones por
-    -- nota_credito_id, la boleta y la línea por su PK). Trae las mismas filas que
-    -- los JOIN de antes; la boleta que no es venta queda afuera igual que con el
-    -- JOIN y su WHERE. Con estadísticas viejas los JOIN se planeaban como nested
-    -- loops que recorrían pedidos, pedido_items y clientes enteros por cada fila.
-    CROSS JOIN LATERAL (SELECT x.pedido_item_id, x.producto_id, x.cantidad, x.subtotal,
-                               x.lotes_devueltos, x.merma_id
-                          FROM nota_credito_venta_items x
-                         WHERE x.nota_credito_id = n.id
-                        OFFSET 0) i
-    CROSS JOIN LATERAL (SELECT x.usuario_id, x.tipo_factura
-                          FROM pedidos x
-                         WHERE x.id = n.pedido_id
-                           AND x.estado = 'entregado'
-                           AND COALESCE(x.canal, 'app') <> 'cambio'
-                           AND x.tipo_factura IS DISTINCT FROM 'VB'
-                        OFFSET 0) pe
-    LEFT JOIN LATERAL (SELECT x.id, x.precio_unitario, x.ingreso_real_unitario, x.neto_unitario,
-                              x.costo_unitario_al_crear
-                         FROM pedido_items x
-                        WHERE x.id = i.pedido_item_id
-                       OFFSET 0) pi ON true
-   WHERE NOT n.anulada
-     AND n.total > 0
-     AND n.sucursal_id = ANY(p_sucs)
-     AND n.fecha BETWEEN p_desde AND p_hasta
-$function$;
-
--- =========================================================================
--- pg_temp al final del search_path de toda función que se recreó y fija uno,
--- definer o invoker (regla de B15; si B15 ya se aplicó, no hace nada). Todas
--- tienen hoy search_path = public.
+-- pg_temp al final del search_path de toda función que se recreó y fija uno
+-- (regla de B15; si B15 ya se aplicó, no hace nada)
 -- =========================================================================
 DO $pgtemp$
 DECLARE
   r record;
 BEGIN
-  FOR r IN SELECT a.oid FROM c5_antes a JOIN pg_proc p ON p.oid = a.oid
-            WHERE (p.prosecdef OR EXISTS (SELECT 1 FROM unnest(COALESCE(p.proconfig, '{}')) c
-                                           WHERE c LIKE 'search_path=%'))
-              AND NOT EXISTS (SELECT 1 FROM unnest(COALESCE(p.proconfig, '{}')) c
-                               WHERE c LIKE 'search_path=%' AND c ~ 'pg_temp\s*$') LOOP
-    EXECUTE format('ALTER FUNCTION %s SET search_path = public, pg_temp', r.oid::regprocedure);
+  FOR r IN SELECT a.oid, substr(c, length('search_path=') + 1) AS sp
+             FROM c5_antes a JOIN pg_proc p ON p.oid = a.oid
+             CROSS JOIN LATERAL unnest(p.proconfig) c
+            WHERE c LIKE 'search_path=%' AND c !~ 'pg_temp\s*$' LOOP
+    EXECUTE format('ALTER FUNCTION %s SET search_path = %s, pg_temp', r.oid::regprocedure, r.sp);
   END LOOP;
+  IF EXISTS (SELECT 1 FROM c5_antes a JOIN pg_proc p ON p.oid = a.oid
+              WHERE p.prosecdef AND NOT EXISTS (SELECT 1 FROM unnest(p.proconfig) c WHERE c LIKE 'search_path=%')) THEN
+    RAISE EXCEPTION 'mig NNN · hay una definer sin search_path: revisar a mano';
+  END IF;
 END
 $pgtemp$;
 
@@ -366,6 +321,7 @@ DECLARE
   a record;
   v_new pg_proc%ROWTYPE;
   v_esperado text;
+  v_cfg text[];
   p record;
   v_n int;
 BEGIN
@@ -380,24 +336,23 @@ BEGIN
        OR v_new.proparallel <> a.proparallel OR v_new.proisstrict <> a.proisstrict
        OR v_new.proleakproof <> a.proleakproof OR v_new.procost <> a.procost
        OR v_new.prorows <> a.prorows OR v_new.prorettype <> a.prorettype
-       OR v_new.proretset <> a.proretset OR v_new.prolang <> a.prolang THEN
+       OR v_new.proretset <> a.proretset OR v_new.prolang <> a.prolang
+       OR v_new.prokind <> a.prokind OR v_new.prosupport <> a.prosupport
+       OR v_new.proargnames IS DISTINCT FROM a.proargnames
+       OR v_new.proargdefaults::text IS DISTINCT FROM a.proargdefaults::text THEN
       RAISE EXCEPTION 'mig NNN · % cambió de dueño, permisos o atributos', a.firma;
     END IF;
-    -- El SET: el mismo, más pg_temp al final del search_path.
-    IF v_new.proconfig IS DISTINCT FROM a.proconfig
-       AND NOT (a.proconfig = ARRAY['search_path=public']
-                AND v_new.proconfig = ARRAY['search_path=public, pg_temp']) THEN
+    -- El SET: el mismo, con pg_temp al final del search_path.
+    v_cfg := ARRAY(SELECT CASE WHEN c LIKE 'search_path=%' AND c !~ 'pg_temp\s*$' THEN c || ', pg_temp' ELSE c END
+                     FROM unnest(a.proconfig) WITH ORDINALITY u(c, n) ORDER BY n);
+    IF v_new.proconfig IS DISTINCT FROM (CASE WHEN a.proconfig IS NULL THEN NULL ELSE v_cfg END) THEN
       RAISE EXCEPTION 'mig NNN · % quedó con SET %, antes %', a.firma, v_new.proconfig, a.proconfig;
-    END IF;
-    IF (v_new.prosecdef OR v_new.proconfig IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM unnest(v_new.proconfig) c
-                                        WHERE c LIKE 'search_path=%' AND c ~ 'pg_temp\s*$') THEN
-      RAISE EXCEPTION 'mig NNN · % fija search_path (o es definer) y quedó sin pg_temp', a.firma;
     END IF;
     IF position(E'\r' IN v_new.prosrc) > 0 THEN
       RAISE EXCEPTION 'mig NNN · % sigue con CRLF', a.firma;
     END IF;
-    -- El texto: el de antes sin los '\r', con los parches de esta migración.
-    IF NOT a.reescrita THEN
+    -- El texto de las de CRLF: el de antes sin los '\r', con los parches.
+    IF a.crlf THEN
       v_esperado := replace(a.prosrc, E'\r', '');
       FOR p IN SELECT * FROM c5_parches WHERE fn = a.oid LOOP
         v_esperado := replace(v_esperado, p.ancla, p.nuevo);
@@ -408,6 +363,10 @@ BEGIN
     END IF;
   END LOOP;
 
+  SELECT count(*) INTO v_n FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND position(E'\r' IN prosrc) > 0;
+  IF v_n <> 0 THEN
+    RAISE EXCEPTION 'mig NNN · quedan % funciones de public con CRLF', v_n;
+  END IF;
   -- Los parches entraron.
   IF (SELECT prosrc FROM pg_proc WHERE oid = 'public._guardar_gasto(jsonb,boolean)'::regprocedure)
        !~ 'Los litros no pueden pasar de 99\.999\.999,99'
@@ -424,12 +383,11 @@ BEGIN
     RAISE EXCEPTION 'mig NNN · auditoria_fechas_utc no quedó con la limpieza de una pasada';
   END IF;
   SELECT count(*) INTO v_n FROM regexp_matches(
-    (SELECT prosrc FROM pg_proc WHERE oid = 'public.auditoria_integridad()'::regprocedure), '''ROT-[ABC]''', 'g');
-  IF v_n <> 3 THEN
-    RAISE EXCEPTION 'mig NNN · auditoria_integridad tiene % checks ROT-* (esperados 3)', v_n;
-  END IF;
-  IF (SELECT prosrc FROM pg_proc WHERE oid = 'public._ventas_nc(bigint[],date,date)'::regprocedure) ~ 'JOIN (pedidos|pedido_items|clientes) ' THEN
-    RAISE EXCEPTION 'mig NNN · _ventas_nc sigue con los JOIN de antes';
+    (SELECT prosrc FROM pg_proc WHERE oid = 'public.auditoria_integridad()'::regprocedure), '''(ROT-[ABC]|SEG-C)''', 'g');
+  IF v_n <> 4 THEN
+    RAISE EXCEPTION 'mig NNN · auditoria_integridad tiene % checks ROT-*/SEG-C (esperados 4)', v_n;
   END IF;
 END
 $post$;
+
+COMMIT;

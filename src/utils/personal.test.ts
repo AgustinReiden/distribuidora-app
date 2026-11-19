@@ -12,6 +12,7 @@ import {
   errorDeMovimiento,
   errorDePago,
   errorDeFechaVieja,
+  errorDeFechaIngreso,
   pisoDeFechaDeCarga,
   errorDeSueldo,
   estadoSaldo,
@@ -90,6 +91,20 @@ const emp = (o: Partial<Empleado> = {}): Empleado => ({
   es_propio: false,
   periodo: null,
   ...o,
+})
+
+// 1597-b6 (#1597): la regla de guardar_empleado, con su mensaje.
+describe('errorDeFechaIngreso', () => {
+  it('futura no, hoy y antes sí, vacía no se mide', () => {
+    expect(errorDeFechaIngreso('2026-10-30', null, '2026-10-29')).toBe('La fecha de ingreso no puede ser futura')
+    expect(errorDeFechaIngreso('2026-10-29', null, '2026-10-29')).toBeNull()
+    expect(errorDeFechaIngreso('2020-01-01', null, '2026-10-29')).toBeNull()
+    expect(errorDeFechaIngreso('', null, '2026-10-29')).toBeNull()
+  })
+  it('una futura que ya tenía la ficha no se mide; cambiarla a otra futura, sí', () => {
+    expect(errorDeFechaIngreso('2026-11-15', '2026-11-15', '2026-10-29')).toBeNull()
+    expect(errorDeFechaIngreso('2026-11-16', '2026-11-15', '2026-10-29')).toBe('La fecha de ingreso no puede ser futura')
+  })
 })
 
 describe('PUESTOS', () => {

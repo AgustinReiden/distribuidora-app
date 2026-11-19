@@ -27,6 +27,11 @@ lista **sólo se achica**. Localmente: `GATE_DB_CONTENEDOR=<contenedor> bash scr
 (la base se arma con `scripts/concurrencia/docker-local.mjs` y la semilla de `scripts/ci/`; esa semilla
 y ese criterio de «ensayo OK» son los del CI).
 
+Después de una carga masiva de datos (una importación, la base inicial de un comercio nuevo) se corre
+`ANALYZE`: con estadísticas viejas el planner cree que `pedidos` y `pedido_items` están casi vacías, arma
+nested loops, y el gerencial, `tablero_categorias`, el bot y Rendimiento pasan el timeout de 8 s (N8 de
+#1603). Se mide con `scripts/tiempos-ventas-estadisticas-viejas-ola2-1603.sql`.
+
 Deploy: push a `main` → webhook de Coolify. La config de nginx de producción **vive en el
 panel de Coolify**, no en el `nginx.conf` del repo — editar el repo no cambia nada.
 Verificá siempre con `curl -I`, nunca leyendo el archivo.
