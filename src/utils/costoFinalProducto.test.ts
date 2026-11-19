@@ -86,6 +86,15 @@ describe('adicionalConIvaDeCompra (1593-b1)', () => {
     expect(adicionalConIvaDeCompra({ costo_sin_iva: 100, porcentaje_iva: 21, costo_con_iva: 100, ultimo_tipo_compra: null }, 'FC')).toBe(0);
   });
 
+  it('un exento sin alícuota cargada se mide al 0 %, no al 21 % (L2)', () => {
+    // Exento con flete de 10 por unidad: la compra deja 110 de costo con IVA.
+    expect(adicionalConIvaDeCompra({ costo_sin_iva: 100, condicion_iva: 'exento', porcentaje_iva: null, costo_con_iva: 110, ultimo_tipo_compra: 'FC' }, 'FC')).toBe(10);
+  });
+
+  it('sin compras pero con cargos en el costo real (los sumó el recálculo), los conserva (L4)', () => {
+    expect(adicionalConIvaDeCompra({ costo_sin_iva: 100, porcentaje_iva: 21, costo_real: 110, costo_con_iva: 131, ultimo_tipo_compra: null }, 'FC')).toBe(10);
+  });
+
   it('sin neto o sin costo con IVA no hay nada que medir', () => {
     expect(adicionalConIvaDeCompra({ costo_sin_iva: null, costo_con_iva: 131 }, 'FC')).toBe(0);
     expect(adicionalConIvaDeCompra({ costo_sin_iva: 100, costo_con_iva: null }, 'FC')).toBe(0);

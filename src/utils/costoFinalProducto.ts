@@ -15,6 +15,8 @@
  * corrige el neto (una lista nueva del proveedor), el flete por unidad se queda.
  */
 import { calcularCostoFinanciero, calcularCostoReal, redondear } from './calculations';
+import type { CondicionIva } from './calculations';
+import { alicuotaIvaVenta } from './alicuotaIvaVenta';
 
 /** Las columnas de `productos` que mira la ficha para el costo final. */
 export interface CostosFichaProducto {
@@ -50,25 +52,38 @@ export function adicionalDeCompra(
  * neto más el IVA de cada componente (el producto, el flete y los cargos que lo
  * llevan). Esto es lo que ese número tiene por encima de neto + IVA + II de la
  * ficha: si el admin corrige el neto, se conserva. Diferencias de redondeo (menos
- * de un centavo) dan 0. Sin neto, sin costo con IVA guardado o sin ninguna compra
- * (`ultimo_tipo_compra` vacío), 0: es la misma cuenta que el trigger del server.
+ * de un centavo) dan 0. Sin neto o sin costo con IVA guardado, 0. Sin ninguna compra
+ * (`ultimo_tipo_compra` vacío), 0, salvo que el costo real tenga cargos por encima de
+ * neto + II (los sumó el recálculo de la migración: L4). La alícuota es la de
+ * `alicuotaIvaVenta` (un exento sin alícuota cargada es 0: L2). Es la misma cuenta que
+ * el trigger del server (`productos_componer_costo_con_iva`).
  */
 export function adicionalConIvaDeCompra(
   producto: (CostosFichaProducto & {
     costo_con_iva?: number | string | null;
     porcentaje_iva?: number | string | null;
+    condicion_iva?: CondicionIva | null;
     ultimo_tipo_compra?: string | null;
   }) | null | undefined,
   tipoCompra: 'ZZ' | 'FC',
 ): number {
-  // Sin ninguna compra no hay cargos de una compra que conservar (N4 de la revisión): la diferencia
-  // de una importación o de una carga a mano se limpia al corregir el neto, como el server.
-  if (!producto?.ultimo_tipo_compra) return 0;
   const neto = positivo(producto?.costo_sin_iva);
   const conIva = positivo(producto?.costo_con_iva);
   if (neto === null || conIva === null) return 0;
+  // Sin ninguna compra no hay cargos que conservar (N4 de la revisión): la diferencia de una
+  // importación o de una carga a mano se limpia al corregir el neto. Salvo que el costo real tenga
+  // algo por encima de neto + II (L4: los cargos que le sumó el recálculo), como el server.
+  if (!producto?.ultimo_tipo_compra) {
+    const real = positivo(producto?.costo_real);
+    if (real === null || real <= calcularCostoReal(neto, producto?.impuestos_internos ?? 0, tipoCompra)) return 0;
+  }
+  const pct = producto?.porcentaje_iva;
+  const alicuota = alicuotaIvaVenta({
+    condicion_iva: producto?.condicion_iva ?? null,
+    porcentaje_iva: pct === null || pct === undefined || pct === '' ? null : Number(pct),
+  });
   const adicional = redondear(
-    conIva - calcularCostoFinanciero(neto, producto?.porcentaje_iva ?? 21, producto?.impuestos_internos ?? 0, tipoCompra),
+    conIva - calcularCostoFinanciero(neto, alicuota, producto?.impuestos_internos ?? 0, tipoCompra),
     4,
   );
   return Math.abs(adicional) < 0.01 ? 0 : adicional;

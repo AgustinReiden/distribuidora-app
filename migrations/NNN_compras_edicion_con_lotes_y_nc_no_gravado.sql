@@ -10,7 +10,7 @@
 -- Toma un lock de tabla: `LOCK TABLE compras ACCESS EXCLUSIVE NOWAIT` al principio, por el CHECK de
 -- la sección 4 (o lo consigue al instante o falla y se reintenta). Crea una tabla sólo de server (la
 -- del recálculo de la sección 5, con dos funciones sólo de server que lo hacen) y un trigger en
--- productos (sección 6). Se aplica sobre la 531.
+-- productos (sección 6). Se aplica sobre la 532 (o la 531: los cuerpos que parcha son los mismos).
 --
 -- =========================================================================
 -- 1 · STK-13: LA EDICIÓN Y SUS LOTES, UNA SOLA TRANSACCIÓN
@@ -85,7 +85,7 @@ END
 $lf$;
 
 -- ---------------------------------------------------------------------------
--- Premisas: los cuerpos vivos de producción en la 531 (los mismos md5 que la 530).
+-- Premisas: los cuerpos vivos de producción en la 532 (los mismos md5 que la 530 y la 531).
 -- ---------------------------------------------------------------------------
 DO $premisas$
 DECLARE
@@ -834,7 +834,11 @@ $function$;
 REVOKE ALL ON FUNCTION public._costo_con_iva_candidatos(bigint[]) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._costo_con_iva_candidatos(bigint[]) TO service_role;
 
--- Las dos pasadas. Devuelve lo que hizo. p_productos acota (los ensayos); NULL, todos.
+-- Las dos pasadas. Devuelve lo que hizo. p_productos acota (los ensayos); NULL, todos. Vale sólo
+-- sobre productos con el costo con IVA de la regla vieja: es idempotente mientras no entre nada, pero
+-- un producto que después recibe una compra con cargos ya los tiene en su costo con IVA, y la segunda
+-- pasada se los volvería a sumar (L3 de la revisión). Por eso, sobre todo (p_productos NULL) corre
+-- una sola vez: la de la migración.
 CREATE FUNCTION public._recalcular_costo_con_iva(p_productos bigint[] DEFAULT NULL)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -847,6 +851,9 @@ DECLARE
   v_p2_suben int;
   v_p2_bajan int;
 BEGIN
+  IF p_productos IS NULL AND EXISTS (SELECT 1 FROM public.costo_con_iva_recalculos) THEN
+    RAISE EXCEPTION 'El recálculo del costo con IVA ya corrió (migración NNN): sobre los productos de hoy contaría dos veces los cargos de una compra nueva.';
+  END IF;
   SELECT count(*) AS candidatos,
          count(*) FILTER (WHERE x.de_la_compra AND NOT x.envio_posterior AND x.con_nuevo IS DISTINCT FROM x.p_con) AS cambian,
          count(*) FILTER (WHERE x.de_la_compra AND NOT x.envio_posterior AND x.con_nuevo > x.p_con) AS suben,
@@ -892,6 +899,11 @@ BEGIN
        AND p.costo_sin_iva <> 'NaN' AND p.costo_real <> 'NaN' AND p.costo_con_iva <> 'NaN'
        AND NOT EXISTS (SELECT 1 FROM public.costo_con_iva_recalculos k
                         WHERE k.producto_id = p.id AND k.sucursal_id = p.sucursal_id)
+       -- L1 de la revisión: lo que ya está en la regla (los «ya iguales») no se toca. Su adicional se
+       -- mediría con el II de la ficha, que puede no ser el del renglón, y lo contaría dos veces.
+       AND NOT EXISTS (SELECT 1 FROM public._costo_con_iva_candidatos(p_productos) x
+                        WHERE x.producto_id = p.id AND x.sucursal_id = p.sucursal_id
+                          AND x.de_la_compra AND NOT x.envio_posterior)
   ), upd AS (
     UPDATE public.productos p
        SET costo_con_iva = round(d.con + d.adicional, 2)
@@ -939,7 +951,8 @@ $recalculo$;
 -- costo_con_iva = neto + IVA + II sin los cargos cuando se corrige el neto, el IVA o el II. Desde
 -- acá el server compone el costo con IVA de lo que guarda la ficha, mande lo que mande: el de los
 -- datos nuevos más lo que el guardado tenía por encima de neto + IVA + II (los cargos y su IVA de
--- la compra), si el producto tuvo una compra. Sin neto, deja lo que mandó la ficha. Sólo para la escritura directa de la ficha
+-- la compra), si el producto tuvo una compra o su costo real tiene cargos. Sin neto, deja lo que
+-- mandó la ficha. Sólo para la escritura directa de la ficha
 -- (authenticated, sin un trigger o una RPC en el medio): las compras y los envíos escriben el
 -- costo con IVA ellos mismos. Es la cuenta de la ficha nueva (adicionalConIvaDeCompra), así que con
 -- la ficha nueva no cambia nada.
@@ -951,12 +964,14 @@ AS $function$
 DECLARE
   v_tipo text;
   v_adicional numeric := 0;
+  v_iva_old numeric;
+  v_iva_new numeric;
 BEGIN
   IF current_user <> 'authenticated' OR pg_trigger_depth() > 1 THEN
     RETURN NEW;
   END IF;
-  IF (NEW.costo_sin_iva, NEW.porcentaje_iva, NEW.impuestos_internos, NEW.costo_con_iva)
-     IS NOT DISTINCT FROM (OLD.costo_sin_iva, OLD.porcentaje_iva, OLD.impuestos_internos, OLD.costo_con_iva) THEN
+  IF (NEW.costo_sin_iva, NEW.porcentaje_iva, NEW.impuestos_internos, NEW.costo_con_iva, NEW.condicion_iva)
+     IS NOT DISTINCT FROM (OLD.costo_sin_iva, OLD.porcentaje_iva, OLD.impuestos_internos, OLD.costo_con_iva, OLD.condicion_iva) THEN
     RETURN NEW;
   END IF;
   -- Sin neto, o con un dato que no es un número o está fuera de rango, deja lo que mandó la ficha:
@@ -970,15 +985,23 @@ BEGIN
   END IF;
   -- El tipo con el que la ficha costea (tipoParaCostoDeProducto): ZZ, B y C son lo pagado.
   v_tipo := CASE WHEN NEW.ultimo_tipo_compra IN ('ZZ', 'FC B', 'FC C') THEN 'ZZ' ELSE 'FC' END;
-  -- Sólo si el producto tuvo una compra (N4 de la revisión): la diferencia de una importación o de
-  -- una carga a mano sin compra no es un cargo, y corregir el neto la limpiaba.
-  IF OLD.ultimo_tipo_compra IS NOT NULL
-     AND COALESCE(OLD.costo_sin_iva, 0) > 0 AND COALESCE(OLD.costo_con_iva, 0) > 0 THEN
+  -- La alícuota con la que se costea: un exento o no gravado es 0 aunque no tenga alícuota cargada
+  -- (una importación: L2 de la revisión), como alicuotaIvaVenta en la ficha. En línea y no con
+  -- _alicuota_iva_venta, que no es de authenticated (este trigger corre como quien guarda la ficha).
+  v_iva_old := CASE WHEN OLD.condicion_iva IN ('exento', 'no_gravado') THEN 0 ELSE COALESCE(OLD.porcentaje_iva, 21) END;
+  v_iva_new := CASE WHEN NEW.condicion_iva IN ('exento', 'no_gravado') THEN 0 ELSE COALESCE(NEW.porcentaje_iva, 21) END;
+  -- Se conserva la diferencia si el producto tuvo una compra (N4 de la revisión: la de una
+  -- importación o una carga a mano no es un cargo, y corregir el neto la limpiaba) o si su costo
+  -- real tiene algo por encima de neto + II (L4: un producto sin compra al que el recálculo le sumó
+  -- esos cargos, para que la ficha no los suelte).
+  IF COALESCE(OLD.costo_sin_iva, 0) > 0 AND COALESCE(OLD.costo_con_iva, 0) > 0
+     AND (OLD.ultimo_tipo_compra IS NOT NULL
+          OR COALESCE(OLD.costo_real, 0) > CASE WHEN v_tipo = 'ZZ' THEN OLD.costo_sin_iva
+                                                ELSE round(OLD.costo_sin_iva * (1 + COALESCE(OLD.impuestos_internos, 0) / 100), 4) END) THEN
     v_adicional := OLD.costo_con_iva
-      - public.costo_financiero_unitario(OLD.costo_sin_iva, COALESCE(OLD.porcentaje_iva, 21),
-                                         COALESCE(OLD.impuestos_internos, 0), v_tipo);
+      - public.costo_financiero_unitario(OLD.costo_sin_iva, v_iva_old, COALESCE(OLD.impuestos_internos, 0), v_tipo);
   END IF;
-  NEW.costo_con_iva := round(public.costo_financiero_unitario(NEW.costo_sin_iva, COALESCE(NEW.porcentaje_iva, 21),
+  NEW.costo_con_iva := round(public.costo_financiero_unitario(NEW.costo_sin_iva, v_iva_new,
                                                               COALESCE(NEW.impuestos_internos, 0), v_tipo)
                              + v_adicional, 2);
   RETURN NEW;
@@ -1021,8 +1044,10 @@ BEGIN
      'OR (v_compra.tipo_factura <> ''ZZ'' AND COALESCE(p_no_gravado, 0) < LEAST(0,', true),
     ('public._reposicion_desde_ultima_compra(bigint,bigint)', 'public._compra_iva_cargos_de_linea(v_ult.item_id)', false),
     ('public._compra_iva_cargos_de_linea(bigint)', 'COALESCE(ci.porcentaje_iva, pr.porcentaje_iva)', false),
-    ('public.productos_componer_costo_con_iva()', 'IF OLD.ultimo_tipo_compra IS NOT NULL', false),
+    ('public.productos_componer_costo_con_iva()', 'AND (OLD.ultimo_tipo_compra IS NOT NULL', false),
     ('public._recalcular_costo_con_iva(bigint[])', 'la ficha no cambia', false),
+    ('public._recalcular_costo_con_iva(bigint[])', 'El recálculo del costo con IVA ya corrió', false),
+    ('public.productos_componer_costo_con_iva()', 'OLD.condicion_iva IN (''exento'', ''no_gravado'')', false),
     ('public._costo_con_iva_unitario(numeric,numeric,numeric,boolean,numeric)', 'THEN round(p_costo_real + COALESCE(p_iva_cargos, 0), 4)', false),
     ('public.registrar_compra_completa(bigint,character varying,character varying,date,numeric,numeric,numeric,numeric,character varying,text,uuid,jsonb,character varying,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,text)',
      'public._compra_descuento_fuera_de_tope(p_items, p_cargos, v_sin_credito)', true),

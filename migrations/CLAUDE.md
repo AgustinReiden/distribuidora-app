@@ -220,10 +220,13 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   el alta, la edición y `_reposicion_desde_ultima_compra`. La ficha lo muestra tal cual y, si se
   corrige el neto, conserva lo que la compra sumó (`adicionalConIvaDeCompra`); el server hace lo mismo
   con lo que guarde cualquier ficha (`trg_productos_costo_con_iva`), mande lo que mande; los dos lo
-  conservan sólo si el producto tuvo una compra (`ultimo_tipo_compra`). Los productos que ya existían se
+  conservan sólo si el producto tuvo una compra (`ultimo_tipo_compra`) o su costo real tiene cargos por
+  encima de neto + II, y costean un exento o no gravado al 0 % aunque no tenga alícuota cargada
+  (`alicuotaIvaVenta`; en el trigger, en línea). Los productos que ya existían se
   recalcularon desde su última compra (`_recalcular_costo_con_iva`); a los que no cerraban con ella (un
   envío, una corrección a mano, otra época) se les sumó lo que la compra sumó al costo real, para que
-  la ficha no cambie (rastro en `costo_con_iva_recalculos`). No es base de ningún
+  la ficha no cambie (rastro en `costo_con_iva_recalculos`). Ese recálculo corre una sola vez sobre todo:
+  sobre productos que ya recibieron compras con la regla nueva contaría dos veces los cargos. No es base de ningún
   precio, margen del server ni CMV: lo leen los envíos (su valor y la reposición del destino), la
   ficha y la exportación.
 - **Dentro de una compra los renglones que fijan costo van antes que los regalos** (#1593 CMP-A):

@@ -76,6 +76,10 @@
 --         ficha (120,50), renglón de otra época (131). Entran en la regla con un centavo de
 --         tolerancia (N2: 9,06) y con la alícuota del producto para el IVA del cargo (N3: 133,10).
 --         Otra corrida no cambia nada.
+--   L*  · Tercera revisión: la segunda pasada no toca lo que ya está en la regla (L1: P06 queda en
+--         131, Q1 en 121); sobre todo, el recálculo corre una sola vez (L3); un exento sin alícuota
+--         se costea al 0 % al corregir el neto (L2: 120, no 122,10); y un producto sin compras al
+--         que el recálculo le sumó cargos los conserva (L4: 131 y, con el neto a 110, 143,10).
 --   RC  · La tabla del recálculo existe y es sólo de server.
 --
 --   docker exec -i <contenedor> psql -U postgres -h localhost -d postgres -f - < scripts/test-compras-edicion-lotes-y-nc-ola2-1603.sql
@@ -733,6 +737,68 @@ BEGIN
     v_fallas := v_fallas || format('RC2 · %s %s', SQLSTATE, SQLERRM);
   END;
 
+  -- ================================================================== L* ====
+  -- Tercera revisión. L1: lo que ya está en la regla no lo toca la segunda pasada (P06: II del 10 % en
+  -- el renglón y no en la ficha, 131; Q1: al revés, 121). L3: sobre todo, el recálculo corre una sola
+  -- vez. L2: un exento sin alícuota cargada se costea al 0 % (Q2: neto de 100 a 110 con flete de 10:
+  -- 120). L4: un producto sin compras al que el recálculo le sumó cargos los conserva al corregir el
+  -- neto (Q6: 131 y, con el neto a 110, 143,10).
+  DECLARE
+    v_p06 bigint; v_q1 bigint; v_q2 bigint; v_q6 bigint; v_c bigint; v_r jsonb;
+  BEGIN
+    -- P06 y Q1, con el costo con IVA de la regla vieja (que en los dos ya es la regla).
+    v_p06 := pg_temp.producto('L1 P06');
+    PERFORM pg_temp.compra(v_adm, pg_temp.lineas(jsonb_build_array(jsonb_build_object(
+              'producto_id', v_p06, 'cantidad', 10, 'costo_unitario', 100, 'porcentaje_iva', 21, 'condicion_iva', 'gravado',
+              'impuestos_internos', 10))), 'FC', 210, 1310, '[]'::jsonb, 'A');
+    v_q1 := pg_temp.producto('L1 Q1');
+    PERFORM pg_temp.compra(v_adm, pg_temp.renglon(v_q1, 10, 100, 21), 'FC', 210, 1210, '[]'::jsonb, 'A');
+    UPDATE public.productos SET impuestos_internos = 10 WHERE id = v_q1;
+    -- Q6: sin compras, con un costo real por encima del neto.
+    INSERT INTO public.productos (nombre, precio, stock, sucursal_id, porcentaje_iva, costo_sin_iva, costo_real, costo_con_iva)
+    VALUES ('C3 L4 Q6 ' || gen_random_uuid(), 1000, 0, 1, 21, 100, 110, 121) RETURNING id INTO v_q6;
+
+    v_r := public._recalcular_costo_con_iva(ARRAY[v_p06, v_q1, v_q6]);
+    v_t := (SELECT string_agg(format('%s', costo_con_iva), ' ' ORDER BY ord)
+              FROM unnest(ARRAY[v_p06, v_q1, v_q6]) WITH ORDINALITY u(id, ord) JOIN productos p ON p.id = u.id);
+    IF v_t IS DISTINCT FROM '131.00 121.00 131.00' THEN
+      v_fallas := v_fallas || format('L1/L4 · esperaba P06 131 y Q1 121 (sin tocar) y Q6 131 (con sus cargos), y dio %s (%s)', v_t, v_r);
+    END IF;
+
+    -- L3: sobre todo, con el rastro ya lleno, se rechaza.
+    BEGIN
+      v_r := public._recalcular_costo_con_iva(NULL);
+      v_fallas := v_fallas || format('L3 · el recálculo sobre todo, con el rastro lleno, debía rechazarse y dio %s', v_r);
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'El recálculo del costo con IVA ya corrió%' THEN
+        v_fallas := v_fallas || format('L3 · %s', SQLERRM);
+      END IF;
+    END;
+
+    -- L2: exento sin alícuota, FC A de 10 × 100 exento con un flete de 100 sin IVA (110).
+    INSERT INTO public.productos (nombre, precio, stock, sucursal_id, condicion_iva, porcentaje_iva)
+    VALUES ('C3 L2 Q2 ' || gen_random_uuid(), 1000, 0, 1, 'exento', NULL) RETURNING id INTO v_q2;
+    PERFORM pg_temp.compra(v_adm, pg_temp.lineas(jsonb_build_array(jsonb_build_object(
+              'producto_id', v_q2, 'cantidad', 10, 'costo_unitario', 100, 'porcentaje_iva', 0, 'condicion_iva', 'exento'))),
+            'FC', 0, 1000, jsonb_build_array(pg_temp.cargo(100, 'no_gravado', false)), 'A');
+
+    PERFORM pg_temp.como(v_adm, 1);
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    -- La ficha de un PWA viejo corrige el neto a 110 (manda 110 de costo con IVA, sin el flete).
+    EXECUTE format('UPDATE public.productos SET costo_sin_iva = 110, costo_con_iva = 110 WHERE id = %s', v_q2);
+    -- Y la de Q6 corrige el neto a 110 (manda 133,10, sin los cargos).
+    EXECUTE format('UPDATE public.productos SET costo_sin_iva = 110, costo_con_iva = 133.10 WHERE id = %s', v_q6);
+    EXECUTE 'RESET ROLE';
+    v_t := format('Q2=%s Q6=%s', (SELECT costo_con_iva FROM productos WHERE id = v_q2),
+                  (SELECT costo_con_iva FROM productos WHERE id = v_q6));
+    IF v_t IS DISTINCT FROM 'Q2=120.00 Q6=143.10' THEN
+      v_fallas := v_fallas || format('L2/L4 · con el neto corregido a 110: esperaba Q2=120 (exento, 0 %% de IVA) y Q6=143,10 (conserva sus cargos), y dio %s', v_t);
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    EXECUTE 'RESET ROLE';
+    v_fallas := v_fallas || format('L* · %s %s', SQLSTATE, SQLERRM);
+  END;
+
   -- ================================================================= RC ====
   -- El rastro del recálculo: sólo de server.
   IF to_regclass('public.costo_con_iva_recalculos') IS NULL
@@ -749,7 +815,7 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = format(E'ENSAYO FALLÓ (%s fallas, todo revertido):\n- %s\nnotas:\n  %s',
       cardinality(v_fallas), array_to_string(v_fallas, E'\n- '), array_to_string(v_notas, E'\n  '));
   END IF;
-  RAISE EXCEPTION USING ERRCODE = 'ZZ0OK', MESSAGE = format(E'ENSAYO OK (todo revertido) · E1 E2 E3 E4 H5 H5P H5L HG HZ C1-C13 RP ED N1-N5 H6 H6B H10 RC2 RC\nnotas:\n  %s',
+  RAISE EXCEPTION USING ERRCODE = 'ZZ0OK', MESSAGE = format(E'ENSAYO OK (todo revertido) · E1 E2 E3 E4 H5 H5P H5L HG HZ C1-C13 RP ED N1-N5 H6 H6B H10 RC2 L1-L4 RC\nnotas:\n  %s',
     array_to_string(v_notas, E'\n  '));
 END
 $ensayo$;
