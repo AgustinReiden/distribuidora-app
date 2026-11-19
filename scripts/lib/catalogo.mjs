@@ -136,20 +136,27 @@ export const SQL_ROL_SIN_ACTIVO_SIN_API = String.raw`
                        ORDER BY firma, lectura)
         FROM lecturas), '[]'::jsonb))`;
 
-// ------------------------------------------- search_path de las definer ---
+// ---------------------------------------------------- search_path de public ---
 
 /**
- * El search_path de una SECURITY DEFINER de public (1564-b8 y 1564-g4, plan #1603 B15).
+ * El search_path de una función de public (1564-b8 y 1564-g4, plan #1603 B15).
  * Sin `pg_temp` escrito, Postgres busca PRIMERO en el esquema temporal de la sesión las
  * tablas, vistas, secuencias y tipos (las funciones y los operadores, no): quien llama crea
- * una tabla temporal `perfiles` y `es_admin()`, que corre como postgres, la lee (lo reproduce
- * scripts/test-search-path-ola2-1603.sql). Con `pg_temp` AL FINAL se busca último.
+ * una tabla temporal `perfiles` y `es_admin()`, que corre como postgres, la lee. Y una INVOKER
+ * con su propio `SET search_path = public` que llama una definer (o que dispara como trigger
+ * de su DML) también corre como postgres y vuelve a poner pg_temp primero (los dos casos los
+ * reproduce scripts/test-search-path-ola2-1603.sql). Con `pg_temp` AL FINAL se busca último.
+ *
+ * La regla: una SECURITY DEFINER fija search_path, y TODA función que lo fija lo termina en
+ * pg_temp. Una INVOKER sin search_path está bien: hereda el de quien la llama (dentro de una
+ * definer, el de la definer), y una SQL sin SET se inlinea, que es a propósito.
  * `proconfig` es el array de pg_proc (`["search_path=public, pg_temp", …]`), que Postgres
- * guarda con los elementos separados por «, ». Devuelve null si está bien, o el motivo.
+ * guarda con los elementos separados por «, » (el vacío, como `""`). Devuelve null si está
+ * bien, o el motivo.
  */
-export function problemaDeSearchPath(proconfig) {
+export function problemaDeSearchPath(proconfig, definer = true) {
   const sp = (proconfig ?? []).find((c) => c.startsWith('search_path='));
-  if (sp === undefined) return 'no fija search_path: usa el de quien la llama';
+  if (sp === undefined) return definer ? 'es SECURITY DEFINER y no fija search_path: usa el de quien la llama' : null;
   const valor = sp.slice('search_path='.length);
   const elementos = valor.split(', ');
   if (elementos[elementos.length - 1] === 'pg_temp') return null;
@@ -158,11 +165,15 @@ export function problemaDeSearchPath(proconfig) {
     : `su search_path (${valor}) no termina en pg_temp`;
 }
 
-/** Las SECURITY DEFINER de public con su proconfig. Devuelve un jsonb [{firma, proconfig}]. */
-export const SQL_SEARCH_PATH_DEFINER = String.raw`
+/**
+ * Las funciones de public que son SECURITY DEFINER o que fijan search_path, con su proconfig.
+ * Devuelve un jsonb [{firma, definer, proconfig}].
+ */
+export const SQL_SEARCH_PATH_FUNCIONES = String.raw`
 SELECT COALESCE(jsonb_agg(jsonb_build_object('firma', p.oid::regprocedure::text,
+                                             'definer', p.prosecdef,
                                              'proconfig', COALESCE(to_jsonb(p.proconfig), '[]'::jsonb))
                           ORDER BY p.oid::regprocedure::text), '[]'::jsonb)
   FROM pg_proc p
  WHERE p.pronamespace = 'public'::regnamespace
-   AND p.prosecdef`;
+   AND (p.prosecdef OR EXISTS (SELECT 1 FROM unnest(p.proconfig) c WHERE c LIKE 'search_path=%'))`;

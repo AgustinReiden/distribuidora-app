@@ -7,7 +7,7 @@ import {
   problemasDeTabla,
   SQL_REALTIME,
   SQL_ROL_SIN_ACTIVO_SIN_API,
-  SQL_SEARCH_PATH_DEFINER,
+  SQL_SEARCH_PATH_FUNCIONES,
   SQL_TABLAS_ANON_CATALOGO,
   // @ts-expect-error -- módulo .mjs de scripts/, sin tipos
 } from '../../scripts/lib/catalogo.mjs'
@@ -341,7 +341,7 @@ describe('las listas de excepciones sólo se achican', () => {
 
 describe('el SQL de los complementos', () => {
   it('lee el catálogo y no escribe', () => {
-    for (const sql of [SQL_TABLAS_ANON_CATALOGO, SQL_ROL_SIN_ACTIVO_SIN_API, SQL_SEARCH_PATH_DEFINER]) {
+    for (const sql of [SQL_TABLAS_ANON_CATALOGO, SQL_ROL_SIN_ACTIVO_SIN_API, SQL_SEARCH_PATH_FUNCIONES]) {
       expect(sql).toMatch(/\bSELECT\b/)
       expect(sql).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE)\b/i)
     }
@@ -352,13 +352,26 @@ describe('el SQL de los complementos', () => {
     expect(SQL_ROL_SIN_ACTIVO_SIN_API).toMatch(/<> 'trigger'::regtype/)
   })
 
-  it('el search_path mira las SECURITY DEFINER de public y nada más', () => {
-    expect(SQL_SEARCH_PATH_DEFINER).toMatch(/pronamespace = 'public'::regnamespace/)
-    expect(SQL_SEARCH_PATH_DEFINER).toMatch(/AND p\.prosecdef\b/)
+  it('el search_path mira las de public: las definer y las que fijan search_path', () => {
+    expect(SQL_SEARCH_PATH_FUNCIONES).toMatch(/pronamespace = 'public'::regnamespace/)
+    expect(SQL_SEARCH_PATH_FUNCIONES).toMatch(/p\.prosecdef OR EXISTS \(SELECT 1 FROM unnest\(p\.proconfig\) c WHERE c LIKE 'search_path=%'\)/)
   })
 })
 
 describe('problemaDeSearchPath (1564-b8 y 1564-g4)', () => {
+  it('una INVOKER con search_path sin pg_temp al final es roja (la llama una definer y corre como postgres)', () => {
+    expect(problemaDeSearchPath(['search_path=public'], false)).toMatch(/no termina en pg_temp/)
+    expect(problemaDeSearchPath(['search_path=""'], false)).toMatch(/no termina en pg_temp/)
+    expect(problemaDeSearchPath(['search_path=pg_temp, public'], false)).toMatch(/no al final/)
+  })
+
+  it('una INVOKER con pg_temp al final, o sin search_path (lo hereda; la SQL se inlinea), pasa', () => {
+    expect(problemaDeSearchPath(['search_path=public, pg_temp'], false)).toBeNull()
+    expect(problemaDeSearchPath(['search_path=pg_temp'], false)).toBeNull()
+    expect(problemaDeSearchPath(null, false)).toBeNull()
+    expect(problemaDeSearchPath(['statement_timeout=5s'], false)).toBeNull()
+  })
+
   it('pg_temp al final está bien, conserve lo que conserve en el medio', () => {
     expect(problemaDeSearchPath(['search_path=public, pg_temp'])).toBeNull()
     expect(problemaDeSearchPath(['search_path=public, pg_catalog, pg_temp'])).toBeNull()
