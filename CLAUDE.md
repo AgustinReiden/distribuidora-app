@@ -26,6 +26,12 @@ de excepciones (`scripts/*-permitidas.json`, `ensayos-sql-excepciones.json`) con
 lista **sólo se achica**. Localmente: `GATE_DB_CONTENEDOR=<contenedor> bash scripts/ci/gates-locales.sh`
 (la base se arma con `scripts/concurrencia/docker-local.mjs` y la semilla de `scripts/ci/`; esa semilla
 y ese criterio de «ensayo OK» son los del CI).
+**Un ensayo que vigila rendimiento cuenta trabajo, no segundos** (C8 de #1603): bloques tocados
+(`pg_stat_get_xact_blocks_fetched`), WAL y llamadas por fila, y la forma (los últimos lotes no cuestan
+más que los primeros); el tiempo, sólo contra una referencia medida en el mismo runner. Y analiza lo
+que inserta (`ANALYZE`): el plan de un ensayo sale de lo que el autovacuum dejó después del ensayo
+anterior, y un plan que elige el índice equivocado tarda 10 veces más sin que el código haya cambiado
+(`test-precios-masivo-30000-1561.sql`; los controles negativos están en `scripts/ci/gates-muerden.sh`).
 
 Deploy: push a `main` → webhook de Coolify. La config de nginx de producción **vive en el
 panel de Coolify**, no en el `nginx.conf` del repo — editar el repo no cambia nada.
