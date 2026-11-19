@@ -477,7 +477,7 @@ describe('verificarGrants (mapa de privilegios de mentira)', () => {
       expect(r.pruebas.map(qs)).toEqual([
         'select=id,pedido_items!pedido_items_pedido_id_fkey(id)&pedido_items.estado=is.null&pedido_items=is.null&limit=0',
       ])
-      expect(r.noAplicados.map((n) => n.select)).toEqual(['id', 'id'])
+      expect(r.noAplicados.map((n: { select: string }) => n.select)).toEqual(['id', 'id'])
       expect(errores(`supabase.from('pedidos').select(x ? 'id, pedido_items(id)' : 'id').is('pedido_items', null)`)).toEqual([])
     })
 
