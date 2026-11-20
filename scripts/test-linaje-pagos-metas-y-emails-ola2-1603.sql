@@ -1,6 +1,6 @@
 -- Ensayo de la tarjeta C6 de la ola 2 del plan #1603 (1601-b9 y la RPC de 1601-b5 de #1601): el
 -- linaje de un pago y los productos de una meta, de su sucursal; y el email de otro usuario por RPC.
--- Migración: NNN_linaje_de_pagos_metas_y_emails.
+-- Migración: 537_linaje_de_pagos_metas_y_emails.
 --
 -- Un único DO con datos propios que termina SIEMPRE en una excepción: no deja rastro (salvo
 -- valores de secuencia). Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ' con la lista. Sin la migración
