@@ -181,6 +181,10 @@ BEGIN
      OR (SELECT count(*) FROM sucursales WHERE activa) <> 2 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · sin contexto: a1 %, at %, ad %, en %, tr %, rubros % %', v_a1, v_at, v_ad, v_en, v_tr, r_lib, r_comb;
   END IF;
+  -- 1427-a (#1427): desde el 03/11 el transportista de Tucumán tiene ficha, y el caso 2 se la vincula a
+  -- una ficha nueva (usuario_id es UNIQUE). La suya queda sin usuario en el ensayo, como en
+  -- test-gastos-5; el RAISE del final lo deshace.
+  UPDATE empleados SET usuario_id = NULL WHERE usuario_id = v_tr;
 
   -- Como el front: rol authenticated, claims y header. Con p_user NULL corre
   -- como postgres (lo que en prod hacen las RPCs DEFINER de cobros).

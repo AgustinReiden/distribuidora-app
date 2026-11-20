@@ -75,8 +75,6 @@ export interface VistaPedidosProps {
   loading: boolean;
   /** La query de pedidos falló tras agotar los reintentos (isError). */
   error?: boolean;
-  /** Por qué falló la lista, cuando es algo que el usuario puede arreglar (el filtro con salvedad, 1598-b4). */
-  errorMotivo?: string;
   onRetry?: () => void;
   exportando: boolean;
   onBusquedaChange: (busqueda: string) => void;
@@ -158,7 +156,6 @@ export default function VistaPedidos({
   usuarios = [],
   loading,
   error,
-  errorMotivo,
   onRetry,
   exportando,
   onBusquedaChange,
@@ -285,7 +282,7 @@ export default function VistaPedidos({
       {loading ? (
         <CargandoContenido><SkeletonPedidosList /></CargandoContenido>
       ) : error ? (
-        <QueryErrorState onRetry={onRetry} motivo={errorMotivo} />
+        <QueryErrorState onRetry={onRetry} />
       ) : pedidos.length === 0 ? (
         <div className="text-center py-12 text-gray-500">
           <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-50" />

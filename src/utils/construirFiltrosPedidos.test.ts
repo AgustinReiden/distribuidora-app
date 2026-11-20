@@ -10,9 +10,9 @@ import { describe, it, expect } from 'vitest'
 import {
   construirFiltrosPedidos,
   aplicarFiltroConSalvedad,
-  motivoDelFiltroSalvedad,
-  FiltroSalvedadDemasiadoGrandeError,
-  TOPE_IDS_FILTRO_SALVEDAD,
+  EMBED_CON_SALVEDAD,
+  EMBED_SIN_SALVEDAD,
+  sinEmbedSalvedad,
 } from './construirFiltrosPedidos'
 import type { FiltrosPedidosState } from '../types'
 
@@ -27,6 +27,8 @@ function crearQueryFalsa() {
     or: (...args: unknown[]) => { llamadas.push({ metodo: 'or', args }); return builder },
     in: (...args: unknown[]) => { llamadas.push({ metodo: 'in', args }); return builder },
     not: (...args: unknown[]) => { llamadas.push({ metodo: 'not', args }); return builder },
+    neq: (...args: unknown[]) => { llamadas.push({ metodo: 'neq', args }); return builder },
+    is: (...args: unknown[]) => { llamadas.push({ metodo: 'is', args }); return builder },
   }
   return { builder, llamadas }
 }
@@ -231,74 +233,44 @@ describe('construirFiltrosPedidos', () => {
 describe('aplicarFiltroConSalvedad', () => {
   it('"todos" no toca la query', () => {
     const { builder, llamadas } = crearQueryFalsa()
-    aplicarFiltroConSalvedad(builder, 'todos', [1, 2, 3])
+    aplicarFiltroConSalvedad(builder, 'todos')
     expect(llamadas).toHaveLength(0)
   })
 
-  it('con_salvedad filtra por los ids conocidos', () => {
+  it('undefined no toca la query', () => {
     const { builder, llamadas } = crearQueryFalsa()
-    aplicarFiltroConSalvedad(builder, 'con_salvedad', [10, 20])
-    expect(llamadas).toContainEqual({ metodo: 'in', args: ['id', [10, 20]] })
+    aplicarFiltroConSalvedad(builder, undefined)
+    expect(llamadas).toHaveLength(0)
   })
 
-  it('con_salvedad sin ninguna fila conocida no trae nada (sentinela -1, no in.() inválido)', () => {
+  // 1598-b4: el filtro es un embed a salvedades_items (antes, ids en la URL con tope de 700).
+  it('con_salvedad filtra el embed a las salvedades vigentes (el !inner lo pone el select)', () => {
     const { builder, llamadas } = crearQueryFalsa()
-    aplicarFiltroConSalvedad(builder, 'con_salvedad', [])
-    expect(llamadas).toContainEqual({ metodo: 'in', args: ['id', [-1]] })
+    aplicarFiltroConSalvedad(builder, 'con_salvedad')
+    expect(llamadas).toEqual([{ metodo: 'neq', args: ['salvedades_items.estado_resolucion', 'anulada'] }])
   })
 
-  it('sin_salvedad excluye los ids conocidos', () => {
+  it('sin_salvedad es el anti-join: las vigentes y salvedades_items=is.null', () => {
     const { builder, llamadas } = crearQueryFalsa()
-    aplicarFiltroConSalvedad(builder, 'sin_salvedad', [10, 20])
-    expect(llamadas).toContainEqual({ metodo: 'not', args: ['id', 'in', '(10,20)'] })
+    aplicarFiltroConSalvedad(builder, 'sin_salvedad')
+    expect(llamadas).toEqual([
+      { metodo: 'neq', args: ['salvedades_items.estado_resolucion', 'anulada'] },
+      { metodo: 'is', args: ['salvedades_items', null] },
+    ])
+  })
+})
+
+describe('el embed del filtro de salvedad (1598-b4)', () => {
+  // Trampa 5: salvedades_items tiene dos FK a pedidos (pedido_id y pedido_reprogramado_id).
+  it('nombra la FK de pedido_id: sin el nombre PostgREST da PGRST201 y cae toda la lista', () => {
+    expect(EMBED_CON_SALVEDAD).toBe(',salvedades_items!salvedades_items_pedido_id_fkey!inner(id)')
+    expect(EMBED_SIN_SALVEDAD).toBe(',salvedades_items!salvedades_items_pedido_id_fkey(id)')
   })
 
-  it('sin_salvedad sin ninguna fila conocida no excluye nada', () => {
-    const { builder, llamadas } = crearQueryFalsa()
-    aplicarFiltroConSalvedad(builder, 'sin_salvedad', null)
-    expect(llamadas).toContainEqual({ metodo: 'not', args: ['id', 'in', '(-1)'] })
-  })
-
-  // 1598-b4: los ids viajan en la URL (`id=in.(…)`). Sin tope, con la tabla creciendo la URL pasa
-  // el límite del proxy y el filtro falla con un error de red que no dice nada.
-  describe('tope de ids en la URL (1598-b4)', () => {
-    const ids = (n: number) => Array.from({ length: n }, (_, i) => 10_000 + i)
-
-    it('hasta el tope arma el filtro como siempre', () => {
-      const { builder, llamadas } = crearQueryFalsa()
-      aplicarFiltroConSalvedad(builder, 'con_salvedad', ids(TOPE_IDS_FILTRO_SALVEDAD))
-      expect(llamadas).toHaveLength(1)
-    })
-
-    it('pasado el tope, con_salvedad no manda la URL: avisa qué hacer', () => {
-      const { builder, llamadas } = crearQueryFalsa()
-      expect(() => aplicarFiltroConSalvedad(builder, 'con_salvedad', ids(TOPE_IDS_FILTRO_SALVEDAD + 1)))
-        .toThrow(FiltroSalvedadDemasiadoGrandeError)
-      expect(llamadas).toHaveLength(0)
-    })
-
-    it('lo mismo con sin_salvedad', () => {
-      const { builder } = crearQueryFalsa()
-      expect(() => aplicarFiltroConSalvedad(builder, 'sin_salvedad', ids(TOPE_IDS_FILTRO_SALVEDAD + 1)))
-        .toThrow(/son demasiados para filtrar por salvedad/i)
-    })
-
-    it('el tope no baja de lo que antes andaba (~700 ids en la URL)', () => {
-      expect(TOPE_IDS_FILTRO_SALVEDAD).toBeGreaterThanOrEqual(700)
-    })
-
-    it('el motivo que se le muestra a la pantalla es el del filtro, y sólo el suyo', () => {
-      const { builder } = crearQueryFalsa()
-      let error: unknown
-      try { aplicarFiltroConSalvedad(builder, 'con_salvedad', ids(TOPE_IDS_FILTRO_SALVEDAD + 5)) } catch (e) { error = e }
-      expect(motivoDelFiltroSalvedad(error)).toMatch(/Hay 705 pedidos con salvedad.*acotá por fecha/)
-      expect(motivoDelFiltroSalvedad(new Error('Failed to fetch'))).toBeUndefined()
-      expect(motivoDelFiltroSalvedad(null)).toBeUndefined()
-    })
-
-    it('«todos» nunca mira el tamaño de la lista', () => {
-      const { builder } = crearQueryFalsa()
-      expect(() => aplicarFiltroConSalvedad(builder, 'todos', ids(TOPE_IDS_FILTRO_SALVEDAD * 3))).not.toThrow()
-    })
+  it('sinEmbedSalvedad saca lo embebido y deja el resto de la fila igual', () => {
+    const fila = { id: 1, total: 100, salvedades: [{ id: 3 }], salvedades_items: [{ id: 9 }] }
+    expect(sinEmbedSalvedad(fila)).toEqual({ id: 1, total: 100, salvedades: [{ id: 3 }] })
+    const sinEmbed = { id: 2, total: 50 }
+    expect(sinEmbedSalvedad(sinEmbed)).toBe(sinEmbed)
   })
 })

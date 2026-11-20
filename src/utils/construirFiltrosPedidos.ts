@@ -10,10 +10,8 @@
  * pago (`filtrosParaStats`, #715): cada card es a la vez un filtro de la lista.
  *
  * PURA a propósito: no pagina ni llama a la base, sólo encadena filtros sobre
- * el query builder que le pasan. Por eso `conSalvedad` queda afuera —
- * necesita un round-trip previo a `salvedades_items` para resolver qué ids
- * tienen salvedad, así que lo resuelve `aplicarFiltroConSalvedad` con esa
- * lista ya en mano.
+ * el query builder que le pasan. `conSalvedad` va aparte, en
+ * `aplicarFiltroConSalvedad`.
  */
 import type { FiltrosPedidosState } from '../types'
 import { escapePostgrestFilter } from './postgrest'
@@ -27,6 +25,8 @@ export interface QueryFiltrablePedidos {
   or(filters: string, options?: { referencedTable?: string }): this
   in(column: string, values: unknown[]): this
   not(column: string, operator: string, value: unknown): this
+  neq(column: string, value: unknown): this
+  is(column: string, value: null): this
 }
 
 export function construirFiltrosPedidos<Q extends QueryFiltrablePedidos>(
@@ -95,62 +95,39 @@ export function construirFiltrosPedidos<Q extends QueryFiltrablePedidos>(
   return q
 }
 
-/**
- * Cuántos ids de pedido caben en la URL del filtro (1598-b4). Los ids viajan como `id=in.(…)` o
- * `id=not.in.(…)`, URL-encodeados (~8 caracteres cada uno: `12345%2C`), y el proxy corta cerca de
- * 8 KB menos el `select` (~1,5 KB): el límite real anda por los 700 a 750. El tope va en 700 para
- * no dejar de andar lo que antes andaba. Pasado el tope hace falta resolver el filtro en el
- * server (una RPC o una vista con la marca «tiene salvedad vigente»), que es lo que cierra el
- * punto del todo.
- */
-export const TOPE_IDS_FILTRO_SALVEDAD = 700
-
-/**
- * El filtro con/sin salvedad no cabe en la URL. Es una clase aparte para que la pantalla muestre
- * SU motivo (que dice qué hacer) y no el «No se pudo cargar» genérico de cualquier otro error.
- */
-export class FiltroSalvedadDemasiadoGrandeError extends Error {
-  constructor(cantidad: number) {
-    super(
-      `Hay ${cantidad} pedidos con salvedad: son demasiados para filtrar por salvedad de una sola vez. ` +
-        'Sacá ese filtro y acotá por fecha, estado o cliente.',
-    )
-    this.name = 'FiltroSalvedadDemasiadoGrandeError'
-  }
-}
-
-/** El motivo que se le muestra al usuario si `error` es el del filtro de salvedad; si no, nada. */
-export function motivoDelFiltroSalvedad(error: unknown): string | undefined {
-  return error instanceof FiltroSalvedadDemasiadoGrandeError ? error.message : undefined
-}
-
-/**
- * Filtro "Con salvedad / Sin salvedad". `idsConSalvedad` viene resuelto de
- * afuera (ver `fetchPedidoIdsConSalvedad` en usePedidosQuery.ts): pedirlo acá
- * adentro rompería la pureza de este módulo, porque es un round-trip a
- * `salvedades_items`, no un filtro sobre la query de pedidos.
+/*
+ * Filtro "Con salvedad / Sin salvedad" (1598-b4). Antes se pedían aparte los ids de los pedidos
+ * con salvedad y viajaban en la URL (`id=in.(…)`): pasados 700 el filtro dejaba de andar. Ahora es
+ * un embed de PostgREST a `salvedades_items`, filtrado a las vigentes (no anuladas, #1180): «con»
+ * es un `!inner` (semi-join) y «sin» el anti-join (`salvedades_items=is.null`). La RLS de
+ * `salvedades_items` corre sola, como corría con la lista de ids.
  *
- * Sentinela `-1`: ningún pedido real tiene ese id, así que "con salvedad" sin
- * ninguna fila conocida no trae nada y "sin salvedad" sin ninguna fila
- * conocida no excluye nada — sin esto `.in('id', [])` arma un `in.()` que
- * PostgREST rechaza.
+ * Trampa 5 de CLAUDE.md: `salvedades_items` tiene DOS FK a `pedidos` (`pedido_id` y
+ * `pedido_reprogramado_id`). Sin el nombre de la FK, PostgREST da PGRST201 y cae TODA la lista.
+ *
+ * El embed va en el `select` y los filtros en `aplicarFiltroConSalvedad`. Cada consulta suma la
+ * constante en su `.select(...)`: `selectStr + (conSalvedad === 'con_salvedad' ? EMBED_CON_SALVEDAD
+ * : conSalvedad === 'sin_salvedad' ? EMBED_SIN_SALVEDAD : '')`. Con una suma, no con una función ni
+ * con un ternario dentro de un template: el gate de embeds (`scripts/check-embeds.mjs`) lee
+ * constantes, sumas y ternarios, y sin leerlo no prueba el embed contra PostgREST. Lo que vuelve embebido no se muestra:
+ * `sinEmbedSalvedad` lo saca de cada fila.
  */
+export const EMBED_CON_SALVEDAD = ',salvedades_items!salvedades_items_pedido_id_fkey!inner(id)'
+export const EMBED_SIN_SALVEDAD = ',salvedades_items!salvedades_items_pedido_id_fkey(id)'
+
+/** Los filtros del embed. La consulta tiene que haber sumado `embedFiltroSalvedad` a su select. */
 export function aplicarFiltroConSalvedad<Q extends QueryFiltrablePedidos>(
   query: Q,
   conSalvedad: FiltrosPedidosState['conSalvedad'] | undefined,
-  idsConSalvedad: number[] | null,
 ): Q {
-  if (!conSalvedad || conSalvedad === 'todos') return query
+  if (conSalvedad !== 'con_salvedad' && conSalvedad !== 'sin_salvedad') return query
+  const q = query.neq('salvedades_items.estado_resolucion', 'anulada')
+  return conSalvedad === 'sin_salvedad' ? q.is('salvedades_items', null) : q
+}
 
-  const ids = idsConSalvedad ?? []
-  if (ids.length > TOPE_IDS_FILTRO_SALVEDAD) {
-    // Un error claro y no una URL de 20 KB que el proxy corta con un 414 sin explicación (ni un
-    // filtro que, recortado en silencio, mostraría una lista incompleta como si fuera la completa).
-    throw new FiltroSalvedadDemasiadoGrandeError(ids.length)
-  }
-  if (conSalvedad === 'con_salvedad') {
-    return query.in('id', ids.length > 0 ? ids : [-1])
-  }
-  const lista = ids.length > 0 ? ids.join(',') : '-1'
-  return query.not('id', 'in', `(${lista})`)
+/** Saca de una fila lo que trajo el embed del filtro, para que nada lo muestre ni lo exporte. */
+export function sinEmbedSalvedad<T extends object>(fila: T): T {
+  if (!('salvedades_items' in fila)) return fila
+  const { salvedades_items: _embed, ...resto } = fila as T & { salvedades_items?: unknown }
+  return resto as T
 }
