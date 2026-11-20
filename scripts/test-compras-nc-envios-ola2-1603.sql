@@ -3,7 +3,7 @@
 --
 -- Un único DO con datos propios que termina SIEMPRE en una excepción: no deja rastro (salvo
 -- valores de secuencia). Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ' con la lista. Sin la
--- migración falla en todos los casos menos S1 (regresión), SN y C1 (declarados) y B7V (lo de
+-- migración falla en todos los casos menos S1 (regresión), SN (declarado) y B7V (lo de
 -- hoy).
 --
 --   A   · 1590-a · Producto con 10 u. a 80 (bolsa) y una ZZ de 10 a 100 con su lote: promedio
@@ -31,8 +31,10 @@
 --         con el nombre del producto y no se reactiva; con la marca, se acepta y lo reactiva.
 --   S16 · STK-16 · Un envío creado sin promedio del origen (NULL) y aceptado cuando el origen
 --         tiene 50: el ítem guarda 50.
---   C1  · 1593-b1 NO va en esta migración (H1): FC A de 10 × 100 al 21 % con un flete no
---         gravado de 100 prorrateado deja costo real 110 y costo con IVA 121, como hoy.
+--   C1  · 1593-b1: FC A de 10 × 100 al 21 % con un flete no gravado de 100 prorrateado deja
+--         costo real 110. El costo con IVA era 121 (H1: no iba en esta migración); desde la de
+--         la tarjeta C3 (decisión del dueño del 19/11) es el neto más el IVA de sus componentes,
+--         131: cambió de regla (los casos completos, en test-compras-edicion-lotes-y-nc-ola2-1603).
 --   C3  · 1593-b3 · Una FC B con IVA 21 mandada directo se rechaza (antes entraba con
 --         COMPRA-A1 en rojo).
 --   C5  · 1593-b5 · Un número de nota de 60 caracteres se rechaza con su motivo, en las dos
@@ -505,8 +507,8 @@ BEGIN
               jsonb_build_object('producto_id', v_p, 'cantidad', 10, 'costo_unitario', 100, 'porcentaje_iva', 21,
                                  'condicion_iva', 'gravado'))), 'FC', v_hoy, 210, 1210, v_flete, 'A');
     v_t := (SELECT format('real=%s con_iva=%s', round(costo_real, 2), round(costo_con_iva, 2)) FROM productos WHERE id = v_p);
-    IF v_t IS DISTINCT FROM 'real=110.00 con_iva=121.00' THEN
-      v_fallas := v_fallas || format('C1 · FC A con un flete de 100: esperaba real=110.00 con_iva=121.00 (como hoy, H1) y dio %s', v_t);
+    IF v_t IS DISTINCT FROM 'real=110.00 con_iva=131.00' THEN
+      v_fallas := v_fallas || format('C1 · FC A con un flete de 100: esperaba real=110.00 con_iva=131.00 (100 + 10 de flete + 21 de IVA del producto; el flete no lleva IVA) y dio %s', v_t);
     END IF;
   END;
 

@@ -10,7 +10,7 @@ import type { NotaCreditoDB, NotaCreditoFormInput } from '../../types'
 import { comprasKeys } from './useComprasQuery'
 import { lotesKeys } from './useLotesQuery'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
-import { avisosAnulacionNotaCredito, resumirNotasCreditoPorCompra } from '../../utils/notaCredito'
+import { avisosAnulacionNotaCredito, restanteDevolucionCompra, resumirNotasCreditoPorCompra } from '../../utils/notaCredito'
 
 // Resumen ligero de NCs por compra (para badges en lista)
 export interface NCResumen {
@@ -143,6 +143,36 @@ export function useNotasCreditoByCompraQuery(compraId: string | undefined, enabl
     queryFn: () => fetchNotasCreditoByCompra(compraId!),
     enabled: !!compraId && enabled,
     staleTime: 5 * 60 * 1000,
+  })
+}
+
+/**
+ * Lo que le queda por acreditar a una compra en una DEVOLUCIÓN (1590-c, #1590), o
+ * null si no tiene tope (sin un ajuste vigente, devolver toda la mercadería entra
+ * siempre: `restanteDevolucionCompra`). Lo usa la devolución por lote de
+ * Vencimientos, cuya fila no trae ni el total ni las notas de la compra. Dos
+ * consultas simples y sin embeds, sólo mientras la devolución está abierta
+ * (`compraId` null = cerrada). Bajo `byCompra`: registrar o anular una nota lo
+ * vuelve a leer.
+ */
+export function useRestanteDevolucionCompraQuery(compraId: number | null) {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: [...notasCreditoKeys.byCompra(currentSucursalId, String(compraId ?? '')), 'restante'] as const,
+    queryFn: async (): Promise<{ compraId: number; restante: number } | null> => {
+      const [compra, notas] = await Promise.all([
+        supabase.from('compras').select('id, total').eq('id', compraId!).maybeSingle(),
+        supabase.from('notas_credito').select('total, tipo, anulada').eq('compra_id', compraId!),
+      ])
+      if (compra.error) throw errorDeSupabase(compra.error, 'Sin conexión: no se pudo leer la compra del lote.')
+      if (notas.error) throw errorDeSupabase(notas.error, 'Sin conexión: no se pudieron leer las notas de crédito de la compra.')
+      const restante = restanteDevolucionCompra(
+        (compra.data as { total?: unknown } | null)?.total,
+        (notas.data ?? []) as Array<{ total?: unknown; tipo?: string | null; anulada?: boolean | null }>,
+      )
+      return restante === null ? null : { compraId: compraId!, restante }
+    },
+    enabled: compraId != null,
   })
 }
 

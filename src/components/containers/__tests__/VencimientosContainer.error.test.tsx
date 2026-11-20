@@ -32,6 +32,10 @@ vi.mock('../../../hooks/queries/useLotesQuery', () => {
   }
 })
 
+vi.mock('../../../hooks/queries/useNotasCreditoQuery', () => ({
+  useRestanteDevolucionCompraQuery: () => ({ data: null }),
+}))
+
 vi.mock('../../../hooks/queries/usePoliticasComercialesQuery', () => ({
   useParametrosVencimientoQuery: () => ({ diasAlertaVencimiento: 30, diasCriticoVencimiento: 15 }),
 }))

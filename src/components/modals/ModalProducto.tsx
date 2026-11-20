@@ -25,7 +25,7 @@ import type { CondicionIva, ProductoDB, ProveedorDBExtended } from '../../types'
 import { OPCIONES_CONDICION_IVA, claveCondicionIva } from '../../utils/condicionIva';
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta';
 import { estadoSubrubro } from '../../utils/subrubroFicha';
-import { adicionalDeCompra, conAdicionalDeCompra, costoEditadoEnFicha } from '../../utils/costoFinalProducto';
+import { adicionalConIvaDeCompra, adicionalDeCompra, conAdicionalDeCompra, costoEditadoEnFicha } from '../../utils/costoFinalProducto';
 import { tipoParaCostoDeProducto } from '../../utils/letraComprobante';
 import { lazyWithReload } from '../../utils/lazyWithReload';
 import { soloLoCambiado } from '../../utils/fichaProductoCambios';
@@ -272,6 +272,10 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   // costo final y en los dos márgenes; sin él la ficha mostraba un costo más
   // bajo que el de la compra.
   const adicionalCompra = adicionalDeCompra(producto, tipoCompra);
+  // 1593-b1 (#1593, decisión del dueño del 19/11): la compra deja el costo con IVA
+  // ya compuesto (neto + II + cargos y flete netos, más el IVA de cada uno). Esto es
+  // lo que tiene por encima de neto + IVA + II: corregir el neto lo conserva.
+  const adicionalConIva = adicionalConIvaDeCompra(producto, tipoCompra);
 
   const { data: marcas = [] } = useMarcasQuery();
   const { data: catalogoII } = useCatalogoIIQuery();
@@ -376,7 +380,7 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   const costosDesdeForm = (f: ProductoFormData) => ({
     costoTotal: conAdicionalDeCompra(
       calcularCostoFinanciero(f.costo_sin_iva, f.porcentaje_iva, f.impuestos_internos, tipoCompra),
-      adicionalCompra,
+      adicionalConIva,
     ),
     costoReal: conAdicionalDeCompra(calcularCostoReal(f.costo_sin_iva, f.impuestos_internos, tipoCompra), adicionalCompra),
   });
@@ -404,7 +408,12 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   //    VENTA no discrimina imp. internos (no somos agente, mig 122): el precio
   //    neto es precio / (1 + IVA%), sin II. El II solo afecta el costo.
   const recalcularTotales = (nuevoForm: ProductoFormData): ProductoFormData => {
-    const costoTotal = calcularCostoFinanciero(nuevoForm.costo_sin_iva, nuevoForm.porcentaje_iva, nuevoForm.impuestos_internos, tipoCompra);
+    // Con lo que sumó la compra (1593-b1): sin esto, cualquier cambio de la ficha
+    // le borraba los cargos al costo con IVA al guardar.
+    const costoTotal = conAdicionalDeCompra(
+      calcularCostoFinanciero(nuevoForm.costo_sin_iva, nuevoForm.porcentaje_iva, nuevoForm.impuestos_internos, tipoCompra),
+      adicionalConIva,
+    );
     const precioNeto = calcularNetoDesdeTotal(nuevoForm.precio, nuevoForm.porcentaje_iva, 0);
     return {
       ...nuevoForm,
@@ -627,9 +636,9 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
   const inputClass = (field: string): string => `w-full px-3 py-2 border rounded-lg ${errores[field] ? 'border-red-500 bg-red-50' : ''}`;
 
   // El costo total que se muestra y contra el que se mide el margen bruto: el
-  // desembolso de la factura (lo que se guarda en costo_con_iva, sin cargos,
-  // igual que lo deja la compra) más lo que sumó la compra.
-  const costoTotalMostrado = conAdicionalDeCompra(parsePrecio(String(form.costo_con_iva)), adicionalCompra);
+  // costo con IVA tal como lo deja la compra (1593-b1: ya trae los cargos y su
+  // IVA) o como lo recalcula la ficha al corregir el neto.
+  const costoTotalMostrado = parsePrecio(String(form.costo_con_iva));
 
   const claveActualIva = claveCondicionIva(form.condicion_iva, form.porcentaje_iva);
 

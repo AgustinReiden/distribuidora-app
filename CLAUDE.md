@@ -622,12 +622,18 @@ suelta en `sucursales`.
 - **El total de una ZZ incluye sus cargos en factura** (#1593, decisión del dueño): es lo pagado,
   10 × 100 con un flete de 300 dan 1.300. La ZZ guarda `bonificaciones` y `no_gravado` en 0: el
   cuadre del alta y COMPRA-A1 suman los cargos `en_factura` de `compra_cargos`, y el front los
-  lleva en `cargosEnFactura`. En una FC no cambia: el cargo gravado va a `bonificaciones`.
+  lleva en `cargosEnFactura`. En una FC no cambia: el cargo gravado va a `bonificaciones`, y el no
+  gravado o exento a `no_gravado`, con su signo: un descuento sobre renglones exentos o no gravados lo
+  deja negativo, hasta lo que suman esos descuentos (#1590, tarjeta C3 de #1603). Un descuento no
+  gravado no pasa de lo que suman los renglones no gravados, ni uno exento de los exentos
+  (`_compra_descuento_fuera_de_tope`): sobre renglones gravados va como bonificación gravada.
 - **Una NC de compra no pasa lo que le queda a la compra** (su total menos sus notas vigentes): el ajuste
   siempre, y la devolución si la compra tiene un ajuste (#1557, #1565; decisión del dueño). La devolución
   se valúa neta de la bonificación y de los descuentos de cabecera (`_compra_factor_neto`, #1590 D16):
-  un descuento con reparto le baja el neto sólo a sus renglones, y el resto va parejo. Devolver todo
-  nunca acredita más que lo pagado. Un camino nuevo de NC hace igual.
+  un descuento con reparto le baja el neto sólo a sus renglones, y el resto va parejo. En una FC el neto
+  baja con todo descuento en factura y el IVA sólo con los gravados (`_compra_factor_iva`): uno no gravado
+  no le bajó el IVA a la factura (H5 de #1590). Devolver todo nunca acredita más que lo pagado. Un camino
+  nuevo de NC hace igual.
 - **Una NC de compra se anula, no se borra** (`anular_nota_credito_compra`, #1590 D15): queda
   `anulada` con su motivo, y deshace el stock, los lotes que tomó (`notas_credito.lotes_tomados`), el
   promedio y la reposición. Una devolución anterior a la 483 (10/11/2026) no se anula: no corrigió el

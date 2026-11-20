@@ -45,6 +45,7 @@ import type { LoteReporte } from '../../hooks/queries/useLotesQuery'
 import { bajaDeLotePideMotivo, estadoVencimiento, formatearFechaVencimiento } from '../../utils/vencimientos'
 import type { EstadoVencimiento } from '../../utils/vencimientos'
 import BadgeVencimiento from '../vencimientos/BadgeVencimiento'
+import { formatPrecio } from '../../utils/formatters'
 
 // Schema CO-LOCADO a propósito (no en `lib/schemas.ts`): si viviera en ese chunk
 // compartido, un bundle viejo del PWA validaría contra un schema desincronizado
@@ -108,6 +109,16 @@ export interface VistaVencimientosProps {
     motivo: string,
   ) => Promise<void>
   nombreSucursal?: string | null
+  /**
+   * 1590-c (#1590): la compra del lote cuya devolución está abierta (null al
+   * cerrarla), para que el container lea lo que le queda por acreditar.
+   */
+  onCompraDevolucion?: (compraId: number | null) => void
+  /**
+   * Lo que le queda por acreditar a esa compra, si tiene tope (un ajuste vigente:
+   * `restanteDevolucionCompra`). null = sin tope, o todavía sin leer.
+   */
+  restanteCompra?: { compraId: number; restante: number } | null
 }
 
 export default function VistaVencimientos({
@@ -124,6 +135,8 @@ export default function VistaVencimientos({
   onDarDeBaja,
   onDevolverAlProveedor,
   nombreSucursal,
+  onCompraDevolucion,
+  restanteCompra,
 }: VistaVencimientosProps) {
   const [filtro, setFiltro] = useState<Filtro>('todos')
   const [paginaActual, setPaginaActual] = useState(1)
@@ -218,6 +231,7 @@ export default function VistaVencimientos({
   function abrirDevolucion(lote: LoteReporte) {
     cerrarBaja()
     setDevolviendo(lote.lote_id)
+    onCompraDevolucion?.(lote.compra_id)
     setCantidadDevolucion(numeroConMiles(Number(lote.cantidad_restante)))
     setNumeroNota('')
     setMotivoDevolucion('')
@@ -225,6 +239,7 @@ export default function VistaVencimientos({
   }
 
   function cerrarDevolucion() {
+    if (devolviendo !== null) onCompraDevolucion?.(null)
     setDevolviendo(null)
     setCantidadDevolucion('')
     setNumeroNota('')
@@ -462,6 +477,19 @@ export default function VistaVencimientos({
                         {errorDevolucion && (
                           <span className="text-xs text-red-600 dark:text-red-400" role="alert">
                             {errorDevolucion}
+                          </span>
+                        )}
+                        {/* 1590-c: si la compra ya tiene un ajuste, la devolución no
+                            puede pasar lo que le queda. Es un aviso: el server la mide
+                            con el importe neto de los descuentos de la factura. */}
+                        {restanteCompra && restanteCompra.compraId === lote.compra_id && (
+                          <span
+                            data-testid="devolucion-restante-compra"
+                            className="max-w-[16rem] text-right text-xs text-stone-600 dark:text-gray-400"
+                          >
+                            Le quedan {formatPrecio(restanteCompra.restante)} por acreditar en su compra (su total
+                            menos las notas que ya tiene, contando los ajustes). Al guardar, el sistema mide la
+                            devolución con el importe neto de los descuentos de la factura y avisa si no entra.
                           </span>
                         )}
                         <span className="inline-flex items-center gap-1">
