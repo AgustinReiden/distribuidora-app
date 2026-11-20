@@ -1,5 +1,5 @@
 -- Ensayo de la tarjeta C4b de la tanda 5 de la ola 2 del plan #1603
--- (migrations/NNN_catalogo_guardados_en_una_operacion.sql): 1561-b12 de #1561, 1599-b8 de #1599 y
+-- (migrations/534_catalogo_guardados_en_una_operacion.sql): 1561-b12 de #1561, 1599-b8 de #1599 y
 -- 1598-b5 de #1598.
 --
 --   G1 · [F] Alta de una condición mayorista con tres productos, una escala clásica y una
