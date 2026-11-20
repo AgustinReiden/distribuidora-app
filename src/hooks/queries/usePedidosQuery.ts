@@ -361,7 +361,7 @@ async function fetchPedidosPaginated(
   if (perfilIds.size > 0) {
     const { data: perfiles, error: errorPerfiles } = await supabase
       .from('perfiles')
-      .select('id, nombre, email')
+      .select('id, nombre')
       .in('id', Array.from(perfilIds))
     // FRT-8: sin perfiles la lista salía con el vendedor y el chofer en blanco, sin aviso.
     if (errorPerfiles) throw errorDeSupabase(errorPerfiles, 'Sin conexión: no se pudo cargar quién cargó y quién reparte cada pedido. Revisá la señal e intentá de nuevo.')
@@ -1001,7 +1001,7 @@ export async function fetchPedidosNoEntregados(sucursalId: number | null): Promi
   if (transportistaIds.size > 0) {
     const { data: perfiles } = await supabase
       .from('perfiles')
-      .select('id, nombre, email')
+      .select('id, nombre')
       .in('id', Array.from(transportistaIds))
 
     if (perfiles) {
@@ -1068,7 +1068,7 @@ export async function fetchPedidosParaEntregaYPago(sucursalId: number | null): P
   if (transportistaIds.size > 0) {
     const { data: perfiles } = await supabase
       .from('perfiles')
-      .select('id, nombre, email')
+      .select('id, nombre')
       .in('id', Array.from(transportistaIds))
 
     if (perfiles) {
@@ -1334,7 +1334,7 @@ export async function fetchPedidosNoPagados(sucursalId: number | null): Promise<
   if (transportistaIds.size > 0) {
     const { data: perfiles } = await supabase
       .from('perfiles')
-      .select('id, nombre, email')
+      .select('id, nombre')
       .in('id', Array.from(transportistaIds))
 
     if (perfiles) {

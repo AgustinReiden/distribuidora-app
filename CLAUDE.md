@@ -133,7 +133,11 @@ suelta en `sucursales`.
   sin `activo` (1564-b11 de #1603): usa los helpers o suma `COALESCE(activo, true)` a la subconsulta
   sobre `perfiles` (el depósito no tiene helper), y el mismo gate falla ante cualquiera, sin lista
   de permitidas. Nadie edita su propio
-  perfil (decisión del dueño): `perfiles` se escribe sólo por `perfiles_update_admin`. Y ningún
+  perfil ni sus propios roles extra, tampoco un admin (decisión del dueño): `perfiles` se escribe por
+  `perfiles_update_admin` (un admin que abarca las sucursales del otro), y `trg_perfiles_nadie_se_edita`
+  y `trg_perfil_roles_nadie_se_asigna` rechazan con el motivo la fila propia de quien escribe como
+  `authenticated` (el REST y las RPC INVOKER; el server y las definer no pasan por ahí). Al único admin
+  lo corrige el server. Y ningún
   `UPDATE` ni `DELETE` de `perfiles` deja la base sin un admin activo (`perfiles_guard_desactivacion`).
 - **El rol es uno solo en toda sucursal: `perfiles.rol`** (mig 486, #1519). Lo que cambia por
   sucursal son los extra de `perfil_roles`. `usuario_sucursales` ya no tiene columna `rol`
@@ -292,7 +296,11 @@ suelta en `sucursales`.
   salió: un pedazo de un pedazo se mide contra él, #1359; un CHECK pide los dos o ninguno), y el
   pago que se parte se bloquea
   `FOR UPDATE` **antes** de insertar el pedazo: la foto de una rendición se fía de eso para
-  saber si un pedazo nació antes o después de ella (`ultimo_pago_id`, #1292). **La rendición confirmada se congela**
+  saber si un pedazo nació antes o después de ella (`ultimo_pago_id`, #1292). El linaje (`pago_padre_id`,
+  `pago_origen_id`) NO tiene FK, a propósito (1601-b9): el padre se puede borrar y el pedazo lo sigue
+  nombrando (la baja de total con un crédito de NC, el borrado del admin, el cobro que repone
+  `anular_salvedad`). Lo cuida `trg_pagos_linaje_de_su_sucursal` (si el padre o la raíz existen, son
+  de la misma sucursal) y PAGO-A/PAGO-B de `auditoria_integridad()`. **La rendición confirmada se congela**
   (#1248): al cerrarla, `trg_rendiciones_control_foto` guarda sus pagos en
   `rendicion_pagos_confirmados`, y un día cerrado se lee de esa foto. Reabrirla la descarta.
   Por eso reimputar ya no mueve la plata de una rendición cerrada a otro chofer. Una RPC
@@ -663,7 +671,10 @@ suelta en `sucursales`.
   y `compra_cargo_repartos`.
 - **Un producto con stock, con lotes (aun agotados) o que es el regalo de una promo no se borra: se
   desactiva** (1561-b2, decisión del dueño). Lo frena `productos_rechazar_borrado_con_historial`,
-  junto con el historial; sin nada de eso se borra y su `stock_historico` se va con él.
+  junto con el historial; sin nada de eso se borra y su `stock_historico` se va con él. Tampoco uno que
+  está en una meta (`trg_productos_rechazar_borrado_en_meta`, 1601-b9), y cada id de
+  `metas_preventista.producto_ids` es un producto de la sucursal de la meta (su trigger, la FK que un
+  array no puede tener, y META-A de `auditoria_integridad()`).
 - **El código de un producto es único por sucursal, sin mirar mayúsculas ni los espacios de los
   bordes** (1561-b1, decisión del dueño D31), como los rubros: índice
   `productos_codigo_unico_por_sucursal` sobre `upper(btrim(codigo))`, sin los vacíos (un producto

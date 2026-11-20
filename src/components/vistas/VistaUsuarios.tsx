@@ -10,12 +10,17 @@ import type { PerfilDB } from '../../types';
 export interface VistaUsuariosProps {
   usuarios: PerfilDB[];
   loading: boolean;
+  /** No se pudieron cargar los emails (la RPC de D53): la lista sale igual, con el aviso. */
+  errorEmails?: boolean;
+  onReintentarEmails?: () => void;
   onEditarUsuario: (usuario: PerfilDB) => void;
 }
 
 export default function VistaUsuarios({
   usuarios,
   loading,
+  errorEmails = false,
+  onReintentarEmails,
   onEditarUsuario
 }: VistaUsuariosProps) {
   return (
@@ -26,6 +31,17 @@ export default function VistaUsuarios({
           Para crear usuarios, hacelo desde Supabase → Authentication → Users
         </p>
       </div>
+
+      {errorEmails && !loading && (
+        <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+          <span>No se pudieron cargar los emails de los usuarios.</span>
+          {onReintentarEmails && (
+            <button type="button" onClick={onReintentarEmails} className="font-medium underline">
+              Reintentar
+            </button>
+          )}
+        </div>
+      )}
 
       {loading ? <CargandoContenido><SkeletonTable rows={5} columns={5} /></CargandoContenido> : usuarios.length === 0 ? (
         <div className="text-center py-12 text-gray-500 dark:text-gray-400">

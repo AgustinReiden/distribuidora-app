@@ -27,11 +27,6 @@ export const usuarioSchema = z.object({
     .transform(val => val.trim())
     .refine(val => val.length >= 2, { message: 'El nombre debe tener al menos 2 caracteres' }),
 
-  email: z
-    .string()
-    .email({ message: 'Email inválido' })
-    .min(1, { message: 'El email es obligatorio' }),
-
   rol: z.enum(['admin', 'preventista', 'transportista', 'deposito', 'encargado'], {
     error: 'Rol invalido'
   }),
@@ -115,9 +110,10 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
   };
 
   const handleSubmit = async (): Promise<void> => {
+    // Sin el email (1601-b5): el campo es de sólo lectura y no se guarda, y desde D53 llega
+    // por otro pedido (emails_de_usuarios) que puede fallar; no puede trabar el guardado.
     const result = validate({
       nombre: form.nombre,
-      email: form.email || '',
       rol: form.rol,
       zona: form.zona,
       telefono: '' // Optional field
@@ -152,6 +148,8 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
           <input
             type="email"
             value={form.email || ''}
+            placeholder="—"
+            aria-label="Email"
             disabled
             className="w-full px-3 py-2 border rounded-lg bg-gray-100 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-400"
           />

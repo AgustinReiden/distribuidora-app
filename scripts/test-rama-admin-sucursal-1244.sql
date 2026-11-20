@@ -4,8 +4,9 @@
 --       todos los de la suya.
 --   2 · perfiles UPDATE: no toca a un usuario de otra sucursal (el ataque:
 --       activo = false), ni a uno que además trabaja en otra; sí a los de su
---       sucursal y a sí mismo. El admin de todas las sucursales sí al mixto. El
---       que no es admin sigue editando su propio perfil.
+--       sucursal. A sí mismo, no: nadie edita su propio perfil, tampoco un admin
+--       (decisión del dueño; trg_perfiles_nadie_se_edita, C6 de #1603). El admin
+--       de todas las sucursales sí al mixto. El que no es admin no edita ninguno.
 --   3 · Los helpers: authenticated los ejecuta (los evalúan las policies), anon
 --       no, y para quien no es admin dan siempre false.
 --   4 · bot_admin_*: listar, el audit log, su resumen y los digests sólo traen
@@ -79,9 +80,27 @@ BEGIN
   SELECT pf.id INTO v_mixto
     FROM perfiles pf JOIN usuario_sucursales us ON us.usuario_id = pf.id
    GROUP BY pf.id HAVING bool_or(us.sucursal_id = v_suc1) AND bool_or(us.sucursal_id <> v_suc1)
-   ORDER BY bool_and(us.sucursal_id IN (SELECT a.sucursal_id FROM usuario_sucursales a WHERE a.usuario_id = v_multi)) DESC,
+   ORDER BY (pf.id = v_multi) ASC,
+            bool_and(us.sucursal_id IN (SELECT a.sucursal_id FROM usuario_sucursales a WHERE a.usuario_id = v_multi)) DESC,
             pf.id
    LIMIT 1;
+
+  -- Si el único usuario de dos sucursales es el propio admin de todas (la base del CI), 2.5 se
+  -- probaba editándose a sí mismo, y nadie edita su propio perfil (C6 de #1603). Se arma uno: un
+  -- preventista de v_suc1 y de otra sucursal de v_multi (se deshace con el resto).
+  IF v_multi IS NOT NULL AND (v_mixto IS NULL OR v_mixto = v_multi)
+     AND EXISTS (SELECT 1 FROM usuario_sucursales WHERE usuario_id = v_multi AND sucursal_id = v_suc1) THEN
+    v_mixto := gen_random_uuid();
+    INSERT INTO auth.users (id, instance_id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    VALUES (v_mixto, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+            'e1244-' || v_mixto || '@ensayo.invalid',
+            jsonb_build_object('rol', 'preventista', 'sucursal_id', v_suc1), jsonb_build_object('nombre', 'Ensayo 1244 mixto'),
+            now(), now());
+    INSERT INTO usuario_sucursales (usuario_id, sucursal_id, es_default)
+    SELECT v_mixto, min(sucursal_id), false FROM usuario_sucursales
+     WHERE usuario_id = v_multi AND sucursal_id <> v_suc1
+    HAVING min(sucursal_id) IS NOT NULL;
+  END IF;
 
   SELECT pf.id INTO v_prev
     FROM perfiles pf
@@ -133,14 +152,21 @@ BEGIN
     v_fallas := v_fallas || '2.2 · el admin no puede editar a un usuario que sólo está en su sucursal'::text;
   END IF;
 
-  -- 2.3 · A sí mismo, sí (por perfiles_update_self y por la suya).
-  EXECUTE 'SET LOCAL ROLE authenticated';
-  EXECUTE 'WITH u AS (UPDATE perfiles SET nombre = nombre WHERE id = $1 RETURNING 1) SELECT count(*) FROM u'
-    INTO v_n USING v_admin1;
-  EXECUTE 'RESET ROLE';
-  IF v_n <> 1 THEN
-    v_fallas := v_fallas || '2.3 · el admin no puede editar su propio perfil'::text;
-  END IF;
+  -- 2.3 · A sí mismo, NO. Cambió de regla (C6 de #1603): antes afirmaba que el admin editaba su
+  -- propia fila (1 fila); la regla escrita es que nadie edita su propio perfil, tampoco un admin, y
+  -- trg_perfiles_nadie_se_edita lo rechaza con el motivo (42501), sin tocar la fila.
+  BEGIN
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    EXECUTE 'WITH u AS (UPDATE perfiles SET nombre = nombre WHERE id = $1 RETURNING 1) SELECT count(*) FROM u'
+      INTO v_n USING v_admin1;
+    EXECUTE 'RESET ROLE';
+    v_fallas := v_fallas || format('2.3 · el admin editó su propio perfil (%s fila/s): nadie edita su perfil', v_n);
+  EXCEPTION WHEN insufficient_privilege THEN
+    EXECUTE 'RESET ROLE';
+    IF SQLERRM NOT LIKE 'No podés editar tu propio usuario%' THEN
+      v_fallas := v_fallas || ('2.3 · el rechazo de editar el propio perfil no dice el motivo: ' || SQLERRM);
+    END IF;
+  END;
 
   -- 2.4 · Al que también trabaja en otra sucursal, no (decisión del dueño).
   IF v_mixto IS NULL OR v_mixto = v_admin1 THEN
