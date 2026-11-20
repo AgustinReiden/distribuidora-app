@@ -12,7 +12,7 @@
 -- pueda cambiar sus policies como lo hizo la 463 en producción:
 --   docker exec -i <contenedor> psql -U supabase_admin -h localhost -d postgres -v ON_ERROR_STOP=1 -f - < scripts/ci/storage-minimo.sql
 --
--- Después: aplicar NNN_facturas_por_sucursal_activa y correr scripts/test-facturas-sucursal-activa-ola2-1603.sql.
+-- Después: aplicar 539_facturas_por_sucursal_activa y correr scripts/test-facturas-sucursal-activa-ola2-1603.sql.
 
 DO $minimo$
 BEGIN

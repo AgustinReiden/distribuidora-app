@@ -504,7 +504,7 @@ describe('scripts/rpcs-definer-permitidas.json', () => {
 })
 
 describe('hallazgosStorage', () => {
-  // El texto como lo devuelve pg_policies después de NNN_facturas_por_sucursal_activa (tarjeta C6
+  // El texto como lo devuelve pg_policies después de 539_facturas_por_sucursal_activa (tarjeta C6
   // de #1603, 1564-b7, D51): el path contra la sucursal activa.
   const MIS_SUCURSALES = '((storage.foldername(name))[1] = (current_sucursal_id())::text)'
   // Y como quedó después de la mig de #1474: contra todas las sucursales del usuario.

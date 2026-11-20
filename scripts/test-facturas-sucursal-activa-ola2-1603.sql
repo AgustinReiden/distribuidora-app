@@ -1,5 +1,5 @@
 -- Ensayo de la tarjeta C6 de la ola 2 del plan #1603 (1564-b7 de #1564, decisión del dueño D51):
--- las facturas escaneadas, de la sucursal activa. Migración: NNN_facturas_por_sucursal_activa.
+-- las facturas escaneadas, de la sucursal activa. Migración: 539_facturas_por_sucursal_activa.
 --
 -- Necesita storage.objects: sobre una base local, scripts/ci/storage-minimo.sql (como
 -- supabase_admin) ANTES de la migración. Sin storage (el CI) da ENSAYO OK con una nota.
