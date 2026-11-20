@@ -138,6 +138,13 @@ describe('la preparación del cuerpo (#1541, espejo de _sql_sin_comentarios_ni_l
     expect(sinComentariosNiLiterales("x := 'it''s'; /* a ' b */ y := '/* no */'; -- z '")).toBe("x := '';  y := ''; ")
   })
 
+  // H1 de la revisión de C5 (#1603), espejo de _sql_sin_comentarios_ni_literales.
+  it("una cadena E'…' con \\' no cierra en la comilla escapada; ELSE'x' no es una E suelta", () => {
+    expect(sinComentariosNiLiterales("a := E'it\\'s -- '; b := now()::date; c := 'x'")).toBe("a := ''; b := now()::date; c := ''")
+    expect(sinComentariosNiLiterales("ELSE'a\\' || 'b'")).toBe("ELSE'' || ''")
+    expect(sinComentarios("a := e'a''b\\\\' -- c")).toBe("a := e'a''b\\\\' ")
+  })
+
   it('sinComentarios deja los literales enteros, aunque traigan -- o /*', () => {
     expect(sinComentarios("a := ' -- ' || b; -- fin\nc := '/* x */'; /* d */")).toBe("a := ' -- ' || b; \nc := '/* x */'; ")
   })

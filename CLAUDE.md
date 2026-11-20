@@ -33,6 +33,11 @@ que inserta (`ANALYZE`): el plan de un ensayo sale de lo que el autovacuum dejó
 anterior, y un plan que elige el índice equivocado tarda 10 veces más sin que el código haya cambiado
 (`test-precios-masivo-30000-1561.sql`; los controles negativos están en `scripts/ci/gates-muerden.sh`).
 
+Después de una carga masiva de datos (una importación, la base inicial de un comercio nuevo) se corre
+`ANALYZE`: con estadísticas viejas el planner cree que `pedidos` y `pedido_items` están casi vacías, arma
+nested loops, y el gerencial, `tablero_categorias`, el bot y Rendimiento pasan el timeout de 8 s (N8 de
+#1603). Se mide con `scripts/tiempos-ventas-estadisticas-viejas-ola2-1603.sql`.
+
 Deploy: push a `main` → webhook de Coolify. La config de nginx de producción **vive en el
 panel de Coolify**, no en el `nginx.conf` del repo — editar el repo no cambia nada.
 Verificá siempre con `curl -I`, nunca leyendo el archivo.
@@ -144,7 +149,8 @@ suelta en `sucursales`.
   necesita quien vende, va a esa lista; si no, a la RPC. El REVOKE de lo reservado para
   `authenticated` (la parte 2) va después, con su issue.
 - **Una `auditoria_*` que lee código limpia el cuerpo con `_sql_sin_comentarios` o
-  `_sql_sin_comentarios_ni_literales`** (#1541): una sola pasada que entiende las comillas. Sacar
+  `_sql_sin_comentarios_ni_literales`** (#1541): una sola pasada que entiende las comillas (también
+  la `\'` de un `E'…'`, C5 de #1603). Sacar
   primero los `--` y después los literales rompe la paridad con un literal `' -- '` y esconde lo
   que sigue. Espejo en `scripts/lib/locks.mjs`.
 - **Los avisos se guardan 90 días y `audit_logs` 24 meses** (1561-b10 y 1596-b10, decisión del

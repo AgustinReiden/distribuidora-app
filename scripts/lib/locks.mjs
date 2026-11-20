@@ -33,9 +33,12 @@ const LOCK = /\bFOR\s+(?:NO\s+KEY\s+UPDATE|UPDATE|KEY\s+SHARE|SHARE)\b/gi;
  * un literal es un comentario. Antes se sacaban primero los comentarios y después los literales: un literal
  * `' -- '` (el motivo de la merma de cancelar_pedido_con_stock) perdía su comilla de cierre, la paridad
  * quedaba al revés y el gate no veía los locks que venían después. Los regex son los mismos que en SQL.
- * Lo que no entiende: un dólar-quote anidado ($q$…$q$) ni un E'…\'…'.
+ * Una cadena E'…' (con la E suelta, no la de ELSE'x') entiende además `\'` y `\\` (H1 de la revisión de
+ * C5, #1603): sin eso la comilla escapada cerraba el literal y lo que seguía quedaba al revés.
+ * Lo que no entiende: un dólar-quote anidado ($q$…$q$).
  */
-const TOKENS_SQL = /('(?:[^']|'')*')|--[^\n]*|\/\*(?:[^*]|\*+[^*/])*\*+\//g;
+const LITERAL_SQL = String.raw`(?<!\w)[Ee]'(?:[^'\\]|\\[\s\S]|'')*'|'(?:[^']|'')*'`;
+const TOKENS_SQL = new RegExp(`(${LITERAL_SQL})|--[^\\n]*|\\/\\*(?:[^*]|\\*+[^*/])*\\*+\\/`, 'g');
 
 /** El cuerpo sin comentarios; los literales quedan como están. */
 export function sinComentarios(src) {
@@ -44,7 +47,7 @@ export function sinComentarios(src) {
 
 /** El cuerpo sin comentarios y con cada literal vacío (`''`). */
 export function sinComentariosNiLiterales(src) {
-  return sinComentarios(src).replace(/'(?:[^']|'')*'/g, "''");
+  return sinComentarios(src).replace(new RegExp(LITERAL_SQL, 'g'), "''");
 }
 
 /** Las sentencias de un cuerpo que toman un lock de fila, como las devuelve auditoria_locks(). */
