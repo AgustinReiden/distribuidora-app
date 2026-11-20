@@ -181,3 +181,42 @@ describe('updatePromocion — la promo se guarda en una sola llamada', () => {
     expect(calls.filter(c => c.op !== 'rpc')).toHaveLength(0)
   })
 })
+
+describe('updatePromocion — «otro la cambió mientras la editabas» (1599-b8, C4b)', () => {
+  beforeEach(() => {
+    calls.length = 0
+    rpcResultado = { data: { success: true, promocion: PROMO_GUARDADA }, error: null }
+  })
+
+  it('manda la versión que se abrió (updated_at_esperado) dentro de p_datos, tal cual llegó', async () => {
+    const { result } = setup()
+    await result.current.mutateAsync({ id: '5', data: INPUT_BASE, updatedAtEsperado: '2026-11-18T10:00:00.123456+00:00' })
+
+    const rpc = calls.find(c => c.op === 'rpc')
+    expect((rpc?.payload as { p_datos: Record<string, unknown> }).p_datos.updated_at_esperado).toBe('2026-11-18T10:00:00.123456+00:00')
+  })
+
+  it('sin versión no la manda (como antes)', async () => {
+    const { result } = setup()
+    await result.current.mutateAsync({ id: '5', data: INPUT_BASE })
+
+    const rpc = calls.find(c => c.op === 'rpc')
+    expect((rpc?.payload as { p_datos: Record<string, unknown> }).p_datos).not.toHaveProperty('updated_at_esperado')
+  })
+
+  it('si otro la guardó, rechaza con un ConflictoDeVersionError que dice que lo cargado sigue en la ventana', async () => {
+    rpcResultado = {
+      data: { success: false, codigo: 'promocion_cambiada', error: 'Otro usuario cambió esta promoción mientras la editabas: no se guardó nada. Volvé a abrirla para ver cómo quedó.' },
+      error: null,
+    }
+    const { result } = setup()
+    const error = await result.current.mutateAsync({ id: '5', data: INPUT_BASE, updatedAtEsperado: '2026-11-18T10:00:00+00:00' })
+      .then(() => null, (e: unknown) => e as Error & { codigo?: string; status?: number })
+    if (!error) throw new Error('tenía que rechazar')
+
+    expect(error).toMatchObject({ codigo: 'promocion_cambiada', status: 409 })
+    expect(error.message).toContain('Otro usuario cambió esta promoción')
+    expect(error.message).toContain('Lo que cargaste sigue en esta ventana')
+    expect(calls.filter(c => c.op !== 'rpc')).toHaveLength(0)
+  })
+})

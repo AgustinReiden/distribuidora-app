@@ -14,6 +14,7 @@ import { usePreviewCambioFactorQuery, usePromoPedidosAbiertosQuery } from '../..
 import { stockPorBloqueDelFormulario } from '../../utils/promocionFormulario'
 import { CampoNumero } from '../ui/CampoNumero'
 import { leerEntero } from '../../utils/normalizarNumero'
+import { nuevoRequestId } from '../../utils/idempotencia'
 
 /**
  * Un entero tipeado, o NaN (B20, D17): los miles los pone el campo («1.500» son 1500) y una coma
@@ -35,6 +36,9 @@ export default function ModalPromocion({
   onClose,
 }: ModalPromocionProps) {
   const isEditing = !!promocion
+  // La clave del alta (C4b de #1603): una por vez que se abre el formulario. Si la respuesta se
+  // pierde y se vuelve a guardar, el server reconoce el reintento y no crea otra promo.
+  const [clave] = useState(nuevoRequestId)
 
   const [nombre, setNombre] = useState(promocion?.nombre || '')
   const [fechaInicio, setFechaInicio] = useState(promocion?.fecha_inicio || fechaLocalISO())
@@ -287,6 +291,7 @@ export default function ModalPromocion({
       ? (ajusteProductoId || null)
       : (productoRegaloId || null)
     const result = await onSave({
+      ...(isEditing ? {} : { clave }),
       nombre: nombre.trim(),
       tipo: 'bonificacion',
       fechaInicio,
