@@ -2,6 +2,7 @@ import React, { Suspense, useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useActualizarUsuarioMutation, useUsuariosQuery } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
+import { useAuth } from '../../hooks/supabase/useAuth'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import type { PerfilDB } from '../../types'
 import type { UsuarioFormData } from '../modals/ModalUsuario'
@@ -20,6 +21,7 @@ function LoadingState(): React.ReactElement {
 
 export default function UsuariosContainer(): React.ReactElement {
   const notify = useNotification()
+  const miId = useAuth().user?.id
   const { data: usuarios = [], isLoading, error } = useUsuariosQuery()
   const actualizarUsuario = useActualizarUsuarioMutation()
 
@@ -39,9 +41,15 @@ export default function UsuariosContainer(): React.ReactElement {
   }, [error, notify])
 
   const handleEditarUsuario = useCallback((usuario: PerfilDB) => {
+    // C4b v3 (D1): nadie edita su propio usuario; el server lo rechaza (guardar_usuario). Se avisa
+    // antes de abrir el formulario, no después de tipear.
+    if (miId && usuario.id === miId) {
+      notify.warning('No podés editar tu propio usuario: lo edita otro administrador.')
+      return
+    }
     setUsuarioEditando(usuario)
     setModalUsuarioOpen(true)
-  }, [])
+  }, [miId, notify])
 
   const handleGuardarUsuario = useCallback(async (usuario: UsuarioFormData) => {
     if (!usuario.id) {
@@ -55,7 +63,9 @@ export default function UsuariosContainer(): React.ReactElement {
           nombre: usuario.nombre,
           rol: usuario.rol,
           activo: usuario.activo,
-          zona: usuario.rol === 'preventista' ? usuario.zona || null : null
+          zona: usuario.rol === 'preventista' ? usuario.zona || null : null,
+          // C4b v2: los roles extra en el mismo guardado (si el modal los tenía cargados).
+          ...(usuario.rolesExtra !== undefined ? { rolesExtra: usuario.rolesExtra } : {}),
         }
       })
       notify.success('Usuario actualizado')
