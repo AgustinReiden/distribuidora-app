@@ -11,8 +11,9 @@ name: Integridad de datos
 # #1563 1563-b9). Lo de acá es lo que sólo se puede mirar con los datos y la configuración
 # de prod: reportes que cierran, signup cerrado, storage, ledger, embeds con un token real.
 #
-# Los gates que leen el catálogo directo (check-realtime, check-mensajes-trigger y el
-# complemento de check-rol-sin-activo, check-rpcs-definer y check-tablas-anon) se conectan
+# Los gates que leen el catálogo directo (check-realtime, check-mensajes-trigger,
+# check-search-path y el complemento de check-rol-sin-activo, check-rpcs-definer y
+# check-tablas-anon) se conectan
 # con SUPABASE_DB_URL, el secret que ya usa backup.yml; son de sólo lectura.
 
 on:
@@ -246,6 +247,17 @@ jobs:
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: node scripts/check-mensajes-trigger.mjs
+
+      # El search_path de las funciones de public (#1564, 1564-b8 y 1564-g4): toda definer lo
+      # fija, y toda función que lo fija lo termina en pg_temp. Sin eso, una tabla temporal de
+      # quien llama tapa una de public y la función, que corre como postgres (la definer, o la
+      # invoker que una definer llama), la lee (es_admin() con una `perfiles` temporal). Un
+      # CREATE OR REPLACE sin el SET lo pierde. Sin lista de permitidas. Lee el catálogo.
+      - name: search_path de las funciones (termina en pg_temp)
+        if: always()
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: node scripts/check-search-path.mjs
 
       # Cada select de la app con un embed, probado contra PostgREST con limit=0,
       # con sus filtros y órdenes sobre embeds en el mismo request. Las FKs de

@@ -103,9 +103,87 @@ muerde "Mensajes de trigger: un RAISE con el nombre de un cliente leído con NEW
   "CREATE FUNCTION public.zz_gate_trg() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS \$f\$ DECLARE v_n text; BEGIN SELECT razon_social INTO v_n FROM clientes WHERE id = NEW.cliente_id; RAISE EXCEPTION 'El cliente % ya tiene pedido', v_n; END \$f\$" \
   "DROP FUNCTION IF EXISTS public.zz_gate_trg()"
 
+muerde "search_path: una definer con SET search_path TO 'public' (sin pg_temp)" check-search-path.mjs zz_gate_sp \
+  "CREATE FUNCTION public.zz_gate_sp() RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public' AS \$f\$ SELECT EXISTS (SELECT 1 FROM perfiles WHERE id = auth.uid()) \$f\$; REVOKE EXECUTE ON FUNCTION public.zz_gate_sp() FROM PUBLIC, anon, authenticated" \
+  "DROP FUNCTION IF EXISTS public.zz_gate_sp()"
+
+muerde "search_path: una definer con pg_temp, pero no al final" check-search-path.mjs zz_gate_sp_medio \
+  "CREATE FUNCTION public.zz_gate_sp_medio() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path TO 'pg_temp', 'public' AS \$f\$ SELECT 1 \$f\$; REVOKE EXECUTE ON FUNCTION public.zz_gate_sp_medio() FROM PUBLIC, anon, authenticated" \
+  "DROP FUNCTION IF EXISTS public.zz_gate_sp_medio()"
+
+muerde "search_path: una INVOKER de trigger con SET search_path TO 'public' (sin pg_temp)" check-search-path.mjs zz_gate_sp_inv \
+  "CREATE FUNCTION public.zz_gate_sp_inv() RETURNS trigger LANGUAGE plpgsql SET search_path TO 'public' AS \$f\$ BEGIN PERFORM 1 FROM perfiles WHERE id = auth.uid(); RETURN NEW; END \$f\$; REVOKE EXECUTE ON FUNCTION public.zz_gate_sp_inv() FROM PUBLIC, anon, authenticated" \
+  "DROP FUNCTION IF EXISTS public.zz_gate_sp_inv()"
+
+muerde "search_path: pg_temp repetido (vale la primera aparición, antes que public)" check-search-path.mjs zz_gate_sp_doble \
+  "CREATE FUNCTION public.zz_gate_sp_doble() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path TO 'pg_temp', 'public', 'pg_temp' AS \$f\$ SELECT 1 \$f\$; REVOKE EXECUTE ON FUNCTION public.zz_gate_sp_doble() FROM PUBLIC, anon, authenticated" \
+  "DROP FUNCTION IF EXISTS public.zz_gate_sp_doble()"
+
+muerde "search_path: un PROCEDURE con SET search_path TO 'public'" check-search-path.mjs zz_gate_sp_proc \
+  "CREATE PROCEDURE public.zz_gate_sp_proc() LANGUAGE sql SET search_path TO 'public' AS \$f\$ SELECT 1 \$f\$; REVOKE EXECUTE ON PROCEDURE public.zz_gate_sp_proc() FROM PUBLIC, anon, authenticated" \
+  "DROP PROCEDURE IF EXISTS public.zz_gate_sp_proc()"
+
+# Lo que el gate tiene que dejar pasar: pg_temp al final (con otro esquema en el medio), y una INVOKER sin search_path.
+no_muerde "search_path: pg_temp al final, o una INVOKER sin search_path, pasan" check-search-path.mjs \
+  "CREATE FUNCTION public.zz_gate_sp_bien() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path TO 'public', 'pg_catalog', 'pg_temp' AS \$f\$ SELECT 1 \$f\$; REVOKE EXECUTE ON FUNCTION public.zz_gate_sp_bien() FROM PUBLIC, anon, authenticated; CREATE FUNCTION public.zz_gate_sp_invoker() RETURNS int LANGUAGE sql AS \$f\$ SELECT 1 \$f\$; REVOKE EXECUTE ON FUNCTION public.zz_gate_sp_invoker() FROM PUBLIC, anon, authenticated" \
+  "DROP FUNCTION IF EXISTS public.zz_gate_sp_bien(); DROP FUNCTION IF EXISTS public.zz_gate_sp_invoker()"
+
 muerde "Cruce por ids: una RPC que cambia un cliente de otra sucursal" check-cruce-ids.mjs zz_gate_cruce \
   "CREATE FUNCTION public.zz_gate_cruce(p_cliente_id bigint) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS \$f\$ BEGIN UPDATE clientes SET direccion = 'tocada' WHERE id = p_cliente_id; END \$f\$; GRANT EXECUTE ON FUNCTION public.zz_gate_cruce(bigint) TO authenticated" \
   "DROP FUNCTION IF EXISTS public.zz_gate_cruce(bigint)"
+
+# ---------------------------------------------------------------------------------------------------
+# El ensayo del aumento masivo de precios (C8, #1603): mide TRABAJO por producto (bloques, WAL, llamadas)
+# y el lote contra una referencia del mismo runner, no segundos. Cada defecto se arma como un trigger en
+# `productos` (que el ensayo, como authenticated, dispara en cada fila del aumento), se corre el ensayo
+# sobre el primer lote (-v lotes=1) y se mira su veredicto; después se deshace.
+#
+# muerde_ensayo <nombre> <FALLA|OK> <fragmento que tiene que aparecer en la salida> <sql que arma> <sql que deshace>
+ENSAYO_PRECIOS="scripts/test-precios-masivo-30000-1561.sql"
+muerde_ensayo() {
+  local nombre="$1" espera="$2" marca="$3" arma="$4" deshace="$5"
+  echo ""
+  echo "=== $nombre"
+  if ! SQL "$arma"; then
+    echo "   no pude armar el defecto"; MAL+=("$nombre (no armó)"); SQL "$deshace" || true; return
+  fi
+  docker exec -i "$GATE_DB_CONTENEDOR" psql -U postgres -h localhost -d postgres -X -q -v lotes=1 < "$ENSAYO_PRECIOS" > /tmp/muerde-ensayo.out 2>&1
+  SQL "$deshace" || { echo "   NO pude deshacer el defecto"; MAL+=("$nombre (no deshizo)"); }
+  grep -E "NOTICE:  medidas|ENSAYO" /tmp/muerde-ensayo.out | sed 's/^/     /'
+  if [ "$espera" = "FALLA" ]; then
+    if grep -q "ENSAYO FALL" /tmp/muerde-ensayo.out && grep -q "$marca" /tmp/muerde-ensayo.out; then
+      echo "   ✓ el ensayo dice FALLÓ y nombra «$marca», como tiene que ser"
+    else
+      echo "   ✗ el ensayo no se puso rojo por «$marca»: ya no muerde (o se cayó)"
+      tail -5 /tmp/muerde-ensayo.out | sed 's/^/     /'
+      MAL+=("$nombre (no mordió)")
+    fi
+  else
+    if grep -q "ENSAYO OK" /tmp/muerde-ensayo.out && ! grep -q "ENSAYO FALL" /tmp/muerde-ensayo.out; then
+      echo "   ✓ el ensayo lo deja pasar, como tiene que ser"
+    else
+      echo "   ✗ el ensayo se puso rojo ante algo que no es un defecto"
+      tail -5 /tmp/muerde-ensayo.out | sed 's/^/     /'
+      MAL+=("$nombre (rojo de más)")
+    fi
+  fi
+}
+
+muerde_ensayo "Precios masivos: un trigger que cuenta productos por fila (cuadrático)" FALLA "bloques" \
+  "CREATE FUNCTION public.zz_gate_lento_a() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'pg_temp' AS \$f\$ DECLARE v int; BEGIN SELECT count(*) INTO v FROM public.productos; RETURN NULL; END \$f\$; CREATE TRIGGER zz_gate_lento_a AFTER UPDATE ON public.productos FOR EACH ROW EXECUTE FUNCTION public.zz_gate_lento_a()" \
+  "DROP TRIGGER IF EXISTS zz_gate_lento_a ON public.productos; DROP FUNCTION IF EXISTS public.zz_gate_lento_a()"
+
+muerde_ensayo "Precios masivos: un trigger que sólo gasta CPU (no toca tablas)" FALLA "unidades de la referencia" \
+  "CREATE FUNCTION public.zz_gate_lento_b() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'pg_temp' AS \$f\$ DECLARE v int; BEGIN SELECT count(*) INTO v FROM generate_series(1, 100000); RETURN NULL; END \$f\$; CREATE TRIGGER zz_gate_lento_b AFTER UPDATE ON public.productos FOR EACH ROW EXECUTE FUNCTION public.zz_gate_lento_b()" \
+  "DROP TRIGGER IF EXISTS zz_gate_lento_b ON public.productos; DROP FUNCTION IF EXISTS public.zz_gate_lento_b()"
+
+muerde_ensayo "Precios masivos: un trigger que llama 25 veces a una función por producto" FALLA "llamadas" \
+  "CREATE FUNCTION public.zz_gate_lento_c_aux() RETURNS int LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'pg_temp' AS \$f\$ BEGIN RETURN 1; END \$f\$; CREATE FUNCTION public.zz_gate_lento_c() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'pg_temp' AS \$f\$ BEGIN FOR i IN 1..25 LOOP PERFORM public.zz_gate_lento_c_aux(); END LOOP; RETURN NULL; END \$f\$; CREATE TRIGGER zz_gate_lento_c AFTER UPDATE ON public.productos FOR EACH ROW EXECUTE FUNCTION public.zz_gate_lento_c()" \
+  "DROP TRIGGER IF EXISTS zz_gate_lento_c ON public.productos; DROP FUNCTION IF EXISTS public.zz_gate_lento_c(); DROP FUNCTION IF EXISTS public.zz_gate_lento_c_aux()"
+
+muerde_ensayo "Precios masivos: un trigger barato de más (un cambio legítimo chico) no lo pone rojo" OK "" \
+  "CREATE FUNCTION public.zz_gate_lento_d() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'pg_temp' AS \$f\$ BEGIN RETURN NULL; END \$f\$; CREATE TRIGGER zz_gate_lento_d AFTER UPDATE ON public.productos FOR EACH ROW EXECUTE FUNCTION public.zz_gate_lento_d()" \
+  "DROP TRIGGER IF EXISTS zz_gate_lento_d ON public.productos; DROP FUNCTION IF EXISTS public.zz_gate_lento_d()"
 
 echo ""
 if [ ${#MAL[@]} -gt 0 ]; then
