@@ -4,12 +4,8 @@ import { Truck } from 'lucide-react';
 import ModalBase from './ModalBase';
 import { Button } from '../ui/Button';
 import { useZodValidation } from '../../hooks/useZodValidation';
-import {
-  usePerfilRolesQuery,
-  useAsignarPerfilRolesMutation,
-} from '../../hooks/queries';
+import { usePerfilRolesQuery } from '../../hooks/queries';
 import { useSucursal } from '../../contexts/SucursalContext';
-import { useNotification } from '../../contexts/NotificationContext';
 import type { PerfilDB } from '../../types';
 
 // Validación de teléfono. Duplicada de lib/schemas.ts (telefonoSchema) a
@@ -31,11 +27,6 @@ export const usuarioSchema = z.object({
     .transform(val => val.trim())
     .refine(val => val.length >= 2, { message: 'El nombre debe tener al menos 2 caracteres' }),
 
-  email: z
-    .string()
-    .email({ message: 'Email inválido' })
-    .min(1, { message: 'El email es obligatorio' }),
-
   rol: z.enum(['admin', 'preventista', 'transportista', 'deposito', 'encargado'], {
     error: 'Rol invalido'
   }),
@@ -56,6 +47,11 @@ export interface UsuarioFormData {
   rol: RolUsuario;
   activo: boolean;
   zona: string;
+  /**
+   * Los roles extra de la sucursal activa (C4b v2): viajan en el mismo guardado que el perfil
+   * (`guardar_usuario`). Sin los roles guardados cargados no viajan y no se tocan.
+   */
+  rolesExtra?: string[];
 }
 
 /** Props del componente ModalUsuario */
@@ -81,8 +77,6 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
   // Capacidades extra en la sucursal activa (mig 155)
   const { currentSucursalNombre } = useSucursal();
   const { data: rolesExtraGuardados } = usePerfilRolesQuery(usuario?.id);
-  const asignarRolesMut = useAsignarPerfilRolesMutation();
-  const notify = useNotification();
 
   const [form, setForm] = useState<UsuarioFormData>(usuario ? {
     id: usuario.id,
@@ -116,9 +110,10 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
   };
 
   const handleSubmit = async (): Promise<void> => {
+    // Sin el email (1601-b5): el campo es de sólo lectura y no se guarda, y desde D53 llega
+    // por otro pedido (emails_de_usuarios) que puede fallar; no puede trabar el guardado.
     const result = validate({
       nombre: form.nombre,
-      email: form.email || '',
       rol: form.rol,
       zona: form.zona,
       telefono: '' // Optional field
@@ -132,25 +127,14 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
       return;
     }
 
-    // Guardar perfil
-    await onSave({ ...form, id: usuario?.id });
-
-    // Guardar capacidades extra de la sucursal activa. Si el rol paso a ser
-    // transportista o admin, se limpian: ya las tiene por rol y dejarlas seria
-    // ruido en la tabla.
-    // Sin los roles guardados cargados (la consulta no volvió) no se escribe nada: el estado
-    // local arranca en «sin capacidades» y guardar así las borraría (#1561, 1561-b12).
-    if (usuario?.id && rolesExtraGuardados !== undefined) {
-      const roles = mostrarCapacidadesExtra && puedeLlevarRuta ? ['transportista'] : [];
-      try {
-        await asignarRolesMut.mutateAsync({ usuarioId: usuario.id, roles });
-      } catch (e) {
-        // El perfil ya se guardó (y el modal se cerró): que no pase en silencio.
-        notify.error(
-          `Se guardó el usuario, pero no se pudieron guardar sus capacidades extra: ${e instanceof Error && e.message ? e.message : 'error desconocido'}`
-        );
-      }
-    }
+    // El perfil y sus capacidades extra de la sucursal activa, en UN guardado (C4b v2:
+    // guardar_usuario). Si el rol pasó a ser transportista o admin, se limpian: ya las tiene por rol.
+    // Sin los roles guardados cargados (la consulta no volvió) no viajan: el estado local arranca en
+    // «sin capacidades» y guardar así las borraría (#1561, 1561-b12).
+    const rolesExtra = usuario?.id && rolesExtraGuardados !== undefined
+      ? (mostrarCapacidadesExtra && puedeLlevarRuta ? ['transportista'] : [])
+      : undefined;
+    await onSave({ ...form, id: usuario?.id, ...(rolesExtra !== undefined ? { rolesExtra } : {}) });
   };
 
   const inputClass = (field: string): string =>
@@ -164,6 +148,8 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
           <input
             type="email"
             value={form.email || ''}
+            placeholder="—"
+            aria-label="Email"
             disabled
             className="w-full px-3 py-2 border rounded-lg bg-gray-100 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-400"
           />
@@ -272,8 +258,8 @@ const ModalUsuario = memo(function ModalUsuario({ usuario, onSave, onClose, guar
         </Button>
         <Button
           onClick={handleSubmit}
-          disabled={guardando || asignarRolesMut.isPending}
-          loading={guardando || asignarRolesMut.isPending}
+          disabled={guardando}
+          loading={guardando}
           variant="primary"
           size="md"
         >

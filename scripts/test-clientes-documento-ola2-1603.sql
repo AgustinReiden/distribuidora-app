@@ -239,10 +239,11 @@ BEGIN
   IF v_n <> 37 THEN
     f := f || format('D4: audit_logs tiene %s filas de UPDATE del documento de los tocados (esperado 37)', v_n);
   END IF;
+  -- `updated_at` es la versión del cliente (C4b de #1603): se mueve con el documento, y no es otro dato.
   IF EXISTS (SELECT 1 FROM public.audit_logs
               WHERE tabla = 'clientes' AND accion = 'UPDATE' AND registro_id = ANY (v_ids::text[])
                 AND campos_modificados && ARRAY['cuit', 'tipo_documento']
-                AND NOT (campos_modificados <@ ARRAY['cuit', 'tipo_documento'])) THEN
+                AND NOT (campos_modificados <@ ARRAY['cuit', 'tipo_documento', 'updated_at'])) THEN
     f := f || 'D4: audit_logs registró otros campos además del documento'::text;
   END IF;
 

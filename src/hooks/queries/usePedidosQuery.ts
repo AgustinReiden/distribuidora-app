@@ -15,7 +15,13 @@ import { nuevoRequestId, type VerificacionDeAlta } from '../../utils/idempotenci
 import { isTransientNetworkError, conPlazoDeRed } from '../../utils/retryWithBackoff'
 import { RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
 import type { OrigenPrecioItem } from '../../utils/origenPrecio'
-import { construirFiltrosPedidos, aplicarFiltroConSalvedad } from '../../utils/construirFiltrosPedidos'
+import {
+  construirFiltrosPedidos,
+  aplicarFiltroConSalvedad,
+  EMBED_CON_SALVEDAD,
+  EMBED_SIN_SALVEDAD,
+  sinEmbedSalvedad,
+} from '../../utils/construirFiltrosPedidos'
 import { traerTodo } from '../../utils/paginacion'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
@@ -231,25 +237,6 @@ async function enrichWithSalvedades(pedidos: Record<string, unknown>[]): Promise
   return salvedadesMap
 }
 
-/**
- * Ids de pedido con al menos una salvedad vigente (no anulada) en
- * `salvedades_items`, para el filtro "Con salvedad / Sin salvedad" (#524).
- * Mismo criterio que el badge de la tarjeta y que las jornadas: una anulada
- * deshace todo y no es faltante (#1180). `enrichWithSalvedades` sí trae todas,
- * porque la tarjeta rotula las anuladas.
- *
- * Paginado con `traerTodo`: la tabla crece con cada entrega con salvedad y no
- * hay ninguna garantía de que se mantenga bajo las 1.000 filas que corta
- * PostgREST.
- */
-export async function fetchPedidoIdsConSalvedad(): Promise<number[]> {
-  const filas = await traerTodo<{ pedido_id: number }>(
-    () => supabase.from('salvedades_items').select('pedido_id').neq('estado_resolucion', 'anulada').order('id'),
-    { etiqueta: 'los pedidos con salvedad' },
-  )
-  return Array.from(new Set(filas.map(f => f.pedido_id)))
-}
-
 // Fetch functions
 
 async function fetchPedidoById(id: string): Promise<PedidoDB | null> {
@@ -317,6 +304,15 @@ export interface PaginatedResult<T> {
   totalCount: number
 }
 
+/** Lo que la lista paginada lee de cada fila de `pedidos` (el resto viaja tal cual a `PedidoDB`). */
+type FilaListaPedidos = Record<string, unknown> & {
+  id: number
+  estado?: string | null
+  usuario_id?: string | null
+  transportista_id?: string | null
+  entregado_por?: string | null
+}
+
 async function fetchPedidosPaginated(
   page: number,
   pageSize: number,
@@ -330,28 +326,25 @@ async function fetchPedidosPaginated(
 
   // Use !inner join when searching so PostgREST filters parent rows by client fields
   const selectStr = hasSearch ? PEDIDO_SELECT_CLIENTE_INNER : PEDIDO_SELECT
-
-  // conSalvedad necesita un round-trip previo a salvedades_items (ver
-  // fetchPedidoIdsConSalvedad): no es un filtro que se pueda encadenar solo.
-  let idsConSalvedad: number[] | null = null
-  if (filters?.conSalvedad && filters.conSalvedad !== 'todos') {
-    idsConSalvedad = await fetchPedidoIdsConSalvedad()
-  }
+  // 1598-b4: el filtro con/sin salvedad es un embed (ver aplicarFiltroConSalvedad).
+  const conSalvedad = filters?.conSalvedad
 
   // `created_at` solo no es único (un alta masiva o el replay de la cola comparten
   // timestamp): sin desempate, `range()` puede repetir un pedido entre dos páginas
   // y saltar otro. El `id` lo fija.
+  // El select con el embed ya no es un literal: el tipo de la fila se dice a mano (lo que se lee acá).
   let query = supabase
     .from('pedidos')
-    .select(selectStr, { count: 'exact' })
+    .select<string, FilaListaPedidos>(selectStr + (conSalvedad === 'con_salvedad' ? EMBED_CON_SALVEDAD : conSalvedad === 'sin_salvedad' ? EMBED_SIN_SALVEDAD : ''), { count: 'exact' })
     .order('created_at', { ascending: false })
     .order('id', { ascending: false })
 
   query = construirFiltrosPedidos(query, filters, search)
-  query = aplicarFiltroConSalvedad(query, filters?.conSalvedad, idsConSalvedad)
+  query = aplicarFiltroConSalvedad(query, conSalvedad)
   query = query.range(from, to)
 
-  const { data, error, count } = await query
+  const { data: filas, error, count } = await query
+  const data = filas?.map(sinEmbedSalvedad)
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los pedidos. Revisá la señal e intentá de nuevo.')
 
@@ -368,7 +361,7 @@ async function fetchPedidosPaginated(
   if (perfilIds.size > 0) {
     const { data: perfiles, error: errorPerfiles } = await supabase
       .from('perfiles')
-      .select('id, nombre, email')
+      .select('id, nombre')
       .in('id', Array.from(perfilIds))
     // FRT-8: sin perfiles la lista salía con el vendedor y el chofer en blanco, sin aviso.
     if (errorPerfiles) throw errorDeSupabase(errorPerfiles, 'Sin conexión: no se pudo cargar quién cargó y quién reparte cada pedido. Revisá la señal e intentá de nuevo.')
@@ -391,7 +384,7 @@ async function fetchPedidosPaginated(
     salvedades: salvedadesMap[String(pedido.id)] || [],
   }))
 
-  return { data: enrichedPedidos as PedidoDB[], totalCount: count ?? 0 }
+  return { data: enrichedPedidos as unknown as PedidoDB[], totalCount: count ?? 0 }
 }
 
 // Mutation functions
@@ -1006,10 +999,12 @@ export async function fetchPedidosNoEntregados(sucursalId: number | null): Promi
 
   let perfilesMap: Record<string, PerfilDB> = {}
   if (transportistaIds.size > 0) {
-    const { data: perfiles } = await supabase
+    const { data: perfiles, error: errorPerfiles } = await supabase
       .from('perfiles')
-      .select('id, nombre, email')
+      .select('id, nombre')
       .in('id', Array.from(transportistaIds))
+    // 1598-b7: sin perfiles el chofer salía en blanco, sin aviso.
+    if (errorPerfiles) throw errorDeSupabase(errorPerfiles, 'Sin conexión: no se pudo cargar quién reparte cada pedido. Revisá la señal e intentá de nuevo.')
 
     if (perfiles) {
       perfilesMap = Object.fromEntries(
@@ -1065,30 +1060,9 @@ export async function fetchPedidosParaEntregaYPago(sucursalId: number | null): P
   const data = (await traerTodo<Record<string, unknown>>(construirQuery, { etiqueta: 'los pedidos para entrega y pago' }))
     .filter(pedido => pedido.canal !== 'cambio')
 
-  // Enrich with transportista names
-  const transportistaIds = new Set<string>()
-  for (const pedido of data) {
-    if (pedido.transportista_id) transportistaIds.add(pedido.transportista_id as string)
-  }
-
-  let perfilesMap: Record<string, PerfilDB> = {}
-  if (transportistaIds.size > 0) {
-    const { data: perfiles } = await supabase
-      .from('perfiles')
-      .select('id, nombre, email')
-      .in('id', Array.from(transportistaIds))
-
-    if (perfiles) {
-      perfilesMap = Object.fromEntries(
-        (perfiles as PerfilDB[]).map(p => [p.id, p])
-      )
-    }
-  }
-
-  return data.map(pedido => ({
-    ...pedido,
-    transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id as string] : null,
-  })) as PedidoDB[]
+  // Esta pantalla no muestra el chofer de cada pedido: no se lo pide a `perfiles` (H2 de la revisión de
+  // C7: un fallo de esa consulta no tiene por qué tirar la lista de lo que hay que cobrar o entregar).
+  return data as unknown as PedidoDB[]
 }
 
 /**
@@ -1331,30 +1305,9 @@ export async function fetchPedidosNoPagados(sucursalId: number | null): Promise<
 
   const data = await traerTodo<Record<string, unknown>>(construirQuery, { etiqueta: 'los pedidos no pagados' })
 
-  // Enrich with transportista names
-  const transportistaIds = new Set<string>()
-  for (const pedido of data) {
-    if (pedido.transportista_id) transportistaIds.add(pedido.transportista_id as string)
-  }
-
-  let perfilesMap: Record<string, PerfilDB> = {}
-  if (transportistaIds.size > 0) {
-    const { data: perfiles } = await supabase
-      .from('perfiles')
-      .select('id, nombre, email')
-      .in('id', Array.from(transportistaIds))
-
-    if (perfiles) {
-      perfilesMap = Object.fromEntries(
-        (perfiles as PerfilDB[]).map(p => [p.id, p])
-      )
-    }
-  }
-
-  return data.map(pedido => ({
-    ...pedido,
-    transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id as string] : null,
-  })) as PedidoDB[]
+  // Esta pantalla no muestra el chofer de cada pedido: no se lo pide a `perfiles` (H2 de la revisión de
+  // C7: un fallo de esa consulta no tiene por qué tirar la lista de lo que hay que cobrar o entregar).
+  return data as unknown as PedidoDB[]
 }
 
 /**

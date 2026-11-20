@@ -9,6 +9,7 @@
  * unicidades las valida el server (`guardar_empleado`); acá se repiten sus mensajes.
  */
 import React, { useId, useMemo, useState } from 'react'
+import { useCambiosDesdeApertura } from '../../hooks/useCambiosDesdeApertura'
 import type { FormEvent, ReactNode } from 'react'
 import { z } from 'zod'
 import { Link2 } from 'lucide-react'
@@ -22,7 +23,9 @@ import {
   PUESTOS,
   errorDeArreglo,
   errorDeDesdeArreglo,
+  errorDeFechaIngreso,
   inicioDelPeriodo,
+  MENSAJE_INGRESO_FUTURO,
   normalizarCuil,
   MENSAJE_MONTO_ILEGIBLE,
   MENSAJE_SIN_SUELDO,
@@ -201,6 +204,10 @@ export default function ModalEmpleado({
   )
   const [cuil, setCuil] = useState(empleado?.cuil ?? '')
   const [ingreso, setIngreso] = useState(empleado?.fecha_ingreso ?? '')
+  // 1597-b6: la fecha de ingreso futura va en rojo junto al campo, antes de guardar (la misma
+  // regla que guardar_empleado), y el motivo del server también se muestra ahí.
+  const [errorIngresoServer, setErrorIngresoServer] = useState<string | null>(null)
+  const errorIngreso = errorDeFechaIngreso(ingreso, empleado?.fecha_ingreso ?? null, hoy) ?? errorIngresoServer
   const [telefono, setTelefono] = useState(empleado?.telefono ?? '')
 
   // ---- Vínculos ------------------------------------------------------------
@@ -277,6 +284,13 @@ export default function ModalEmpleado({
     if (comboboxAbierto) event.preventDefault()
   }
 
+  // La X, Escape y el «atrás» del teléfono preguntan «Salir sin guardar» si el formulario cambió respecto de
+  // como abrió (decisión 4 del dueño, #1603): una edición sin tocar no pregunta.
+  const hayCambios = useCambiosDesdeApertura({
+    nombre, puesto, sucursalSel, cuil, ingreso, telefono, usuarioId, clienteId, vehiculoId,
+    sueldoTxt, frecuencia, comisiona, desdeManual, saldoTxt, saldoSigno,
+  })
+
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError('')
@@ -335,6 +349,12 @@ export default function ModalEmpleado({
       return
     }
     // El primer arreglo también vale desde una fecha a no más de 60 días de hoy (GTO-3, #1521).
+    const errorFechaIngreso = errorDeFechaIngreso(ingreso, empleado?.fecha_ingreso ?? null, hoy)
+    if (errorFechaIngreso) {
+      setError(errorFechaIngreso)
+      document.getElementById(`${id}-ingreso`)?.focus()
+      return
+    }
     const errorDesde = edicion ? null : errorDeDesdeArreglo(desde, hoy)
     if (errorDesde) {
       setError(errorDesde)
@@ -349,7 +369,9 @@ export default function ModalEmpleado({
     } catch (err) {
       // getErrorMessage, no `err instanceof Error`: el error de supabase-js es un
       // objeto plano. Ver src/utils/errorDeSupabase.ts.
-      setError(getErrorMessage(err))
+      const mensaje = getErrorMessage(err)
+      setError(mensaje)
+      if (mensaje.includes(MENSAJE_INGRESO_FUTURO)) setErrorIngresoServer(MENSAJE_INGRESO_FUTURO)
     } finally {
       setGuardando(false)
     }
@@ -360,6 +382,7 @@ export default function ModalEmpleado({
       title={edicion ? 'Editar empleado' : 'Nuevo empleado'}
       onClose={onClose}
       maxWidth="max-w-xl"
+      hayCambios={hayCambios}
       onEscapeKeyDown={handleEscapeKeyDown}
     >
       <form onSubmit={handleSubmit} className="p-4 space-y-4">
@@ -432,9 +455,14 @@ export default function ModalEmpleado({
               id={`${id}-ingreso`}
               type="date"
               value={ingreso}
-              onChange={e => setIngreso(e.target.value)}
-              className={cn(CLASE_INPUT, 'text-sm')}
+              onChange={e => { setIngreso(e.target.value); setErrorIngresoServer(null) }}
+              aria-invalid={errorIngreso ? true : undefined}
+              aria-describedby={errorIngreso ? `${id}-ingreso-error` : undefined}
+              className={cn(CLASE_INPUT, 'text-sm', errorIngreso && 'border-red-500 dark:border-red-500')}
             />
+            {errorIngreso && (
+              <p id={`${id}-ingreso-error`} className="mt-1 text-xs text-red-600 dark:text-red-400">{errorIngreso}</p>
+            )}
           </div>
           <div>
             <label htmlFor={`${id}-telefono`} className={CLASE_ETIQUETA}>Teléfono</label>

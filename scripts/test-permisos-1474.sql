@@ -227,8 +227,10 @@ BEGIN
     IF v_err <> '1' THEN
       v_fallas := v_fallas || format('P2 · el admin edita a su preventista: %s', v_err);
     END IF;
+    -- Cambió de regla (C6 de #1603): nadie edita su propio perfil, tampoco un admin;
+    -- trg_perfiles_nadie_se_edita lo rechaza con el motivo (antes afirmaba 1 fila).
     v_err := pg_temp.rest_n(format('UPDATE public.perfiles SET nombre = nombre WHERE id = %L', v_a1));
-    IF v_err <> '1' THEN
+    IF v_err NOT LIKE '42501 No podés editar tu propio usuario%' THEN
       v_fallas := v_fallas || format('P2 · el admin edita su propio nombre: %s', v_err);
     END IF;
     RAISE EXCEPTION USING ERRCODE = 'ZZ001';

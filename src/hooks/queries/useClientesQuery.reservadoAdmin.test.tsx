@@ -27,10 +27,12 @@ import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { simularGuardarCliente } from '../../test/guardarClienteSimulado'
 
 const insertSpy = vi.fn()
 const deleteSpy = vi.fn()
 const updateSpy = vi.fn()
+const rpcSimulado = simularGuardarCliente({ insertSpy: (f) => insertSpy(f), updateSpy: (p) => updateSpy(p) })
 const from = vi.fn()
 
 // `createCliente` siempre pasa por el guard de duplicados (mig 250): la RPC
@@ -42,7 +44,9 @@ const SIN_DUPLICADO = {
 vi.mock('../supabase/base', () => ({
   supabase: {
     from: (...args: unknown[]) => from(...args),
-    rpc: () => Promise.resolve({ data: SIN_DUPLICADO, error: null }),
+    // C4b v2: el alta y la edición van por guardar_cliente; su `campos` es lo que viajaba en el
+    // INSERT o en el PATCH.
+    rpc: (...args: unknown[]) => rpcSimulado(...(args as [string, Record<string, unknown>])),
   },
 }))
 
@@ -159,15 +163,20 @@ describe('reservado_admin en la capa de escritura', () => {
     expect(updateSpy.mock.calls[0][0]).toMatchObject({ reservado_admin: true })
   })
 
-  it('un cliente reservado se guarda SIN asignaciones: borra las que había y no inserta ninguna', async () => {
+  it('un cliente reservado se guarda SIN asignaciones: la lista vacía viaja en el mismo guardado', async () => {
     asignadasEnBase = ['p-viejo']
     const { result } = renderHook(() => useActualizarClienteMutation(), { wrapper })
 
     await result.current.mutateAsync({ id: '77', data: { reservado_admin: true, preventista_ids: [] } })
 
-    await waitFor(() => expect(deleteSpy).toHaveBeenCalledWith('cliente_id', '77'))
-    expect(deleteSpy).toHaveBeenCalledWith('preventista_id', ['p-viejo'])
-    // El único insert posible sería el de cliente_preventistas: no tiene que existir.
+    // C4b v2: guardar_cliente borra en la base las que había (lo prueba su ensayo, K7); el front
+    // ya no escribe cliente_preventistas por REST.
+    await waitFor(() => expect(updateSpy).toHaveBeenCalled())
+    const llamada = rpcSimulado.mock.calls.find(([fn]) => fn === 'guardar_cliente')
+    expect((llamada?.[1] as { p_cliente: Record<string, unknown> }).p_cliente).toMatchObject({
+      id: 77, preventista_ids: [], campos: { reservado_admin: true },
+    })
+    expect(deleteSpy).not.toHaveBeenCalled()
     expect(insertSpy).not.toHaveBeenCalled()
   })
 })

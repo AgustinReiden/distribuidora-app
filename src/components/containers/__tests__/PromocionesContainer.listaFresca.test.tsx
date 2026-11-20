@@ -16,19 +16,20 @@ const mocks = vi.hoisted(() => ({
   refetchPromos: vi.fn(),
   refetchCombos: vi.fn(),
   guardarCombo: vi.fn(),
+  actualizarPromo: vi.fn(),
   notifyError: vi.fn(),
   notifyWarning: vi.fn(),
 }))
 
 const PROMO_VIEJA = { id: '1', nombre: 'Promo vieja', tipo: 'bonificacion', activo: true, productos: [], reglas: [], usos_pendientes: 0 }
-const PROMO_FRESCA = { ...PROMO_VIEJA, nombre: 'Promo fresca' }
+const PROMO_FRESCA = { ...PROMO_VIEJA, nombre: 'Promo fresca', updated_at: '2026-11-18T10:00:00.123456+00:00' }
 const comboBase = {
   id: '500', activo: false, fechaInicio: '2026-01-01', fechaFin: null, precio: 11000,
   combinaEscalas: false, prioridad: 0, topeCombos: null, productoAMoverId: null,
   componentes: [{ cantidad: 1, sueltos: ['10'], categorias: [] }],
 }
 const COMBO_VIEJO = { ...comboBase, nombre: 'Combo viejo' }
-const COMBO_FRESCO = { ...comboBase, nombre: 'Combo fresco' }
+const COMBO_FRESCO = { ...comboBase, nombre: 'Combo fresco', updatedAt: '2026-11-18T11:00:00.654321+00:00' }
 
 vi.mock('../../../hooks/queries', () => {
   const mutacion = () => ({ mutateAsync: vi.fn(), isPending: false })
@@ -36,7 +37,7 @@ vi.mock('../../../hooks/queries', () => {
     usePromocionesListQuery: () => ({ data: [PROMO_VIEJA], isLoading: false, isError: false, refetch: mocks.refetchPromos }),
     useProductosQuery: () => ({ data: [] }),
     useCrearPromocionMutation: mutacion,
-    useActualizarPromocionMutation: mutacion,
+    useActualizarPromocionMutation: () => ({ mutateAsync: mocks.actualizarPromo, isPending: false }),
     useEliminarPromocionMutation: mutacion,
     useTogglePromocionActivaMutation: mutacion,
     usePromoUnidadesEntregadasQuery: () => ({ data: undefined }),
@@ -69,7 +70,12 @@ vi.mock('../../vistas/VistaPromociones', () => ({
   ),
 }))
 vi.mock('../../modals/ModalPromocion', () => ({
-  default: (p: { promocion: { nombre: string } | null }) => <div>editando: {p.promocion?.nombre}</div>,
+  default: (p: { promocion: { nombre: string } | null; onSave: (d: unknown) => void }) => (
+    <div>
+      editando: {p.promocion?.nombre}
+      <button onClick={() => p.onSave({ nombre: 'cambiada' })}>guardar promo</button>
+    </div>
+  ),
 }))
 vi.mock('../../vistas/VistaCombos', () => ({
   default: (p: { combos: unknown[]; onEditarCombo: (x: unknown) => void; onToggleActivo: (x: unknown) => void }) => (
@@ -111,6 +117,19 @@ describe('PromocionesContainer — parte de la base, no de la lista en caché', 
     expect(mocks.refetchPromos).toHaveBeenCalledWith({ throwOnError: true })
   })
 
+  it('guardar la promo editada manda la versión con la que se abrió (1599-b8)', async () => {
+    mocks.actualizarPromo.mockResolvedValue({})
+    const user = userEvent.setup()
+    render(<PromocionesContainer />)
+    await user.click(await screen.findByRole('button', { name: 'editar promo' }, ESPERA))
+    await user.click(await screen.findByRole('button', { name: 'guardar promo' }, ESPERA))
+
+    await vi.waitFor(() => expect(mocks.actualizarPromo).toHaveBeenCalledTimes(1))
+    expect(mocks.actualizarPromo.mock.calls[0][0]).toMatchObject({
+      id: '1', updatedAtEsperado: '2026-11-18T10:00:00.123456+00:00',
+    })
+  })
+
   it('si no se puede traer la promo fresca, no abre el editor y lo dice', async () => {
     mocks.refetchPromos.mockRejectedValue(new Error('red'))
     const user = userEvent.setup()
@@ -137,6 +156,8 @@ describe('PromocionesContainer — parte de la base, no de la lista en caché', 
     expect(input.nombre).toBe('Combo fresco')
     expect(input.activo).toBe(true)
     expect(input.id).toBe('500')
+    // Y con la versión que se leyó (1599-b8): si otro lo cambió en el medio, no se pisa.
+    expect(input.updatedAtEsperado).toBe('2026-11-18T11:00:00.654321+00:00')
   })
 
   it('si el combo ya estaba activo (otro lo activó), avisa y no escribe', async () => {

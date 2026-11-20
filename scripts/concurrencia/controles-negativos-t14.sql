@@ -31,6 +31,17 @@
 --   Sin forzar (arrancan juntas) casi no cae, y con el pre-bloqueo puesto da 0: T14d 9 de 200, T14i 3 de 200, T14b 0 de
 --   200, T14m 0 de 200. T14k, T14n, T14o y T14p (C4) dan 0 con y sin la mutación: no dependen de ninguno de estos
 --   pre-bloqueos.
+--
+-- Rehecho el 19/11 (H5 de la revisión de C2, ola 2 de #1603), sobre la 531 con la migración de C2. T14c/d, T14j y
+-- T14n/o/p daban 0 de N con y sin la mutación porque los escenarios chocaban con dos reglas del dueño: D2 (el factor de
+-- una promo no cambia con pedidos sin entregar: X sale entregado, `conc.t14_setup(1, true)`, y el rechazo de D2 cuando la
+-- venta confirma primero es de negocio, `esDeNegocio("P0001")`) y D23 (la salvedad va sólo sobre un pedido en camino:
+-- `conc.t14m_setup(true)` y t14n_setup ponen X en `asignado`). Correctas / 40P01:
+--   sin la mutación: T14c 100/100 y 0 · T14d 200/200 y 0 · T14j 100/100 y 0 · T14n, T14o, T14p 100/100 y 0 (el resto de
+--   T14, igual: 100 % y 0).
+--   con la mutación: T14c 100 y 100 · T14d 200 y 165 · T14j 100 y 97 · T14n, T14o, T14p 100 y 0 (no dependen de ningún
+--   pre-bloqueo de esta lista). Se aplica en LF (`tr -d '\r' <` el archivo): con CRLF, el patrón de los precios en masa no
+--   aparece y el DO aborta sin mutar nada.
 
 -- ===== MUTAR =====
 CREATE TABLE IF NOT EXISTS conc.mut_orig (firma text PRIMARY KEY, def text NOT NULL);

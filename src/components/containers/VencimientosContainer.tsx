@@ -6,7 +6,7 @@
  * administración decide qué se descarta y qué se devuelve. El gate real está en
  * las RPCs — esto es la UI que lo acompaña.
  */
-import { Suspense, useCallback } from 'react'
+import { Suspense, useCallback, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   useVencimientosQuery,
@@ -14,6 +14,7 @@ import {
   useRegistrarNotaCreditoLoteMutation,
 } from '../../hooks/queries/useLotesQuery'
 import { useParametrosVencimientoQuery } from '../../hooks/queries/usePoliticasComercialesQuery'
+import { useRestanteDevolucionCompraQuery } from '../../hooks/queries/useNotasCreditoQuery'
 import { useAuth } from '../../hooks/supabase/useAuth'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -38,6 +39,10 @@ export default function VencimientosContainer() {
   const { diasAlertaVencimiento, diasCriticoVencimiento } = useParametrosVencimientoQuery()
   const darDeBaja = useDarDeBajaLoteMutation()
   const devolver = useRegistrarNotaCreditoLoteMutation()
+  // 1590-c (#1590): la compra del lote cuya devolución está abierta, y lo que le
+  // queda por acreditar si tiene tope (un ajuste vigente).
+  const [compraDevolucion, setCompraDevolucion] = useState<number | null>(null)
+  const { data: restanteCompra = null } = useRestanteDevolucionCompraQuery(compraDevolucion)
 
   // El horizonte es el umbral amarillo, no "todo": traer los lotes cargados a
   // dos años para mostrar los veinte que importan es tráfico puro. Lo ya
@@ -102,6 +107,8 @@ export default function VencimientosContainer() {
         onDarDeBaja={handleDarDeBaja}
         onDevolverAlProveedor={handleDevolverAlProveedor}
         nombreSucursal={currentSucursalNombre}
+        onCompraDevolucion={setCompraDevolucion}
+        restanteCompra={restanteCompra}
       />
     </Suspense>
   )

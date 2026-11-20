@@ -1169,12 +1169,17 @@ function t14() {
   const retA = retiene("productos", "pa");
 
   const S0 = "select conc.t14_setup() as c";
-  const S1 = "select conc.t14_setup(1) as c";
+  // H5 de la revisión de C2: X entregado, para que el cambio de factor no lo frene D2 y se cruce con la venta.
+  const S1 = "select conc.t14_setup(1, true) as c";
   return [
     // T14a y T14b ajustaban el stock de la promo con ajustar_stock_promocion_completo, que se borró (#1515, PRM-3).
+    // H5 de la revisión de C2: si la venta confirma primero, D2 rechaza el cambio de factor (P0001, «hay N pedido(s) sin
+    // entregar»): es el rechazo de negocio esperado y el estado es el de ese orden serial. Lo que mide la variante es que
+    // los dos se ordenen sin 40P01 (sin el pre-bloqueo de los contenedores, el UPDATE toma P y después C, y se cruza).
     mk("T14c · C2: cambiar el factor por REST (P, y C en el trigger) contra una venta, con C retenido", 100, S1,
-      forzar(retC, ventaB, factor), [ventaB, factor], estadoP, { extra: [verContenedor] }),
-    mk("T14d · C2: lo mismo, arranque simultáneo", 200, S1, juntas(ventaB, factor), [ventaB, factor], estadoP, { extra: [verContenedor] }),
+      forzar(retC, ventaB, factor), [ventaB, factor], estadoP, { extra: [verContenedor], esperado: esDeNegocio("P0001") }),
+    mk("T14d · C2: lo mismo, arranque simultáneo", 200, S1, juntas(ventaB, factor), [ventaB, factor], estadoP,
+      { extra: [verContenedor], esperado: esDeNegocio("P0001") }),
     mk("T14e · C5: eliminar X (A, P, C) contra una venta de B (C, B, S, P), con C retenido", 100, S0,
       forzar(retC, ventaB, eliminar), [ventaB, eliminar], estadoP, { extra: [verContenedor] }),
     mk("T14f · C5: eliminar X contra una venta de A (C, A, S, P), con C retenido", 100, S0,
@@ -1186,7 +1191,7 @@ function t14() {
     mk("T14i · C3: editar X (ya en P2) agregando P1 contra la venta, arranque simultáneo", 200,
       "select conc.t14k_setup(true) as c", juntas(ventaK, editarK), [ventaK, editarK], estadoK),
     mk("T14j · C4: una salvedad en X (la promo cambió de tipo) retiene 250 ms y llega la venta al mismo cliente", 100,
-      "select conc.t14m_setup() as c", [reteniendo(salvedadM), despues(ventaM)], [salvedadM, ventaM], estadoM),
+      "select conc.t14m_setup(true) as c", [reteniendo(salvedadM), despues(ventaM)], [salvedadM, ventaM], estadoM),
     mk("T14k · C4: lo mismo con la edición de X", 100,
       "select conc.t14m_setup() as c", [reteniendo(editarM), despues(ventaM)], [editarM, ventaM], estadoM),
     mk("T14n · C4: anular una salvedad de X retiene 250 ms y llega la venta al mismo cliente", 100,

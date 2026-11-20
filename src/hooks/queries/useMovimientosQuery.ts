@@ -14,6 +14,7 @@ import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { fechaLocalISO, fechaHaceDias } from '../../utils/formatters'
 import { rangoArgentino } from '../../utils/rangoArgentino'
+import { mensajeAlAceptarEnvio } from '../../utils/codigoProducto'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { CondicionIva } from '../../types'
 
@@ -212,7 +213,7 @@ async function aceptarMovimiento(input: { movimientoId: number; resoluciones: Re
   })
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la aceptación del movimiento. Revisá su estado antes de reintentar.')
   const r = data as RPCResult & { reactivados?: number[] | null }
-  if (!r.success) throw new Error(r.error || 'Error al aceptar el movimiento')
+  if (!r.success) throw new Error(mensajeAlAceptarEnvio(r.error))
   return r.reactivados ?? []
 }
 

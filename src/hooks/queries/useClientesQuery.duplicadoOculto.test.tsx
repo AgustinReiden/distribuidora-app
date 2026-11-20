@@ -42,16 +42,22 @@ import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { simularGuardarCliente } from '../../test/guardarClienteSimulado'
 
 const insertSpy = vi.fn()
 const updateSpy = vi.fn()
 const rpc = vi.fn()
+const guardarSimulado = simularGuardarCliente({ insertSpy: (f) => insertSpy(f), updateSpy: (p) => updateSpy(p) })
 const from = vi.fn()
 
 vi.mock('../supabase/base', () => ({
   supabase: {
     from: (...args: unknown[]) => from(...args),
-    rpc: (...args: unknown[]) => rpc(...args),
+    // C4b v2: guardar_cliente la contesta el simulador (su `campos` va a insertSpy/updateSpy); el
+    // resto, el mock de cada caso.
+    rpc: (...args: unknown[]) => (args[0] === 'guardar_cliente'
+      ? guardarSimulado(...(args as [string, Record<string, unknown>]))
+      : rpc(...args)),
   },
 }))
 

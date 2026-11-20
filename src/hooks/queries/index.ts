@@ -33,6 +33,8 @@ export {
   useCrearCategoriaMutation,
   useRenombrarCategoriaMutation,
   useEliminarCategoriaMutation,
+  useRubrosAMediasQuery,
+  useTerminarRubroMutation,
   useImpactoEliminarRubroQuery,
   useToggleCategoriaActivaMutation,
   useSubcategoriasQuery,
@@ -40,7 +42,7 @@ export {
   useRenombrarSubcategoriaMutation,
   useEliminarSubcategoriaMutation,
 } from './useCategoriasQuery'
-export type { CategoriaDB, ImpactoEliminarRubro } from './useCategoriasQuery'
+export type { CategoriaDB, ImpactoEliminarRubro, RubroAMedias } from './useCategoriasQuery'
 
 // Stock de la red (cross-sucursal, solo lectura)
 export { stockRedKeys, useStockRedQuery } from './useStockRedQuery'
@@ -158,7 +160,6 @@ export {
   usePedidosParaEntregaYPagoQuery,
   usePagosMasivosMutation,
   useEntregaYPagoMasivosMutation,
-  fetchPedidoIdsConSalvedad,
 } from './usePedidosQuery'
 export type { PaginatedResult, ResultadoEntregaYPagoMasivo } from './usePedidosQuery'
 export { usePedidoStatsQuery, EMPTY_PEDIDO_STATS_SUMMARY } from './usePedidoStatsQuery'

@@ -10,7 +10,7 @@ import { filtrarProductosOperativos } from '../../utils/productosOperativos'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta'
-import { avisoCobroAltaRecortado, mensajeSaldoAFavorAlta, montoCobroAlta, saldoMostradoAlta } from '../../utils/saldoAFavor'
+import { avisoCobroAltaRecortado, mensajeSaldoAFavorAlta, saldoMostradoAlta } from '../../utils/saldoAFavor'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { filasPedidosExcel, resumenPagosExcel } from '../../utils/pedidosExcel'
@@ -42,6 +42,7 @@ import {
 } from '../../utils/valeBlanco'
 import { puedeVerDeudaCliente, puedeCrearNotaCreditoVenta } from '../../lib/permisos'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
+import { mensajeOrigenPendiente, registrarOrigenPrecios } from '../../utils/origenPrecioPendiente'
 import { useTrabajoEnCurso } from '../../hooks/useTrabajoEnCurso'
 import { cobrarRecordandoSinConfirmar, guardarClavesDeAlta, leerClavesDeAlta } from '../../utils/requestIdPersistente'
 import {
@@ -96,14 +97,20 @@ import {
   useCrearPedidoCambioEnRutaMutation,
   useAplicarCambioParadaMutation,
   useZonasEstandarizadasQuery,
-  fetchPedidoIdsConSalvedad,
   type RegistrarCambioInput,
 } from '../../hooks/queries'
-import { construirFiltrosPedidos, aplicarFiltroConSalvedad, motivoDelFiltroSalvedad } from '../../utils/construirFiltrosPedidos'
+import {
+  construirFiltrosPedidos,
+  aplicarFiltroConSalvedad,
+  EMBED_CON_SALVEDAD,
+  EMBED_SIN_SALVEDAD,
+  sinEmbedSalvedad,
+} from '../../utils/construirFiltrosPedidos'
 import { filtrosParaStats } from '../../utils/kpiFiltroPedidos'
 import { useRecorridoActivoQuery } from '../../hooks/queries/useRecorridoActivoQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useOfflineSync } from '../../hooks/useOfflineSync'
+import { avisoAltaQueYaHabiaEntrado, montoCobroDelAlta } from '../../utils/totalDelAlta'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useOptimizarRuta, horarioParaRutear, type RepartidorParam } from '../../hooks/useOptimizarRuta'
 import { barridasEfectivas, clasificarBarrida, intercalarSinCoordenadas, type Barrida } from '../../utils/barridas'
@@ -274,7 +281,6 @@ export default function PedidosContainer(): React.ReactElement {
     data: paginatedResult,
     isLoading: loadingPedidos,
     isError: errorPedidos,
-    error: errorPedidosDetalle,
     refetch: refetchPedidos,
     dataUpdatedAt: pedidosActualizadosAt,
     isSuccess: pedidosCargados,
@@ -340,6 +346,9 @@ export default function PedidosContainer(): React.ReactElement {
   const requestIdMasivo = useRequestIdEstable()
   // UUID de idempotencia del cobro que se declara al CREAR el pedido (mig 167).
   const requestIdAlta = useRequestIdEstable()
+  // La clave del alta de un cliente desde el pedido (C4b v2): el mismo cliente reintentado no
+  // se crea dos veces.
+  const claveAltaCliente = useRequestIdEstable()
   /**
    * Clave de idempotencia del ALTA en sí (mig 071, `pedidos.offline_id`).
    *
@@ -553,6 +562,9 @@ export default function PedidosContainer(): React.ReactElement {
   // La última carga de pagos previos falló: el modal no deja cobrar (#1410).
   const [pagosPreviosFallaron, setPagosPreviosFallaron] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
+  // C4b v2: el origen del precio de una edición que no se pudo registrar (los productos ya se
+  // guardaron). Al cerrar el editor se ofrece reintentarlo.
+  const [origenPendiente, setOrigenPendiente] = useState<{ pedidoId: string; origenes: OrigenPrecioItem[] } | null>(null)
 
   // Pedido-specific state for modals
   const [pedidoHistorial, setPedidoHistorial] = useState<PedidoDB | null>(null)
@@ -1238,35 +1250,31 @@ export default function PedidosContainer(): React.ReactElement {
       ? `*, cliente:clientes!inner(*), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PRODUCTO_COLUMNAS})), pagos(forma_pago, monto)`
       : `*, cliente:clientes(*), items:pedido_items(${PEDIDO_ITEM_COLUMNAS}, producto:productos(${PRODUCTO_COLUMNAS})), pagos(forma_pago, monto)`
 
-    // conSalvedad necesita un round-trip previo a salvedades_items: no es un
-    // filtro que se pueda encadenar solo (ver fetchPedidoIdsConSalvedad).
-    let idsConSalvedad: number[] | null = null
-    if (filtros.conSalvedad && filtros.conSalvedad !== 'todos') {
-      idsConSalvedad = await fetchPedidoIdsConSalvedad()
-    }
-
     // Los filtros se arman en `construirFiltrosPedidos`, EL MISMO armado que usan
     // la lista paginada y las cards de stats: el conteo y las páginas tienen que
     // mirar exactamente el mismo universo, o la verificación no prueba nada.
     // El desempate por `id` hace falta porque `created_at` no es único y
     // paginar sin orden estable repite filas y saltea otras.
-    const armarQuery = (opciones?: { count: 'exact'; head: true }) => {
-      let query = supabase
-        .from('pedidos')
-        .select(selectStr, opciones)
-        .order('created_at', { ascending: false })
-        .order('id')
-
-      query = construirFiltrosPedidos(query, filtros, debouncedBusqueda)
-      query = aplicarFiltroConSalvedad(query, filtros.conSalvedad, idsConSalvedad)
-      return query
-    }
-
     type FilaExport = Record<string, unknown> & {
       usuario_id?: string | null
       transportista_id?: string | null
       entregado_por?: string | null
     }
+    // 1598-b4: el filtro con/sin salvedad es un embed (ver aplicarFiltroConSalvedad). Con el embed el
+    // select ya no es un literal: el tipo de la fila se dice a mano.
+    const conSalvedad = filtros.conSalvedad
+    const armarQuery = (opciones?: { count: 'exact'; head: true }) => {
+      let query = supabase
+        .from('pedidos')
+        .select<string, FilaExport>(selectStr + (conSalvedad === 'con_salvedad' ? EMBED_CON_SALVEDAD : conSalvedad === 'sin_salvedad' ? EMBED_SIN_SALVEDAD : ''), opciones)
+        .order('created_at', { ascending: false })
+        .order('id')
+
+      query = construirFiltrosPedidos(query, filtros, debouncedBusqueda)
+      query = aplicarFiltroConSalvedad(query, conSalvedad)
+      return query
+    }
+
     const data = await traerTodoVerificado<FilaExport>(
       () => armarQuery(),
       {
@@ -1285,14 +1293,14 @@ export default function PedidosContainer(): React.ReactElement {
     let perfilesMap: Record<string, PerfilDB> = {}
     if (perfilIds.size > 0) {
       const { data: perfiles } = await supabase
-        .from('perfiles').select('id, nombre, email').in('id', Array.from(perfilIds))
+        .from('perfiles').select('id, nombre').in('id', Array.from(perfilIds))
       if (perfiles) {
         perfilesMap = Object.fromEntries((perfiles as PerfilDB[]).map(p => [p.id, p]))
       }
     }
 
     return (data || []).map(pedido => ({
-      ...pedido,
+      ...sinEmbedSalvedad(pedido),
       usuario: pedido.usuario_id ? perfilesMap[pedido.usuario_id] : null,
       transportista: pedido.transportista_id ? perfilesMap[pedido.transportista_id] : null,
       entregado_por_perfil: pedido.entregado_por ? (perfilesMap[pedido.entregado_por] ?? null) : null,
@@ -1440,6 +1448,8 @@ export default function PedidosContainer(): React.ReactElement {
       precio_unitario: item.precioUnitario,
       ...(item.esBonificacion ? { es_bonificacion: true } : {}),
       ...(item.promocionId ? { promocion_id: item.promocionId } : {}),
+      // H1 de la revisión de C2: el regalo vuelve a su producto de la promo (sin el cambio).
+      ...(item.regaloOriginal ? { regalo_original: true } : {}),
       ...(item.neto_unitario !== undefined ? { neto_unitario: item.neto_unitario } : {}),
       ...(item.iva_unitario !== undefined ? { iva_unitario: item.iva_unitario } : {}),
       ...(item.impuestos_internos_unitario !== undefined ? { impuestos_internos_unitario: item.impuestos_internos_unitario } : {}),
@@ -1479,12 +1489,13 @@ export default function PedidosContainer(): React.ReactElement {
     // habia registrado al crear el pedido ya no existe: hay que reponerlo o esta
     // venta pasa a comisionarse con la regla generica (mig 148/149).
     if (origenes && origenes.length > 0) {
-      const { error: errorOrigen } = await supabase.rpc('registrar_origen_precio_items', {
-        p_pedido_id: pedidoEditando.id,
-        p_origenes: origenes,
-      })
-      // No se propaga: los items ya se guardaron bien y el total es correcto.
-      if (errorOrigen) console.warn('No se pudo registrar el origen del precio:', errorOrigen)
+      // No se propaga: los items ya se guardaron bien y el total es correcto. Pero se avisa (queda
+      // en pantalla) y, al cerrar el editor, se ofrece reintentarlo (C4b v2).
+      const r = await registrarOrigenPrecios(supabase.rpc.bind(supabase), pedidoEditando.id, origenes as OrigenPrecioItem[])
+      if (!r.ok) {
+        notify.error(mensajeOrigenPendiente(pedidoEditando.id), { persist: true })
+        setOrigenPendiente({ pedidoId: String(pedidoEditando.id), origenes: origenes as OrigenPrecioItem[] })
+      }
     }
     // Invalidar cache de pedidos para refrescar datos. Tambien la familia
     // recorridos* para que la hoja de ruta y las comandas (que se descargan
@@ -1504,7 +1515,7 @@ export default function PedidosContainer(): React.ReactElement {
     // por sucursal y aca no hay una a mano: el prefijo las alcanza a todas.
     queryClient.invalidateQueries({ queryKey: ['productos'] })
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
-  }, [pedidoEditando, user, queryClient])
+  }, [pedidoEditando, user, queryClient, notify])
 
   // Reasignar el preventista del pedido en edicion. Solo admin (la UI ya
   // pasa el flag canEditPreventista={isAdmin}). El RPC tambien valida.
@@ -2093,19 +2104,30 @@ export default function PedidosContainer(): React.ReactElement {
         esVB: esTipoVB(nuevoPedido.tipoFactura || 'ZZ'),
         isOffline: !isOnline,
       })
-      const montoDelAlta = montoCobroAlta({
+      // I2 de la revisión de B12a, H4 de la de C7 y decisión 5 del dueño: el server devolvió el pedido propio que
+      // ya había entrado y cambió (se editó o se canceló). No se creó nada: NO se registra ningún cobro y el aviso
+      // dice el total que quedó y que hay que cobrarlo desde el pedido.
+      const avisoYaEntro = avisoAltaQueYaHabiaEntrado(pedidoCreado, {
+        clienteId: nuevoPedido.clienteId,
+        total: totalConDescuento,
+        tipoFactura: nuevoPedido.tipoFactura,
+        // El total final que el carrito mostró: productos + el envío que mostraba (N2 de la revisión de C7).
+        cargoMostrado: cargoEnvioPedido(totalConDescuento, reglaMinimoDe(politicas)),
+      })
+      const montoDelAlta = montoCobroDelAlta({
         estadoPago: nuevoPedido.estadoPago,
         montoDeclarado: Number(nuevoPedido.montoPagado) || 0,
         totalConEnvio,
         totalGuardado,
         saldoAplicado: saldoAFavorAlta,
         saldoMostrado,
+        volvioDistinto: avisoYaEntro !== null,
       })
 
       // El carrito mostró un envío y el servidor decidió otro (la política
       // cambió mientras se armaba el pedido): el cobro ya sigue al servidor, pero
       // quien cobra tiene que enterarse.
-      if (typeof pedidoCreado?.cargoEnvio === 'number') {
+      if (typeof pedidoCreado?.cargoEnvio === 'number' && !avisoYaEntro) {
         const cargoMostrado = cargoEnvioPedido(totalConDescuento, reglaMinimoDe(politicas))
         if (Math.abs(pedidoCreado.cargoEnvio - cargoMostrado) >= 0.01) {
           notify.warning(
@@ -2150,7 +2172,7 @@ export default function PedidosContainer(): React.ReactElement {
           // El pedido ya existe: el mensaje tiene que decir exactamente eso y
           // qué hacer, no un "error al crear pedido" que invita a recargarlo.
           notify.error(
-            `El pedido #${pedidoCreado.id} se creó, pero no se pudo registrar el cobro de ` +
+            `El pedido #${pedidoCreado.id} ${pedidoCreado.idempotente ? 'ya existía' : 'se creó'}, pero no se pudo registrar el cobro de ` +
               `${formatPrecio(montoDelAlta)}: ${(pagoErr as Error).message}. ` +
               'Registralo desde la ficha del pedido.',
             { persist: true },
@@ -2164,12 +2186,15 @@ export default function PedidosContainer(): React.ReactElement {
       const avisoSaldoFavor = pedidoCreado?.id
         ? mensajeSaldoAFavorAlta(pedidoCreado.id, saldoAFavorAlta, pedidoCreado.saldoAFavorOtras ?? 0)
         : null
-      if (avisoSaldoFavor) notify.success(`Pedido creado correctamente. ${avisoSaldoFavor}`, { persist: true })
+      // Si el pedido ya había entrado y cambió, decir «Pedido creado» mentía: se dice qué pasó (y que no hay cobro),
+      // con el saldo a favor aplicado si lo hubo, y queda a la vista.
+      if (avisoYaEntro) notify.warning(avisoSaldoFavor ? `${avisoYaEntro} ${avisoSaldoFavor}` : avisoYaEntro, { persist: true })
+      else if (avisoSaldoFavor) notify.success(`Pedido creado correctamente. ${avisoSaldoFavor}`, { persist: true })
       else notify.success('Pedido creado correctamente')
       // #1503: si se registró menos de lo que se declaró cobrar, quien cobró lo
       // tiene que saber: la diferencia está en su mano y no en el sistema. Si el
       // cobro falló, ya lo dice su error.
-      const avisoRecorte = pedidoCreado?.id && !cobroAltaFallo
+      const avisoRecorte = pedidoCreado?.id && !cobroAltaFallo && !avisoYaEntro
         ? avisoCobroAltaRecortado({
             pedidoId: pedidoCreado.id,
             estadoPago: nuevoPedido.estadoPago,
@@ -2860,6 +2885,30 @@ export default function PedidosContainer(): React.ReactElement {
     onConfirm: confirmConfig.onConfirm || (() => {}),
   } : null
 
+  // C4b v2: el origen del precio que no se pudo registrar se ofrece reintentar al cerrar el editor
+  // (la confirmación del container queda detrás del modal abierto).
+  useEffect(() => {
+    if (!origenPendiente || modalEditarOpen || confirmConfig.visible) return
+    const pendiente = origenPendiente
+    setOrigenPendiente(null)
+    setConfirmConfig({
+      visible: true,
+      tipo: 'warning',
+      titulo: 'Falta registrar el origen de los precios',
+      mensaje: `${mensajeOrigenPendiente(pendiente.pedidoId)} ¿Reintentar ahora?`,
+      onConfirm: async () => {
+        setConfirmConfig({ visible: false })
+        const r = await registrarOrigenPrecios(supabase.rpc.bind(supabase), pendiente.pedidoId, pendiente.origenes)
+        if (r.ok) {
+          notify.success(`Se registró el origen de los precios del pedido #${pendiente.pedidoId}`)
+        } else {
+          notify.error(mensajeOrigenPendiente(pendiente.pedidoId), { persist: true })
+          setOrigenPendiente(pendiente)
+        }
+      },
+    })
+  }, [origenPendiente, modalEditarOpen, confirmConfig.visible, notify])
+
   return (
     <>
       {/* Una linea de resumen que despliega los dos paneles de alerta (#714):
@@ -2903,7 +2952,6 @@ export default function PedidosContainer(): React.ReactElement {
           usuarios={usuarios}
           loading={loadingPedidos}
           error={errorPedidos}
-          errorMotivo={motivoDelFiltroSalvedad(errorPedidosDetalle)}
           onRetry={refetchPedidos}
           exportando={exportando}
           onBusquedaChange={handleBusquedaChange}
@@ -3017,7 +3065,9 @@ export default function PedidosContainer(): React.ReactElement {
                   dias_atencion: (clienteData.dias_atencion as string | null) ?? null,
                   duplicado_confirmado: Boolean(clienteData.duplicadoConfirmado),
                 }
-                const newCliente = await crearClienteMut.mutateAsync(dbData)
+                const huella = JSON.stringify(dbData)
+                const newCliente = await crearClienteMut.mutateAsync({ ...dbData, clave: claveAltaCliente(huella) })
+                claveAltaCliente.olvidar([huella])
                 notify.success(`Cliente "${newCliente.nombre_fantasia}" creado`)
                 return { id: newCliente.id }
               } catch (e) {

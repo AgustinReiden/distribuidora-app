@@ -20,12 +20,14 @@ import {
   useEliminarCategoriaMutation,
   useImpactoEliminarRubroQuery,
   useToggleCategoriaActivaMutation,
+  useRubrosAMediasQuery,
+  useTerminarRubroMutation,
   useSubcategoriasQuery,
   useCrearSubcategoriaMutation,
   useRenombrarSubcategoriaMutation,
   useEliminarSubcategoriaMutation,
 } from '../../hooks/queries';
-import type { CategoriaDB } from '../../hooks/queries';
+import type { CategoriaDB, RubroAMedias } from '../../hooks/queries';
 import type { ProductoDB } from '../../types';
 
 export interface ModalCategoriasProps {
@@ -50,6 +52,10 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
   const renameMut = useRenombrarCategoriaMutation();
   const deleteMut = useEliminarCategoriaMutation();
   const toggleMut = useToggleCategoriaActivaMutation();
+  // Un renombre o una eliminación que se cortó entre tandas (1596-b9): se ofrece «Terminar», así
+  // ningún rubro queda trabado.
+  const aMedias = useRubrosAMediasQuery();
+  const terminarMut = useTerminarRubroMutation();
   const { data: subrubros = [] } = useSubcategoriasQuery();
   const crearSubMut = useCrearSubcategoriaMutation();
   const renameSubMut = useRenombrarSubcategoriaMutation();
@@ -232,7 +238,19 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
     }
   };
 
-  const working = crearSubMut.isPending || renameSubMut.isPending || deleteSubMut.isPending || crearMut.isPending || renameMut.isPending || deleteMut.isPending || toggleMut.isPending;
+  // Un rubro grande va en tandas (1596-b9): mientras corre, cuántos productos van y cuántos faltan.
+  const avanceRubro = (renameMut.isPending && renameMut.avance) || (deleteMut.isPending && deleteMut.avance)
+    || (terminarMut.isPending && terminarMut.avance) || null;
+
+  const handleTerminar = async (p: RubroAMedias) => {
+    setError('');
+    try {
+      await terminarMut.mutateAsync(p);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo terminar el cambio del rubro');
+    }
+  };
+  const working = terminarMut.isPending || crearSubMut.isPending || renameSubMut.isPending || deleteSubMut.isPending || crearMut.isPending || renameMut.isPending || deleteMut.isPending || toggleMut.isPending;
 
   return (
     <ModalBase title="Gestionar categorías" onClose={onClose} maxWidth="max-w-2xl">
@@ -270,6 +288,25 @@ const ModalCategorias = memo(function ModalCategorias({ productos, onClose }: Mo
             Agregar
           </Button>
         </div>
+
+        {(aMedias.data ?? []).map((p) => (
+          <div key={`${p.accion}-${p.id ?? p.nombre}`} className="flex items-center justify-between gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-sm text-amber-800 dark:text-amber-200">
+            <span>
+              {p.accion === 'renombrar'
+                ? `«${p.nombre}» → «${p.nombre_nuevo}» quedó a medias: faltan ${p.faltan.toLocaleString('es-AR')} productos.`
+                : `La eliminación de «${p.nombre}» quedó a medias: faltan ${p.faltan.toLocaleString('es-AR')} productos.`}
+            </span>
+            <Button type="button" size="sm" onClick={() => handleTerminar(p)} disabled={working} loading={terminarMut.isPending}>
+              Terminar
+            </Button>
+          </div>
+        ))}
+
+        {avanceRubro && (
+          <div role="status" className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-700 dark:text-blue-300">
+            Procesando el rubro: {avanceRubro.hechos.toLocaleString('es-AR')} productos listos, faltan {avanceRubro.faltan.toLocaleString('es-AR')}.
+          </div>
+        )}
 
         {error && (
           <div role="alert" className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">

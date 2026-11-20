@@ -26,6 +26,7 @@ import { describirReglaEscala } from '../../utils/describirReglaEscala'
 import type { EscalaPrecio } from '../../utils/precioMayorista'
 import type { GrupoPrecioConDetalles, GrupoPrecioFormInput, ProductoDB } from '../../types'
 import { useClavesDeRenglones } from '../../hooks/useClavesDeRenglones'
+import { nuevoRequestId } from '../../utils/idempotencia'
 
 /**
  * Una cantidad tipeada, o NaN si no es un entero (#1560-b3). Era `parseInt` sobre un
@@ -115,6 +116,9 @@ export default function ModalGrupoPrecio({
   onClose,
 }: ModalGrupoPrecioProps) {
   const isEditing = !!grupo
+  // La clave del alta (C4b de #1603): una por vez que se abre el formulario. Si la respuesta se
+  // pierde y se vuelve a guardar, el server reconoce el reintento y no crea otra condición.
+  const [clave] = useState(nuevoRequestId)
 
   const [nombre, setNombre] = useState(grupo?.nombre || '')
   const [descripcion, setDescripcion] = useState(grupo?.descripcion || '')
@@ -393,6 +397,7 @@ export default function ModalGrupoPrecio({
     setGuardando(true)
     try {
       const result = await onSave({
+        ...(isEditing ? {} : { clave }),
         nombre: nombre.trim(),
         descripcion: descripcion.trim() || null,
         productoIds: Array.from(productoIds),

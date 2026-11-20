@@ -206,6 +206,29 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   que la recalcula desde una compra le aplica encima el mayor de los envíos aceptados después
   (`_reposicion_aplicar_envios`, D12), como hizo aceptarlos; un envío sin `origen_costo_real`
   (anterior a esa migración) no aplica nada, para no dejar la terna mezclada.
+- **El costo con IVA es el neto más el IVA de cada componente** (1593-b1 de #1593; decisión del dueño
+  del 19/11: «el costo neto sería: neto producto + imp internos + cargos netos + flete neto. El costo
+  con IVA sería la suma del neto más el IVA de los componentes (incluido el costo del flete y cargos,
+  e inclusive sus respectivos IVAs si llevan)»). El neto es `costo_real` (el del motor, con el II
+  declarado y los cargos que prorratean al costo); `costo_con_iva` le suma el IVA del producto a su
+  alícuota y el de cada cargo: uno gravado en factura, a la alícuota del renglón donde cae (como la
+  base de IVA del motor: el sistema no tiene alícuota por cargo, y un flete al 21 % sobre un producto
+  al 10,5 % queda con el 10,5 %; H8 de la revisión, queda así); uno de un tercero, su `iva_monto`; uno
+  no gravado, exento o sin IVA cargado, nada. Sin crédito fiscal (ZZ, FC B o C) es lo pagado
+  (`costo_real`) más el IVA de un cargo de un tercero, que lo pagado no trae. La cuenta es una,
+  `_costo_con_iva_unitario` con `_compra_iva_cargos` (o `_compra_iva_cargos_de_linea` desde las filas):
+  el alta, la edición y `_reposicion_desde_ultima_compra`. La ficha lo muestra tal cual y, si se
+  corrige el neto, conserva lo que la compra sumó (`adicionalConIvaDeCompra`); el server hace lo mismo
+  con lo que guarde cualquier ficha (`trg_productos_costo_con_iva`), mande lo que mande; los dos lo
+  conservan sólo si el producto tuvo una compra (`ultimo_tipo_compra`) o su costo real tiene cargos por
+  encima de neto + II, y costean un exento o no gravado al 0 % aunque no tenga alícuota cargada
+  (`alicuotaIvaVenta`; en el trigger, en línea). Los productos que ya existían se
+  recalcularon desde su última compra (`_recalcular_costo_con_iva`); a los que no cerraban con ella (un
+  envío, una corrección a mano, otra época) se les sumó lo que la compra sumó al costo real, para que
+  la ficha no cambie (rastro en `costo_con_iva_recalculos`). Ese recálculo corre una sola vez sobre todo:
+  sobre productos que ya recibieron compras con la regla nueva contaría dos veces los cargos. No es base de ningún
+  precio, margen del server ni CMV: lo leen los envíos (su valor y la reposición del destino), la
+  ficha y la exportación.
 - **Dentro de una compra los renglones que fijan costo van antes que los regalos** (#1593 CMP-A):
   el alta y la edición los recorren e insertan así, y la cadena va por id. Un regalo primero sobre
   un producto agotado no diluía nada y el pagado de después se promediaba con esas unidades al
@@ -230,7 +253,10 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   sale de los lotes de esa compra, en cantidad y restante a la vez; `cantidad > 0`
   (CHECK) obliga a dejar 1 en cada lote intacto en una primera pasada, y el que la segunda saca
   entero se borra si nada lo referencia (STK-12: en 1/0 era una unidad «vendida» que no salió). Un camino nuevo que baje
-  las unidades de una compra con vencimientos hace lo mismo. La nota de crédito no: lo devuelto
+  las unidades de una compra con vencimientos hace lo mismo. La edición recibe la foto de los vencimientos
+  (`p_lotes` de `actualizar_compra_items`) y llama a `sincronizar_lotes_compra` en su transacción, con las
+  salvedades que anotaron lotes de la compra tomadas antes que los productos: o se guarda todo o nada (STK-13).
+  Sin `p_lotes` (un PWA de antes) no toca los lotes y esa app los manda después por separado. La nota de crédito no: lo devuelto
   sí salió, y baja sólo el restante de los lotes de su compra (#1079).
 - **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** (#1057). Cada
   línea de regalo tiene `pedido_items.regalo_cadena_id` y cada eslabón de
@@ -266,7 +292,19 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   techo. La regla es una, `regalo_tope_sustituto`, con espejo en `topeSustitutoRegalo` (gate:
   `topeSustituto.espejo.json`); la pantalla sugiere con ella. El reparto la cumple sobre la suma
   de las partes, y la edición no escala una cadena por encima (`_regalo_tope_de_cadena`): lo que
-  armó un admin se conserva pero no crece. El admin, sin tope.
+  armó un admin se conserva pero no crece, **salvo** cuando la edición baja lo que da la promo y el
+  sustituto es de otro rubro: ahí no puede valer más que el regalo nuevo y se rechaza
+  (`regalo_sustituto_sobre_tope`, con las promos en `promociones`). Decisión del dueño del 19/11:
+  «No deja guardar así: o vuelve al regalo original (R) o el pedido queda como está. Este bloqueo
+  no es silencioso sino que se avisa». Sin línea guardada de la cadena (el regalo se cayó y vuelve
+  con la cadena enganchada) también cuenta como que bajó. La pantalla lo avisa antes cuando sabe el
+  corte guardado (RPC `regalo_corte_de_linea`; si no, decide el server) y ofrece «Volver al regalo
+  original», que viaja con `regalo_original`: la línea entra sin su cadena, y la cadena queda
+  cerrada con una fila de reparto del regalo a sí mismo, así que si el regalo se cae y vuelve,
+  vuelve el regalo de la promo (`regalo_elemento_con_cadena` y `cadenaDelRegalo` no enganchan una
+  cadena con reparto). Y el tope de la promo se mide en el corte también cuando
+  la edición recibe la línea cambiada por valor tal como está (W×1 con corte 10 cuenta 10; C2 de la
+  ola 2). El admin, sin tope.
 - **Un regalo se mide contra la promo con la que se armó, no contra la vigente** (mig 370,
   #1164). Todo lo que mide el regalo de un pedido que ya existe —la salvedad, su anulación y
   las dos simulaciones— lee `promos_del_pedido(pedido)`, no `promocion_reglas` ni

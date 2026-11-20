@@ -292,10 +292,14 @@ BEGIN
        OR has_function_privilege('anon', 'public._compra_costo_real_sin_piso(jsonb,jsonb,bigint)', 'EXECUTE') THEN
       v_fallas := v_fallas || 'L1 los helpers no existen o no son de server'::text;
     END IF;
+    -- La firma no se fija (la de C3 de #1603 le sumó p_lotes): una sola, con su EXECUTE, y con
+    -- p_renglones_vistos (la versión de esta migración).
     IF (SELECT count(*) FROM pg_proc WHERE proname = 'actualizar_compra_items' AND pronamespace = 'public'::regnamespace) <> 1
-       OR to_regprocedure('public.actualizar_compra_items(bigint,jsonb,numeric,numeric,numeric,uuid,numeric,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,bigint[])') IS NULL
-       OR NOT has_function_privilege('authenticated', 'public.actualizar_compra_items(bigint,jsonb,numeric,numeric,numeric,uuid,numeric,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,bigint[])', 'EXECUTE')
-       OR has_function_privilege('anon', 'public.actualizar_compra_items(bigint,jsonb,numeric,numeric,numeric,uuid,numeric,numeric,numeric,numeric,numeric,jsonb,jsonb,numeric,bigint[])', 'EXECUTE') THEN
+       OR NOT EXISTS (SELECT 1 FROM pg_proc p
+                       WHERE p.proname = 'actualizar_compra_items' AND p.pronamespace = 'public'::regnamespace
+                         AND 'p_renglones_vistos' = ANY (p.proargnames)
+                         AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
+                         AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')) THEN
       v_fallas := v_fallas || 'L1 actualizar_compra_items no tiene una sola firma con su EXECUTE'::text;
     END IF;
   EXCEPTION WHEN OTHERS THEN

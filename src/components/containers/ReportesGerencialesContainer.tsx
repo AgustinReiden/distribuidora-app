@@ -3,6 +3,9 @@ import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { useReporteGerencialQuery, useReporteCombosQuery, useReporteCombosRotacionQuery, useAnalisisMensualQuery, useMetasGerencialQuery, useGuardarMetaMutation, useCalcularComisionesQuery, useSucursalesActivasQuery } from '../../hooks/queries'
 import { useSucursal } from '../../contexts/SucursalContext'
+import { useNotification } from '../../contexts/NotificationContext'
+import { getErrorMessage } from '../../utils/errorHandling'
+import { contestoElServidor } from '../../utils/idempotencia'
 import { useAlertasCombos } from '../../hooks/useAlertasCombos'
 import { useDiaArgentino } from '../../hooks/useDiaArgentino'
 import type { PeriodoOpt, SucursalOpt } from '../vistas/VistaReportesGerenciales'
@@ -181,6 +184,7 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
   const { data: analisis } = useAnalisisMensualQuery(sucParam, periodoSel.periodoMes, ready && periodoSel.esMes)
   const { data: metas } = useMetasGerencialQuery(sucParam, periodoSel.periodoMes, ready && periodoSel.esMes)
   const guardarMeta = useGuardarMetaMutation()
+  const notify = useNotification()
   // La meta de la Red la carga sólo quien tiene todas las sucursales activas, el
   // mismo criterio con que la lee (#1272) y con que la guarda el RPC (#1321).
   const { data: sucursalesActivas = [] } = useSucursalesActivasQuery()
@@ -197,10 +201,25 @@ export default function ReportesGerencialesContainer(): React.ReactElement {
   const { data: comisionCalcPrev } = useCalcularComisionesQuery(
     rangoPrev?.desde ?? '', rangoPrev?.hasta ?? '', Boolean(comparar && rangoPrev), scopeComision)
 
+  // 1600-b5: cada meta es su propia llamada, y `mutate` dos veces seguidas deja de seguir a la primera.
+  // Se usan las dos promesas y cada meta que falla avisa por sí sola; el aviso queda hasta que se cierra
+  // porque quien la cargó cree que quedó guardada.
   const onGuardarMeta = (venta: number | null, margenNeto: number | null): void => {
     if (!periodoSel.periodoMes) return
-    if (venta != null) guardarMeta.mutate({ sucursalId: sucParam, periodo: periodoSel.periodoMes, metrica: 'venta', valor: venta })
-    if (margenNeto != null) guardarMeta.mutate({ sucursalId: sucParam, periodo: periodoSel.periodoMes, metrica: 'margen_neto', valor: margenNeto })
+    const periodo = periodoSel.periodoMes
+    const pedidos: Array<{ nombre: string; guardar: Promise<void> }> = []
+    if (venta != null) pedidos.push({ nombre: 'venta', guardar: guardarMeta.mutateAsync({ sucursalId: sucParam, periodo, metrica: 'venta', valor: venta }) })
+    if (margenNeto != null) pedidos.push({ nombre: 'margen', guardar: guardarMeta.mutateAsync({ sucursalId: sucParam, periodo, metrica: 'margen_neto', valor: margenNeto }) })
+    for (const { nombre, guardar } of pedidos) {
+      guardar.catch((err: unknown) => {
+        // H5 de la revisión de C7: si el server contestó, la meta NO se guardó; si se cortó la señal (o un
+        // gateway contestó en su lugar) no se sabe, y el aviso no puede afirmar lo que no sabe.
+        const aviso = contestoElServidor(err)
+          ? `No se guardó la meta de ${nombre}: ${getErrorMessage(err)}`
+          : `No se pudo confirmar si se guardó la meta de ${nombre}: revisá la meta antes de volver a cargarla.`
+        notify.error(aviso, { persist: true })
+      })
+    }
   }
 
   return (

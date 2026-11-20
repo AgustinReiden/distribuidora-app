@@ -7,11 +7,11 @@
  * misma llamada devuelve distintas filas para distintas sucursales.
  */
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
-import { diferenciaDeConjuntos } from '../../utils/diferenciaDeConjuntos'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { PerfilDB } from '../../types'
+import { PERFIL_COLUMNAS } from '../../lib/perfilColumnas'
 
 // Query keys scoped by sucursalId (multi-tenant). Using function factories so
 // every cache entry lives under its own tenant prefix and a sucursal switch
@@ -38,6 +38,11 @@ interface UsuarioUpdateInput {
   rol?: string
   zona?: string | null
   activo?: boolean
+  /**
+   * Los roles extra de la sucursal activa (C4b v2): van en el mismo guardado que el perfil. Sin
+   * la clave no se tocan.
+   */
+  rolesExtra?: string[]
 }
 
 // Fetch functions
@@ -51,18 +56,19 @@ async function fetchUsuarios(sucursalId: number | null): Promise<PerfilDB[]> {
   if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*, usuario_sucursales!inner(sucursal_id)')
+    .select(`${PERFIL_COLUMNAS}, usuario_sucursales!inner(sucursal_id)`)
     .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los usuarios. Revisá la señal e intentá de nuevo.')
-  return (data as PerfilDB[]) || []
+  // Sin el email (1601-b5): la pantalla de usuarios lo pide aparte (useEmailsDeUsuariosQuery).
+  return (data as unknown as PerfilDB[]) || []
 }
 
 async function fetchUsuarioById(id: string): Promise<PerfilDB | null> {
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*')
+    .select(PERFIL_COLUMNAS)
     .eq('id', id)
     .single()
 
@@ -74,7 +80,7 @@ async function fetchUsuariosByRol(sucursalId: number | null, rol: string): Promi
   if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*, usuario_sucursales!inner(sucursal_id)')
+    .select(`${PERFIL_COLUMNAS}, usuario_sucursales!inner(sucursal_id)`)
     .eq('rol', rol)
     .eq('activo', true)
     .eq('usuario_sucursales.sucursal_id', sucursalId)
@@ -97,7 +103,7 @@ async function fetchTransportistas(sucursalId: number | null): Promise<PerfilDB[
   // vacio, no incompleto. Mismo patron que pedidos!transportista_id_fkey.
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*, usuario_sucursales!inner(sucursal_id), perfil_roles!perfil_roles_usuario_id_fkey(rol, sucursal_id)')
+    .select(`${PERFIL_COLUMNAS}, usuario_sucursales!inner(sucursal_id), perfil_roles!perfil_roles_usuario_id_fkey(rol, sucursal_id)`)
     .eq('activo', true)
     .eq('usuario_sucursales.sucursal_id', sucursalId)
     .order('nombre')
@@ -123,46 +129,19 @@ async function fetchPerfilRoles(usuarioId: string, sucursalId: number): Promise<
   return ((data ?? []) as Array<{ rol: string }>).map(r => r.rol)
 }
 
-// Deja los roles extra del usuario EN ESA SUCURSAL como pide la ficha, escribiendo
-// sólo lo que cambió (#1561, 1561-b12). Antes era DELETE de todo + INSERT de todo en
-// dos llamadas sin transacción: si el INSERT fallaba, el usuario quedaba sin ningún
-// rol extra (por ejemplo, sin poder repartir). Ahora se relee lo que hay, se quita
-// primero lo que sobra (nunca queda con más permisos de los pedidos) y después se
-// agrega lo que falta. Si lo segundo falla, el mensaje dice qué quedó hecho.
-// Cerrarlo del todo pide una RPC que lo haga en una transacción.
+// Deja los roles extra del usuario en la sucursal activa como pide la ficha, en UNA llamada y una
+// transacción (`guardar_roles_extra`, C4b de #1603; 1561-b12). Antes eran un DELETE y un INSERT
+// REST: si fallaba el segundo, el usuario quedaba sin el rol (por ejemplo, sin poder repartir) y
+// el front sólo podía avisar. La RPC valida lo mismo que la policy: admin activo que abarca las
+// sucursales del usuario, y el usuario es de la sucursal activa. Repetirla no cambia nada.
 async function asignarPerfilRoles(
   usuarioId: string,
-  sucursalId: number,
+  _sucursalId: number,
   roles: string[],
 ): Promise<void> {
-  const sinConexion = 'Sin conexión: no se pudo confirmar el cambio de roles. Revisá los roles del usuario antes de reintentar, puede haber quedado hecho.'
-  const actuales = await fetchPerfilRoles(usuarioId, sucursalId)
-  const { quitar, agregar } = diferenciaDeConjuntos(actuales, roles)
-
-  if (quitar.length > 0) {
-    const { error: errorDelete } = await supabase
-      .from('perfil_roles')
-      .delete()
-      .eq('usuario_id', usuarioId)
-      .eq('sucursal_id', sucursalId)
-      .in('rol', quitar)
-
-    if (errorDelete) throw errorDeSupabase(errorDelete, sinConexion)
-  }
-  if (agregar.length === 0) return
-
-  const { error } = await supabase
-    .from('perfil_roles')
-    .insert(agregar.map(rol => ({ usuario_id: usuarioId, sucursal_id: sucursalId, rol })))
-
+  const { error } = await supabase.rpc('guardar_roles_extra', { p_usuario_id: usuarioId, p_roles: roles })
   if (error) {
-    const motivo = errorDeSupabase(error, sinConexion)
-    if (quitar.length === 0 || motivo.sinServidor) throw errorDeSupabase(error, sinConexion)
-    // Lo quitado ya está hecho: que quien lo lee sepa que quedó a medias.
-    throw new Error(
-      `Se quitaron los roles ${quitar.join(', ')}, pero no se pudieron agregar ${agregar.join(', ')}: ${motivo.message} ` +
-      'Revisá los roles del usuario y volvé a guardar.'
-    )
+    throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de roles. Podés volver a guardar: deja los roles como los marcaste.')
   }
 }
 
@@ -170,7 +149,7 @@ async function fetchPreventistas(sucursalId: number | null): Promise<PerfilDB[]>
   if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*, usuario_sucursales!inner(sucursal_id)')
+    .select(`${PERFIL_COLUMNAS}, usuario_sucursales!inner(sucursal_id)`)
     .eq('rol', 'preventista')
     .eq('activo', true)
     .eq('usuario_sucursales.sucursal_id', sucursalId)
@@ -187,7 +166,7 @@ async function fetchPreventistasAsignables(sucursalId: number | null): Promise<P
   if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*, usuario_sucursales!inner(sucursal_id)')
+    .select(`${PERFIL_COLUMNAS}, usuario_sucursales!inner(sucursal_id)`)
     .in('rol', ['admin', 'preventista'])
     .eq('activo', true)
     .eq('usuario_sucursales.sucursal_id', sucursalId)
@@ -212,7 +191,7 @@ async function fetchVendedoresComisionables(sucursalId: number | null): Promise<
   if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
-    .select('*, usuario_sucursales!inner(sucursal_id)')
+    .select(`${PERFIL_COLUMNAS}, usuario_sucursales!inner(sucursal_id)`)
     .in('rol', ['admin', 'encargado', 'preventista'])
     .eq('activo', true)
     .eq('usuario_sucursales.sucursal_id', sucursalId)
@@ -228,22 +207,21 @@ async function fetchVendedoresComisionables(sucursalId: number | null): Promise<
 const MENSAJE_USUARIO_AJENO =
   'No podés editar a este usuario: también trabaja en sucursales que no son tuyas. Lo edita un admin de todas ellas.'
 
+/**
+ * El perfil (nombre, rol, activo, zona) y los roles extra de la sucursal activa en UNA llamada
+ * (`guardar_usuario`, C4b v2 de #1603). Antes eran el PATCH de `perfiles` y después
+ * `guardar_roles_extra`: si fallaba la segunda, el perfil quedaba y los roles no. La RPC corre
+ * como quien llama, así que rigen la misma policy (`perfiles_update_admin`) y los mismos triggers
+ * que con el REST. Devuelve sólo lo que escribe (no el email).
+ */
 async function updateUsuario({ id, data: usuario }: { id: string; data: UsuarioUpdateInput }): Promise<PerfilDB> {
-  const { data, error } = await supabase
-    .from('perfiles')
-    .update(usuario)
-    .eq('id', id)
-    .select()
-    .single()
-
-  // Cero filas (PGRST116): la policy perfiles_update_admin (mig 404, #1244) no
-  // deja que el admin edite a quien también trabaja en una sucursal que no es
-  // suya. Sin esto, la pantalla mostraría "Cannot coerce the result…".
-  if (error?.code === 'PGRST116') {
-    throw new Error(MENSAJE_USUARIO_AJENO)
-  }
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar los cambios del usuario. Revisá la ficha del usuario antes de reintentar, puede haber quedado hecho.')
-  return data as PerfilDB
+  const { rolesExtra, ...campos } = usuario
+  const { data, error } = await supabase.rpc('guardar_usuario', {
+    p_usuario: { id, campos, ...(rolesExtra !== undefined ? { roles_extra: rolesExtra } : {}) },
+  })
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar los cambios del usuario. Podés volver a guardar: deja el usuario como lo cargaste.')
+  const r = data as { perfil?: Partial<PerfilDB> | null } | null
+  return { id, ...(r?.perfil ?? {}) } as PerfilDB
 }
 
 async function toggleUsuarioActivo(id: string, activo: boolean): Promise<PerfilDB> {
@@ -251,7 +229,7 @@ async function toggleUsuarioActivo(id: string, activo: boolean): Promise<PerfilD
     .from('perfiles')
     .update({ activo })
     .eq('id', id)
-    .select()
+    .select(PERFIL_COLUMNAS)
     .single()
 
   // Mismo caso que `updateUsuario`: activar o desactivar a alguien de otra
@@ -410,14 +388,17 @@ export function useActualizarUsuarioMutation() {
 
   return useMutation({
     mutationFn: updateUsuario,
-    onSuccess: (updatedUsuario) => {
-      // Actualizar cache de detalle
-      queryClient.setQueryData(usuariosKeys.detail(currentSucursalId, updatedUsuario.id), updatedUsuario)
-      // Actualizar cache de lista
+    onSuccess: (updatedUsuario, variables) => {
+      // Lo que devolvió el server se suma a lo que ya había (la RPC no devuelve el email).
+      queryClient.setQueryData<PerfilDB>(usuariosKeys.detail(currentSucursalId, updatedUsuario.id),
+        (old) => (old ? { ...old, ...updatedUsuario } : old))
       queryClient.setQueryData<PerfilDB[]>(usuariosKeys.lists(currentSucursalId), (old) => {
-        if (!old) return [updatedUsuario]
-        return old.map(u => u.id === updatedUsuario.id ? updatedUsuario : u)
+        if (!old) return old
+        return old.map(u => u.id === updatedUsuario.id ? { ...u, ...updatedUsuario } : u)
       })
+      if (variables.data.rolesExtra !== undefined) {
+        queryClient.invalidateQueries({ queryKey: usuariosKeys.rolesExtra(currentSucursalId, updatedUsuario.id) })
+      }
       // Invalidar listas por rol
       if (updatedUsuario.rol) {
         queryClient.invalidateQueries({ queryKey: usuariosKeys.byRol(currentSucursalId, updatedUsuario.rol) })

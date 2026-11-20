@@ -26,6 +26,17 @@ de excepciones (`scripts/*-permitidas.json`, `ensayos-sql-excepciones.json`) con
 lista **sólo se achica**. Localmente: `GATE_DB_CONTENEDOR=<contenedor> bash scripts/ci/gates-locales.sh`
 (la base se arma con `scripts/concurrencia/docker-local.mjs` y la semilla de `scripts/ci/`; esa semilla
 y ese criterio de «ensayo OK» son los del CI).
+**Un ensayo que vigila rendimiento cuenta trabajo, no segundos** (C8 de #1603): bloques tocados
+(`pg_stat_get_xact_blocks_fetched`), WAL y llamadas por fila, y la forma (los últimos lotes no cuestan
+más que los primeros); el tiempo, sólo contra una referencia medida en el mismo runner. Y analiza lo
+que inserta (`ANALYZE`): el plan de un ensayo sale de lo que el autovacuum dejó después del ensayo
+anterior, y un plan que elige el índice equivocado tarda 10 veces más sin que el código haya cambiado
+(`test-precios-masivo-30000-1561.sql`; los controles negativos están en `scripts/ci/gates-muerden.sh`).
+
+Después de una carga masiva de datos (una importación, la base inicial de un comercio nuevo) se corre
+`ANALYZE`: con estadísticas viejas el planner cree que `pedidos` y `pedido_items` están casi vacías, arma
+nested loops, y el gerencial, `tablero_categorias`, el bot y Rendimiento pasan el timeout de 8 s (N8 de
+#1603). Se mide con `scripts/tiempos-ventas-estadisticas-viejas-ola2-1603.sql`.
 
 Deploy: push a `main` → webhook de Coolify. La config de nginx de producción **vive en el
 panel de Coolify**, no en el `nginx.conf` del repo — editar el repo no cambia nada.
@@ -85,6 +96,16 @@ suelta en `sucursales`.
   falla ante lo alcanzable con la **anon key**, no con una sesión—. Pasó con
   `bot_digest_destinatarios` (261, corregida en la 262): devolvía los `telegram_user_id` de
   todos los admins y cualquier preventista logueado podía enumerarlos.
+- **El search_path termina en `pg_temp`** (mig 531, B15 de #1603), en dos mitades: toda `SECURITY DEFINER`
+  nueva o reemplazada fija `SET search_path = public, pg_temp`; y **toda función que fije
+  search_path, definer o no**, lo termina en `pg_temp` (`public, pg_temp`, o el suyo con `pg_temp`
+  al final). Sin `pg_temp` escrito, Postgres busca primero en las tablas temporales de la sesión:
+  una `perfiles` temporal del que llama hacía que `es_admin()` le diera true, y una INVOKER con su
+  propio `SET search_path = public` que llama una definer corre como postgres y hace lo mismo. Una
+  INVOKER que no fija search_path está bien (hereda el de quien la llama; una SQL sin `SET` se
+  inlinea, como `_cliente_visible`). Un `CREATE OR REPLACE` sin el `SET` lo pierde, y copiar el
+  `SET search_path TO 'public'` de una función vieja lo vuelve a abrir. Lo vigila
+  `scripts/check-search-path.mjs`, sin lista de permitidas.
 - **El alta de un usuario no le cree al usuario, y el admin gestiona a los de sus sucursales**
   (migs 403b y 404, #1243 y #1244). `handle_new_user()` toma el rol y la sucursal de
   `raw_app_meta_data`: en la admin API, `app_metadata: {rol, sucursal_id}`; por SQL, la
@@ -112,7 +133,11 @@ suelta en `sucursales`.
   sin `activo` (1564-b11 de #1603): usa los helpers o suma `COALESCE(activo, true)` a la subconsulta
   sobre `perfiles` (el depósito no tiene helper), y el mismo gate falla ante cualquiera, sin lista
   de permitidas. Nadie edita su propio
-  perfil (decisión del dueño): `perfiles` se escribe sólo por `perfiles_update_admin`. Y ningún
+  perfil ni sus propios roles extra, tampoco un admin (decisión del dueño): `perfiles` se escribe por
+  `perfiles_update_admin` (un admin que abarca las sucursales del otro), y `trg_perfiles_nadie_se_edita`
+  y `trg_perfil_roles_nadie_se_asigna` rechazan con el motivo la fila propia de quien escribe como
+  `authenticated` (el REST y las RPC INVOKER; el server y las definer no pasan por ahí). Al único admin
+  lo corrige el server. Y ningún
   `UPDATE` ni `DELETE` de `perfiles` deja la base sin un admin activo (`perfiles_guard_desactivacion`).
 - **El rol es uno solo en toda sucursal: `perfiles.rol`** (mig 486, #1519). Lo que cambia por
   sucursal son los extra de `perfil_roles`. `usuario_sucursales` ya no tiene columna `rol`
@@ -131,7 +156,8 @@ suelta en `sucursales`.
   necesita quien vende, va a esa lista; si no, a la RPC. El REVOKE de lo reservado para
   `authenticated` (la parte 2) va después, con su issue.
 - **Una `auditoria_*` que lee código limpia el cuerpo con `_sql_sin_comentarios` o
-  `_sql_sin_comentarios_ni_literales`** (#1541): una sola pasada que entiende las comillas. Sacar
+  `_sql_sin_comentarios_ni_literales`** (#1541): una sola pasada que entiende las comillas (también
+  la `\'` de un `E'…'`, C5 de #1603). Sacar
   primero los `--` y después los literales rompe la paridad con un literal `' -- '` y esconde lo
   que sigue. Espejo en `scripts/lib/locks.mjs`.
 - **Los avisos se guardan 90 días y `audit_logs` 24 meses** (1561-b10 y 1596-b10, decisión del
@@ -140,6 +166,21 @@ suelta en `sucursales`.
   de stock por venta (`pedido_creado`, `pedido_creado_bot` y `pedido_editado` para abajo) no se
   audita en `productos` porque ya está en `stock_historico`: la filtra el `WHEN` de
   `audit_productos_update`. Un origen de venta nuevo que baje stock se suma ahí.
+  **Renombrar o eliminar un rubro anota UNA fila, en el rubro, no una por producto** (1596-b9,
+  decisión del dueño del 19/11): `renombrar_rubro` y `eliminar_rubro` (DEFINER) escriben en
+  `audit_logs` la fila de `categorias` con el nombre viejo y el nuevo (o la baja), cuántos productos
+  alcanzó y, en `old_data.productos`, el antes de cada uno agrupado con sus ids. Su UPDATE de
+  productos lleva la marca `app.rubro_masivo` (`set_config(…, true)`, que borran apenas termina), y el
+  mismo `WHEN` saltea la fila sólo si lo único que cambió es el rubro (`categoria`, `categoria_id`,
+  `subcategoria_id`, `updated_at`): con la marca, otro cambio se audita entero, y el rubro de un
+  producto desde la ficha se audita como siempre. Van **en tandas** (`p_lote`; el front de a 5.000,
+  `rubroEnTandas.ts`): la fila de auditoría queda «en_curso» hasta la última, repetir la misma
+  operación retoma, y otra sobre el mismo rubro por id primero termina la que quedó a medias; ningún
+  rubro queda trabado (`rubros_a_medias()` y el botón «Terminar» de Categorías). Por el camino de
+  texto, lo que falta de un renombre a medias no se elimina ni se renombra a otra cosa, un rubro
+  nuevo con ese nombre viejo (o con el de un rubro de texto a medias de eliminar) se rechaza, y la
+  fila de un rubro con un renombre a medias no se borra por REST. Sin `p_lote` (un bundle viejo),
+  todo va en la misma llamada, también terminar lo que quedó a medias.
 - **Toda tabla nueva** de `public` nace sin escritura REST y sin nada para `anon` (los
   defaults de la migración del barrido, #1135). Si el front la escribe por REST, o la escribe
   un trigger INVOKER como `authenticated`, la migración concede **el privilegio exacto** (por
@@ -258,7 +299,11 @@ suelta en `sucursales`.
   salió: un pedazo de un pedazo se mide contra él, #1359; un CHECK pide los dos o ninguno), y el
   pago que se parte se bloquea
   `FOR UPDATE` **antes** de insertar el pedazo: la foto de una rendición se fía de eso para
-  saber si un pedazo nació antes o después de ella (`ultimo_pago_id`, #1292). **La rendición confirmada se congela**
+  saber si un pedazo nació antes o después de ella (`ultimo_pago_id`, #1292). El linaje (`pago_padre_id`,
+  `pago_origen_id`) NO tiene FK, a propósito (1601-b9): el padre se puede borrar y el pedazo lo sigue
+  nombrando (la baja de total con un crédito de NC, el borrado del admin, el cobro que repone
+  `anular_salvedad`). Lo cuida `trg_pagos_linaje_de_su_sucursal` (si el padre o la raíz existen, son
+  de la misma sucursal) y PAGO-A/PAGO-B de `auditoria_integridad()`. **La rendición confirmada se congela**
   (#1248): al cerrarla, `trg_rendiciones_control_foto` guarda sus pagos en
   `rendicion_pagos_confirmados`, y un día cerrado se lee de esa foto. Reabrirla la descarta.
   Por eso reimputar ya no mueve la plata de una rendición cerrada a otro chofer. Una RPC
@@ -283,6 +328,11 @@ suelta en `sucursales`.
   `anular_salvedad` se lo devuelve, con tope en lo que la boleta debe. Si el recorte lo borró, o
   el cobro ya está en una rendición confirmada o en un día con la caja cerrada, vuelve como un
   cobro nuevo con sus datos (con la fecha de hoy si la suya está cerrada), y la foto no cambia.
+  Ese cobro nuevo lleva las marcas del recortado (`a_cuenta`, `pago_origen_id` y `pago_padre_id`;
+  1595-b2): un adelanto de sueldo del FIFO de la ficha sigue a cuenta y `desimputar_pago` lo acepta.
+  Reponer un adelanto a un empleado dado de baja se rechaza siempre: raíz, pedazo o sumado al pago
+  vivo, mirando la ficha de hoy y los movimientos de esa familia de pagos (a quien el trigger de la
+  cuenta carga), y sólo si hay algo que reponer (H4 de la revisión de C1).
   Lo que quedó a favor, o un cobro que alguien borró o movió después, no se repone.
   **La línea que la salvedad borró vuelve con su foto** (VTA-1, #1595): al borrarla,
   `registrar_salvedad` guarda su costo, su lista, su origen, su descuento y su escala en
@@ -292,7 +342,9 @@ suelta en `sucursales`.
   combo), y uno que repunte escalas repunta también la de la foto.
   Anular una salvedad que devuelve el derecho a un regalo se rechaza si **cualquier** salvedad
   del pedido, viva o anulada, recortó un regalo de esa promo (1592-b5 y su revisión): mirar
-  sólo la propia hacía que el resultado dependiera del orden en que se anulan.
+  sólo la propia hacía que el resultado dependiera del orden en que se anulan. Una salvedad sobre
+  el propio regalo (baja esa línea, no la venta) no es un recorte y no cuenta: como no se puede
+  anular, el resultado sigue sin depender del orden (1592-b5 residual).
   **La boleta nueva absorbe el saldo a favor al crearse** (mig 463c, #1469; decisión del dueño):
   FIFO, por `aplicar_credito_cliente`, en `crear_pedido_completo` y el bot. Un camino nuevo que
   cree una boleta hace lo mismo con `_alta_bloquea_boletas_credito` (antes de los productos),
@@ -323,7 +375,9 @@ suelta en `sucursales`.
   de total ya no absorbe sola el crédito suelto: lo absorbe el próximo pedido o una imputación a
   mano. El FIFO es uno, `_aplicar_credito_pagos(cliente, sucursal, pagos)`, y
   `aplicar_credito_cliente` lo llama con todos: sólo barren todo el alta y el FIFO de la ficha. Un
-  camino nuevo que deje plata a favor pasa la lista de sus pagos. **El saldo a favor aplicado a
+  camino nuevo que deje plata a favor pasa la lista de sus pagos. El crédito que se aplica a una
+  boleta pierde sus marcas de saldo a favor en las notas por `_notas_sin_saldo_a_favor` (las tres:
+  la común, la de cancelación y la de cambio de cliente; COB-b6). **El saldo a favor aplicado a
   una boleta no se borra:** un pago con `de_saldo_a_favor`, `a_cuenta`, `pago_origen_id` o
   `nota_credito_id` se quita con `desimputar_pago` y vuelve suelto, sin reaplicarse solo (decisión
   del dueño); el `DELETE` REST lo rechaza `trg_pagos_guard_credito_aplicado`. Anular una NC
@@ -358,6 +412,28 @@ suelta en `sucursales`.
   lo frena `trg_promocion_no_se_borra_con_uso`: líneas de pedido de cualquier estado, ajustes de
   stock o salvedades. El front cuenta lo mismo antes de ofrecer "Eliminar"
   (`promocionesEliminacion.ts`): si cambia la regla de un lado, cambia del otro.
+- **Un guardado que escribe varias filas o tablas va en UNA RPC, y el front no compensa** (C4b de
+  #1603): la condición mayorista entera (`guardar_condicion_mayorista`), el alta de una promo
+  (`crear_promocion`), los roles extra (`guardar_roles_extra`) y los descuentos por categoría
+  (`guardar_descuentos_categoria`). Validan adentro lo de la policy, las restricciones y el
+  formulario, y un rechazo es un RAISE (un `{success:false}` después de escribir confirma lo
+  escrito). Un alta que un reintento duplicaría lleva la clave del formulario (`altas_por_clave`,
+  sólo de server). La edición de un combo o de una promo manda la versión que abrió
+  (`updated_at_esperado`, y en un combo las `versiones` del orden que reescribe): si otro guardó, no
+  se pisa y el formulario queda abierto con lo tipeado. La versión de una promo no la mueve la barra
+  (`usos_pendientes`), ni la de un cliente su saldo (`clientes.updated_at`, `trg_clientes_zz_version`).
+  Un cambio sólo en las hijas (los productos o reglas de una promo, los descuentos o preventistas de
+  un cliente) la mueve la RPC que lo hace (el trigger respeta ese movimiento si viene del server, y
+  en un alta de `authenticated` la pone él): una RPC nueva que escriba las hijas hace lo mismo.
+  Estas RPC toman la fila padre `FOR NO KEY UPDATE`, nunca `FOR UPDATE`, que choca con el `KEY
+  SHARE` de la FK de una venta y da deadlock; y antes de insertar hijas que apuntan a productos, los
+  toman `FOR KEY SHARE` por id (las filas toman el `KEY SHARE` de la FK en el orden del JSON, y la
+  venta toma los productos `FOR UPDATE` por id). Lo prueba `scripts/concurrencia/c4b-combo-y-venta.sh`.
+  Nadie se edita a sí mismo por estas RPC.
+  El alta y la edición de un cliente (`guardar_cliente`) y el guardado de un usuario (`guardar_usuario`)
+  corren como quien llama (INVOKER), a propósito: los triggers de `clientes` y `perfiles` se eximen
+  cuando `current_user` no es 'authenticated', y una definer los salteaba. Mientras sean INVOKER
+  necesitan los grants REST de esas tablas: revocarlos obliga a pasarlas a definer con esas guardas.
 - **El stock por lote lo lleva un trigger, no las RPCs** (y cómo devolver, etiquetar y lockear) → `migrations/CLAUDE.md`.
 - **"Venta por vendedor" tiene UNA definición y se escribe siempre igual** (migs 241 y 318, #568):
   `estado = 'entregado'` · `canal <> 'cambio'` · `tipo_factura IS DISTINCT FROM 'VB'` · por
@@ -557,12 +633,18 @@ suelta en `sucursales`.
 - **El total de una ZZ incluye sus cargos en factura** (#1593, decisión del dueño): es lo pagado,
   10 × 100 con un flete de 300 dan 1.300. La ZZ guarda `bonificaciones` y `no_gravado` en 0: el
   cuadre del alta y COMPRA-A1 suman los cargos `en_factura` de `compra_cargos`, y el front los
-  lleva en `cargosEnFactura`. En una FC no cambia: el cargo gravado va a `bonificaciones`.
+  lleva en `cargosEnFactura`. En una FC no cambia: el cargo gravado va a `bonificaciones`, y el no
+  gravado o exento a `no_gravado`, con su signo: un descuento sobre renglones exentos o no gravados lo
+  deja negativo, hasta lo que suman esos descuentos (#1590, tarjeta C3 de #1603). Un descuento no
+  gravado no pasa de lo que suman los renglones no gravados, ni uno exento de los exentos
+  (`_compra_descuento_fuera_de_tope`): sobre renglones gravados va como bonificación gravada.
 - **Una NC de compra no pasa lo que le queda a la compra** (su total menos sus notas vigentes): el ajuste
   siempre, y la devolución si la compra tiene un ajuste (#1557, #1565; decisión del dueño). La devolución
   se valúa neta de la bonificación y de los descuentos de cabecera (`_compra_factor_neto`, #1590 D16):
-  un descuento con reparto le baja el neto sólo a sus renglones, y el resto va parejo. Devolver todo
-  nunca acredita más que lo pagado. Un camino nuevo de NC hace igual.
+  un descuento con reparto le baja el neto sólo a sus renglones, y el resto va parejo. En una FC el neto
+  baja con todo descuento en factura y el IVA sólo con los gravados (`_compra_factor_iva`): uno no gravado
+  no le bajó el IVA a la factura (H5 de #1590). Devolver todo nunca acredita más que lo pagado. Un camino
+  nuevo de NC hace igual.
 - **Una NC de compra se anula, no se borra** (`anular_nota_credito_compra`, #1590 D15): queda
   `anulada` con su motivo, y deshace el stock, los lotes que tomó (`notas_credito.lotes_tomados`), el
   promedio y la reposición. Una devolución anterior a la 483 (10/11/2026) no se anula: no corrigió el
@@ -592,7 +674,21 @@ suelta en `sucursales`.
   y `compra_cargo_repartos`.
 - **Un producto con stock, con lotes (aun agotados) o que es el regalo de una promo no se borra: se
   desactiva** (1561-b2, decisión del dueño). Lo frena `productos_rechazar_borrado_con_historial`,
-  junto con el historial; sin nada de eso se borra y su `stock_historico` se va con él.
+  junto con el historial; sin nada de eso se borra y su `stock_historico` se va con él. Tampoco uno que
+  está en una meta (`trg_productos_rechazar_borrado_en_meta`, 1601-b9), y cada id de
+  `metas_preventista.producto_ids` es un producto de la sucursal de la meta (su trigger, la FK que un
+  array no puede tener, y META-A de `auditoria_integridad()`).
+- **El código de un producto es único por sucursal, sin mirar mayúsculas ni los espacios de los
+  bordes** (1561-b1, decisión del dueño D31), como los rubros: índice
+  `productos_codigo_unico_por_sucursal` sobre `upper(btrim(codigo))`, sin los vacíos (un producto
+  sin código no choca con nadie), y `trg_productos_codigo_unico` da el mensaje con el producto que
+  ya lo tiene, sólo a quien pasa la policy de escritura (el server, o un admin en su sucursal
+  activa): corre antes que la RLS, y a cualquier otro le devuelve la fila para que la RLS dé su 42501
+  (el depósito no lee productos y no puede sondearlos por código). El encargado que acepta un envío
+  recibe el 23505 del índice, que el front traduce (`mensajeAlAceptarEnvio`). Busca por el índice
+  (DEFINER, sin `ORDER BY` y con `plan_cache_mode = force_custom_plan`): un trigger por fila cuyo
+  plan guardado recorre la sucursal hace cuadrática un alta masiva en una base nueva. Espejo en `src/utils/codigoProducto.ts`. Un camino nuevo que escriba
+  `productos.codigo` no lo valida aparte: lo frena la base.
 - **Un stock mínimo de 0 es «sin alerta», y vacío es 10** (CAT-13, decisión del dueño): con alerta,
   está bajo cuando `stock <= mínimo`. Es una regla en tres lugares: `stockBajo`
   (`src/utils/stockMinimo.ts`), su copia del bot (`supabase/functions/_shared/utils/stockMinimo.ts`)

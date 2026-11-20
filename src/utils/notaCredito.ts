@@ -373,3 +373,19 @@ export function restanteAcreditableCompra(
   if (!Number.isFinite(total)) return null;
   return redondear(total - notasVigentes(notas).reduce((s, n) => s + num(n.total), 0));
 }
+
+/**
+ * El tope de una DEVOLUCIÓN: lo que le queda a la compra (`restanteAcreditableCompra`),
+ * pero sólo si la compra tiene un ajuste vigente, que es cuando rige (decisión del
+ * dueño, #1565; `registrar_nota_credito` y `registrar_nota_credito_lote`): sin
+ * ajustes, devolver toda la mercadería entra siempre. `null` = sin tope (o sin el
+ * total de la compra). No baja de 0. Lo usa la devolución por lote (1590-c).
+ */
+export function restanteDevolucionCompra(
+  totalCompra: unknown,
+  notas: ReadonlyArray<{ total?: unknown; tipo?: string | null; anulada?: boolean | null }>,
+): number | null {
+  if (!notasVigentes(notas).some(n => n.tipo === 'ajuste')) return null;
+  const restante = restanteAcreditableCompra(totalCompra, notas);
+  return restante === null ? null : Math.max(restante, 0);
+}

@@ -8,12 +8,14 @@
  *
  * Requiere la migración 009_categorias_table.sql aplicada en Supabase.
  */
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { productosKeys } from './useProductosQuery'
 import { traerTodo } from '../../utils/paginacion'
+import { procesarRubroEnTandas, TANDA_RUBRO, type AvanceRubro, type RespuestaTandaRubro } from '../../utils/rubroEnTandas'
 
 // =============================================================================
 // TYPES
@@ -91,7 +93,8 @@ async function createCategoria(nombre: string, sucursalId: number | null): Promi
  */
 async function renameCategoria(
   { id, nombreViejo, nombreNuevo, sucursalId }:
-  { id: string | null; nombreViejo: string; nombreNuevo: string; sucursalId: number | null }
+  { id: string | null; nombreViejo: string; nombreNuevo: string; sucursalId: number | null },
+  onAvance?: (avance: AvanceRubro) => void,
 ): Promise<void> {
   if (sucursalId == null) {
     throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
@@ -101,17 +104,22 @@ async function renameCategoria(
   if (!nuevoLimpio) throw new Error('El nombre nuevo no puede estar vacío')
   if (nuevoLimpio === nombreViejo) return
 
-  const { error } = await supabase.rpc('renombrar_rubro', {
-    p_categoria_id: id,
-    p_nombre_actual: nombreViejo,
-    p_nombre_nuevo: nuevoLimpio,
-  })
-  if (error) {
-    if (error.code === '23505') {
-      throw new Error(`Ya existe una categoría llamada "${nuevoLimpio}"`)
+  // En tandas (1596-b9): cada llamada pasa hasta TANDA_RUBRO productos y dice cuántos faltan.
+  await procesarRubroEnTandas(async (idTanda) => {
+    const { data, error } = await supabase.rpc('renombrar_rubro', {
+      p_categoria_id: idTanda,
+      p_nombre_actual: nombreViejo,
+      p_nombre_nuevo: nuevoLimpio,
+      p_lote: TANDA_RUBRO,
+    })
+    if (error) {
+      if (error.code === '23505') {
+        throw new Error(`Ya existe una categoría llamada "${nuevoLimpio}"`)
+      }
+      throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la categoría se haya renombrado. Revisá antes de reintentar.')
     }
-    throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la categoría se haya renombrado. Revisá antes de reintentar.')
-  }
+    return data as RespuestaTandaRubro
+  }, id, 'renombrar', onAvance)
 }
 
 /** Lo que haría eliminar un rubro, y lo que lo frena (`eliminar_rubro` con `p_solo_ver`). */
@@ -145,13 +153,19 @@ async function fetchImpactoEliminarRubro({ id, nombre }: { id: string | null; no
  * (23503, con el motivo) si el rubro está en un combo o en una regla de comisión.
  */
 async function deleteCategoria(
-  { id, nombre }: { id: string | null; nombre: string }
+  { id, nombre }: { id: string | null; nombre: string },
+  onAvance?: (avance: AvanceRubro) => void,
 ): Promise<void> {
-  const { error } = await supabase.rpc('eliminar_rubro', {
-    p_categoria_id: id,
-    p_nombre: nombre,
-  })
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la categoría se haya eliminado. Revisá antes de reintentar.')
+  // En tandas (1596-b9): la fila del rubro se borra con la última.
+  await procesarRubroEnTandas(async (idTanda) => {
+    const { data, error } = await supabase.rpc('eliminar_rubro', {
+      p_categoria_id: idTanda,
+      p_nombre: nombre,
+      p_lote: TANDA_RUBRO,
+    })
+    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la categoría se haya eliminado. Revisá antes de reintentar.')
+    return data as RespuestaTandaRubro
+  }, id, 'eliminar', onAvance)
 }
 
 // =============================================================================
@@ -277,18 +291,24 @@ export function useCrearCategoriaMutation() {
 export function useRenombrarCategoriaMutation() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
+  // El avance de las tandas (1596-b9), para mostrarlo mientras corre.
+  const [avance, setAvance] = useState<AvanceRubro | null>(null)
 
-  return useMutation({
-    mutationFn: (args: { id: string | null; nombreViejo: string; nombreNuevo: string }) =>
-      renameCategoria({ ...args, sucursalId: currentSucursalId }),
+  const mutation = useMutation({
+    mutationFn: (args: { id: string | null; nombreViejo: string; nombreNuevo: string }) => {
+      setAvance(null)
+      return renameCategoria({ ...args, sucursalId: currentSucursalId }, setAvance)
+    },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: categoriasKeys.lists(currentSucursalId) })
+      // `all`: la lista y los cambios a medias (si una tanda se cortó, aparece «Terminar»).
+      queryClient.invalidateQueries({ queryKey: categoriasKeys.all(currentSucursalId) })
       // Los productos cambiaron su string de categoría; invalidar la lista
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
       // Y los descuentos por rubro de los clientes (#1561).
       queryClient.invalidateQueries({ queryKey: ['clientes', currentSucursalId] })
     },
   })
+  return { ...mutation, avance }
 }
 
 /** Lo que haría eliminar el rubro, para avisarlo antes de confirmar. `null` = no se está por eliminar. */
@@ -305,15 +325,79 @@ export function useImpactoEliminarRubroQuery(rubro: { id: string | null; nombre:
 export function useEliminarCategoriaMutation() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
+  // El avance de las tandas (1596-b9), para mostrarlo mientras corre.
+  const [avance, setAvance] = useState<AvanceRubro | null>(null)
 
-  return useMutation({
-    mutationFn: deleteCategoria,
+  const mutation = useMutation({
+    mutationFn: (args: { id: string | null; nombre: string }) => {
+      setAvance(null)
+      return deleteCategoria(args, setAvance)
+    },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: categoriasKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: ['clientes', currentSucursalId] })
     },
   })
+  return { ...mutation, avance }
+}
+
+/** Un cambio de rubro que quedó a medias entre tandas (`rubros_a_medias`, 1596-b9). */
+export interface RubroAMedias {
+  accion: 'renombrar' | 'eliminar'
+  /** El rubro con fila, o null si era sólo texto. */
+  id: string | null
+  /** El nombre de antes (el del texto que falta). */
+  nombre: string
+  /** Al que se estaba renombrando. */
+  nombre_nuevo: string | null
+  hechos: number
+  faltan: number
+}
+
+async function fetchRubrosAMedias(): Promise<RubroAMedias[]> {
+  const { data, error } = await supabase.rpc('rubros_a_medias')
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo ver si hay cambios de rubro a medias. Revisá la señal e intentá de nuevo.')
+  return (data ?? []) as RubroAMedias[]
+}
+
+/**
+ * Los cambios de rubro a medias (se cortaron entre tandas), para ofrecer «Terminar»: así ningún
+ * rubro queda trabado (1596-b9).
+ */
+export function useRubrosAMediasQuery() {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: [...categoriasKeys.all(currentSucursalId), 'a_medias'],
+    queryFn: fetchRubrosAMedias,
+    staleTime: 0,
+  })
+}
+
+/** Termina un cambio de rubro a medias: el mismo renombre (o eliminación), en tandas. */
+export function useTerminarRubroMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+  const [avance, setAvance] = useState<AvanceRubro | null>(null)
+
+  const mutation = useMutation({
+    mutationFn: (p: RubroAMedias) => {
+      setAvance(null)
+      if (p.accion === 'renombrar') {
+        return renameCategoria(
+          { id: p.id, nombreViejo: p.nombre, nombreNuevo: p.nombre_nuevo ?? '', sucursalId: currentSucursalId },
+          setAvance,
+        )
+      }
+      return deleteCategoria({ id: p.id, nombre: p.nombre }, setAvance)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: categoriasKeys.all(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: ['clientes', currentSucursalId] })
+    },
+  })
+  return { ...mutation, avance }
 }
 
 /**
