@@ -1850,6 +1850,11 @@ export interface GrupoPrecioConDetalles extends GrupoPrecioDB {
 }
 
 export interface GrupoPrecioFormInput {
+  /**
+   * La clave del alta (un uuid por vez que se abre el formulario, C4b de #1603): el reintento de
+   * la misma alta devuelve la condición que ya entró y no crea otra. La edición no la usa.
+   */
+  clave?: string;
   nombre: string;
   descripcion?: string | null;
   productoIds: string[];

@@ -9,6 +9,7 @@ import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { condicionesDeProducto } from '../../utils/condicionesMayoristas'
 import { traerTodo } from '../../utils/paginacion'
+import { nuevoRequestId } from '../../utils/idempotencia'
 import type {
   GrupoPrecioDB,
   GrupoPrecioProductoDB,
@@ -147,318 +148,66 @@ async function fetchPricingMap(): Promise<PricingMap> {
 // MUTATION FUNCTIONS
 // =============================================================================
 
-/**
- * Le suma un aviso al mensaje de un error y lo devuelve (conserva su `code` y su tipo, que
- * leen la UI y el reintento).
- */
-function conAviso(err: unknown, aviso: string): Error {
-  const e = err instanceof Error ? err : new Error(String(err))
-  e.message = `${e.message} ${aviso}`
-  return e
+/** Lo que devuelve `guardar_condicion_mayorista`: la condición y si era el reintento de un alta. */
+export interface CondicionGuardada {
+  id: string
+  /** El alta ya había entrado con el intento anterior (misma clave): no se creó otra. */
+  replay: boolean
 }
 
-async function createGrupoPrecio(input: GrupoPrecioFormInput, sucursalId: number | null): Promise<GrupoPrecioConDetalles> {
-  if (sucursalId == null) {
-    throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
-  }
-
-  // Crear el grupo
-  const { data: grupo, error: errorGrupo } = await supabase
-    .from('grupos_precio')
-    .insert([{ nombre: input.nombre, descripcion: input.descripcion || null, sucursal_id: sucursalId }])
-    .select()
-    .single()
-
-  if (errorGrupo) throw errorDeSupabase(errorGrupo, 'Sin conexión: no se pudo confirmar que la condición se haya creado. Revisá antes de reintentar.')
-
-  const grupoId = (grupo as GrupoPrecioDB).id
-
-  // Son varias escrituras REST sin transacción (#1561, 1561-b12): si una falla, la condición
-  // recién creada se borra (nadie la usó todavía y sus productos y escalas caen en cascada)
-  // en vez de quedar vacía o a medias. Cerrarlo del todo pide una RPC que lo haga en una sola
-  // transacción.
-  try {
-  // Insertar productos
-  if (input.productoIds.length > 0) {
-    const { error: errorProductos } = await supabase
-      .from('grupo_precio_productos')
-      .insert(input.productoIds.map(pid => ({
-        grupo_precio_id: parseInt(grupoId),
-        producto_id: parseInt(pid),
-        sucursal_id: sucursalId,
-      })))
-
-    if (errorProductos) throw errorDeSupabase(errorProductos, 'Sin conexión: no se pudo confirmar que la condición se haya creado. Revisá antes de reintentar.')
-  }
-
-  // Insertar escalas y recuperar los IDs para asociar minimos
-  if (input.escalas.length > 0) {
-    const { data: escalasInsertadas, error: errorEscalas } = await supabase
-      .from('grupo_precio_escalas')
-      .insert(input.escalas.map(e => ({
-        grupo_precio_id: parseInt(grupoId),
-        cantidad_minima: e.cantidadMinima,
-        precio_unitario: e.precioUnitario,
-        etiqueta: e.etiqueta || null,
-        min_productos_distintos: e.minProductosDistintos ?? 1,
-        sucursal_id: sucursalId,
-      })))
-      .select()
-
-    if (errorEscalas) throw errorDeSupabase(errorEscalas, 'Sin conexión: no se pudo confirmar que la condición se haya creado. Revisá antes de reintentar.')
-
-    // Insertar los minimos por producto para las escalas combinadas.
-    // Match por cantidad_minima (es UNIQUE dentro del grupo).
-    const filasMinimos = buildFilasMinimos(
-      input.escalas,
-      (escalasInsertadas as GrupoPrecioEscalaDB[]) || [],
-      sucursalId
-    )
-    if (filasMinimos.length > 0) {
-      const { error: errorMinimos } = await supabase
-        .from('grupo_precio_escala_minimos')
-        .insert(filasMinimos)
-      if (errorMinimos) throw errorDeSupabase(errorMinimos, 'Sin conexión: no se pudo confirmar que la condición se haya creado. Revisá antes de reintentar.')
-    }
-  }
-
-  } catch (err) {
-    const { error: errorDeshacer } = await supabase.from('grupos_precio').delete().eq('id', grupoId)
-    throw conAviso(err, errorDeshacer
-      ? 'La condición quedó creada a medias: abrila y revisala, o eliminala y volvé a crearla.'
-      : 'No se creó nada: volvé a intentar.')
-  }
-
-  // Fetch completo para devolver
-  const { data: productos } = await supabase
-    .from('grupo_precio_productos')
-    .select('*')
-    .eq('grupo_precio_id', grupoId)
-
-  const { data: escalas } = await supabase
-    .from('grupo_precio_escalas')
-    .select('*')
-    .eq('grupo_precio_id', grupoId)
-    .order('cantidad_minima')
-
+/**
+ * El JSON de `guardar_condicion_mayorista` (C4b, ola 2 de #1603). Con `id` es la edición; sin
+ * `id`, el alta, con la clave del formulario: el reintento de la misma alta devuelve la condición
+ * que ya entró y no crea otra. Los mínimos por producto van sólo los que tienen cantidad, como
+ * antes; los que no vienen se borran.
+ */
+export function condicionParaGuardar(input: GrupoPrecioFormInput, id?: string): Record<string, unknown> {
   return {
-    ...(grupo as GrupoPrecioDB),
-    productos: (productos || []) as GrupoPrecioProductoDB[],
-    escalas: (escalas || []) as GrupoPrecioEscalaDB[],
-  }
-}
-
-/**
- * Arma las filas de grupo_precio_escala_minimos a partir del input del form
- * y las escalas ya insertadas (para obtener sus IDs). Hace match por
- * cantidad_minima, que es UNIQUE dentro de un grupo.
- */
-interface FilaMinimoInsert {
-  escala_id: number
-  producto_id: number
-  cantidad_minima_por_item: number
-  precio_unitario_override: number | null
-  sucursal_id: number
-}
-
-function buildFilasMinimos(
-  escalasInput: GrupoPrecioFormInput['escalas'],
-  escalasDB: GrupoPrecioEscalaDB[],
-  sucursalId: number
-): FilaMinimoInsert[] {
-  const filas: FilaMinimoInsert[] = []
-  for (const e of escalasInput) {
-    if (!e.minimosPorProducto) continue
-    const entries = Object.entries(e.minimosPorProducto).filter(([, v]) => v && v.cantidad > 0)
-    if (entries.length === 0) continue
-    const escalaDB = escalasDB.find(db => db.cantidad_minima === e.cantidadMinima)
-    if (!escalaDB) continue
-    for (const [productoId, regla] of entries) {
-      filas.push({
-        escala_id: parseInt(String(escalaDB.id)),
-        producto_id: parseInt(productoId),
-        cantidad_minima_por_item: regla.cantidad,
-        precio_unitario_override:
-          regla.precioOverride != null && regla.precioOverride > 0 ? regla.precioOverride : null,
-        sucursal_id: sucursalId,
-      })
-    }
-  }
-  return filas
-}
-
-async function updateGrupoPrecio(
-  { id, data: input, sucursalId }: { id: string; data: GrupoPrecioFormInput; sucursalId: number | null }
-): Promise<GrupoPrecioConDetalles> {
-  if (sucursalId == null) {
-    throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
-  }
-
-  // Actualizar grupo
-  const { data: grupo, error: errorGrupo } = await supabase
-    .from('grupos_precio')
-    .update({ nombre: input.nombre, descripcion: input.descripcion || null })
-    .eq('id', id)
-    .select()
-    .single()
-
-  if (errorGrupo) throw errorDeSupabase(errorGrupo, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
-
-  // Lo que sigue son varias escrituras sin transacción (#1561, 1561-b12). El nombre ya está
-  // guardado: si un paso falla, la condición quedó a medias y el mensaje lo dice. El orden
-  // limita el daño: los productos y las escalas se reconcilian (nada se borra para volver a
-  // insertar) y los mínimos por producto se escriben antes de borrar los que sobran.
-  try {
-  // Productos: reconciliar por producto_id en vez de barrer y reinsertar.
-  const { data: productosActuales, error: errorLeerProductos } = await supabase
-    .from('grupo_precio_productos')
-    .select('id, producto_id')
-    .eq('grupo_precio_id', id)
-  if (errorLeerProductos) throw errorDeSupabase(errorLeerProductos, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
-
-  const filasProducto = (productosActuales || []) as Array<{ id: string; producto_id: string }>
-  const productoIdsDeseados = new Set(input.productoIds.map(String))
-  const productoIdsActuales = new Set(filasProducto.map(p => String(p.producto_id)))
-
-  const productosAQuitar = filasProducto.filter(p => !productoIdsDeseados.has(String(p.producto_id)))
-  if (productosAQuitar.length > 0) {
-    const { error } = await supabase
-      .from('grupo_precio_productos')
-      .delete()
-      .in('id', productosAQuitar.map(p => p.id))
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
-  }
-
-  const productosAAgregar = input.productoIds.filter(pid => !productoIdsActuales.has(String(pid)))
-  if (productosAAgregar.length > 0) {
-    const { error } = await supabase
-      .from('grupo_precio_productos')
-      .insert(productosAAgregar.map(pid => ({
-        grupo_precio_id: parseInt(id),
-        producto_id: parseInt(pid),
-        sucursal_id: sucursalId,
-      })))
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
-  }
-
-  // Escalas: reconciliar por cantidad_minima, que es UNIQUE dentro del grupo.
-  //
-  // Antes se borraban todas y se reinsertaban. Eso rotaba los ids en cada
-  // edición y dejaba huérfano el `grupo_precio_escala_id` que `pedido_items`
-  // guarda para trazar qué escala fijó el precio (mig 148): en prod ya hay 11
-  // de 149 items apuntando a escalas que no existen. Actualizar en el lugar
-  // conserva el id, así el histórico sigue siendo legible.
-  const { data: escalasActuales, error: errorLeerEscalas } = await supabase
-    .from('grupo_precio_escalas')
-    .select('id, cantidad_minima')
-    .eq('grupo_precio_id', id)
-  if (errorLeerEscalas) throw errorDeSupabase(errorLeerEscalas, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
-
-  const filasEscala = (escalasActuales || []) as Array<{ id: string; cantidad_minima: number }>
-  const idPorCantidad = new Map<number, string>()
-  for (const e of filasEscala) idPorCantidad.set(Number(e.cantidad_minima), String(e.id))
-
-  // Primero las bajas: si una escala cambia de cantidad a una ya ocupada por
-  // otra que se va, borrar antes evita chocar contra el UNIQUE.
-  const cantidadesDeseadas = new Set(input.escalas.map(e => e.cantidadMinima))
-  const escalasAQuitar = filasEscala.filter(e => !cantidadesDeseadas.has(Number(e.cantidad_minima)))
-  if (escalasAQuitar.length > 0) {
-    const { error } = await supabase
-      .from('grupo_precio_escalas')
-      .delete()
-      .in('id', escalasAQuitar.map(e => e.id))
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
-  }
-
-  const escalasFinales: GrupoPrecioEscalaDB[] = []
-  for (const e of input.escalas) {
-    const existenteId = idPorCantidad.get(e.cantidadMinima)
-    const campos = {
+    ...(id ? { id: Number(id) } : { clave: input.clave }),
+    nombre: input.nombre,
+    descripcion: input.descripcion || null,
+    producto_ids: input.productoIds.map(Number),
+    escalas: input.escalas.map(e => ({
+      cantidad_minima: e.cantidadMinima,
       precio_unitario: e.precioUnitario,
       etiqueta: e.etiqueta || null,
       min_productos_distintos: e.minProductosDistintos ?? 1,
-    }
-    if (existenteId) {
-      const { data, error } = await supabase
-        .from('grupo_precio_escalas')
-        .update(campos)
-        .eq('id', existenteId)
-        .select()
-        .single()
-      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
-      escalasFinales.push(data as GrupoPrecioEscalaDB)
-    } else {
-      const { data, error } = await supabase
-        .from('grupo_precio_escalas')
-        .insert({
-          grupo_precio_id: parseInt(id),
-          cantidad_minima: e.cantidadMinima,
-          sucursal_id: sucursalId,
-          ...campos,
-        })
-        .select()
-        .single()
-      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
-      escalasFinales.push(data as GrupoPrecioEscalaDB)
-    }
+      minimos: Object.entries(e.minimosPorProducto ?? {})
+        .filter(([, regla]) => regla && regla.cantidad > 0)
+        .map(([productoId, regla]) => ({
+          producto_id: Number(productoId),
+          cantidad: regla.cantidad,
+          precio_override: regla.precioOverride != null && regla.precioOverride > 0 ? regla.precioOverride : null,
+        })),
+    })),
   }
+}
 
-  // Los mínimos por producto se concilian: primero se escriben los que valen (upsert por
-  // escala + producto) y recién después se borran los que sobran. Antes se borraban todos y
-  // se reinsertaban: si el INSERT fallaba, la condición perdía sus mínimos.
-  if (escalasFinales.length > 0) {
-    const { data: minimosActuales, error: errorLeerMinimos } = await supabase
-      .from('grupo_precio_escala_minimos')
-      .select('escala_id, producto_id')
-      .in('escala_id', escalasFinales.map(e => e.id))
-    if (errorLeerMinimos) throw errorDeSupabase(errorLeerMinimos, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
-
-    const filasMinimos = buildFilasMinimos(input.escalas, escalasFinales, sucursalId)
-    if (filasMinimos.length > 0) {
-      const { error: errorMinimos } = await supabase
-        .from('grupo_precio_escala_minimos')
-        .upsert(filasMinimos, { onConflict: 'escala_id,producto_id' })
-      if (errorMinimos) throw errorDeSupabase(errorMinimos, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
-    }
-
-    const vigentes = new Set(filasMinimos.map(f => `${f.escala_id}:${f.producto_id}`))
-    const sobran = new Map<string, string[]>()
-    for (const m of (minimosActuales || []) as Array<{ escala_id: string | number; producto_id: string | number }>) {
-      if (vigentes.has(`${m.escala_id}:${m.producto_id}`)) continue
-      const lista = sobran.get(String(m.escala_id)) ?? []
-      lista.push(String(m.producto_id))
-      sobran.set(String(m.escala_id), lista)
-    }
-    for (const [escalaId, productoIds] of sobran) {
-      const { error: errorBorrar } = await supabase
-        .from('grupo_precio_escala_minimos')
-        .delete()
-        .eq('escala_id', escalaId)
-        .in('producto_id', productoIds)
-      if (errorBorrar) throw errorDeSupabase(errorBorrar, 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.')
-    }
+/**
+ * Alta o edición de una condición mayorista entera —nombre, productos, escalas y mínimos— en UNA
+ * llamada y una transacción (`guardar_condicion_mayorista`, C4b de #1603; 1561-b12). Antes eran
+ * unas diez escrituras REST y, si una fallaba, el front borraba lo recién creado o avisaba que
+ * había quedado a medias. Ahora, si algo falla, no entra nada y vuelve el motivo.
+ */
+async function guardarCondicion(
+  input: GrupoPrecioFormInput,
+  sucursalId: number | null,
+  id?: string,
+): Promise<CondicionGuardada> {
+  if (sucursalId == null) {
+    throw new Error('No hay sucursal activa. Recargá la página e intentá de nuevo.')
   }
-  } catch (err) {
-    throw conAviso(err, 'La condición quedó guardada a medias: abrila, revisala y volvé a guardar.')
+  // El formulario manda su clave (una por vez que se abre). Sin ella, una nueva: no hay reintento
+  // que reconocer.
+  const datos = condicionParaGuardar(id ? input : { ...input, clave: input.clave ?? nuevoRequestId() }, id)
+  const { data, error } = await supabase.rpc('guardar_condicion_mayorista', { p_condicion: datos })
+  if (error) {
+    throw errorDeSupabase(error, id
+      ? 'Sin conexión: no se pudo confirmar que la condición se haya guardado. Revisá antes de reintentar.'
+      : 'Sin conexión: no se pudo confirmar que la condición se haya creado. Podés volver a guardar: si ya había entrado, no se crea otra.')
   }
-
-  // Fetch completo
-  const { data: productos } = await supabase
-    .from('grupo_precio_productos')
-    .select('*')
-    .eq('grupo_precio_id', id)
-
-  const { data: escalas } = await supabase
-    .from('grupo_precio_escalas')
-    .select('*')
-    .eq('grupo_precio_id', id)
-    .order('cantidad_minima')
-
-  return {
-    ...(grupo as GrupoPrecioDB),
-    productos: (productos || []) as GrupoPrecioProductoDB[],
-    escalas: (escalas || []) as GrupoPrecioEscalaDB[],
-  }
+  const r = data as { id: number | string; replay?: boolean }
+  return { id: String(r.id), replay: Boolean(r.replay) }
 }
 
 async function deleteGrupoPrecio(id: string): Promise<void> {
@@ -521,8 +270,7 @@ export function useCrearGrupoPrecioMutation() {
   const { currentSucursalId } = useSucursal()
 
   return useMutation({
-    mutationFn: (input: GrupoPrecioFormInput) => createGrupoPrecio(input, currentSucursalId),
-    // También si falla: una condición que quedó a medias tiene que verse como está.
+    mutationFn: (input: GrupoPrecioFormInput) => guardarCondicion(input, currentSucursalId),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
     },
@@ -538,7 +286,7 @@ export function useActualizarGrupoPrecioMutation() {
 
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: GrupoPrecioFormInput }) =>
-      updateGrupoPrecio({ id, data, sucursalId: currentSucursalId }),
+      guardarCondicion(data, currentSucursalId, id),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: gruposPrecioKeys.all(currentSucursalId) })
     },
@@ -628,9 +376,9 @@ export function useGruposPrecioPorProductoQuery(productoId: string | undefined) 
 /**
  * Cambia el precio de UNA escala sin pasar por el form completo del grupo.
  *
- * `updateGrupoPrecio` borra y reinserta productos y escalas enteras: usarlo para
- * corregir un precio desde la ficha del producto rotaría los ids de todas las
- * escalas y exigiría mandar el grupo completo. Este UPDATE es puntual.
+ * Guardar la condición entera (`guardar_condicion_mayorista`) exige mandarla
+ * completa: para corregir un precio desde la ficha del producto este UPDATE es
+ * puntual.
  *
  * - `alcance: 'override'` toca `grupo_precio_escala_minimos.precio_unitario_override`
  *   → afecta SOLO a este producto.
@@ -677,8 +425,8 @@ export function useActualizarPrecioEscalaMutation() {
 // GESTIÓN DESDE LA FICHA DEL PRODUCTO
 // =============================================================================
 //
-// Todas operan por id sobre una sola tabla, nunca por `updateGrupoPrecio`: ese
-// reemplaza la condición entera y desde la ficha solo se toca una parte. La RLS
+// Todas operan por id sobre una sola tabla, nunca por `guardar_condicion_mayorista`:
+// ésa reemplaza la condición entera y desde la ficha solo se toca una parte. La RLS
 // ya exige es_admin() + sucursal, así que no hacen falta RPCs.
 
 /** `unique_violation`: la condición ya tiene una escala con esa cantidad. */
