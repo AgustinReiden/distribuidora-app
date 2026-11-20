@@ -357,8 +357,14 @@ describe('revisión rápida de la factura escaneada', () => {
     await waitFor(() => expect(fila(3)).toHaveFocus())
     await user.keyboard('{ArrowDown}')
     expect(fila(4)).toHaveFocus()
-    await user.keyboard('{ArrowUp}{ArrowUp}')
+    // Las flechas siguen el orden de la tabla: arriba lo pendiente (3, 4) y
+    // debajo lo ya agregado (1 y la 2, que se acaba de vincular).
+    await user.keyboard('{ArrowDown}')
+    expect(fila(1)).toHaveFocus()
+    await user.keyboard('{ArrowDown}')
     expect(fila(2)).toHaveFocus()
+    await user.keyboard('{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}')
+    expect(fila(3)).toHaveFocus()
   })
 
   it('"Aceptar todas las sugeridas ≥ 85%" pide confirmación adentro del modal', async () => {
