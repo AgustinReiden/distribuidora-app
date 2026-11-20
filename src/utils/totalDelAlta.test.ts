@@ -61,7 +61,7 @@ describe('avisoAltaQueYaHabiaEntrado (I2 de la revisión de B12a)', () => {
 // decide el cobro.
 describe('el cobro del alta cuando el pedido ya estaba cargado (decisión 5)', () => {
   // El carrito: 12.000 de productos y 500 de envío mostrado. Con «Pagado», lo declarado es 12.500.
-  const carrito = { clienteId: '9', total: 12000, tipoFactura: 'ZZ' }
+  const carrito = { clienteId: '9', total: 12000, tipoFactura: 'ZZ', cargoMostrado: 500 }
   const cobroDe = (
     respuesta: Parameters<typeof avisoAltaQueYaHabiaEntrado>[0],
     over: { estadoPago?: string; saldoAplicado?: number; totalConEnvio?: number } = {},
@@ -96,6 +96,9 @@ describe('el cobro del alta cuando el pedido ya estaba cargado (decisión 5)', (
     ['C6 editado, parcial de 20.000', dup(8500, 500), { estadoPago: 'parcial' }],
     ['C8 dos centavos de diferencia: ya es otro total', dup(12500.02, 500), {}],
     ['C10 la fila no se pudo leer y el total de la RPC no es el del carrito', dup(8500, 500, null), {}],
+    // N2 de la revisión de C7: el total FINAL es lo que se vio y se cobró (12.000 + 500).
+    ['C9 sólo subió el envío (12.000 + 800): otro total final', dup(12800, 800), { totalConEnvio: 12800 }],
+    ['C9b le sacaron el envío (12.000 + 0): otro total final', dup(12000, 0), {}],
   ])('%s: NO se registra ningún cobro y se avisa', (_caso, respuesta, over) => {
     const { aviso, monto } = cobroDe(respuesta, over)
     expect(monto).toBe(0)
@@ -119,11 +122,17 @@ describe('el cobro del alta cuando el pedido ya estaba cargado (decisión 5)', (
     expect(monto).toBeCloseTo(esperado, 2)
   })
 
-  it('C9 sólo cambió el envío (12.000 + 800): el envío no cuenta para «cambió» y el cobro sigue al total del server', () => {
-    // El alta cobra lo que el server guardó (productos + envío): 12.800.
-    const { aviso, monto } = cobroDe(dup(12800, 800), { totalConEnvio: 12800 })
+  it('C9c mismo total final con otro reparto (11.700 + 800 = 12.500): es el mismo pedido, se cobra y no se avisa', () => {
+    // El alta cobra lo que el server guardó, con tope en lo que el carrito mostró a cobrar.
+    const { aviso, monto } = cobroDe(dup(12500, 800), { totalConEnvio: 12800 })
     expect(aviso).toBeNull()
-    expect(monto).toBeCloseTo(12800, 2)
+    expect(monto).toBeCloseTo(12500, 2)
+  })
+
+  it('sin `cargoMostrado` (el replay de la cola) se sigue comparando el total de productos', () => {
+    const sinCargo = { clienteId: '9', total: 12000, tipoFactura: 'ZZ' }
+    expect(avisoAltaQueYaHabiaEntrado(dup(12800, 800), sinCargo)).toBeNull()
+    expect(avisoAltaQueYaHabiaEntrado(dup(12800, 500), sinCargo)).not.toBeNull()
   })
 
   it('un vale blanco no se compara (lo precia el server a costo) y se cobra como siempre', () => {

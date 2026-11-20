@@ -471,12 +471,32 @@ describe('PedidosContainer — el alta directa devuelve un pedido propio que ya 
     expect(avisos().filter(t => /ya estaba cargado/.test(t))).toEqual([])
   })
 
-  it('sólo cambió el envío: es el mismo pedido, el cobro sigue al total que guardó el server', async () => {
+  // N2 de la revisión de C7: lo que se vio y se cobró es el total FINAL (12.000 + 500 de envío = 12.500).
+  it('sólo subió el envío (12.000 + 800): es otro total final, no se registra ningún cobro y se avisa', async () => {
     mutateAlta.mockResolvedValue({ id: '9', idempotente: true, clienteId: '9', cargoEnvio: 800, total: 12800 })
     await altaCon(['Pagado'])
 
+    await waitFor(() => expect(avisos().some(t => /ya estaba cargado/.test(t))).toBe(true))
+    expect(registrarPago).not.toHaveBeenCalled()
+    expect(notify.success).not.toHaveBeenCalled()
+    expect(avisos().find(t => /ya estaba cargado/.test(t))).toMatch(/ahora su total es \$\s12\.800,00/)
+  })
+
+  it('le sacaron el envío (12.000 + 0): tampoco se registra ningún cobro', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', idempotente: true, clienteId: '9', cargoEnvio: 0, total: 12000 })
+    await altaCon(['Pagado'])
+
+    await waitFor(() => expect(avisos().some(t => /ya estaba cargado/.test(t))).toBe(true))
+    expect(registrarPago).not.toHaveBeenCalled()
+    expect(notify.success).not.toHaveBeenCalled()
+  })
+
+  it('mismo total final con otro reparto (11.700 + 800 = 12.500): es el mismo pedido, cobra y no avisa de cambio', async () => {
+    mutateAlta.mockResolvedValue({ id: '9', idempotente: true, clienteId: '9', cargoEnvio: 800, total: 12500 })
+    await altaCon(['Pagado'])
+
     await waitFor(() => expect(registrarPago).toHaveBeenCalledTimes(1))
-    expect(registrarPago.mock.calls[0][0]).toMatchObject({ monto: 12800 })
+    expect(registrarPago.mock.calls[0][0]).toMatchObject({ monto: 12500 })
     expect(avisos().filter(t => /ya estaba cargado/.test(t))).toEqual([])
   })
 

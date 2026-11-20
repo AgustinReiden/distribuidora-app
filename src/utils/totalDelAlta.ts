@@ -40,10 +40,22 @@ interface RespuestaDelAlta {
  * aviso, o null si no aplica: no fue la rama idempotente, no hay total, es de otro cliente
  * (acá no puede pasar con una clave por intención) o está igual. Un vale blanco no tiene total
  * comparable (lo precia el server a costo) y no entra.
+ *
+ * Con `cargoMostrado` (el envío que mostró el carrito) se compara el total FINAL: el guardado por el server
+ * contra productos + el envío mostrado, que es lo que quien cargó tuvo a la vista y, con «Pagado», lo que cobró
+ * (N2 de la revisión de C7). Un pedido al que sólo le cambiaron el envío es otro total (no se cobra); el mismo
+ * total final con otro reparto es el mismo pedido. Sin `cargoMostrado`, se compara el total de productos (el
+ * server menos su envío).
  */
 export function avisoAltaQueYaHabiaEntrado(
   respuesta: RespuestaDelAlta | null | undefined,
-  enviado: { clienteId: string | number | null | undefined; total: number; tipoFactura?: string | null },
+  enviado: {
+    clienteId: string | number | null | undefined
+    total: number
+    tipoFactura?: string | null
+    /** El envío que mostró el carrito. */
+    cargoMostrado?: number | null
+  },
 ): string | null {
   if (!respuesta || respuesta.idempotente !== true || enviado.tipoFactura === 'VB') return null
   if (typeof respuesta.total !== 'number') return null
@@ -51,7 +63,10 @@ export function avisoAltaQueYaHabiaEntrado(
   // la RPC sólo le contesta a quien cargó el pedido (mig 519) y la clave es por intención, así que es el propio
   // y decide el total de la RPC. Con cliente, tiene que ser el mismo.
   if (respuesta.clienteId != null && String(respuesta.clienteId) !== String(enviado.clienteId)) return null
-  if (mismoTotalDelAlta(respuesta.total - (respuesta.cargoEnvio ?? 0), enviado.total)) return null
+  const final = typeof enviado.cargoMostrado === 'number'
+  if (final
+    ? mismoTotalDelAlta(respuesta.total, enviado.total + enviado.cargoMostrado!)
+    : mismoTotalDelAlta(respuesta.total - (respuesta.cargoEnvio ?? 0), enviado.total)) return null
   return mensajePedidoQueYaHabiaEntrado(respuesta.id, respuesta.total)
 }
 

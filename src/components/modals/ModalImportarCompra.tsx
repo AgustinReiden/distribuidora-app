@@ -8,6 +8,7 @@ import { useState, useCallback } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle, Download } from 'lucide-react';
 import { Button } from '../ui/Button';
+import { useAtrasCierraModal } from '../../hooks/useAtrasCierraModal';
 const loadExcelUtils = () => import('../../utils/excel');
 import { alicuotaIvaCompra } from '../../utils/condicionIva';
 import { validateExcelFile, validateAndSanitizeExcelData, FILE_LIMITS } from '../../utils/fileValidation';
@@ -55,6 +56,8 @@ interface ColumnasMap {
 }
 
 export default function ModalImportarCompra({ productos, onImportar, onClose }: ModalImportarCompraProps) {
+  // Modal hecho a mano (no pasa por `ui/Dialog`): el «atrás» del teléfono lo cierra (decisión 4 del dueño, #1603).
+  useAtrasCierraModal(onClose);
   const [archivo, setArchivo] = useState<File | null>(null);
   const [preview, setPreview] = useState<CompraImportPreviewItem[]>([]);
   const [erroresParseo, setErroresParseo] = useState<string[]>([]);

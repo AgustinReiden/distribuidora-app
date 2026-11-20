@@ -4,7 +4,8 @@
  * tocar —o que volvió a lo guardado— cierra de una. Historial real de jsdom.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor, cleanup, act } from '@testing-library/react'
+import { asentar, atras } from '../../test/atrasHelpers'
+import { render, screen, waitFor, cleanup } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom/vitest'
 import { reiniciarAtrasModales } from '../../utils/atrasModales'
@@ -42,8 +43,6 @@ const pedido = {
   items: [{ producto_id: '1', cantidad: 10, precio_unitario: 250, origen_precio: 'lista', producto: { nombre: 'Producto de prueba' } }],
 } as never
 
-const asentar = () => act(async () => { await new Promise(r => setTimeout(r, 150)) })
-const atras = async () => { act(() => { window.history.back() }); await asentar() }
 const cant = () => screen.getByLabelText('Cantidad') as HTMLInputElement
 
 async function abrir() {
@@ -126,6 +125,44 @@ describe('ModalEditarPedido · salir sin guardar', () => {
 
     await atras()
     expect(onClose).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: 'Salir igual' })).not.toBeInTheDocument()
+  })
+})
+
+describe('ModalEditarPedido · una edición sin tocar y el guardado en vuelo (N5 y N3 de la revisión de C7)', () => {
+  it('un regalo guardado que la promo de hoy ya no da no cuenta como cambio: sin tocar nada, cierra de una', async () => {
+    const onClose = vi.fn()
+    const pedidoConRegalo = {
+      id: 602, notas: '', estado: 'en_preparacion', total: 2500,
+      cliente: { id: '9', nombre_fantasia: 'Kiosco de prueba', direccion: 'Calle 1' },
+      items: [
+        { producto_id: '1', cantidad: 10, precio_unitario: 250, origen_precio: 'lista', producto: { nombre: 'Producto de prueba' } },
+        { producto_id: '1', cantidad: 1, precio_unitario: 0, es_bonificacion: true, promocion_id: '77', producto: { nombre: 'Producto de prueba' } },
+      ],
+    } as never
+    render(<ModalEditarPedido productos={productos} pedido={pedidoConRegalo} isAdmin onSave={vi.fn()} onSaveItems={vi.fn()} onClose={onClose} guardando={false} />)
+    await waitFor(() => screen.getAllByText('Producto de prueba'))
+    await asentar()
+
+    await atras()
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: 'Salir igual' })).not.toBeInTheDocument()
+  })
+
+  it('con el guardado en vuelo, el «atrás», la X y Escape no cierran ni preguntan', async () => {
+    const onClose = vi.fn()
+    const user = userEvent.setup()
+    render(<ModalEditarPedido productos={productos} pedido={pedido} isAdmin onSave={vi.fn()} onSaveItems={vi.fn()} onClose={onClose} guardando />)
+    await waitFor(() => screen.getByText('Producto de prueba'))
+    await user.type(screen.getByPlaceholderText(/Observaciones importantes/), ' y llamar antes')
+    await asentar()
+
+    await atras()
+    await user.keyboard('{Escape}')
+    await user.click(screen.getByRole('button', { name: /cerrar/i }))
+
+    expect(onClose).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: 'Salir igual' })).not.toBeInTheDocument()
   })
 })

@@ -11,22 +11,28 @@ import ConfirmarSalirSinGuardar, { type TextosSalirSinGuardar } from '../compone
  *
  * «Hay cambios» es que el formulario cambió respecto de como abrió, no que tenga algo cargado: una edición
  * sin tocar no pregunta.
+ *
+ * Con `bloqueado` (el guardado está en vuelo) la ventana no se cierra por ningún camino: el pedido va a entrar
+ * igual, y preguntar «no se guardó» sería falso. El «atrás» se absorbe (la entrada se repone).
  */
 export function useSalirSinGuardar({
   hayCambios,
   onClose,
   textos,
+  bloqueado = false,
 }: {
   hayCambios: boolean
   onClose: () => void
   textos?: TextosSalirSinGuardar
+  bloqueado?: boolean
 }): { pedirCierre: () => void; confirmacion: ReactElement } {
   const [preguntando, setPreguntando] = useState(false)
 
   const pedirCierre = useCallback(() => {
+    if (bloqueado) return
     if (hayCambios) setPreguntando(true)
     else onClose()
-  }, [hayCambios, onClose])
+  }, [bloqueado, hayCambios, onClose])
 
   const confirmacion = (
     <ConfirmarSalirSinGuardar

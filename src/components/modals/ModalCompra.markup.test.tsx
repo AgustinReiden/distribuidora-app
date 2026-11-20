@@ -20,7 +20,8 @@
  * `ModalCompra.reducer` y en `utils/prorrateoCompra`; acá no se duplica.
  */
 import { describe, it, expect, vi, beforeEach, afterAll, type Mock } from 'vitest'
-import { act, render, screen, within, waitFor } from '@testing-library/react'
+import { asentar, atras } from '../../test/atrasHelpers'
+import { render, screen, within, waitFor } from '@testing-library/react'
 import { reiniciarAtrasModales } from '../../utils/atrasModales'
 import userEvent from '@testing-library/user-event'
 import type { ProductoDB, ProveedorDBExtended } from '../../types'
@@ -85,49 +86,60 @@ vi.mock('../../hooks/queries/useImpuestosInternosQuery', () => ({
  * guarda llega a `onCrearProveedor`, y que el proveedor creado queda elegido en
  * la compra.
  */
-vi.mock('./ModalProveedor', () => ({
-  default: ({
+vi.mock('./ModalProveedor', async () => {
+  // Como el de verdad: se engancha al «atrás» del teléfono (el cableado real lo prueba `modalesAMano.atras.test`).
+  const { useAtrasCierraModal } = await import('../../hooks/useAtrasCierraModal')
+  function ModalProveedorStub({
     onSave,
     onClose,
   }: {
     onSave: (data: { nombre: string; cuit: string }) => Promise<void>
     onClose: () => void
-  }) => (
-    <div>
-      <h2>Nuevo Proveedor</h2>
-      <button
-        type="button"
-        onClick={() => {
-          void onSave({ nombre: 'Proveedor Nuevo SRL', cuit: '30-99999999-9' })
-        }}
-      >
-        Crear Proveedor
-      </button>
-      <button type="button" onClick={onClose}>
-        Descartar el alta
-      </button>
-    </div>
-  ),
-}))
+  }) {
+      useAtrasCierraModal(onClose)
+      return (
+        <div>
+          <h2>Nuevo Proveedor</h2>
+          <button
+            type="button"
+            onClick={() => {
+              void onSave({ nombre: 'Proveedor Nuevo SRL', cuit: '30-99999999-9' })
+            }}
+          >
+            Crear Proveedor
+          </button>
+          <button type="button" onClick={onClose}>
+            Descartar el alta
+          </button>
+        </div>
+      )
+  }
+  return { default: ModalProveedorStub }
+})
 
 /**
  * El import de ítems desde Excel, el otro modal hecho a mano que la compra abre
  * anidado y lazy. Stubbeado por lo mismo que el alta de proveedor: el de verdad
  * parsea un archivo, y acá sólo importa el cableado con la compra.
  */
-vi.mock('./ModalImportarCompra', () => ({
-  default: ({ onClose, onImportar }: { onClose: () => void; onImportar: (items: unknown[]) => void }) => (
-    <div>
-      <h2>Importar Items desde Excel</h2>
-      <button type="button" onClick={() => onImportar(itemsDelExcel)}>
-        Traer los ítems
-      </button>
-      <button type="button" onClick={onClose}>
-        Descartar la importación
-      </button>
-    </div>
-  ),
-}))
+vi.mock('./ModalImportarCompra', async () => {
+  const { useAtrasCierraModal } = await import('../../hooks/useAtrasCierraModal')
+  function ModalImportarStub({ onClose, onImportar }: { onClose: () => void; onImportar: (items: unknown[]) => void }) {
+      useAtrasCierraModal(onClose)
+      return (
+        <div>
+          <h2>Importar Items desde Excel</h2>
+          <button type="button" onClick={() => onImportar(itemsDelExcel)}>
+            Traer los ítems
+          </button>
+          <button type="button" onClick={onClose}>
+            Descartar la importación
+          </button>
+        </div>
+      )
+  }
+  return { default: ModalImportarStub }
+})
 
 // Líneas que entran al estado de la compra por afuera del reducer, como las de
 // un borrador viejo: una exenta con alícuota y otras sin ninguna.
@@ -1096,8 +1108,6 @@ describe('ModalCompra — salidas del modal', () => {
 // Decisión 4 del dueño (#1603): el «atrás» del teléfono cierra la compra por el mismo camino que la X y
 // Escape. Con la compra a medio cargar pregunta «Salir sin guardar»; sin tocar, cierra de una.
 describe('ModalCompra — el «atrás» del teléfono', () => {
-  const asentar = () => act(async () => { await new Promise(r => setTimeout(r, 150)) })
-  const atras = async () => { act(() => { window.history.back() }); await asentar() }
 
   beforeEach(() => {
     reiniciarAtrasModales()
@@ -1130,5 +1140,47 @@ describe('ModalCompra — el «atrás» del teléfono', () => {
     await atras()
     expect(onClose).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('button', { name: 'Salir igual' })).not.toBeInTheDocument()
+  })
+})
+
+// El alta de proveedor y la importación de Excel son modales hechos a mano anidados en la compra: el «atrás»
+// del teléfono cierra SÓLO el de arriba (decisión 4 del dueño, #1603) y la compra queda como estaba.
+describe('ModalCompra — el «atrás» con un modal anidado abierto', () => {
+  beforeEach(() => {
+    reiniciarAtrasModales()
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('con el alta de proveedor abierta, el «atrás» la cierra y la compra sigue (sin preguntar)', async () => {
+    const { user, onClose } = renderModal({ onCrearProveedor: vi.fn<OnCrearProveedor>() })
+    await asentar()
+    await user.click(screen.getByRole('button', { name: /^nuevo$/i }))
+    expect(
+      await screen.findByRole('heading', { name: 'Nuevo Proveedor' }, ESPERA_LAZY),
+    ).toBeInTheDocument()
+    await asentar()
+
+    await atras()
+
+    expect(screen.queryByRole('heading', { name: 'Nuevo Proveedor' })).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Nueva Compra' })).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Salir igual' })).not.toBeInTheDocument()
+  })
+
+  it('con la importación de Excel abierta, el «atrás» la cierra y la compra sigue', async () => {
+    const { user, onClose } = renderModal()
+    await asentar()
+    await user.click(screen.getByRole('button', { name: /importar excel/i }))
+    expect(
+      await screen.findByRole('heading', { name: 'Importar Items desde Excel' }, ESPERA_LAZY),
+    ).toBeInTheDocument()
+    await asentar()
+
+    await atras()
+
+    expect(screen.queryByRole('heading', { name: 'Importar Items desde Excel' })).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Nueva Compra' })).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
   })
 })

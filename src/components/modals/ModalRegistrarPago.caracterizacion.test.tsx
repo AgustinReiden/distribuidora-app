@@ -22,6 +22,7 @@
 import '@testing-library/jest-dom/vitest'
 import { useState } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { atras } from '../../test/atrasHelpers'
 import { reiniciarAtrasModales } from '../../utils/atrasModales'
 import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -444,8 +445,7 @@ describe('ModalRegistrarPago — el «atrás» del teléfono', () => {
     await user.click(screen.getByRole('button', { name: 'Total' }))
 
     for (let i = 0; i < 2; i++) {
-      act(() => { window.history.back() })
-      await act(async () => { await new Promise(r => setTimeout(r, 150)) })
+      await atras()
       expect(onClose).not.toHaveBeenCalled()
       expect(window.location.pathname).toBe('/clientes')
       expect(screen.getByRole('button', { name: 'Registrar' })).toBeEnabled()

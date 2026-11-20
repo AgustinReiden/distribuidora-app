@@ -19,7 +19,8 @@
  * pero sólo si no hay nada tildado (`entregaSalvedadTieneCambios`).
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
-import { act, render, screen, within } from '@testing-library/react'
+import { asentar, atras } from '../../test/atrasHelpers'
+import { render, screen, within } from '@testing-library/react'
 import { reiniciarAtrasModales } from '../../utils/atrasModales'
 import userEvent from '@testing-library/user-event'
 import type { RegaloSimulado } from '../../hooks/queries/useSimularSalvedadesQuery'
@@ -945,8 +946,6 @@ describe('ModalEntregaConSalvedad — cerrar', () => {
 // Decisión 4 del dueño (#1603): el «atrás» del teléfono cierra la entrega por el mismo camino que la X y
 // Escape. Con algo tildado (o en el paso de confirmación) pregunta «Salir sin guardar»; sin tocar, cierra.
 describe('ModalEntregaConSalvedad — el «atrás» del teléfono', () => {
-  const asentar = () => act(async () => { await new Promise(r => setTimeout(r, 150)) })
-  const atras = async () => { act(() => { window.history.back() }); await asentar() }
 
   beforeEach(() => {
     reiniciarAtrasModales()

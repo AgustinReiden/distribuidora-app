@@ -160,6 +160,20 @@ export function volverUnaPantalla(): void {
   retirar(n)
 }
 
+/**
+ * Para los tests: se resuelve cuando la mecánica no tiene nada pendiente (ni una sincronización por correr ni un
+ * retiro esperando su `popstate`). Esperar esto, y no un tiempo fijo, es lo que hace estables los tests con la
+ * máquina cargada.
+ */
+export async function atrasQuieto(limiteMs = 3000): Promise<void> {
+  const fin = Date.now() + limiteMs
+  do {
+    await new Promise<void>(r => setTimeout(r, 0))
+  } while ((timerSincronizar !== null || retiroPendiente) && Date.now() < fin)
+  // Un turno más: que React termine de pintar lo que la última sincronización provocó.
+  await new Promise<void>(r => setTimeout(r, 0))
+}
+
 /** Para los tests: deja la mecánica como recién cargada (el historial de jsdom no se toca). */
 export function reiniciarAtrasModales(): void {
   pila.length = 0

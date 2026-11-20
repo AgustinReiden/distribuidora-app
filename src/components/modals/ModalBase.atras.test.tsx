@@ -5,14 +5,12 @@
  */
 import '@testing-library/jest-dom/vitest'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, act, waitFor } from '@testing-library/react'
+import { asentar, atras, marca } from '../../test/atrasHelpers'
+import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ModalBase from './ModalBase'
 import { reiniciarAtrasModales } from '../../utils/atrasModales'
 
-const asentar = () => act(async () => { await new Promise(r => setTimeout(r, 150)) })
-const marca = (): unknown => (window.history.state as Record<string, unknown> | null)?.atrasModales
-const atras = async () => { act(() => { window.history.back() }); await asentar() }
 
 beforeEach(() => {
   reiniciarAtrasModales()

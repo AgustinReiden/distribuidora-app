@@ -4,7 +4,8 @@
  * vigente sin tocarlo.
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { asentar, atras } from '../../test/atrasHelpers'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { reiniciarAtrasModales } from '../../utils/atrasModales'
 import userEvent from '@testing-library/user-event'
 import ModalEmpleado, { modalEmpleadoSchema, type ModalEmpleadoProps } from './ModalEmpleado'
@@ -470,7 +471,6 @@ describe('modalEmpleadoSchema', () => {
 // Decisión 4 del dueño (#1603): la X, Escape y el «atrás» del teléfono preguntan «Salir sin guardar» si el
 // formulario cambió respecto de como abrió; sin tocar, cierran de una.
 describe('ModalEmpleado — salir sin guardar', () => {
-  const asentar = () => act(async () => { await new Promise(r => setTimeout(r, 150)) })
   const botonX = () => screen.getByRole('button', { name: /cerrar/i })
 
   beforeEach(() => {
@@ -485,8 +485,7 @@ describe('ModalEmpleado — salir sin guardar', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
     await user.keyboard('{Escape}')
     expect(onClose).toHaveBeenCalledTimes(2)
-    act(() => { window.history.back() })
-    await asentar()
+    await atras()
     expect(onClose).toHaveBeenCalledTimes(3)
     expect(screen.queryByText('Salir sin guardar')).not.toBeInTheDocument()
   })
@@ -501,7 +500,7 @@ describe('ModalEmpleado — salir sin guardar', () => {
   it.each([
     ['la X', async (user: ReturnType<typeof userEvent.setup>) => { await user.click(botonX()) }],
     ['Escape', async (user: ReturnType<typeof userEvent.setup>) => { await user.keyboard('{Escape}') }],
-    ['el «atrás» del teléfono', async () => { act(() => { window.history.back() }); await asentar() }],
+    ['el «atrás» del teléfono', async () => { await atras() }],
   ])('con el nombre tipeado, %s pregunta; «Seguir editando» conserva lo tipeado y «Salir igual» cierra', async (_camino, accion) => {
     const { onClose, user } = renderModal()
     await asentar()

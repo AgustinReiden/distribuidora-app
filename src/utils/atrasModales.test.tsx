@@ -4,14 +4,12 @@
  */
 import { StrictMode, useState } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { asentar, atras, marca } from '../test/atrasHelpers'
 import { render, cleanup, act } from '@testing-library/react'
 import { useAtrasCierraModal } from '../hooks/useAtrasCierraModal'
 import { limpiarAtrasAlCargar, reiniciarAtrasModales, volverUnaPantalla } from './atrasModales'
 
 /** Deja pasar los `setTimeout 0` de la mecánica y los `popstate` de jsdom. */
-const asentar = () => act(async () => { await new Promise(r => setTimeout(r, 150)) })
-const marca = (): unknown => (window.history.state as Record<string, unknown> | null)?.atrasModales
-const atras = async () => { act(() => { window.history.back() }); await asentar() }
 
 /** Una ventana que, ante el «atrás», se cierra (o no, según `seCierra`). */
 function Ventana({ alPedirCierre, seCierra = true, activo = true }: { alPedirCierre: () => void; seCierra?: boolean; activo?: boolean }) {

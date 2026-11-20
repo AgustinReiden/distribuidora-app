@@ -226,6 +226,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const [mostrarBuscador, setMostrarBuscador] = useState<boolean>(false);
   const [busquedaProducto, setBusquedaProducto] = useState<string>('');
   const [itemsModificados, setItemsModificados] = useState<boolean>(false);
+  // Sólo lo que tocó el usuario en los renglones (sin `bonifDifierenDeDB`: un regalo que la promo de hoy ya no
+  // da prende `itemsModificados` sin que nadie toque nada). Es lo que decide «Salir sin guardar» (N5, C7).
+  const [lineasTocadas, setLineasTocadas] = useState<boolean>(false);
   const [errorStock, setErrorStock] = useState<string | null>(null);
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
   // T8 de la tercera pasada: tocar la X marca «cancelando» ANTES de que el navegador pueda sacarle el
@@ -879,6 +882,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     if (itemsOriginales.length === 0) {
       // Un pedido sin líneas de venta: lo agregado tampoco se pisa con un refresco.
       lineasTocadasRef.current = items.length > 0;
+      setLineasTocadas(items.length > 0);
       return;
     }
 
@@ -896,6 +900,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       itemsOriginales.some(o => !items.find(i => i.productoId === o.productoId));
 
     lineasTocadasRef.current = cambios;
+    setLineasTocadas(cambios);
     setItemsModificados(cambios || bonifDifierenDeDB);
   }, [items, itemsOriginales, bonifDifierenDeDB]);
 
@@ -1268,7 +1273,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
 
   // La X, Escape y el «atrás» del teléfono preguntan «Salir sin guardar» si lo editado difiere de lo guardado
   // (decisión 4 del dueño, #1603): renglones, promos, notas, fechas. Un pedido sin tocar no pregunta.
-  const hayCambiosSinGuardar = itemsModificados || hayPromosQuitadas || promosAgregadas.length > 0
+  const hayCambiosSinGuardar = lineasTocadas || hayPromosQuitadas || promosAgregadas.length > 0
     || notas !== (pedido?.notas || '')
     || fecha !== (pedido?.fecha || '')
     || fechaEntrega !== fechaEntregaOriginal
@@ -1288,6 +1293,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       onClose={onClose}
       maxWidth="max-w-2xl"
       hayCambios={hayCambiosSinGuardar}
+      guardando={guardando || guardandoLocal}
     >
       <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
         {/* Info del cliente */}

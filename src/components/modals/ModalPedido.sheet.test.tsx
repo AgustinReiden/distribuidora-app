@@ -15,6 +15,7 @@
  */
 import { useState } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { asentar, atras } from '../../test/atrasHelpers'
 import { act, render, screen, within } from '@testing-library/react'
 import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event'
 
@@ -184,6 +185,8 @@ interface HarnessProps {
   onCloseSpy: () => void
   onCrearClienteSpy: (cliente: Record<string, unknown>) => void
   onActualizarPrecioSpy: (productoId: string, precio: number) => void
+  /** El alta se está guardando (default false). */
+  guardando?: boolean
   onVerificarDuplicado?: (data: {
     direccion: string | null
     latitud: number | null
@@ -196,6 +199,7 @@ function Harness({
   onCloseSpy,
   onCrearClienteSpy,
   onActualizarPrecioSpy,
+  guardando = false,
   onVerificarDuplicado,
 }: HarnessProps) {
   const [clientes, setClientes] = useState<ClienteDB[]>(CLIENTES)
@@ -216,7 +220,7 @@ function Harness({
       clientes={clientes}
       categorias={['Bebidas', 'Almacen']}
       nuevoPedido={pedido}
-      guardando={false}
+      guardando={guardando}
       isAdmin
       currentUserId="u-1"
       onClose={onCloseSpy}
@@ -292,7 +296,7 @@ function Harness({
 }
 
 function montar(
-  props: Partial<Pick<HarnessProps, 'onVerificarDuplicado'>> = {},
+  props: Partial<Pick<HarnessProps, 'onVerificarDuplicado' | 'guardando'>> = {},
   opciones: { permitirClickAfuera?: boolean } = {},
 ) {
   const onGuardarSpy = vi.fn()
@@ -597,8 +601,6 @@ describe('ModalPedido en celular — alta rápida de cliente', () => {
 // Decisión 4 del dueño (#1603): el «atrás» del teléfono cierra el alta por el mismo camino que la X y Escape:
 // con el pedido a medio armar pregunta «Salir sin guardar»; sin tocar, cierra de una. Historial real de jsdom.
 describe('ModalPedido en celular (bottom sheet) — el «atrás» del teléfono', () => {
-  const asentar = () => act(async () => { await new Promise(r => setTimeout(r, 150)) })
-  const atras = async () => { act(() => { window.history.back() }); await asentar() }
 
   beforeEach(() => {
     reiniciarAtrasModales()
@@ -630,5 +632,73 @@ describe('ModalPedido en celular (bottom sheet) — el «atrás» del teléfono'
     await atras()
     expect(onCloseSpy).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('button', { name: 'Salir igual' })).not.toBeInTheDocument()
+  })
+})
+
+// N1 y N3 de la revisión de C7 (decisión 4 del dueño, #1603).
+describe('ModalPedido en celular (bottom sheet) — comercio nuevo a medio cargar y guardado en vuelo', () => {
+  beforeEach(() => {
+    reiniciarAtrasModales()
+    window.history.replaceState(null, '', '/')
+  })
+
+  // N1: el alta rápida del comercio vive en el estado local del modal, no en el pedido del container.
+  it.each([
+    ['el «atrás» del teléfono', async () => { await atras() }],
+    ['la X', async () => { await userEvent.setup().click(screen.getByRole('button', { name: 'Cerrar' })) }],
+  ])('con un comercio nuevo a medio tipear, %s pregunta «Salir sin guardar» y no cierra', async (_camino, accion) => {
+    const { user, onCloseSpy } = montar()
+    await asentar()
+    await user.click(screen.getByRole('button', { name: '+ Nuevo' }))
+    await user.type(screen.getByPlaceholderText('Nombre fantasia *'), 'Despensa Nueva')
+
+    await accion()
+
+    expect(await screen.findByRole('button', { name: 'Salir igual' })).toBeInTheDocument()
+    expect(onCloseSpy).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Seguir con el pedido' }))
+    expect(screen.getByPlaceholderText('Nombre fantasia *')).toHaveValue('Despensa Nueva')
+  })
+
+  it('con el panel del comercio nuevo abierto pero sin tipear nada, cierra de una', async () => {
+    const { user, onCloseSpy } = montar()
+    await asentar()
+    await user.click(screen.getByRole('button', { name: '+ Nuevo' }))
+
+    await atras()
+
+    expect(onCloseSpy).toHaveBeenCalledTimes(1)
+  })
+
+  // N3: con el alta en vuelo va a entrar: «El pedido no se guardó» sería falso. El «atrás» se absorbe.
+  it('con el alta guardándose, el «atrás» no pregunta «no se guardó» ni cierra', async () => {
+    const { user, onCloseSpy } = montar({ guardando: true })
+    await asentar()
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+
+    await atras()
+    // Un solo «atrás»: con otro, la pregunta (si hubiera salido) se cerraría y el test no la vería.
+    expect(screen.queryByRole('button', { name: 'Salir igual' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/El pedido no se guardó/)).not.toBeInTheDocument()
+    expect(onCloseSpy).not.toHaveBeenCalled()
+    expect(botonCarrito()).toHaveAccessibleName(/1 unidad/)
+
+    // Y el siguiente «atrás» tampoco: la entrada se repone y sigue absorbiendo.
+    await atras()
+    expect(onCloseSpy).not.toHaveBeenCalled()
+  })
+
+  it('con el alta guardándose, la X y Escape tampoco cierran', async () => {
+    const { user, onCloseSpy } = montar({ guardando: true })
+    await asentar()
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+
+    await user.click(screen.getByRole('button', { name: 'Cerrar' }))
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByRole('button', { name: 'Salir igual' })).not.toBeInTheDocument()
+    expect(onCloseSpy).not.toHaveBeenCalled()
   })
 })

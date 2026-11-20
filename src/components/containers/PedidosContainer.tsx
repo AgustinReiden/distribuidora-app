@@ -2101,6 +2101,8 @@ export default function PedidosContainer(): React.ReactElement {
         clienteId: nuevoPedido.clienteId,
         total: totalConDescuento,
         tipoFactura: nuevoPedido.tipoFactura,
+        // El total final que el carrito mostró: productos + el envío que mostraba (N2 de la revisión de C7).
+        cargoMostrado: cargoEnvioPedido(totalConDescuento, reglaMinimoDe(politicas)),
       })
       const montoDelAlta = montoCobroDelAlta({
         estadoPago: nuevoPedido.estadoPago,

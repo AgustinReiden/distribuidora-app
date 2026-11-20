@@ -17,6 +17,7 @@ import {
   totalesAjusteNotaCredito,
 } from '../../utils/notaCredito'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { useAtrasCierraModal } from '../../hooks/useAtrasCierraModal'
 import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 
 interface CompraItem {
@@ -66,6 +67,8 @@ export default function ModalNotaCredito({
   onSave,
   onClose,
 }: ModalNotaCreditoProps): React.ReactElement {
+  // Modal hecho a mano (no pasa por `ui/Dialog`): el «atrás» del teléfono lo cierra (decisión 4 del dueño, #1603).
+  useAtrasCierraModal(onClose)
   // B20: los campos de número en rojo frenan el guardado.
   const ilegibles = useRegistroIlegibles()
   const [saving, setSaving] = useState(false)

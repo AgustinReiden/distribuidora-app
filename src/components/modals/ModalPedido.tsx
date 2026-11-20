@@ -637,8 +637,17 @@ const ModalPedido = memo(function ModalPedido({
   // respecto de como se abrió el formulario, o si está la oferta de la cola en pantalla (D56: el pedido no se
   // guardó en ningún lado). Un alta recién abierta, sin tocar, cierra de una.
   const pedidoTocado = useCambiosDesdeApertura(nuevoPedido);
+  // El comercio nuevo a medio cargar (el alta rápida vive en el estado local del modal, no en `nuevoPedido`):
+  // con algo tipeado cuenta como pedido tocado (N1 de la revisión de C7).
+  const clienteNuevoTocado = mostrarNuevoCliente && (
+    Object.values(nuevoCliente).some(v => v !== '' && v != null)
+    || franjasAtencion.some(f => f.apertura !== '' || f.cierre !== '')
+    || diasAtencion !== null
+  );
   const salida = useSalirSinGuardar({
-    hayCambios: pedidoTocado || Boolean(onGuardarEnCola),
+    // Con el guardado en vuelo no se cierra ni se pregunta «no se guardó»: va a entrar (N3).
+    bloqueado: guardando,
+    hayCambios: pedidoTocado || clienteNuevoTocado || Boolean(onGuardarEnCola),
     onClose,
     textos: {
       mensaje: 'El pedido no se guardó. ¿Salir igual?',

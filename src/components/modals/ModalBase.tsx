@@ -75,6 +75,8 @@ export interface ModalBaseProps {
   hayCambios?: boolean;
   /** Los textos de esa pregunta, si el modal quiere decir otra cosa. */
   textosSalirSinGuardar?: TextosSalirSinGuardar;
+  /** El guardado está en vuelo: la X, Escape y el «atrás» no cierran hasta que termine. */
+  guardando?: boolean;
 }
 
 const MAX_WIDTH_MAP: Record<ModalMaxWidth, string> = {
@@ -101,9 +103,10 @@ const ModalBase = memo(function ModalBase({
   bodyBare = false,
   hayCambios = false,
   textosSalirSinGuardar,
+  guardando = false,
 }: ModalBaseProps) {
   // La X, Escape y el «atrás» (que `ui/Dialog` pide como `onOpenChange(false)`) pasan por el mismo camino.
-  const salida = useSalirSinGuardar({ hayCambios, onClose, textos: textosSalirSinGuardar });
+  const salida = useSalirSinGuardar({ hayCambios, onClose, textos: textosSalirSinGuardar, bloqueado: guardando });
 
   // El boundary envuelve sólo el cuerpo (no el header), con o sin `bodyBare`:
   // si algo tira adentro, el modal sigue teniendo título y botón de cerrar.

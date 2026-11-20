@@ -7,14 +7,13 @@
 import '@testing-library/jest-dom/vitest'
 import { useState } from 'react'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, act } from '@testing-library/react'
+import { asentar, atras } from '../test/atrasHelpers'
+import { render, screen, cleanup } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom'
 import ModalBase from '../components/modals/ModalBase'
 import { reiniciarAtrasModales } from './atrasModales'
 
-const asentar = () => act(async () => { await new Promise(r => setTimeout(r, 150)) })
-const atras = async () => { act(() => { window.history.back() }); await asentar() }
 
 function Pedidos() {
   const [abierto, setAbierto] = useState(false)

@@ -4,7 +4,8 @@
  * factura A al 21% dan IVA 8.677,69 y neto 41.322,31.
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { asentar, atras } from '../../test/atrasHelpers'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { reiniciarAtrasModales } from '../../utils/atrasModales'
 import userEvent from '@testing-library/user-event'
 // La lectura de km del gasto vive en `vehiculo_km`: el modal la pide con un hook que acá se
@@ -1594,7 +1595,6 @@ describe('ModalGasto — salir sin guardar', () => {
     observacion: null, creado_por: 'u-1', rendicion_transportista_id: null, rendicion_fecha: null, empleado_id: null,
     anulado_at: null, created_at: '2026-10-15T10:00:00Z', updated_at: '2026-10-15T10:00:00.123456+00:00',
   }
-  const asentar = () => act(async () => { await new Promise(r => setTimeout(r, 150)) })
   const botonX = () => screen.getByRole('button', { name: /cerrar/i })
 
   beforeEach(async () => {
@@ -1609,8 +1609,7 @@ describe('ModalGasto — salir sin guardar', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
     await user.keyboard('{Escape}')
     expect(onClose).toHaveBeenCalledTimes(2)
-    act(() => { window.history.back() })
-    await asentar()
+    await atras()
     expect(onClose).toHaveBeenCalledTimes(3)
     expect(screen.queryByText('Salir sin guardar')).not.toBeInTheDocument()
   })
@@ -1618,7 +1617,7 @@ describe('ModalGasto — salir sin guardar', () => {
   it.each([
     ['la X', async (user: ReturnType<typeof userEvent.setup>) => { await user.click(botonX()) }],
     ['Escape', async (user: ReturnType<typeof userEvent.setup>) => { await user.keyboard('{Escape}') }],
-    ['el «atrás» del teléfono', async () => { act(() => { window.history.back() }); await asentar() }],
+    ['el «atrás» del teléfono', async () => { await atras() }],
   ])('con un monto tipeado, %s pregunta; «Seguir editando» conserva el monto y «Salir igual» cierra', async (_camino, accion) => {
     const { onClose, user } = renderModal()
     await asentar()
