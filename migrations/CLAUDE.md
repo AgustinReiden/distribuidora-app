@@ -292,7 +292,19 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   techo. La regla es una, `regalo_tope_sustituto`, con espejo en `topeSustitutoRegalo` (gate:
   `topeSustituto.espejo.json`); la pantalla sugiere con ella. El reparto la cumple sobre la suma
   de las partes, y la edición no escala una cadena por encima (`_regalo_tope_de_cadena`): lo que
-  armó un admin se conserva pero no crece. El admin, sin tope.
+  armó un admin se conserva pero no crece, **salvo** cuando la edición baja lo que da la promo y el
+  sustituto es de otro rubro: ahí no puede valer más que el regalo nuevo y se rechaza
+  (`regalo_sustituto_sobre_tope`, con las promos en `promociones`). Decisión del dueño del 19/11:
+  «No deja guardar así: o vuelve al regalo original (R) o el pedido queda como está. Este bloqueo
+  no es silencioso sino que se avisa». Sin línea guardada de la cadena (el regalo se cayó y vuelve
+  con la cadena enganchada) también cuenta como que bajó. La pantalla lo avisa antes cuando sabe el
+  corte guardado (RPC `regalo_corte_de_linea`; si no, decide el server) y ofrece «Volver al regalo
+  original», que viaja con `regalo_original`: la línea entra sin su cadena, y la cadena queda
+  cerrada con una fila de reparto del regalo a sí mismo, así que si el regalo se cae y vuelve,
+  vuelve el regalo de la promo (`regalo_elemento_con_cadena` y `cadenaDelRegalo` no enganchan una
+  cadena con reparto). Y el tope de la promo se mide en el corte también cuando
+  la edición recibe la línea cambiada por valor tal como está (W×1 con corte 10 cuenta 10; C2 de la
+  ola 2). El admin, sin tope.
 - **Un regalo se mide contra la promo con la que se armó, no contra la vigente** (mig 370,
   #1164). Todo lo que mide el regalo de un pedido que ya existe —la salvedad, su anulación y
   las dos simulaciones— lee `promos_del_pedido(pedido)`, no `promocion_reglas` ni
