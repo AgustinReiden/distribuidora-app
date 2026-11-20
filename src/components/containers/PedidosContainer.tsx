@@ -10,7 +10,7 @@ import { filtrarProductosOperativos } from '../../utils/productosOperativos'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta'
-import { avisoCobroAltaRecortado, mensajeSaldoAFavorAlta, montoCobroAlta, saldoMostradoAlta } from '../../utils/saldoAFavor'
+import { avisoCobroAltaRecortado, mensajeSaldoAFavorAlta, saldoMostradoAlta } from '../../utils/saldoAFavor'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { filasPedidosExcel, resumenPagosExcel } from '../../utils/pedidosExcel'
@@ -110,6 +110,7 @@ import { filtrosParaStats } from '../../utils/kpiFiltroPedidos'
 import { useRecorridoActivoQuery } from '../../hooks/queries/useRecorridoActivoQuery'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useOfflineSync } from '../../hooks/useOfflineSync'
+import { avisoAltaQueYaHabiaEntrado, montoCobroDelAlta } from '../../utils/totalDelAlta'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useOptimizarRuta, horarioParaRutear, type RepartidorParam } from '../../hooks/useOptimizarRuta'
 import { barridasEfectivas, clasificarBarrida, intercalarSinCoordenadas, type Barrida } from '../../utils/barridas'
@@ -1447,6 +1448,8 @@ export default function PedidosContainer(): React.ReactElement {
       precio_unitario: item.precioUnitario,
       ...(item.esBonificacion ? { es_bonificacion: true } : {}),
       ...(item.promocionId ? { promocion_id: item.promocionId } : {}),
+      // H1 de la revisión de C2: el regalo vuelve a su producto de la promo (sin el cambio).
+      ...(item.regaloOriginal ? { regalo_original: true } : {}),
       ...(item.neto_unitario !== undefined ? { neto_unitario: item.neto_unitario } : {}),
       ...(item.iva_unitario !== undefined ? { iva_unitario: item.iva_unitario } : {}),
       ...(item.impuestos_internos_unitario !== undefined ? { impuestos_internos_unitario: item.impuestos_internos_unitario } : {}),
@@ -2101,19 +2104,30 @@ export default function PedidosContainer(): React.ReactElement {
         esVB: esTipoVB(nuevoPedido.tipoFactura || 'ZZ'),
         isOffline: !isOnline,
       })
-      const montoDelAlta = montoCobroAlta({
+      // I2 de la revisión de B12a, H4 de la de C7 y decisión 5 del dueño: el server devolvió el pedido propio que
+      // ya había entrado y cambió (se editó o se canceló). No se creó nada: NO se registra ningún cobro y el aviso
+      // dice el total que quedó y que hay que cobrarlo desde el pedido.
+      const avisoYaEntro = avisoAltaQueYaHabiaEntrado(pedidoCreado, {
+        clienteId: nuevoPedido.clienteId,
+        total: totalConDescuento,
+        tipoFactura: nuevoPedido.tipoFactura,
+        // El total final que el carrito mostró: productos + el envío que mostraba (N2 de la revisión de C7).
+        cargoMostrado: cargoEnvioPedido(totalConDescuento, reglaMinimoDe(politicas)),
+      })
+      const montoDelAlta = montoCobroDelAlta({
         estadoPago: nuevoPedido.estadoPago,
         montoDeclarado: Number(nuevoPedido.montoPagado) || 0,
         totalConEnvio,
         totalGuardado,
         saldoAplicado: saldoAFavorAlta,
         saldoMostrado,
+        volvioDistinto: avisoYaEntro !== null,
       })
 
       // El carrito mostró un envío y el servidor decidió otro (la política
       // cambió mientras se armaba el pedido): el cobro ya sigue al servidor, pero
       // quien cobra tiene que enterarse.
-      if (typeof pedidoCreado?.cargoEnvio === 'number') {
+      if (typeof pedidoCreado?.cargoEnvio === 'number' && !avisoYaEntro) {
         const cargoMostrado = cargoEnvioPedido(totalConDescuento, reglaMinimoDe(politicas))
         if (Math.abs(pedidoCreado.cargoEnvio - cargoMostrado) >= 0.01) {
           notify.warning(
@@ -2158,7 +2172,7 @@ export default function PedidosContainer(): React.ReactElement {
           // El pedido ya existe: el mensaje tiene que decir exactamente eso y
           // qué hacer, no un "error al crear pedido" que invita a recargarlo.
           notify.error(
-            `El pedido #${pedidoCreado.id} se creó, pero no se pudo registrar el cobro de ` +
+            `El pedido #${pedidoCreado.id} ${pedidoCreado.idempotente ? 'ya existía' : 'se creó'}, pero no se pudo registrar el cobro de ` +
               `${formatPrecio(montoDelAlta)}: ${(pagoErr as Error).message}. ` +
               'Registralo desde la ficha del pedido.',
             { persist: true },
@@ -2172,12 +2186,15 @@ export default function PedidosContainer(): React.ReactElement {
       const avisoSaldoFavor = pedidoCreado?.id
         ? mensajeSaldoAFavorAlta(pedidoCreado.id, saldoAFavorAlta, pedidoCreado.saldoAFavorOtras ?? 0)
         : null
-      if (avisoSaldoFavor) notify.success(`Pedido creado correctamente. ${avisoSaldoFavor}`, { persist: true })
+      // Si el pedido ya había entrado y cambió, decir «Pedido creado» mentía: se dice qué pasó (y que no hay cobro),
+      // con el saldo a favor aplicado si lo hubo, y queda a la vista.
+      if (avisoYaEntro) notify.warning(avisoSaldoFavor ? `${avisoYaEntro} ${avisoSaldoFavor}` : avisoYaEntro, { persist: true })
+      else if (avisoSaldoFavor) notify.success(`Pedido creado correctamente. ${avisoSaldoFavor}`, { persist: true })
       else notify.success('Pedido creado correctamente')
       // #1503: si se registró menos de lo que se declaró cobrar, quien cobró lo
       // tiene que saber: la diferencia está en su mano y no en el sistema. Si el
       // cobro falló, ya lo dice su error.
-      const avisoRecorte = pedidoCreado?.id && !cobroAltaFallo
+      const avisoRecorte = pedidoCreado?.id && !cobroAltaFallo && !avisoYaEntro
         ? avisoCobroAltaRecortado({
             pedidoId: pedidoCreado.id,
             estadoPago: nuevoPedido.estadoPago,

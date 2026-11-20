@@ -12,6 +12,13 @@ import { useSucursal } from '../../contexts/SucursalContext'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 import { conCostos, usePuedeVerCostos } from './costosProductos'
 import { traerTodo } from '../../utils/paginacion'
+import {
+  codigoParaGuardar,
+  errorCodigoDuplicado,
+  esCodigoDuplicadoDeBase,
+  mismoCodigoProducto,
+  patronCodigoProducto,
+} from '../../utils/codigoProducto'
 
 // Query keys
 export const productosKeys = {
@@ -86,34 +93,28 @@ function errorDeConflicto(mensaje: string): Error {
 
 // Mutation functions
 /**
- * Valida que ningún otro producto tenga ese código. `productos.codigo` no
- * tiene UNIQUE (ver mig 210), así que esta es la única guarda: si no corta
- * acá, no corta en ningún lado. La RLS acota la consulta a la sucursal activa
- * (el código es único por sucursal, decisión D31 de #1561). En la edición se
- * excluye el propio producto (`excluirId`): guardar la ficha con su mismo
- * código no es un duplicado (#1561, 1561-b1).
+ * Valida que ningún otro producto tenga ese código. El código es único por sucursal
+ * (decisión D31 de #1561), sin mirar mayúsculas ni los espacios de los bordes: lo frena el
+ * server (índice `productos_codigo_unico_por_sucursal` y el trigger que nombra el producto),
+ * y esto es su espejo (`codigoProducto.ts`), que avisa antes de escribir. La RLS acota la
+ * consulta a la sucursal activa. La base achica los candidatos con `ilike` y decide
+ * `mismoCodigoProducto`. En la edición se excluye el propio producto (`excluirId`): guardar
+ * la ficha con su mismo código no es un duplicado (#1561, 1561-b1).
  */
 async function verificarCodigoLibre(codigo: string | null | undefined, excluirId?: string): Promise<void> {
-  if (!codigo) return
+  const patron = patronCodigoProducto(codigo)
+  if (patron === null) return
   let consulta = supabase
     .from('productos')
-    .select('id, nombre')
-    .eq('codigo', codigo)
+    .select('id, nombre, codigo')
+    .ilike('codigo', patron)
   if (excluirId !== undefined) consulta = consulta.neq('id', excluirId)
-  const { data: existente, error } = await consulta.limit(1).maybeSingle()
+  const { data: candidatos, error } = await consulta.limit(50)
   // Si la lectura falla no se puede decir que el código está libre: se corta (H8).
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo verificar que el código no esté repetido. Revisá la señal e intentá de nuevo.')
-  if (existente) {
-    // El mensaje tiene que decir qué hacer, no sólo que no se pudo: el que
-    // llega acá casi siempre está cargando una factura y no sabe que el
-    // producto ya lo creó él mismo un minuto antes, en la línea anterior.
-    throw errorDeConflicto(
-      `Ya existe un producto con código "${codigo}": «${existente.nombre}». ` +
-      (excluirId === undefined
-        ? 'Buscalo por nombre o código y agregalo, o cargá este con otro código.'
-        : 'Buscalo por nombre o código, o dejale a este otro código.')
-    )
-  }
+  const existente = ((candidatos ?? []) as Array<{ nombre: string; codigo: string | null }>)
+    .find(p => mismoCodigoProducto(p.codigo, codigo))
+  if (existente) throw errorCodigoDuplicado(codigoParaGuardar(codigo), existente.nombre, excluirId !== undefined)
 }
 
 async function createProducto(producto: ProductoFormInput, sucursalId: number | null): Promise<ProductoDB> {
@@ -129,7 +130,7 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
     .from('productos')
     .insert([{
       nombre: producto.nombre,
-      codigo: producto.codigo || null,
+      codigo: codigoParaGuardar(producto.codigo),
       precio: producto.precio,
       // El alta sí fija el saldo inicial (en la edición `stock` es opcional).
       stock: producto.stock ?? 0,
@@ -167,6 +168,8 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
     .select(PRODUCTO_COLUMNAS)
     .single()
 
+  // El índice único del server cubre la carrera que la verificación de arriba no ve.
+  if (error && esCodigoDuplicadoDeBase(error)) throw errorCodigoDuplicado(codigoParaGuardar(producto.codigo))
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el producto se haya creado. Revisá antes de reintentar.')
   // Va a la caché de la lista tal cual: sin los costos, el admin vería el
   // producto recién creado sin costo hasta el próximo refetch.
@@ -176,21 +179,21 @@ async function createProducto(producto: ProductoFormInput, sucursalId: number | 
 
 async function updateProducto({ id, data: producto }: { id: string; data: Partial<ProductoFormInput> }): Promise<ProductoDB> {
   // Cambiar el código a uno que ya tiene otro producto: se rechaza antes de escribir. Sólo si
-  // el código CAMBIÓ: la ficha manda el formulario entero, y dos productos que ya comparten
-  // código (la base no tiene UNIQUE) tienen que poder seguir editándose.
-  if (producto.codigo) {
+  // el código CAMBIÓ (sin mirar mayúsculas ni bordes, como el índice del server): la ficha
+  // manda el formulario entero, y guardar con el mismo código no es un duplicado.
+  if (codigoParaGuardar(producto.codigo) !== null) {
     const { data: guardado, error: errorLeer } = await supabase
       .from('productos')
       .select('codigo')
       .eq('id', id)
       .maybeSingle()
     if (errorLeer) throw errorDeSupabase(errorLeer, 'Sin conexión: no se pudo verificar el código del producto. Revisá la señal e intentá de nuevo.')
-    if ((guardado?.codigo ?? '') !== producto.codigo) await verificarCodigoLibre(producto.codigo, id)
+    if (!mismoCodigoProducto(guardado?.codigo, producto.codigo)) await verificarCodigoLibre(producto.codigo, id)
   }
 
   const updateData: Record<string, unknown> = {}
   if (producto.nombre !== undefined) updateData.nombre = producto.nombre
-  if (producto.codigo !== undefined) updateData.codigo = producto.codigo || null
+  if (producto.codigo !== undefined) updateData.codigo = codigoParaGuardar(producto.codigo)
   if (producto.precio !== undefined) updateData.precio = producto.precio
   if (producto.stock !== undefined) updateData.stock = producto.stock
   if (producto.stock_minimo !== undefined) updateData.stock_minimo = producto.stock_minimo
@@ -260,6 +263,8 @@ async function updateProducto({ id, data: producto }: { id: string; data: Partia
 
   const { data, error } = await query.select(PRODUCTO_COLUMNAS).maybeSingle()
 
+  // Ponerle a un producto el código de otro en una carrera: lo frena el índice único del server.
+  if (error && esCodigoDuplicadoDeBase(error)) throw errorCodigoDuplicado(codigoParaGuardar(producto.codigo), null, true)
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el producto se haya guardado. Revisá antes de reintentar.')
   if (!data) {
     if (conCas) {

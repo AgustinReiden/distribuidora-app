@@ -29,6 +29,7 @@
  */
 import { useState } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { asentar, atras } from '../../test/atrasHelpers'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event'
 
@@ -197,6 +198,7 @@ vi.mock('../../hooks/usePromocionPedido', () => ({
 }))
 
 import ModalPedido, { type NuevoPedidoState } from './ModalPedido'
+import { reiniciarAtrasModales } from '../../utils/atrasModales'
 import type { PatchHorarioCliente } from '../ui/BloqueHorarioRequerido'
 import { fechaLocalISO } from '../../utils/formatters'
 import type { ClienteDB, ProductoDB } from '../../types'
@@ -772,25 +774,52 @@ describe('ModalPedido — camino feliz', () => {
     expect(botonConfirmar()).toBeDisabled()
   })
 
-  it('cerrar avisa al padre y no guarda nada', async () => {
+  // Decisión 4 del dueño (#1603): con el pedido a medio armar, la X, Escape y el «atrás» preguntan
+  // «Salir sin guardar»; sin tocar cierran de una (tests de abajo). Antes cerraban sin preguntar.
+  it('cerrar con el pedido a medio armar pregunta; «Salir igual» avisa al padre y no guarda nada', async () => {
     const { user, onCloseSpy, onGuardarSpy } = montar()
 
     await elegirCliente(user, 'Kiosco El Sol')
     await agregarProducto(user, 'Gaseosa')
     await user.click(screen.getByRole('button', { name: 'Cerrar' }))
+    expect(onCloseSpy).not.toHaveBeenCalled()
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
 
     expect(onCloseSpy).toHaveBeenCalledTimes(1)
     expect(onGuardarSpy).not.toHaveBeenCalled()
   })
 
-  it('Escape cierra el modal', async () => {
+  it('«Seguir con el pedido» deja el pedido como estaba', async () => {
+    const { user, onCloseSpy } = montar()
+
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+    await user.click(screen.getByRole('button', { name: 'Cerrar' }))
+    await user.click(await screen.findByRole('button', { name: 'Seguir con el pedido' }))
+
+    expect(onCloseSpy).not.toHaveBeenCalled()
+    expect(botonCarrito()).toHaveAccessibleName(/1 unidad/)
+  })
+
+  it('Escape con el pedido a medio armar pregunta; «Salir igual» cierra el modal', async () => {
     const { user, onCloseSpy, onGuardarSpy } = montar()
 
     await agregarProducto(user, 'Gaseosa')
     await user.keyboard('{Escape}')
+    expect(onCloseSpy).not.toHaveBeenCalled()
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
 
     expect(onCloseSpy).toHaveBeenCalledTimes(1)
     expect(onGuardarSpy).not.toHaveBeenCalled()
+  })
+
+  it('un alta recién abierta, sin tocar, cierra de una con Escape y con la X', async () => {
+    const { user, onCloseSpy } = montar()
+
+    await user.keyboard('{Escape}')
+    expect(onCloseSpy).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole('button', { name: 'Cerrar' }))
+    expect(onCloseSpy).toHaveBeenCalledTimes(2)
   })
 
   // I1 de la revisión de B12a (decisión de pantalla a confirmar por el dueño):
@@ -1313,7 +1342,9 @@ describe('ModalPedido — precio editado a mano (admin)', () => {
     await user.keyboard('{Escape}')
     expect(onCloseSpy).not.toHaveBeenCalled()
 
+    // Ya cancelada la edición, Escape vuelve a cerrar el alta: con el pedido a medio armar, preguntando.
     await user.keyboard('{Escape}')
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
     expect(onCloseSpy).toHaveBeenCalledTimes(1)
   })
 
@@ -2107,5 +2138,110 @@ describe('ModalPedido — no se confirma sin los datos que arman el precio (FRV-
     expect(screen.queryByText(/No se puede confirmar:/)).not.toBeInTheDocument()
     await user.click(botonConfirmar())
     expect(onGuardarSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+// Decisión 4 del dueño (#1603): el «atrás» del teléfono cierra el alta por el mismo camino que la X y Escape:
+// con el pedido a medio armar pregunta «Salir sin guardar»; sin tocar, cierra de una. Historial real de jsdom.
+describe('ModalPedido (escritorio) — el «atrás» del teléfono', () => {
+
+  beforeEach(() => {
+    reiniciarAtrasModales()
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('con el pedido a medio armar pregunta; «Seguir con el pedido» lo deja y «Salir igual» cierra', async () => {
+    const { user, onCloseSpy } = montar()
+    await asentar()
+    await agregarProducto(user, 'Gaseosa')
+
+    await atras()
+    expect(await screen.findByRole('button', { name: 'Salir igual' })).toBeInTheDocument()
+    expect(onCloseSpy).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Seguir con el pedido' }))
+    await asentar()
+    expect(onCloseSpy).not.toHaveBeenCalled()
+    expect(botonCarrito()).toHaveAccessibleName(/1 unidad/)
+
+    await atras()
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
+    expect(onCloseSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('un alta recién abierta, sin tocar, cierra de una', async () => {
+    const { onCloseSpy } = montar()
+    await asentar()
+    await atras()
+    expect(onCloseSpy).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: 'Salir igual' })).not.toBeInTheDocument()
+  })
+})
+
+// N1 y N3 de la revisión de C7 (decisión 4 del dueño, #1603).
+describe('ModalPedido (escritorio) — comercio nuevo a medio cargar y guardado en vuelo', () => {
+  beforeEach(() => {
+    reiniciarAtrasModales()
+    window.history.replaceState(null, '', '/')
+  })
+
+  // N1: el alta rápida del comercio vive en el estado local del modal, no en el pedido del container.
+  it.each([
+    ['el «atrás» del teléfono', async () => { await atras() }],
+    ['la X', async () => { await userEvent.setup().click(screen.getByRole('button', { name: 'Cerrar' })) }],
+  ])('con un comercio nuevo a medio tipear, %s pregunta «Salir sin guardar» y no cierra', async (_camino, accion) => {
+    const { user, onCloseSpy } = montar({ isAdmin: true })
+    await asentar()
+    await user.click(screen.getByRole('button', { name: '+ Nuevo' }))
+    await user.type(screen.getByPlaceholderText('Nombre fantasia *'), 'Despensa Nueva')
+
+    await accion()
+
+    expect(await screen.findByRole('button', { name: 'Salir igual' })).toBeInTheDocument()
+    expect(onCloseSpy).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Seguir con el pedido' }))
+    expect(screen.getByPlaceholderText('Nombre fantasia *')).toHaveValue('Despensa Nueva')
+  })
+
+  it('con el panel del comercio nuevo abierto pero sin tipear nada, cierra de una', async () => {
+    const { user, onCloseSpy } = montar({ isAdmin: true })
+    await asentar()
+    await user.click(screen.getByRole('button', { name: '+ Nuevo' }))
+
+    await atras()
+
+    expect(onCloseSpy).toHaveBeenCalledTimes(1)
+  })
+
+  // N3: con el alta en vuelo va a entrar: «El pedido no se guardó» sería falso. El «atrás» se absorbe.
+  it('con el alta guardándose, el «atrás» no pregunta «no se guardó» ni cierra', async () => {
+    const { user, onCloseSpy } = montar({ guardando: true })
+    await asentar()
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+
+    await atras()
+    // Un solo «atrás»: con otro, la pregunta (si hubiera salido) se cerraría y el test no la vería.
+    expect(screen.queryByRole('button', { name: 'Salir igual' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/El pedido no se guardó/)).not.toBeInTheDocument()
+    expect(onCloseSpy).not.toHaveBeenCalled()
+    expect(botonCarrito()).toHaveAccessibleName(/1 unidad/)
+
+    // Y el siguiente «atrás» tampoco: la entrada se repone y sigue absorbiendo.
+    await atras()
+    expect(onCloseSpy).not.toHaveBeenCalled()
+  })
+
+  it('con el alta guardándose, la X y Escape tampoco cierran', async () => {
+    const { user, onCloseSpy } = montar({ guardando: true })
+    await asentar()
+    await elegirCliente(user, 'Kiosco El Sol')
+    await agregarProducto(user, 'Gaseosa')
+
+    await user.click(screen.getByRole('button', { name: 'Cerrar' }))
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByRole('button', { name: 'Salir igual' })).not.toBeInTheDocument()
+    expect(onCloseSpy).not.toHaveBeenCalled()
   })
 })

@@ -27,7 +27,6 @@ import {
   useAsegurarCatalogo,
 } from '../../hooks/queries'
 import type { ActualizarCompraItemsInput } from '../../hooks/queries'
-import type { LotesSinSincronizar } from '../../hooks/queries/useComprasQuery'
 import type { CambiarProveedorPayload } from '../modals/ModalCambiarProveedor'
 import type { ProductoRapidoInput } from '../modals/ModalCompra'
 import { useAuthData } from '../../contexts/AuthDataContext'
@@ -50,7 +49,6 @@ const ModalNotaCredito = lazyWithReload(() => import('../modals/ModalNotaCredito
 const ModalCambiarProveedor = lazyWithReload(() => import('../modals/ModalCambiarProveedor'))
 const ModalConfirmacion = lazyWithReload(() => import('../modals/ModalConfirmacion'))
 // Lazy: arrastra el cliente de queries completo, y sólo hace falta si una edición dejó lotes sin sincronizar.
-const AvisoLotesSinSincronizar = lazyWithReload(() => import('./AvisoLotesSinSincronizar'))
 
 /**
  * Muestra los avisos blandos que devuelven las RPCs de compra.
@@ -181,10 +179,6 @@ export default function ComprasContainer(): React.ReactElement {
   const [aperturaEdicion, setAperturaEdicion] = useState(0)
   const [compraParaCambiarProveedor, setCompraParaCambiarProveedor] = useState<CompraDBExtended | null>(null)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
-  // STK-13: las ediciones que guardaron la compra pero no pudieron sincronizar sus lotes,
-  // una por compra: una edición posterior de la misma compra que sí sincroniza lo borra
-  // (su foto ya es vieja), y la de otra compra no lo pisa.
-  const [lotesPendientes, setLotesPendientes] = useState<Record<string, LotesSinSincronizar>>({})
 
   // Cerrar modales al cambiar de sucursal: las compras son por sucursal.
   useResetOnSucursalChange(() => {
@@ -198,7 +192,6 @@ export default function ComprasContainer(): React.ReactElement {
     setCompraParaEditar(null)
     setCompraParaCambiarProveedor(null)
     setConfirmConfig({ visible: false })
-    setLotesPendientes({})
   })
 
   // NC resumen for badges in list
@@ -378,10 +371,6 @@ export default function ComprasContainer(): React.ReactElement {
       // Editar los items puede dejar el II declarado sin cuadrar (una línea que
       // se fue se lleva su alícuota). La RPC avisa; acá se muestra.
       avisosDeLaBase(notify, null, res.warningIiDeclarado, res.warningLotes, res.warningConceptos, res.warningMedidas)
-      setLotesPendientes(prev => {
-        const { [String(input.compraId)]: _vieja, ...resto } = prev
-        return res.lotesPendientes ? { ...resto, [String(input.compraId)]: res.lotesPendientes } : resto
-      })
       // Dos avisos de costo que se dicen distinto (mig 236). Van en dos y no en
       // uno porque el motivo no es el mismo, y "no es la última" mandado sobre
       // una compra que SÍ es la última manda a buscar donde no hay nada. Desde
@@ -472,17 +461,6 @@ export default function ComprasContainer(): React.ReactElement {
 
   return (
     <>
-      {Object.entries(lotesPendientes).map(([compraId, pendiente]) => (
-        <Suspense key={compraId} fallback={null}>
-          <AvisoLotesSinSincronizar
-            pendiente={pendiente}
-            onTerminar={() => setLotesPendientes(prev => {
-              const { [compraId]: _hecha, ...resto } = prev
-              return resto
-            })}
-          />
-        </Suspense>
-      ))}
       <Suspense fallback={<LoadingState />}>
         <VistaCompras
           compras={compras as any}

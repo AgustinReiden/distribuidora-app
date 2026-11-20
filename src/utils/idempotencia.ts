@@ -221,7 +221,7 @@ export function decidirTrasVerificar(
  * transacción de ESE intento no hizo COMMIT. Un 5xx de gateway no cuenta: el
  * gateway contestó, pero la base pudo haber terminado (#1373).
  */
-function contestoElServidor(error: unknown): boolean {
+export function contestoElServidor(error: unknown): boolean {
   const e = error as { code?: unknown; sinServidor?: unknown } | null | undefined
   if (e?.sinServidor === true || esGatewayCaido(error)) return false
   const code = e?.code

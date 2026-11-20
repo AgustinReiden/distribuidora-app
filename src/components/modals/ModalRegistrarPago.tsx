@@ -248,7 +248,8 @@ function DialogoPago({
   children: React.ReactNode
 }): React.ReactElement {
   return (
-    <Dialog open onOpenChange={(abierto) => { if (!abierto) onClose() }}>
+    // `atrasCierra={false}`: un modal de plata no se cierra con Escape y el «atrás» del teléfono tampoco (se absorbe).
+    <Dialog open atrasCierra={false} onOpenChange={(abierto) => { if (!abierto) onClose() }}>
       <DialogContent
         className={className}
         data-sheet-movil={sheetMovil ? '' : undefined}

@@ -5,8 +5,7 @@
 import { useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
-import { errorDeSupabase, esErrorReintentable } from '../../utils/errorDeSupabase'
-import type { ErrorDeSupabase } from '../../utils/errorDeSupabase'
+import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { aplanarVencimientos } from '../../utils/vencimientos'
 import { fechaLocalISO } from '../../utils/formatters'
@@ -456,9 +455,8 @@ async function sincronizarLotesDeCompra(
   items: { productoId: string; vencimientos?: { fecha: string; cantidad: number }[] }[],
 ): Promise<string | null> {
   // Es el ALTA: no hay lotes que borrar, así que sin vencimientos ni se llama.
-  // La EDICIÓN llama siempre (una lista vacía borra los que había) y lo hace
-  // aparte, en `actualizarCompraItems`, porque si falla tiene que devolver qué
-  // quedó sin sincronizar (STK-13).
+  // La EDICIÓN no pasa por acá: manda los lotes con la edición (`p_lotes` de
+  // `actualizar_compra_items`) y el server los sincroniza en su transacción (STK-13).
   const lotes = aplanarVencimientos(items)
   if (lotes.length === 0) return null
 
@@ -485,46 +483,18 @@ async function llamarSincronizarLotes(compraId: string | number, lotes: LotesDeC
   })
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el guardado de los vencimientos.')
 
-  const res = data as unknown as { warning_clamp?: { producto_id: number; unidades: number }[] }
-  const clamp = res?.warning_clamp ?? []
-  if (clamp.length > 0) {
-    const total = clamp.reduce((acc, c) => acc + c.unidades, 0)
-    return `Se recortaron ${total} u. de vencimientos en ${clamp.length} producto(s): los lotes no entraban en el stock disponible.`
-  }
-  return null
+  return avisoDeRecorte((data as unknown as { warning_clamp?: RecorteDeLotes[] } | null)?.warning_clamp)
 }
 
-/**
- * Los lotes que una edición no pudo sincronizar (STK-13, #1542). La edición de
- * la compra (`actualizar_compra_items`) y la sincronización de sus lotes son dos
- * llamadas, y no hay una RPC que las haga juntas: si la segunda falla con la
- * compra ya bajada, un lote queda con más unidades que la compra. Esto es lo que
- * hace falta para repetir la segunda llamada.
- */
-export interface LotesSinSincronizar {
-  compraId: string
-  lotes: LotesDeCompra
-  /**
-   * `false` si el server rechazó por regla (la compra pasó los 8 días, entró una
-   * nota de crédito): repetir la misma llamada falla siempre y el aviso no
-   * ofrece reintentar. `true` si fue de red o un fallo transitorio.
-   */
-  reintentable: boolean
-}
+/** Lo que `sincronizar_lotes_compra` tuvo que recortar de un producto. */
+interface RecorteDeLotes { producto_id: number; unidades: number }
 
-/**
- * Reintenta la sincronización de lotes que falló al editar una compra. Lanza si
- * vuelve a fallar (la pantalla muestra el motivo y deja reintentar otra vez);
- * devuelve el aviso de recorte, si lo hubo. Deja la lista de lotes al día.
- */
-export async function reintentarSincronizarLotes(
-  queryClient: ReturnType<typeof useQueryClient>,
-  sucursalId: number | null,
-  pendiente: LotesSinSincronizar,
-): Promise<string | null> {
-  const aviso = await llamarSincronizarLotes(pendiente.compraId, pendiente.lotes)
-  invalidarLotes(queryClient, sucursalId)
-  return aviso
+/** El aviso de lo que se recortó de los vencimientos (porque no entraban en el stock), o null. */
+function avisoDeRecorte(clamp: RecorteDeLotes[] | null | undefined): string | null {
+  const recortes = clamp ?? []
+  if (recortes.length === 0) return null
+  const total = recortes.reduce((acc, c) => acc + c.unidades, 0)
+  return `Se recortaron ${total} u. de vencimientos en ${recortes.length} producto(s): los lotes no entraban en el stock disponible.`
 }
 
 async function registrarCompra(compraData: CompraFormInputExtended): Promise<RegistrarCompraResult> {
@@ -1013,6 +983,11 @@ export function paramsActualizarCompraItems(input: ActualizarCompraItemsInput): 
     p_ii_declarado: input.iiDeclarado,
     // FRG-4 (#1557): sin él la RPC pide recargar la aplicación.
     p_renglones_vistos: input.renglonesVistos.map(Number),
+    // STK-13 (#1542): la foto COMPLETA de los vencimientos de la compra, que el
+    // server sincroniza en la misma transacción que la edición. Va siempre, aunque
+    // ninguna línea traiga vencimientos: la lista vacía borra los que había (la
+    // edición borra y recrea las líneas, y los lotes siguen a las líneas).
+    p_lotes: aplanarVencimientos(input.items),
   }
 }
 
@@ -1024,9 +999,8 @@ async function actualizarCompraItems(
   /** La reposición que se fue con una línea y no tiene otra compra que la fije (mig 407). */
   warningCostoCompra: WarningCostoCompra[]
   warningIiDeclarado: string | null
+  /** Lo que el server tuvo que recortar de los vencimientos (no entraban en el stock). */
   warningLotes: string | null
-  /** Lo que falta sincronizar si falló: la pantalla ofrece reintentarlo. null = nada pendiente. */
-  lotesPendientes: LotesSinSincronizar | null
   warningConceptos: string | null
   warningMedidas: string | null
 }> {
@@ -1045,37 +1019,18 @@ async function actualizarCompraItems(
     warning_costo_promedio?: WarningCostoPromedio[] | null
     warnings?: WarningCostoCompra[] | null
     warning_ii_declarado?: string | null
+    warning_clamp?: RecorteDeLotes[] | null
   }
+  // Un rechazo de los vencimientos (uno que no entra en la compra) llega acá: el
+  // server deshizo la edición entera, así que no quedó nada a medias (STK-13).
   if (!result.success) {
     throw new Error(result.error || 'Error al actualizar compra')
   }
   // `actualizar_compra_items` NO devuelve `warning_descuadre`: no compara el
   // total contra el informado. En una FC lo recibe ya hecho; en una ZZ lo
-  // calcula el server (#1603). Sólo devuelve el aviso del II declarado.
-  // En la edición se llama SIEMPRE, incluso sin vencimientos: la RPC es la foto
-  // completa de los lotes de esta factura, así que una lista vacía es la forma
-  // de borrar los que había. `actualizar_compra_items` borra y recrea las
-  // líneas, y los lotes tienen que seguir a las líneas.
-  // STK-13: si esta segunda llamada falla, la compra ya está editada (y quizá
-  // bajada) y los lotes quedaron como estaban. No se calla: el aviso lo dice y se
-  // devuelve lo que falta para que la pantalla deje reintentar.
-  const lotes = aplanarVencimientos(input.items)
-  let warningLotes: string | null = null
-  let lotesPendientes: LotesSinSincronizar | null = null
-  try {
-    warningLotes = await llamarSincronizarLotes(result.compra_id, lotes)
-  } catch (e) {
-    // De red o transitorio se reintenta; un rechazo del server por regla (la
-    // compra pasó los 8 días, entró una nota de crédito) falla igual la segunda vez.
-    const reintentable = (e as Partial<ErrorDeSupabase>)?.sinServidor === true || esErrorReintentable(e)
-    lotesPendientes = { compraId: String(result.compra_id), lotes, reintentable }
-    warningLotes = 'La compra se editó, pero los vencimientos no se pudieron sincronizar con las nuevas cantidades: ' +
-      `${e instanceof Error ? e.message : 'error desconocido'}. ` +
-      'Mientras no se sincronicen, un vencimiento de esta compra puede tener más unidades que la compra misma. ' +
-      (reintentable
-        ? 'Reintentá la sincronización desde el aviso, o abrí la compra y guardala de nuevo.'
-        : 'Esto no se arregla reintentando: corregí los vencimientos desde la ficha del producto.')
-  }
+  // calcula el server (#1603). Devuelve el aviso del II declarado y, de los
+  // vencimientos que sincronizó, lo que tuvo que recortar.
+  const warningLotes = avisoDeRecorte(result.warning_clamp)
   const warningMedidas = await guardarMedidasDeFicha(input.medidasFicha)
 
   return {
@@ -1084,7 +1039,6 @@ async function actualizarCompraItems(
     warningCostoCompra: result.warnings ?? [],
     warningIiDeclarado: result.warning_ii_declarado ?? null,
     warningLotes,
-    lotesPendientes,
     warningConceptos: conceptos.warning,
     warningMedidas,
   }

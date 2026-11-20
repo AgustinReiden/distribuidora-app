@@ -12,6 +12,7 @@
  * el modal trabaja en borrador: `onSave` no escribe nada, el cierre guarda todo junto.
  */
 import React, { useId, useMemo, useState } from 'react'
+import { useCambiosDesdeApertura } from '../../hooks/useCambiosDesdeApertura'
 import type { FormEvent, ReactNode, SelectHTMLAttributes } from 'react'
 import { z } from 'zod'
 import { AlertTriangle, CalendarRange, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
@@ -560,6 +561,14 @@ export default function ModalGasto({
     if (comboboxAbierto) event.preventDefault()
   }
 
+  // La X, Escape y el «atrás» del teléfono preguntan «Salir sin guardar» si el formulario cambió respecto de
+  // como abrió (decisión 4 del dueño, #1603): una edición sin tocar no pregunta.
+  const hayCambios = useCambiosDesdeApertura({
+    rubroId, montoTxt, fecha, comprobante, alicuota, desgloseManual, percIvaTxt, percIibbTxt, otrosTxt, numero,
+    renglonesTxt, vehiculoId, litrosTxt, kmEditado, sucursalSel, compartido, mesManual, repartirManual, mesesTxt,
+    origen, transportistaId, diaManual, empleadoId, observacion,
+  })
+
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError('')
@@ -675,6 +684,7 @@ export default function ModalGasto({
       title={edicion ? 'Editar gasto' : 'Registrar gasto'}
       onClose={onClose}
       maxWidth="max-w-xl"
+      hayCambios={hayCambios}
       onEscapeKeyDown={handleEscapeKeyDown}
     >
 <RegistroIlegiblesContext.Provider value={ilegibles.registro}>

@@ -710,8 +710,9 @@ BEGIN
     ('public.actualizar_monto_minimo_pedido(numeric)', true, true),
     ('public.pedido_incumple_minimo(numeric,bigint)', true, false),
     ('public.sync_producto_categoria_id()', false, false),
-    ('public.renombrar_rubro(uuid,text,text)', false, true),
-    ('public.eliminar_rubro(uuid,text,boolean)', false, true),
+    -- DEFINER y con p_lote desde la migración de C4a (1596-b9): escriben la fila de auditoría del rubro, en tandas.
+    ('public.renombrar_rubro(uuid,text,text,integer)', true, true),
+    ('public.eliminar_rubro(uuid,text,boolean,integer)', true, true),
     ('public.clave_direccion_cliente(text)', false, true),
     ('public.unidad_direccion_cliente(text)', false, false),
     ('public._otra_unidad_misma_puerta(text,text)', false, false),
