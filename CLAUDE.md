@@ -26,6 +26,17 @@ de excepciones (`scripts/*-permitidas.json`, `ensayos-sql-excepciones.json`) con
 lista **sólo se achica**. Localmente: `GATE_DB_CONTENEDOR=<contenedor> bash scripts/ci/gates-locales.sh`
 (la base se arma con `scripts/concurrencia/docker-local.mjs` y la semilla de `scripts/ci/`; esa semilla
 y ese criterio de «ensayo OK» son los del CI).
+**Un ensayo que vigila rendimiento cuenta trabajo, no segundos** (C8 de #1603): bloques tocados
+(`pg_stat_get_xact_blocks_fetched`), WAL y llamadas por fila, y la forma (los últimos lotes no cuestan
+más que los primeros); el tiempo, sólo contra una referencia medida en el mismo runner. Y analiza lo
+que inserta (`ANALYZE`): el plan de un ensayo sale de lo que el autovacuum dejó después del ensayo
+anterior, y un plan que elige el índice equivocado tarda 10 veces más sin que el código haya cambiado
+(`test-precios-masivo-30000-1561.sql`; los controles negativos están en `scripts/ci/gates-muerden.sh`).
+
+Después de una carga masiva de datos (una importación, la base inicial de un comercio nuevo) se corre
+`ANALYZE`: con estadísticas viejas el planner cree que `pedidos` y `pedido_items` están casi vacías, arma
+nested loops, y el gerencial, `tablero_categorias`, el bot y Rendimiento pasan el timeout de 8 s (N8 de
+#1603). Se mide con `scripts/tiempos-ventas-estadisticas-viejas-ola2-1603.sql`.
 
 Deploy: push a `main` → webhook de Coolify. La config de nginx de producción **vive en el
 panel de Coolify**, no en el `nginx.conf` del repo — editar el repo no cambia nada.
@@ -85,6 +96,16 @@ suelta en `sucursales`.
   falla ante lo alcanzable con la **anon key**, no con una sesión—. Pasó con
   `bot_digest_destinatarios` (261, corregida en la 262): devolvía los `telegram_user_id` de
   todos los admins y cualquier preventista logueado podía enumerarlos.
+- **El search_path termina en `pg_temp`** (mig 531, B15 de #1603), en dos mitades: toda `SECURITY DEFINER`
+  nueva o reemplazada fija `SET search_path = public, pg_temp`; y **toda función que fije
+  search_path, definer o no**, lo termina en `pg_temp` (`public, pg_temp`, o el suyo con `pg_temp`
+  al final). Sin `pg_temp` escrito, Postgres busca primero en las tablas temporales de la sesión:
+  una `perfiles` temporal del que llama hacía que `es_admin()` le diera true, y una INVOKER con su
+  propio `SET search_path = public` que llama una definer corre como postgres y hace lo mismo. Una
+  INVOKER que no fija search_path está bien (hereda el de quien la llama; una SQL sin `SET` se
+  inlinea, como `_cliente_visible`). Un `CREATE OR REPLACE` sin el `SET` lo pierde, y copiar el
+  `SET search_path TO 'public'` de una función vieja lo vuelve a abrir. Lo vigila
+  `scripts/check-search-path.mjs`, sin lista de permitidas.
 - **El alta de un usuario no le cree al usuario, y el admin gestiona a los de sus sucursales**
   (migs 403b y 404, #1243 y #1244). `handle_new_user()` toma el rol y la sucursal de
   `raw_app_meta_data`: en la admin API, `app_metadata: {rol, sucursal_id}`; por SQL, la
@@ -132,7 +153,8 @@ suelta en `sucursales`.
   necesita quien vende, va a esa lista; si no, a la RPC. El REVOKE de lo reservado para
   `authenticated` (la parte 2) va después, con su issue.
 - **Una `auditoria_*` que lee código limpia el cuerpo con `_sql_sin_comentarios` o
-  `_sql_sin_comentarios_ni_literales`** (#1541): una sola pasada que entiende las comillas. Sacar
+  `_sql_sin_comentarios_ni_literales`** (#1541): una sola pasada que entiende las comillas (también
+  la `\'` de un `E'…'`, C5 de #1603). Sacar
   primero los `--` y después los literales rompe la paridad con un literal `' -- '` y esconde lo
   que sigue. Espejo en `scripts/lib/locks.mjs`.
 - **Los avisos se guardan 90 días y `audit_logs` 24 meses** (1561-b10 y 1596-b10, decisión del
@@ -288,6 +310,11 @@ suelta en `sucursales`.
   `anular_salvedad` se lo devuelve, con tope en lo que la boleta debe. Si el recorte lo borró, o
   el cobro ya está en una rendición confirmada o en un día con la caja cerrada, vuelve como un
   cobro nuevo con sus datos (con la fecha de hoy si la suya está cerrada), y la foto no cambia.
+  Ese cobro nuevo lleva las marcas del recortado (`a_cuenta`, `pago_origen_id` y `pago_padre_id`;
+  1595-b2): un adelanto de sueldo del FIFO de la ficha sigue a cuenta y `desimputar_pago` lo acepta.
+  Reponer un adelanto a un empleado dado de baja se rechaza siempre: raíz, pedazo o sumado al pago
+  vivo, mirando la ficha de hoy y los movimientos de esa familia de pagos (a quien el trigger de la
+  cuenta carga), y sólo si hay algo que reponer (H4 de la revisión de C1).
   Lo que quedó a favor, o un cobro que alguien borró o movió después, no se repone.
   **La línea que la salvedad borró vuelve con su foto** (VTA-1, #1595): al borrarla,
   `registrar_salvedad` guarda su costo, su lista, su origen, su descuento y su escala en
@@ -297,7 +324,9 @@ suelta en `sucursales`.
   combo), y uno que repunte escalas repunta también la de la foto.
   Anular una salvedad que devuelve el derecho a un regalo se rechaza si **cualquier** salvedad
   del pedido, viva o anulada, recortó un regalo de esa promo (1592-b5 y su revisión): mirar
-  sólo la propia hacía que el resultado dependiera del orden en que se anulan.
+  sólo la propia hacía que el resultado dependiera del orden en que se anulan. Una salvedad sobre
+  el propio regalo (baja esa línea, no la venta) no es un recorte y no cuenta: como no se puede
+  anular, el resultado sigue sin depender del orden (1592-b5 residual).
   **La boleta nueva absorbe el saldo a favor al crearse** (mig 463c, #1469; decisión del dueño):
   FIFO, por `aplicar_credito_cliente`, en `crear_pedido_completo` y el bot. Un camino nuevo que
   cree una boleta hace lo mismo con `_alta_bloquea_boletas_credito` (antes de los productos),
@@ -328,7 +357,9 @@ suelta en `sucursales`.
   de total ya no absorbe sola el crédito suelto: lo absorbe el próximo pedido o una imputación a
   mano. El FIFO es uno, `_aplicar_credito_pagos(cliente, sucursal, pagos)`, y
   `aplicar_credito_cliente` lo llama con todos: sólo barren todo el alta y el FIFO de la ficha. Un
-  camino nuevo que deje plata a favor pasa la lista de sus pagos. **El saldo a favor aplicado a
+  camino nuevo que deje plata a favor pasa la lista de sus pagos. El crédito que se aplica a una
+  boleta pierde sus marcas de saldo a favor en las notas por `_notas_sin_saldo_a_favor` (las tres:
+  la común, la de cancelación y la de cambio de cliente; COB-b6). **El saldo a favor aplicado a
   una boleta no se borra:** un pago con `de_saldo_a_favor`, `a_cuenta`, `pago_origen_id` o
   `nota_credito_id` se quita con `desimputar_pago` y vuelve suelto, sin reaplicarse solo (decisión
   del dueño); el `DELETE` REST lo rechaza `trg_pagos_guard_credito_aplicado`. Anular una NC
