@@ -2,6 +2,7 @@ import React, { useState, useEffect, FormEvent, ChangeEvent } from 'react';
 import { z } from 'zod';
 import { X, Building2, Phone, Mail, MapPin, FileText, User, Hash, CheckCircle } from 'lucide-react';
 import { AddressAutocomplete } from '../AddressAutocomplete';
+import { useAtrasCierraModal } from '../../hooks/useAtrasCierraModal';
 import { Button } from '../ui/Button';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { formatCuitInput } from '../../utils/formatters';
@@ -91,6 +92,8 @@ export default function ModalProveedor({
   guardando = false,
   nombreInicial = ''
 }: ModalProveedorProps): React.ReactElement {
+  // Modal hecho a mano (no pasa por `ui/Dialog`): el «atrás» del teléfono lo cierra (decisión 4 del dueño, #1603).
+  useAtrasCierraModal(onClose);
   // Zod validation hook
   const { validate, getFirstError } = useZodValidation(modalProveedorSchema);
 

@@ -282,13 +282,9 @@ export default function ModalEntregaConSalvedad({
 
   const totalSalvedades = itemsConSalvedad.reduce((sum, i) => sum + (i.item.precio_unitario * i.cantidadAfectada), 0)
 
-  // Escape cierra sólo si no hay nada que perder (ver la util). La X y
-  // "Cancelar" cierran siempre, como antes de pasar a ModalBase.
-  const handleEscapeKeyDown = (event: KeyboardEvent) => {
-    if (entregaSalvedadTieneCambios({ paso, seleccionados: itemsConSalvedad.length })) {
-      event.preventDefault()
-    }
-  }
+  // La X, Escape y el «atrás» del teléfono preguntan «Salir sin guardar» si hay algo que perder (ver la
+  // util; decisión 4 del dueño, #1603). "Cancelar" cierra siempre.
+  const hayCambios = entregaSalvedadTieneCambios({ paso, seleccionados: itemsConSalvedad.length })
 
   // bodyBare: el modal trae su propia columna. Con el DialogBody de siempre
   // habría doble scroll y el footer con los botones se iría con la lista,
@@ -300,7 +296,7 @@ export default function ModalEntregaConSalvedad({
       onClose={onClose}
       maxWidth="max-w-2xl"
       bodyBare
-      onEscapeKeyDown={handleEscapeKeyDown}
+      hayCambios={hayCambios}
     >
       <div className="flex flex-1 min-h-0 flex-col">
         {/* Pedido: queda fijo arriba del área que scrollea. No va como

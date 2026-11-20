@@ -54,6 +54,8 @@ import {
   MENSAJE_CLIENTE_NO_HABILITADO_VB,
 } from '../../utils/valeBlanco';
 import { AbrirSeccionContext, RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles';
+import { useSalirSinGuardar } from '../../hooks/useSalirSinGuardar';
+import { useCambiosDesdeApertura } from '../../hooks/useCambiosDesdeApertura';
 
 // Alto del alta en el sheet. Un navegador sin `dvh` (Chrome < 108, Safari <
 // 15.4) descarta el valor inline entero y el sheet crecería más que la pantalla,
@@ -630,29 +632,29 @@ const ModalPedido = memo(function ModalPedido({
   // silencio. Mismo patrón que ModalEditarPedido.
   const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null);
 
-  // I1 de la revisión de B12a (decisión de pantalla a confirmar por el dueño): con
-  // la oferta de la cola en pantalla (D56) el pedido no se guardó en ningún lado;
-  // cerrar con la X o con Escape pide confirmación, DENTRO del modal como la de
-  // quitar una promo. Sin la oferta, cierra como siempre. El «atrás» del teléfono
-  // NO pasa por acá: navega (no hay `popstate`) y desmonta la pantalla; va aparte.
-  const cerrarAlta = (): void => {
-    if (!onGuardarEnCola) {
-      onClose();
-      return;
-    }
-    setConfirmConfig({
-      visible: true,
-      tipo: 'warning',
-      titulo: 'Salir sin guardar',
+  // Cerrar el alta: la X, Escape y el «atrás» del teléfono (decisión 4 del dueño, #1603) pasan por el mismo
+  // camino. Pregunta «Salir sin guardar», DENTRO del modal como la de quitar una promo, si el pedido cambió
+  // respecto de como se abrió el formulario, o si está la oferta de la cola en pantalla (D56: el pedido no se
+  // guardó en ningún lado). Un alta recién abierta, sin tocar, cierra de una.
+  const pedidoTocado = useCambiosDesdeApertura(nuevoPedido);
+  // El comercio nuevo a medio cargar (el alta rápida vive en el estado local del modal, no en `nuevoPedido`):
+  // con algo tipeado cuenta como pedido tocado (N1 de la revisión de C7).
+  const clienteNuevoTocado = mostrarNuevoCliente && (
+    Object.values(nuevoCliente).some(v => v !== '' && v != null)
+    || franjasAtencion.some(f => f.apertura !== '' || f.cierre !== '')
+    || diasAtencion !== null
+  );
+  const salida = useSalirSinGuardar({
+    // Con el guardado en vuelo no se cierra ni se pregunta «no se guardó»: va a entrar (N3).
+    bloqueado: guardando,
+    hayCambios: pedidoTocado || clienteNuevoTocado || Boolean(onGuardarEnCola),
+    onClose,
+    textos: {
       mensaje: 'El pedido no se guardó. ¿Salir igual?',
-      textoConfirmar: 'Salir igual',
       textoCancelar: 'Seguir con el pedido',
-      onConfirm: () => {
-        setConfirmConfig(null);
-        onClose();
-      },
-    });
-  };
+    },
+  });
+  const cerrarAlta = salida.pedirCierre;
 
   // Promos quitadas a mano → se excluyen de la resolución (display y submit).
   const promosEliminadasSet = useMemo(
@@ -2168,6 +2170,7 @@ const ModalPedido = memo(function ModalPedido({
             {cuerpo}
           </RegistroIlegiblesContext.Provider>
           {confirmacion}
+          {salida.confirmacion}
         </CompactErrorBoundary>
       </BottomSheet>
     );
@@ -2179,6 +2182,7 @@ const ModalPedido = memo(function ModalPedido({
         {cuerpo}
       </RegistroIlegiblesContext.Provider>
       {confirmacion}
+      {salida.confirmacion}
     </ModalBase>
   );
 });

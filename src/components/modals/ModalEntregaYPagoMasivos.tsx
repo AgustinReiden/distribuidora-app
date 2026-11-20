@@ -1,6 +1,7 @@
 import { useState, useMemo, memo } from 'react'
 import { Loader2, Search, Calendar, AlertTriangle, Truck } from 'lucide-react'
 import ModalBase from './ModalBase'
+import QueryErrorState from '../layout/QueryErrorState'
 import { Button } from '../ui/Button'
 // DENTRO del ModalBase: es un Radix Dialog portaleado con z-50 y un hermano
 // `fixed inset-0 z-50` queda detrás del overlay. Ver ModalPedido.
@@ -61,7 +62,7 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
 
   // Universo: pedidos que aún requieren acción = NO cancelados y NO (entregado Y pagado).
   // Incluye entregados-con-salvedad impagos (solo se cobran, sin re-entregar).
-  const { data: pedidos = [], isLoading } = usePedidosParaEntregaYPagoQuery(true)
+  const { data: pedidos = [], isLoading, isError, refetch } = usePedidosParaEntregaYPagoQuery(true)
   const { data: rendicionCerrada = false } = useRendicionCerradaQuery(fecha, fechaBloqueada)
 
   const pedidosFiltrados = useMemo(() => {
@@ -289,6 +290,9 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
               <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
               <span className="ml-2 text-gray-500">Cargando pedidos...</span>
             </div>
+          ) : isError ? (
+            // H2 de la revisión de C7: un error de lectura no es «no hay pedidos».
+            <QueryErrorState onRetry={() => { void refetch() }} />
           ) : pedidosFiltrados.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               No hay pedidos disponibles para entregar o cobrar

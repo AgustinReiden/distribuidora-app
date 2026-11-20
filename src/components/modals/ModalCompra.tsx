@@ -1039,8 +1039,8 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
   // de ModalBase más abajo.
   const modalAnidadoAbierto = modalProveedorOpen || modalImportarOpen
 
-  // Escape cierra sólo si no hay nada que perder (ver `compraTieneCambios`).
-  // La X y "Cancelar" cierran siempre, como antes de pasar a ModalBase.
+  // La X, Escape y el «atrás» del teléfono preguntan «Salir sin guardar» si hay algo que perder (ver
+  // `compraTieneCambios`; decisión 4 del dueño, #1603). "Cancelar" cierra siempre.
   //
   // Radix escucha Escape en el `document` en fase de CAPTURA: le llega antes
   // que al `onKeyDown` de cualquier input, y ningún `stopPropagation` de adentro
@@ -1054,7 +1054,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
     const enfocado = document.activeElement
     const comboboxAbierto = enfocado?.getAttribute('role') === 'combobox' &&
       enfocado.getAttribute('aria-expanded') === 'true'
-    if (state.mostrarBuscador || comboboxAbierto || modalAnidadoAbierto || compraTieneCambios(state)) {
+    if (state.mostrarBuscador || comboboxAbierto || modalAnidadoAbierto) {
       event.preventDefault()
     }
   }
@@ -1116,6 +1116,7 @@ function ModalCompraCarga({ productos, proveedores, categorias = [], marcas = []
       maxWidth="max-w-6xl"
       bodyBare
       headerExtra={botonEscanear}
+      hayCambios={compraTieneCambios(state)}
       onEscapeKeyDown={handleEscapeKeyDown}
       className={modalAnidadoAbierto ? 'h-[90vh]' : undefined}
     >
@@ -1753,12 +1754,12 @@ function ModalCompraEditar({
     }
   }
 
-  // Escape no cierra si hay algo sin guardar (la X y "Cancelar" sí).
+  // La X, Escape y el «atrás» del teléfono preguntan «Salir sin guardar» si hay algo sin guardar ("Cancelar" cierra).
   const handleEscapeKeyDown = (event: KeyboardEvent) => {
     const enfocado = document.activeElement
     const comboboxAbierto = enfocado?.getAttribute('role') === 'combobox' &&
       enfocado.getAttribute('aria-expanded') === 'true'
-    if (state.mostrarBuscador || comboboxAbierto || hayCambios) event.preventDefault()
+    if (state.mostrarBuscador || comboboxAbierto) event.preventDefault()
   }
 
   return (
@@ -1768,6 +1769,7 @@ function ModalCompraEditar({
       onClose={onClose}
       maxWidth="max-w-6xl"
       bodyBare
+      hayCambios={hayCambios}
       onEscapeKeyDown={handleEscapeKeyDown}
     >
       <div className="flex flex-1 min-h-0 flex-col">
