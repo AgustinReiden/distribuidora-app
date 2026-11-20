@@ -35,7 +35,9 @@ const GASEOSA: ProductoDB = {
   categoria: 'GASEOSAS',
   costo_sin_iva: 4000,
   impuestos_internos: 8.6957,
-  costo_con_iva: 5187.83,
+  // Cambió de regla (1593-b1, tarjeta C3 de #1603): la compra guarda el costo con IVA
+  // con los cargos adentro (5.187,83 de neto + IVA + II y 852,17 de cargos sin IVA).
+  costo_con_iva: 6040,
   costo_real: 5200,
   costo_promedio: 5100,
   ultimo_tipo_compra: 'FC',
@@ -149,7 +151,7 @@ describe('ModalProducto — costo final con los cargos de la compra', () => {
     renderFicha()
     // Neto: 6.198,35 − 5.200 de costo final.
     expect(screen.getByText('$998.35')).toBeInTheDocument()
-    // Bruto: 7.500 − (5.187,83 de factura con IVA + 852,17 de cargos).
+    // Bruto: 7.500 − 6.040 (5.187,83 de factura con IVA + 852,17 de cargos, como lo deja la compra).
     expect(screen.getByText('$1460.00')).toBeInTheDocument()
   })
 })

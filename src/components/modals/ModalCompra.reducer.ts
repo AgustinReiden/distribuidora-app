@@ -685,6 +685,20 @@ export function noGravadoDeCargos(cargos: CargoCompraForm[]): number {
   )
 }
 
+/**
+ * Hasta dónde puede bajar el «No gravado» de cabecera (#1590): lo que suman los
+ * DESCUENTOS no gravados o exentos que trae la factura. Un descuento sobre renglones
+ * exentos o no gravados va ahí con su signo (la base lo acepta hasta ese piso desde la
+ * migración de la tarjeta C3 de #1603), así la compra cierra contra el papel. Sin
+ * esos descuentos, 0.
+ */
+export function pisoNoGravado(cargos: CargoCompraForm[]): number {
+  return redondearSQL(
+    Math.min(0, cargosNoGravadosEnFactura(cargos).filter(c => (c.monto || 0) < 0).reduce((acc, c) => acc + c.monto, 0)),
+    2
+  )
+}
+
 /** El II declarado que llega al motor. En ZZ la RPC lo descarta; acá también. */
 export function iiDeclaradoParaMotor(
   iiDeclarado: Record<number, number>,

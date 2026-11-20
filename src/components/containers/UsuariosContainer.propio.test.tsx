@@ -27,6 +27,10 @@ vi.mock('../../hooks/queries', () => ({
   useActualizarUsuarioMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   usePerfilRolesQuery: () => ({ data: [] }),
 }))
+// Los emails van en su propia consulta (C6, 1601-b5); acá no importan.
+vi.mock('../../hooks/queries/emailsDeUsuarios', () => ({
+  useEmailsDeUsuariosQuery: () => ({ data: undefined, isError: false, refetch: vi.fn() }),
+}))
 vi.mock('../../hooks/supabase/useAuth', () => ({
   useAuth: () => ({ user: { id: 'yo' } }),
 }))

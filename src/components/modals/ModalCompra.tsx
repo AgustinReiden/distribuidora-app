@@ -5,6 +5,7 @@
  * Validación con Zod
  */
 import React, { useReducer, useMemo, useCallback, useState, useEffect, useRef, useId, Suspense, createContext, useContext } from 'react'
+import CampoNoGravado from './CampoNoGravado'
 import type { ChangeEvent, FormEvent } from 'react'
 import { X, ShoppingCart, Plus, Trash2, Package, Building2, FileText, Calculator, Search, Camera, CheckCircle, AlertTriangle, Truck, ChevronDown, ChevronRight, Copy, Save, RefreshCw } from 'lucide-react'
 import { formatPrecio, fechaLocalISO, parseDateSafe } from '../../utils/formatters'
@@ -74,7 +75,7 @@ import {
   compraReducer, initialState,
   lineasParaMotor, cargosParaMotor, iiDeclaradoParaMotor,
   cuadreImpuestoInterno, DESVIO_II_TOLERADO,
-  cargosParaRPC, validarCargos, cargosNoGravadosEnFactura, noGravadoDeCargos,
+  cargosParaRPC, validarCargos, cargosNoGravadosEnFactura, noGravadoDeCargos, pisoNoGravado,
   resolucionBasesII, validarMedidasCargos, lineasSinMedida, lineaEnAlcance,
   aplicaComprobanteTercero, ivaTerceroEfectivo, sugerenciasBonificacion, alicuotasIIExplicadas,
   precargarVencimientos,
@@ -1727,8 +1728,8 @@ function ModalCompraEditar({
     if (ilegibles.hay) return
     dispatch({ type: 'SET_ERROR', payload: '' })
     // FRT-1 (#1517): sin los vencimientos de la compra precargados, guardar
-    // mandaría la foto vacía (la edición llama a sincronizar_lotes_compra
-    // siempre) y los borraría. Los lotes llegan del container sólo cuando hay
+    // mandaría la foto vacía (la edición manda siempre la foto de los
+    // vencimientos) y los borraría. Los lotes llegan del container sólo cuando hay
     // una lectura hecha con la edición abierta.
     if (!vencimientosPrecargados.current) {
       dispatch({ type: 'SET_ERROR', payload: 'Todavía no se cargaron los vencimientos de la compra: guardar ahora los borraría. Esperá un momento y volvé a guardar; si no cargan, cerrá la compra y volvé a abrirla.' })
@@ -2662,7 +2663,9 @@ function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster
     try {
       const producto = await onCrearProductoRapido({
         nombre: itemRapido.nombre,
-        codigo: itemRapido.codigo,
+        // Sin los espacios de los bordes: el código es único por sucursal sobre el texto
+        // recortado (tarjeta C4a de #1603), y «  A-12 » no es otro código.
+        codigo: itemRapido.codigo.trim(),
         costoSinIva: itemRapido.costo,
         ...datosClasificacion(clasificacion, catalogo.proveedorFactura),
       })
@@ -2827,6 +2830,10 @@ function ProductosSection({ state, dispatch, productosFiltrados, condicionMaster
                 type="text"
                 value={itemRapido.codigo}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setItemRapido(prev => ({ ...prev, codigo: e.target.value }))}
+                // Al salir, sin los espacios de los bordes: es el mismo criterio que `codigoParaGuardar`
+                // (src/utils/codigoProducto, tarjeta C4a de #1603), que todavía no está en esta rama;
+                // el código es único por sucursal sobre ese texto. Lo que se ve es lo que se guarda.
+                onBlur={(e: ChangeEvent<HTMLInputElement>) => { const limpio = e.target.value.trim(); if (limpio !== e.target.value) setItemRapido(prev => ({ ...prev, codigo: limpio })) }}
                 placeholder="Codigo"
                 className="w-full px-3 py-1.5 text-sm border dark:border-gray-600 rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
               />
@@ -4666,12 +4673,13 @@ function ResumenSection({ totales, state, dispatch, resolucion }: ResumenSection
                 </button>
               )}
             </label>
-            <NumberInput
-              min={0}
-              emptyValue={0}
-              value={state.noGravado}
+            {/* Puede ser negativo (#1590): un descuento sobre renglones exentos o no
+                gravados, hasta lo que suman esos descuentos. NumberInput no deja tipear
+                negativos (H7 de la revisión de C3): CampoNumero con `negativo`. */}
+            <CampoNoGravado
+              valor={state.noGravado}
+              piso={pisoNoGravado(state.cargos)}
               onChange={(n) => dispatch({ type: 'SET_EXTRAS', payload: { noGravado: n } })}
-              commitOnChange
               className="w-full px-2 py-1.5 border dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm"
             />
             {/* De dónde sale el número. Sin esto el campo parece pedir un dato

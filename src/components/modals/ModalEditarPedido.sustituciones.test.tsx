@@ -36,7 +36,9 @@ vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
   usePromoCuposQuery: () => ({ data: undefined }),
   usePromoMapQuery: () => ({ data: new Map(), isLoading: false }),
   usePromocionesListQuery: () => ({ data: [], isLoading: false }),
-  usePedidoSustitucionesQuery: () => ({ data: undefined, isLoading: estado.cargando, isFetching: estado.cargando }),
+  // Cargada, la consulta trae la lista (vacía acá). Sin datos y sin cargar es una consulta
+  // que no trajo nada: desde la H3 de la revisión de C2 eso también frena el guardado.
+  usePedidoSustitucionesQuery: () => ({ data: estado.cargando ? undefined : [], isLoading: estado.cargando, isFetching: estado.cargando }),
 }))
 vi.mock('../../hooks/queries/useProductosQuery', () => ({
   useMinimosVentaQuery: () => ({ data: new Map(), isLoading: false }),

@@ -1,6 +1,7 @@
-import React, { Suspense, useCallback, useEffect, useState } from 'react'
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useActualizarUsuarioMutation, useUsuariosQuery } from '../../hooks/queries'
+import { useEmailsDeUsuariosQuery } from '../../hooks/queries/emailsDeUsuarios'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useAuth } from '../../hooks/supabase/useAuth'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
@@ -22,7 +23,14 @@ function LoadingState(): React.ReactElement {
 export default function UsuariosContainer(): React.ReactElement {
   const notify = useNotification()
   const miId = useAuth().user?.id
-  const { data: usuarios = [], isLoading, error } = useUsuariosQuery()
+  const { data: usuariosSinEmail = [], isLoading, error } = useUsuariosQuery()
+  // Los emails van aparte, por la RPC de D53 (1601-b5): si fallan, la lista sale igual y lo
+  // dice con su «Reintentar»; editar un usuario no los necesita.
+  const emails = useEmailsDeUsuariosQuery(usuariosSinEmail.map(u => u.id))
+  const usuarios = useMemo(
+    () => usuariosSinEmail.map(u => (emails.data?.has(u.id) ? { ...u, email: emails.data.get(u.id) } : u)),
+    [usuariosSinEmail, emails.data],
+  )
   const actualizarUsuario = useActualizarUsuarioMutation()
 
   const [usuarioEditando, setUsuarioEditando] = useState<PerfilDB | null>(null)
@@ -83,6 +91,8 @@ export default function UsuariosContainer(): React.ReactElement {
         <VistaUsuarios
           usuarios={usuarios}
           loading={isLoading}
+          errorEmails={emails.isError}
+          onReintentarEmails={() => { void emails.refetch() }}
           onEditarUsuario={handleEditarUsuario}
         />
       </Suspense>

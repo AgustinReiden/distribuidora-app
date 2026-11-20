@@ -1,8 +1,10 @@
 /**
  * El alta con código repetido tiene que fallar rápido y decir qué hacer.
  *
- * `productos.codigo` no tiene UNIQUE (mig 210), así que esta comprobación en el
- * cliente es la única guarda que hay. Dos cosas se rompieron alrededor de ella:
+ * El código es único por sucursal (decisión D31 de #1561), sin mirar mayúsculas ni los
+ * espacios de los bordes: lo frena el server (el índice `productos_codigo_unico_por_sucursal`
+ * y un trigger que nombra el producto). Esta verificación previa es su espejo
+ * (`src/utils/codigoProducto.ts`) y adelanta el aviso. Dos cosas se rompieron alrededor de ella:
  *
  * 1. El mensaje nombraba el producto existente pero no decía qué hacer con él.
  *    Quien lo lee está cargando una factura y lo que necesita es saber que el
@@ -21,16 +23,24 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-const maybeSingle = vi.fn()
+// La búsqueda del código: select().ilike('codigo', patrón).limit() → candidatos.
+const ilike = vi.fn()
+const candidatos = vi.fn()
 const insert = vi.fn()
+const resultadoInsert = vi.fn()
 
 vi.mock('../supabase/base', () => ({
   supabase: {
     from: () => ({
-      select: () => ({ eq: () => ({ limit: () => ({ maybeSingle }) }) }),
+      select: () => ({
+        ilike: (...args: unknown[]) => {
+          ilike(...args)
+          return { limit: () => candidatos() }
+        },
+      }),
       insert: (...args: unknown[]) => {
         insert(...args)
-        return { select: () => ({ single: () => Promise.resolve({ data: { id: 1 }, error: null }) }) }
+        return { select: () => ({ single: () => resultadoInsert() }) }
       },
     }),
     // costos_productos (#974): cero filas, como para un rol sin acceso a costos.
@@ -65,10 +75,11 @@ const productoNuevo = { nombre: 'MANI JAMON x 1kg', codigo: '0802', precio: 9115
 describe('crear producto con código duplicado', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    resultadoInsert.mockResolvedValue({ data: { id: 1 }, error: null })
   })
 
   it('nombra al producto que ya tiene ese código y dice qué hacer', async () => {
-    maybeSingle.mockResolvedValue({ data: { id: 398, nombre: 'MANI JAMON x 1kg' }, error: null })
+    candidatos.mockResolvedValue({ data: [{ id: 398, nombre: 'MANI JAMON x 1kg', codigo: '0802' }], error: null })
     const { result } = setup()
 
     await expect(result.current.mutateAsync(productoNuevo)).rejects.toThrow(
@@ -78,30 +89,86 @@ describe('crear producto con código duplicado', () => {
   })
 
   it('no se reintenta: el código duplicado no se va a destrabar solo', async () => {
-    maybeSingle.mockResolvedValue({ data: { id: 398, nombre: 'MANI JAMON x 1kg' }, error: null })
+    candidatos.mockResolvedValue({ data: [{ id: 398, nombre: 'MANI JAMON x 1kg', codigo: '0802' }], error: null })
     const { result } = setup()
 
     await expect(result.current.mutateAsync(productoNuevo)).rejects.toThrow()
 
     // Una sola consulta = un solo intento. Tres serían los reintentos de 1s y 2s
     // que dejaban el botón mudo durante tres segundos.
-    await waitFor(() => expect(maybeSingle).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(candidatos).toHaveBeenCalledTimes(1))
   })
 
-  it('inserta cuando el código está libre', async () => {
-    maybeSingle.mockResolvedValue({ data: null, error: null })
+  it('choca sin mirar mayúsculas ni los espacios de los bordes, como el índice del server', async () => {
+    candidatos.mockResolvedValue({ data: [{ id: 398, nombre: 'PALITOS', codigo: 'abc-1' }], error: null })
     const { result } = setup()
 
-    await result.current.mutateAsync(productoNuevo)
+    await expect(result.current.mutateAsync({ ...productoNuevo, codigo: '  ABC-1 ' })).rejects.toThrow(
+      /Ya existe un producto con código "ABC-1".*PALITOS/s
+    )
+    // La base achica con ilike sobre el código sin bordes.
+    expect(ilike).toHaveBeenCalledWith('codigo', 'ABC-1')
+    expect(insert).not.toHaveBeenCalled()
+  })
 
+  it('un candidato que no es el mismo código (un comodín que acertó de más) no frena', async () => {
+    candidatos.mockResolvedValue({ data: [{ id: 5, nombre: 'OTRO', codigo: 'AXB' }], error: null })
+    const { result } = setup()
+
+    await result.current.mutateAsync({ ...productoNuevo, codigo: 'A_B' })
+
+    expect(ilike).toHaveBeenCalledWith('codigo', 'A\\_B')
     expect(insert).toHaveBeenCalledTimes(1)
   })
 
+  it('inserta cuando el código está libre, sin los espacios de los bordes', async () => {
+    candidatos.mockResolvedValue({ data: [], error: null })
+    const { result } = setup()
+
+    await result.current.mutateAsync({ ...productoNuevo, codigo: ' 0802 ' })
+
+    expect(insert).toHaveBeenCalledTimes(1)
+    expect(insert.mock.calls[0][0][0].codigo).toBe('0802')
+  })
+
+  it('sin código no consulta nada y lo guarda vacío', async () => {
+    const { result } = setup()
+
+    await result.current.mutateAsync({ ...productoNuevo, codigo: '   ' })
+
+    expect(ilike).not.toHaveBeenCalled()
+    expect(insert.mock.calls[0][0][0].codigo).toBeNull()
+  })
+
   it('si la lectura del código falla, no lo da por libre: no inserta', async () => {
-    maybeSingle.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'timeout de lectura' } })
+    candidatos.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'timeout de lectura' } })
     const { result } = setup()
 
     await expect(result.current.mutateAsync(productoNuevo)).rejects.toThrow('timeout de lectura')
     expect(insert).not.toHaveBeenCalled()
+  })
+
+  it('si dos altas se cruzan, el rechazo del índice único dice lo mismo (409)', async () => {
+    candidatos.mockResolvedValue({ data: [], error: null })
+    resultadoInsert.mockResolvedValue({
+      data: null,
+      error: { code: '23505', message: 'duplicate key value violates unique constraint "productos_codigo_unico_por_sucursal"' },
+    })
+    const { result } = setup()
+
+    const error = await result.current.mutateAsync(productoNuevo).catch(e => e)
+    expect((error as Error).message).toMatch(/Ya existe un producto con código "0802" en esta sucursal.*Buscalo por nombre o código/s)
+    expect((error as { status?: number }).status).toBe(409)
+  })
+
+  it('el rechazo del trigger del server (23505 con el producto) llega tal cual', async () => {
+    candidatos.mockResolvedValue({ data: [], error: null })
+    resultadoInsert.mockResolvedValue({
+      data: null,
+      error: { code: '23505', message: 'Ya existe un producto con el código «0802» en esta sucursal: «MANI»' },
+    })
+    const { result } = setup()
+
+    await expect(result.current.mutateAsync(productoNuevo)).rejects.toThrow('Ya existe un producto con el código «0802» en esta sucursal: «MANI»')
   })
 })

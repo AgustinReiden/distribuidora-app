@@ -1293,7 +1293,7 @@ export default function PedidosContainer(): React.ReactElement {
     let perfilesMap: Record<string, PerfilDB> = {}
     if (perfilIds.size > 0) {
       const { data: perfiles } = await supabase
-        .from('perfiles').select('id, nombre, email').in('id', Array.from(perfilIds))
+        .from('perfiles').select('id, nombre').in('id', Array.from(perfilIds))
       if (perfiles) {
         perfilesMap = Object.fromEntries((perfiles as PerfilDB[]).map(p => [p.id, p]))
       }
@@ -1448,6 +1448,8 @@ export default function PedidosContainer(): React.ReactElement {
       precio_unitario: item.precioUnitario,
       ...(item.esBonificacion ? { es_bonificacion: true } : {}),
       ...(item.promocionId ? { promocion_id: item.promocionId } : {}),
+      // H1 de la revisión de C2: el regalo vuelve a su producto de la promo (sin el cambio).
+      ...(item.regaloOriginal ? { regalo_original: true } : {}),
       ...(item.neto_unitario !== undefined ? { neto_unitario: item.neto_unitario } : {}),
       ...(item.iva_unitario !== undefined ? { iva_unitario: item.iva_unitario } : {}),
       ...(item.impuestos_internos_unitario !== undefined ? { impuestos_internos_unitario: item.impuestos_internos_unitario } : {}),

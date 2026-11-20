@@ -12,6 +12,7 @@ import { queryClient } from '../../lib/queryClient'
 import { guardarAvisoDeCierre } from '../../utils/avisoDeCierreDeSesion'
 import { EVENTO_REVALIDAR_PERFIL } from '../../utils/revalidarPerfil'
 import type { RolUsuario } from '../../types'
+import { PERFIL_COLUMNAS } from '../../lib/perfilColumnas'
 
 /**
  * Cuanto aguanta la sesion sin uso. Se cuenta USO REAL: el tiempo que la app
@@ -65,7 +66,8 @@ const MENSAJE_PERFIL_DESACTIVADO = 'Tu perfil está desactivado. Consultá con e
 export interface Perfil {
   id: string;
   nombre: string;
-  email: string;
+  /** No viene de `perfiles` (1601-b5): el propio está en la sesión (`user.email`). */
+  email?: string;
   rol: RolUsuario;
   zona?: string;
   activo: boolean;
@@ -253,7 +255,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const { data, error } = await withTimeout(
           supabase
             .from('perfiles')
-            .select('*')
+            // Sin `*` ni email (1601-b5): el email propio sale de la sesión.
+            .select(PERFIL_COLUMNAS)
             .eq('id', userId)
             .maybeSingle(),
           AUTH_REQUEST_TIMEOUT_MS,
