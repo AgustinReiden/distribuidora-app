@@ -1,7 +1,7 @@
 -- Ensayo de la tarjeta C3 de la tanda 5 de la ola 2 del plan #1603: la edición de una compra
 -- sincroniza sus lotes en la misma transacción (STK-13, #1542) y la nota de crédito de una FC
 -- con un descuento NO gravado en factura no acredita de más (1590-b, H5 de la revisión de B2,
--- #1590). Migración: NNN_compras_edicion_con_lotes_y_nc_no_gravado.
+-- #1590). Migración: 536_compras_edicion_con_lotes_y_nc_no_gravado.
 --
 -- Un único DO con datos propios que termina SIEMPRE en una excepción: no deja rastro (salvo
 -- valores de secuencia). Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ' con la lista. Sin la
