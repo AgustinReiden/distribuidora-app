@@ -164,8 +164,10 @@ suelta en `sucursales`.
   `rubroEnTandas.ts`): la fila de auditoría queda «en_curso» hasta la última, repetir la misma
   operación retoma, y otra sobre el mismo rubro por id primero termina la que quedó a medias; ningún
   rubro queda trabado (`rubros_a_medias()` y el botón «Terminar» de Categorías). Por el camino de
-  texto, lo que falta de un renombre a medias no se elimina ni se renombra a otra cosa, y un rubro
-  nuevo con ese nombre viejo se rechaza.
+  texto, lo que falta de un renombre a medias no se elimina ni se renombra a otra cosa, un rubro
+  nuevo con ese nombre viejo (o con el de un rubro de texto a medias de eliminar) se rechaza, y la
+  fila de un rubro con un renombre a medias no se borra por REST. Sin `p_lote` (un bundle viejo),
+  todo va en la misma llamada, también terminar lo que quedó a medias.
 - **Toda tabla nueva** de `public` nace sin escritura REST y sin nada para `anon` (los
   defaults de la migración del barrido, #1135). Si el front la escribe por REST, o la escribe
   un trigger INVOKER como `authenticated`, la migración concede **el privilegio exacto** (por

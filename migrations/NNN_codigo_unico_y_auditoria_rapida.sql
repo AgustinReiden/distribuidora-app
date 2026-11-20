@@ -127,8 +127,12 @@
 --     lista para que la pantalla ofrezca «Terminar». Por el camino de texto, lo que
 --     falta de un renombre a medias (los productos con el nombre viejo) no se
 --     elimina ni se renombra a otra cosa (sólo se retoma al mismo destino), y un
---     rubro nuevo con ese nombre viejo se rechaza
---     (`trg_categorias_no_pisa_rubro_a_medias`). Dos admins a la vez se ordenan en la
+--     rubro nuevo con ese nombre viejo, o con el de un rubro de texto que se está
+--     eliminando, se rechaza (`trg_categorias_no_pisa_rubro_a_medias`); tampoco se
+--     borra por REST la fila de un rubro con un renombre a medias
+--     (`trg_categorias_no_borra_rubro_a_medias`: el aviso quedaba para siempre).
+--     Sin p_lote (un bundle viejo), lo pedido se hace en la misma llamada, también
+--     cuando antes hay que terminar un renombre a medias. Dos admins a la vez se ordenan en la
 --     fila del rubro (FOR UPDATE) y, por nombre, en un lock consultivo que toman
 --     los caminos de texto y el comienzo de un renombre.
 --   · Quién lee `audit_logs` de `productos`: `precio_fuera_de_politica`, sólo
@@ -199,6 +203,11 @@ BEGIN
               WHERE tgrelid = 'public.productos'::regclass
                 AND tgname IN ('trg_productos_codigo_unico', 'trg_productos_codigo_unico_upd')) THEN
     RAISE EXCEPTION 'mig NNN · los triggers trg_productos_codigo_unico ya existen';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_trigger
+              WHERE tgrelid = 'public.categorias'::regclass
+                AND tgname IN ('trg_categorias_no_pisa_rubro_a_medias', 'trg_categorias_no_borra_rubro_a_medias')) THEN
+    RAISE EXCEPTION 'mig NNN · los triggers de rubros a medias de categorias ya existen';
   END IF;
 
   -- 1561-b1 (D31): el índice no entra si hoy hay dos productos de una sucursal con el
@@ -493,7 +502,9 @@ BEGIN
   -- Volver a llamar con el mismo nombre nuevo sigue donde quedó. Con otro nombre nuevo, primero
   -- se termina el renombre a medias, una tanda por llamada («retomado», terminado = false), y
   -- la llamada siguiente hace el cambio pedido: ningún rubro queda trabado.
-  -- Sin p_lote hace todo de una vez, como antes (lo que llama un bundle viejo).
+  -- Sin p_lote hace todo de una vez, como antes (lo que llama un bundle viejo), y si antes hay
+  -- que terminar un renombre a medias, lo termina y hace lo pedido en la misma llamada: el
+  -- bundle viejo no mira «terminado».
   -- plan_cache_mode: el plan guardado de la tanda se arma con lo que el planificador cree de
   -- productos; en una base nueva (estadísticas vacías) recorría la tabla por cada id de la
   -- tanda. Una llamada planifica unas pocas sentencias: replanificar cuesta nada.
@@ -712,6 +723,10 @@ BEGIN
   RETURNING (a.new_data->>'cantidad_productos')::int INTO v_total;
 
   IF v_retomo THEN
+    IF p_lote IS NULL THEN
+      -- Un bundle viejo: el renombre a medias ya terminó (sin tope), y lo pedido sale ahora.
+      RETURN public.renombrar_rubro(v_id, v_nuevo, v_pedido, NULL);
+    END IF;
     -- Se avanzó el renombre a medias; el cambio pedido viene en la llamada siguiente.
     RETURN jsonb_build_object('success', true, 'id', v_id, 'nombre', v_pedido,
                               'productos', v_productos, 'productos_total', v_total,
@@ -765,7 +780,8 @@ BEGIN
   -- fila DELETE «en_curso» que se completa en cada tanda (con quién, cuándo y cuántos) y queda
   -- «terminado» con la última. Volver a llamar sigue donde quedó. Si el rubro tiene un renombre
   -- a medias, primero se termina ése (una tanda por llamada, «retomado»). Sin p_lote, todo de
-  -- una vez.
+  -- una vez, también el renombre a medias y después la eliminación (el bundle viejo no mira
+  -- «terminado»).
   IF NOT es_admin() THEN
     RAISE EXCEPTION 'Sólo un admin puede eliminar un rubro' USING ERRCODE = '42501';
   END IF;
@@ -844,6 +860,9 @@ BEGIN
            AND q.categoria IS DISTINCT FROM v_pend.nuevo;
       ELSE
         v_r := public.renombrar_rubro(v_id, v_pend.viejo, v_pend.nuevo, p_lote);
+        IF p_lote IS NULL THEN
+          RETURN public.eliminar_rubro(v_id, p_nombre, false, NULL);
+        END IF;
         RETURN v_r || jsonb_build_object('solo_ver', false, 'nombre', v_nombre, 'terminado', false,
           'retomado', jsonb_build_object('de', v_pend.viejo, 'a', v_pend.nuevo, 'faltan', v_r->'faltan'));
       END IF;
@@ -1031,8 +1050,12 @@ $function$;
 REVOKE ALL ON FUNCTION public.rubros_a_medias() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.rubros_a_medias() TO authenticated, service_role;
 
--- Un rubro nuevo (o un cambio de nombre por REST) con el nombre viejo de un renombre a medias
--- se rechaza: al retomar, el renombre se llevaría sus productos (H5 de la revisión).
+-- Un rubro nuevo (o un cambio de nombre por REST) con el nombre viejo de un renombre a medias,
+-- o con el de un rubro de texto que se está eliminando, se rechaza: al retomar, el renombre se
+-- llevaría sus productos (H5 de la revisión), y la eliminación de texto no se podría terminar
+-- (H8). Y la fila de un rubro con un renombre a medias no se borra por REST: el aviso quedaba
+-- para siempre y su nombre viejo, trabado (H7). eliminar_rubro termina el renombre antes de
+-- borrar la fila, así que no lo frena.
 CREATE FUNCTION public.categorias_no_pisa_rubro_a_medias()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1040,24 +1063,47 @@ CREATE FUNCTION public.categorias_no_pisa_rubro_a_medias()
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
-  v_nuevo text;
+  v_pend record;
 BEGIN
   -- mig NNN (1596-b9): DEFINER para leer audit_logs. Corre antes que la RLS: sólo mira (y
   -- nombra) para quien pasa la policy de escritura de categorias (un admin en su sucursal
   -- activa) o el server; a cualquier otro le devuelve la fila y lo frena la RLS.
+  IF TG_OP = 'DELETE' THEN
+    IF NOT COALESCE(auth.uid() IS NULL OR (es_admin() AND OLD.sucursal_id = current_sucursal_id()), false) THEN
+      RETURN OLD;
+    END IF;
+    SELECT a.old_data->>'nombre' AS viejo, a.new_data->>'nombre' AS nuevo INTO v_pend
+      FROM audit_logs a
+     WHERE a.tabla = 'categorias' AND a.accion = 'UPDATE' AND a.sucursal_id = OLD.sucursal_id
+       AND a.registro_id = OLD.id::text
+       AND a.new_data->>'estado' = 'en_curso'
+     LIMIT 1;
+    IF FOUND THEN
+      RAISE EXCEPTION 'El rubro «%» quedó a medias de renombrar (venía de «%»): tocá «Terminar» en Categorías antes de eliminarlo.',
+        v_pend.nuevo, v_pend.viejo USING ERRCODE = '22023';
+    END IF;
+    RETURN OLD;
+  END IF;
+
   IF NOT COALESCE(auth.uid() IS NULL OR (es_admin() AND NEW.sucursal_id = current_sucursal_id()), false) THEN
     RETURN NEW;
   END IF;
-  SELECT a.new_data->>'nombre' INTO v_nuevo
+  SELECT a.accion, a.new_data->>'nombre' AS nuevo INTO v_pend
     FROM audit_logs a
-   WHERE a.tabla = 'categorias' AND a.accion = 'UPDATE' AND a.sucursal_id = NEW.sucursal_id
+   WHERE a.tabla = 'categorias' AND a.sucursal_id = NEW.sucursal_id
      AND a.new_data->>'estado' = 'en_curso'
-     AND upper(a.old_data->>'nombre') = upper(btrim(NEW.nombre))
-     AND a.registro_id IS DISTINCT FROM NEW.id::text
+     AND ((a.accion = 'UPDATE' AND upper(a.old_data->>'nombre') = upper(btrim(NEW.nombre))
+           AND a.registro_id IS DISTINCT FROM NEW.id::text)
+          OR (a.accion = 'DELETE' AND a.old_data->>'categoria_id' IS NULL
+              AND upper(a.registro_id) = upper(btrim(NEW.nombre))))
    LIMIT 1;
   IF FOUND THEN
+    IF v_pend.accion = 'DELETE' THEN
+      RAISE EXCEPTION '«%» se está eliminando y quedó a medias: tocá «Terminar» en Categorías antes de usar ese nombre.',
+        btrim(NEW.nombre) USING ERRCODE = '23505';
+    END IF;
     RAISE EXCEPTION '«%» se está renombrando a «%» y quedó a medias: tocá «Terminar» en Categorías antes de usar ese nombre.',
-      btrim(NEW.nombre), v_nuevo USING ERRCODE = '23505';
+      btrim(NEW.nombre), v_pend.nuevo USING ERRCODE = '23505';
   END IF;
   RETURN NEW;
 END
@@ -1070,6 +1116,12 @@ CREATE TRIGGER trg_categorias_no_pisa_rubro_a_medias
   BEFORE INSERT OR UPDATE OF nombre, parent_id ON public.categorias
   FOR EACH ROW
   WHEN (NEW.parent_id IS NULL)
+  EXECUTE FUNCTION public.categorias_no_pisa_rubro_a_medias();
+
+CREATE TRIGGER trg_categorias_no_borra_rubro_a_medias
+  BEFORE DELETE ON public.categorias
+  FOR EACH ROW
+  WHEN (OLD.parent_id IS NULL)
   EXECUTE FUNCTION public.categorias_no_pisa_rubro_a_medias();
 
 
@@ -1088,15 +1140,15 @@ BEGIN
      '{postgres=X/postgres,service_role=X/postgres}'),
     ('public.productos_codigo_unico()', '2f5067b2fcb1c3586d51c6e057c91120', '{"search_path=public, pg_temp",plan_cache_mode=force_custom_plan}',
      '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public.renombrar_rubro(uuid,text,text,integer)',   'd0855283a3a8f7876470f66ae653f0da', '{"search_path=public, pg_temp",plan_cache_mode=force_custom_plan}',
+    ('public.renombrar_rubro(uuid,text,text,integer)',   'dc6b501f6533903029d1f0e181a76817', '{"search_path=public, pg_temp",plan_cache_mode=force_custom_plan}',
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
-    ('public.eliminar_rubro(uuid,text,boolean,integer)', '5b2db000767a9dc17f54c10a6f003e3e', '{"search_path=public, pg_temp",plan_cache_mode=force_custom_plan}',
+    ('public.eliminar_rubro(uuid,text,boolean,integer)', '4801a22f3cac90f927833703913d36ff', '{"search_path=public, pg_temp",plan_cache_mode=force_custom_plan}',
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
     ('public.sync_producto_categoria_id()',              '092100d0fdb42ce04f3a4e8cde3c7788', '{"search_path=public, pg_temp"}',
      '{postgres=X/postgres,service_role=X/postgres}'),
     ('public.rubros_a_medias()',                         '4ec92648d2449b0191ac365885065629', '{"search_path=public, pg_temp"}',
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
-    ('public.categorias_no_pisa_rubro_a_medias()',       '3d4521b514f1966bbd8018bbabc5e2c9', '{"search_path=public, pg_temp"}',
+    ('public.categorias_no_pisa_rubro_a_medias()',       '978b4c82e0e638d4d2fcd7d2ba8a8c8f', '{"search_path=public, pg_temp"}',
      '{postgres=X/postgres,service_role=X/postgres}')
   ) AS t(f, h, cfg, acl) LOOP
     SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS def, proconfig::text AS cfg INTO x
@@ -1127,13 +1179,18 @@ BEGIN
     END IF;
   END LOOP;
 
-  IF (SELECT pg_get_triggerdef(t.oid) FROM pg_trigger t
-       WHERE t.tgrelid = 'public.categorias'::regclass AND t.tgname = 'trg_categorias_no_pisa_rubro_a_medias' AND t.tgenabled = 'O')
-     IS DISTINCT FROM 'CREATE TRIGGER trg_categorias_no_pisa_rubro_a_medias BEFORE INSERT OR UPDATE OF nombre, parent_id ON public.categorias FOR EACH ROW WHEN ((new.parent_id IS NULL)) EXECUTE FUNCTION categorias_no_pisa_rubro_a_medias()' THEN
-    v_mal := v_mal || format(E'\n  el trigger trg_categorias_no_pisa_rubro_a_medias: %s',
-      (SELECT pg_get_triggerdef(t.oid) FROM pg_trigger t
-        WHERE t.tgrelid = 'public.categorias'::regclass AND t.tgname = 'trg_categorias_no_pisa_rubro_a_medias'));
-  END IF;
+  FOR r IN SELECT * FROM (VALUES
+    ('trg_categorias_no_pisa_rubro_a_medias',
+     'CREATE TRIGGER trg_categorias_no_pisa_rubro_a_medias BEFORE INSERT OR UPDATE OF nombre, parent_id ON public.categorias FOR EACH ROW WHEN ((new.parent_id IS NULL)) EXECUTE FUNCTION categorias_no_pisa_rubro_a_medias()'),
+    ('trg_categorias_no_borra_rubro_a_medias',
+     'CREATE TRIGGER trg_categorias_no_borra_rubro_a_medias BEFORE DELETE ON public.categorias FOR EACH ROW WHEN ((old.parent_id IS NULL)) EXECUTE FUNCTION categorias_no_pisa_rubro_a_medias()')
+  ) AS t(tg, def) LOOP
+    SELECT pg_get_triggerdef(t.oid) AS def INTO x FROM pg_trigger t
+     WHERE t.tgrelid = 'public.categorias'::regclass AND t.tgname = r.tg AND t.tgenabled = 'O';
+    IF x.def IS DISTINCT FROM r.def THEN
+      v_mal := v_mal || format(E'\n  el trigger %s: %s', r.tg, x.def);
+    END IF;
+  END LOOP;
 
   IF to_regprocedure('public.renombrar_rubro(uuid,text,text)') IS NOT NULL
      OR to_regprocedure('public.eliminar_rubro(uuid,text,boolean)') IS NOT NULL THEN

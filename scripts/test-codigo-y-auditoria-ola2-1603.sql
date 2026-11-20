@@ -55,6 +55,11 @@
 --   C5b · [F] un rubro nuevo con el nombre viejo de un renombre a medias se rechaza (H5).
 --   B1 · [F] cortado y con los que faltaban movidos desde la ficha: la vista previa de eliminar no
 --        se traba, y pedir otro nombre termina el renombre a medias y después lo cambia.
+--   N3b · [F] un bundle viejo (sin p_lote) sobre un renombre a medias hace lo pedido en la misma
+--        llamada: otro nombre, o eliminar el rubro (H6).
+--   N4 · [F] un rubro nuevo con el nombre de un rubro de texto que se está eliminando se rechaza (H8).
+--   N5 · [F] la fila de un rubro con un renombre a medias no se borra por REST; después de
+--        «Terminar», sí (H7).
 --   C16 · [F] un admin con el header de una sucursal ajena recibe el 42501 sin el nombre (H1).
 --   R8 · [R] fuera de las dos RPC la sincronización del id del rubro hace lo de siempre (otra
 --        caja y bordes, otro rubro, uno que no existe), también con una marca puesta a mano.
@@ -747,6 +752,86 @@ BEGIN
     END IF;
   END;
 
+  -- ==================================================================== N3b ==
+  -- Un bundle viejo llama sin p_lote y no mira «terminado»: sobre un renombre a medias, lo pedido
+  -- tiene que salir en la misma llamada (H6).
+  DECLARE v_cat uuid; v_r jsonb;
+  BEGIN
+    INSERT INTO categorias (nombre, sucursal_id) VALUES ('ZZ C4a N3', 1) RETURNING id INTO v_cat;
+    PERFORM pg_temp.prod(1, 'N3 ' || g, NULL, true, 'ZZ C4a N3') FROM generate_series(1, 30) g;
+    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT (public.renombrar_rubro(%L, NULL, 'ZZ C4a N3 b', 10))::text$q$, v_cat));
+    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT (public.renombrar_rubro(p_categoria_id => %L, p_nombre_actual => 'ZZ C4a N3 b',
+                                                                              p_nombre_nuevo => 'ZZ C4a N3 c'))::text$q$, v_cat));
+    v_r := CASE WHEN v_t LIKE 'PASA %' THEN substr(v_t, 6)::jsonb END;
+    IF v_t NOT LIKE 'PASA %' OR NOT COALESCE((v_r->>'terminado')::boolean, false)
+       OR (SELECT nombre FROM categorias WHERE id = v_cat) IS DISTINCT FROM 'ZZ C4a N3 c'
+       OR (SELECT count(*) FROM productos WHERE sucursal_id = 1 AND categoria = 'ZZ C4a N3 c' AND categoria_id = v_cat) <> 30
+       OR EXISTS (SELECT 1 FROM audit_logs a WHERE a.tabla = 'categorias' AND a.registro_id = v_cat::text
+                                              AND a.new_data->>'estado' = 'en_curso') THEN
+      v_fallas := v_fallas || format('N3b · sin p_lote, otro nombre sobre un renombre a medias tenía que hacerse en la misma llamada: %s (el rubro se llama %s)',
+                                     v_t, (SELECT nombre FROM categorias WHERE id = v_cat));
+    END IF;
+
+    INSERT INTO categorias (nombre, sucursal_id) VALUES ('ZZ C4a N3e', 1) RETURNING id INTO v_cat;
+    PERFORM pg_temp.prod(1, 'N3e ' || g, NULL, true, 'ZZ C4a N3e') FROM generate_series(1, 30) g;
+    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT (public.renombrar_rubro(%L, NULL, 'ZZ C4a N3e b', 10))::text$q$, v_cat));
+    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT (public.eliminar_rubro(p_categoria_id => %L, p_nombre => 'ZZ C4a N3e b'))::text$q$, v_cat));
+    v_r := CASE WHEN v_t LIKE 'PASA %' THEN substr(v_t, 6)::jsonb END;
+    IF v_t NOT LIKE 'PASA %' OR NOT COALESCE((v_r->>'terminado')::boolean, false)
+       OR EXISTS (SELECT 1 FROM categorias WHERE id = v_cat)
+       OR EXISTS (SELECT 1 FROM productos WHERE sucursal_id = 1 AND (categoria_id = v_cat OR categoria IN ('ZZ C4a N3e', 'ZZ C4a N3e b')))
+       OR EXISTS (SELECT 1 FROM audit_logs a WHERE a.tabla = 'categorias' AND a.registro_id = v_cat::text
+                                              AND a.new_data->>'estado' = 'en_curso') THEN
+      v_fallas := v_fallas || format('N3b · sin p_lote, eliminar un rubro con un renombre a medias tenía que hacerse en la misma llamada: %s (filas del rubro: %s)',
+                                     v_t, (SELECT count(*) FROM categorias WHERE id = v_cat));
+    END IF;
+  END;
+
+  -- ===================================================================== N4 ==
+  -- Un rubro de texto a medias de eliminar: un rubro nuevo con ese nombre se llevaría lo que falta
+  -- sacar, y «Terminar» ya no podría cerrarlo (H8).
+  DECLARE v_n int;
+  BEGIN
+    PERFORM pg_temp.prod(1, 'N4 ' || g, NULL, true, 'ZZ C4a N4') FROM generate_series(1, 30) g;
+    v_t := pg_temp.intenta(v_adm, 1, $q$SELECT (public.eliminar_rubro(NULL, 'ZZ C4a N4', false, 10))::text$q$);
+    v_t := pg_temp.intenta(v_adm, 1, $q$INSERT INTO public.categorias (nombre, sucursal_id) VALUES (' zz c4a n4 ', 1) RETURNING id::text$q$);
+    IF v_t NOT LIKE '23505 %se está eliminando y quedó a medias%' THEN
+      v_fallas := v_fallas || ('N4 · un rubro nuevo con el nombre de un rubro de texto a medias de eliminar tenía que rechazarse: ' || v_t);
+    END IF;
+    v_t := pg_temp.intenta(v_adm, 1, $q$SELECT (public.eliminar_rubro(NULL, 'ZZ C4a N4', false, 5000))::text$q$);
+    SELECT count(*) INTO v_n FROM productos WHERE sucursal_id = 1 AND categoria = 'ZZ C4a N4';
+    IF v_t NOT LIKE 'PASA %"terminado": true%' OR v_n <> 0 THEN
+      v_fallas := v_fallas || format('N4 · «Terminar» tenía que cerrar la eliminación de texto (quedan %s): %s', v_n, v_t);
+    END IF;
+  END;
+
+  -- ===================================================================== N5 ==
+  -- La fila de un rubro con un renombre a medias, sin productos (los que faltaban se movieron desde
+  -- la ficha), no se borra por REST: el aviso quedaba para siempre (H7). Terminado, sí.
+  DECLARE v_cat uuid; v_r jsonb;
+  BEGIN
+    INSERT INTO categorias (nombre, sucursal_id) VALUES ('ZZ C4a N5', 1) RETURNING id INTO v_cat;
+    PERFORM pg_temp.prod(1, 'N5 ' || g, NULL, true, 'ZZ C4a N5') FROM generate_series(1, 30) g;
+    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT (public.renombrar_rubro(%L, NULL, 'ZZ C4a N5 b', 10))::text$q$, v_cat));
+    UPDATE productos SET categoria = 'ZZ C4a N5 otro'
+     WHERE sucursal_id = 1 AND (categoria_id = v_cat OR categoria IN ('ZZ C4a N5', 'ZZ C4a N5 b'));
+    v_t := pg_temp.intenta(v_adm, 1, format($q$WITH d AS (DELETE FROM public.categorias WHERE id = %L RETURNING 1)
+                                             SELECT count(*)::text FROM d$q$, v_cat));
+    IF v_t NOT LIKE '22023 %quedó a medias de renombrar%' OR NOT EXISTS (SELECT 1 FROM categorias WHERE id = v_cat) THEN
+      v_fallas := v_fallas || ('N5 · borrar por REST la fila de un rubro con un renombre a medias tenía que rechazarse: ' || v_t);
+    END IF;
+    v_t := pg_temp.intenta(v_adm, 1, format($q$SELECT (public.renombrar_rubro(%L, 'ZZ C4a N5', 'ZZ C4a N5 b', 5000))::text$q$, v_cat));
+    v_r := CASE WHEN v_t LIKE 'PASA %' THEN substr(v_t, 6)::jsonb END;
+    IF v_r IS NULL OR NOT COALESCE((v_r->>'terminado')::boolean, false) THEN
+      v_fallas := v_fallas || ('N5 · «Terminar» tenía que cerrar el renombre a medias: ' || v_t);
+    END IF;
+    v_t := pg_temp.intenta(v_adm, 1, format($q$WITH d AS (DELETE FROM public.categorias WHERE id = %L RETURNING 1)
+                                             SELECT count(*)::text FROM d$q$, v_cat));
+    IF v_t IS DISTINCT FROM 'PASA 1' THEN
+      v_fallas := v_fallas || ('N5 · terminado el renombre, la fila tenía que poder borrarse por REST: ' || v_t);
+    END IF;
+  END;
+
   -- ===================================================================== R8 ==
   -- Fuera de las dos RPC la sincronización del id del rubro hace lo de siempre, también con una
   -- marca puesta a mano que no es la del texto.
@@ -871,7 +956,7 @@ BEGIN
   END IF;
 
   IF cardinality(v_fallas) = 0 THEN
-    RAISE EXCEPTION 'ENSAYO OK · código único por sucursal (C1-C15) y auditoría igual fila por fila (A1-A7), rubros con una fila y en tandas (R1-R8, T0-T3, B1), código con header ajeno (C16), permisos (K1)'
+    RAISE EXCEPTION 'ENSAYO OK · código único por sucursal (C1-C15) y auditoría igual fila por fila (A1-A7), rubros con una fila y en tandas (R1-R8, T0-T3, B1), sin p_lote y sin trabas por REST (N3b, N4, N5), código con header ajeno (C16), permisos (K1)'
       USING ERRCODE = 'P0001';
   END IF;
   RAISE EXCEPTION 'ENSAYO FALLÓ (%):%', cardinality(v_fallas), E'\n  ' || array_to_string(v_fallas, E'\n  ')
