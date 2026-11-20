@@ -144,8 +144,11 @@ suelta en `sucursales`.
   (#1525): nombrarla en un `select` rompe la consulta entera. `_rol_en_sucursal(uid, suc)` da
   `perfiles.rol` si el usuario es de esa sucursal.
 - **El path de un bucket privado empieza por la sucursal** (`<sucursal_id>/…`, #1474). Sus
-  policies comparan `(storage.foldername(name))[1]` con las sucursales del usuario, nunca sólo el
-  rol. Lo vigila `scripts/check-storage.mjs`, que además falla ante un bucket público.
+  policies comparan `(storage.foldername(name))[1]` con la sucursal ACTIVA,
+  `current_sucursal_id()::text` (decisión del dueño D51, 1564-b7): un usuario de dos sucursales ve
+  sólo las facturas de la sucursal en la que está trabajando; nunca sólo el rol. Anda porque el front
+  manda el header `X-Sucursal-ID` también a Storage y storage-api lo pasa a `request.headers`. Lo
+  vigila `scripts/check-storage.mjs`, que además falla ante un bucket público.
 - **Lo reservado de la política comercial se lee por RPC** (decisión del dueño, 1564-b6 de #1603).
   Las comisiones, las alertas de combos y la ventana del precio anterior las da
   `politica_comercial_reservada()` a admin y encargado; el front lee por REST sólo lo de vender
