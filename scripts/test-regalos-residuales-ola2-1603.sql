@@ -1,5 +1,5 @@
 -- Ensayo de la migración de la ola 2 del plan #1603, tanda 5, tarjeta C2:
--- migrations/NNN_regalos_tope_por_corte_y_factor_sin_stock.sql
+-- migrations/538_regalos_tope_por_corte_y_factor_sin_stock.sql
 --
 -- Dos residuales de regalos y promos:
 --   P1 · PRM-1 residual (#1592; H3 de la revisión de B4). Promo 2 V → 1 R (mueve stock); el pedido
