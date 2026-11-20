@@ -48,11 +48,11 @@
 --   C2 · siguen: PATCH de notas del preventista dueño, de fecha y
 --        fecha_entrega_programada del admin, asignar transportista
 --        (transportista_id, estado) y la entrega del transportista (estado,
---        fecha_entrega, updated_at)
+--        fecha_entrega; sin updated_at desde los cierres de C6 de #1603, 1595-b6)
 --   C3 · admin PATCH recorridos.total_cobrado → 42501; estado y completed_at OK
 --   C4 · auditoria_grants_tablas(): select_sin_policy = [], policies_public =
---        [], 17 secuencias, pedidos.UPDATE con las 8 columnas (la 385 sumó
---        retiro_deposito) y recorridos con 2; authenticated sin EXECUTE sobre ella; historial_cambios no existe
+--        [], 17 secuencias, pedidos.UPDATE con las 7 columnas (la 385 sumó
+--        retiro_deposito; los cierres de C6 sacaron updated_at) y recorridos con 2; authenticated sin EXECUTE sobre ella; historial_cambios no existe
 --
 -- Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ …' con la lista de fallas. Con el GUC
 -- ensayo.continuar = '1' el OK sale como NOTICE (para encadenar un rollback).
@@ -413,7 +413,7 @@ BEGIN
       ELSE
         PERFORM pg_temp.como(v_trans, v_suc);
         v_err := pg_temp.rest_n(format(
-          'UPDATE public.pedidos SET estado = %L, fecha_entrega = now(), updated_at = now() WHERE id = %s', 'entregado', v_n));
+          'UPDATE public.pedidos SET estado = %L, fecha_entrega = now() WHERE id = %s', 'entregado', v_n));
         IF v_err IS DISTINCT FROM '1' THEN
           v_fallas := v_fallas || format('C2 · el transportista marca la entrega: %s', v_err);
         END IF;
@@ -466,8 +466,8 @@ BEGIN
     END IF;
     IF (SELECT jsonb_agg(e->'nivel') FROM jsonb_array_elements(v_g->'authenticated_escrituras') e
          WHERE e->>'tabla' = 'pedidos' AND e->>'privilegio' = 'UPDATE')
-       IS DISTINCT FROM '[["estado", "fecha", "fecha_entrega", "fecha_entrega_programada", "notas", "retiro_deposito", "transportista_id", "updated_at"]]'::jsonb THEN
-      v_fallas := v_fallas || 'C4 · pedidos.UPDATE no es por las 8 columnas'::text;
+       IS DISTINCT FROM '[["estado", "fecha", "fecha_entrega", "fecha_entrega_programada", "notas", "retiro_deposito", "transportista_id"]]'::jsonb THEN
+      v_fallas := v_fallas || 'C4 · pedidos.UPDATE no es por las 7 columnas'::text;
     END IF;
     IF (SELECT jsonb_agg(e->'nivel') FROM jsonb_array_elements(v_g->'authenticated_escrituras') e
          WHERE e->>'tabla' = 'recorridos' AND e->>'privilegio' = 'UPDATE')

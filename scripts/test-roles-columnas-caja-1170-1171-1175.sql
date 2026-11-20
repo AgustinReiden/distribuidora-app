@@ -323,7 +323,7 @@ BEGIN
     IF COALESCE(v_res, '') NOT LIKE '42501 %' THEN
       v_fallas := v_fallas || format('P5 · T guardó notas: %s', v_res);
     END IF;
-    v_res := pg_temp.rest(format('UPDATE public.pedidos SET estado = %L, fecha_entrega = %L::timestamptz, updated_at = now() WHERE id = %s',
+    v_res := pg_temp.rest(format('UPDATE public.pedidos SET estado = %L, fecha_entrega = %L::timestamptz WHERE id = %s',
                                  'entregado', v_t400, v_ped_otr));
     IF v_res IS DISTINCT FROM 'OK 1' THEN
       v_fallas := v_fallas || format('P5 · T no marca entregado hacia un día sin control: %s', v_res);
@@ -358,7 +358,7 @@ BEGIN
         PERFORM pg_temp.control(-911751, v_tr, v_suc, v_d400, v_estado, v_adm);
       END IF;
       PERFORM pg_temp.como(v_tr, v_suc);
-      v_res := pg_temp.rest(format('UPDATE public.pedidos SET fecha_entrega = %L::timestamptz, updated_at = now() WHERE id = %s',
+      v_res := pg_temp.rest(format('UPDATE public.pedidos SET fecha_entrega = %L::timestamptz WHERE id = %s',
                                    v_t401, v_ped_ent));
       IF v_estado IN ('confirmada', 'resuelta') THEN
         IF COALESCE(v_res, '') NOT LIKE '42501 %ya fue controlada%' THEN
@@ -388,7 +388,7 @@ BEGIN
                                'asignado', v_tr, v_ped_otr));
     PERFORM pg_temp.control(-911752, v_tr, v_suc, v_d400, 'confirmada', v_adm);
     PERFORM pg_temp.como(v_tr, v_suc);
-    v_res := pg_temp.rest(format('UPDATE public.pedidos SET estado = %L, fecha_entrega = %L::timestamptz, updated_at = now() WHERE id = %s',
+    v_res := pg_temp.rest(format('UPDATE public.pedidos SET estado = %L, fecha_entrega = %L::timestamptz WHERE id = %s',
                                  'entregado', v_t400, v_ped_otr));
     IF COALESCE(v_res, '') NOT LIKE '42501 %ya fue controlada%' THEN
       v_fallas := v_fallas || format('C5 · T marcó entregado hacia un día controlado (tenía que dar 42501): %s', v_res);
@@ -396,7 +396,7 @@ BEGIN
     IF NOT pg_temp.hay_control(v_tr, v_suc, v_d400) THEN
       v_fallas := v_fallas || 'C5 · se borró el control al marcar entregado'::text;
     END IF;
-    v_res := pg_temp.rest(format('UPDATE public.pedidos SET estado = %L, fecha_entrega = %L::timestamptz, updated_at = now() WHERE id = %s',
+    v_res := pg_temp.rest(format('UPDATE public.pedidos SET estado = %L, fecha_entrega = %L::timestamptz WHERE id = %s',
                                  'entregado', v_t401, v_ped_otr));
     IF v_res IS DISTINCT FROM 'OK 1' THEN
       v_fallas := v_fallas || format('C5 · T no marca entregado hacia un día sin control: %s', v_res);

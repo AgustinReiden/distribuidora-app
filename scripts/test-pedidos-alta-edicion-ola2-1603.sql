@@ -24,8 +24,8 @@
 --   P9   · 1559-b9  · actualizar_preventista_pedido devuelve la versión de antes y la nueva.
 --   N10  · 1559-b10 · actualizar_fechas_y_notas_pedido con una versión vieja contesta
 --                     'pedido_editado_por_otro' y no toca nada; con la buena guarda y la mueve.
---   G6   · 1595-b6  · un PATCH no repone la versión: sólo updated_at la deja como estaba; con
---                     otro cambio la mueve a now().
+--   G6   · 1595-b6  · un PATCH no repone la versión: desde los cierres de C6 un PATCH que nombra
+--                     updated_at da 42501 y la deja como estaba; uno con otro cambio la mueve a now().
 --   K9   · 1595-b9  · el preventista no edita el pedido de un cliente dado de baja (el
 --                     encargado sí, D24) ni el de un cliente que ya atiende otro.
 --   R10  · 1595-b10 · (regresión) una línea con la promo de otra sucursal no entra: la FK
@@ -405,14 +405,21 @@ BEGIN
   BEGIN
     v_ped := (pg_temp.alta(v_adm, v_cli, jsonb_build_array(pg_temp.venta(v_a, 1)))->>'pedido_id')::bigint;
     UPDATE pedidos SET updated_at = now() - interval '1 hour' WHERE id = v_ped RETURNING updated_at INTO v_v1;
+    -- Cambió de regla con los cierres de la tarjeta C6 (1595-b6 residual): updated_at ya no está
+    -- en el GRANT UPDATE de authenticated.
     v_t := pg_temp.intenta(v_adm, format(
       'UPDATE public.pedidos SET updated_at = %L WHERE id = %s RETURNING updated_at::text', '2000-01-01 00:00:00+00', v_ped));
-    IF v_t NOT LIKE 'PASA%' OR (SELECT updated_at FROM pedidos WHERE id = v_ped) IS DISTINCT FROM v_v1 THEN
-      v_fallas := v_fallas || format('G6 · el PATCH de sólo la versión la cambió: %s', v_t);
+    IF v_t NOT LIKE '42501%' OR (SELECT updated_at FROM pedidos WHERE id = v_ped) IS DISTINCT FROM v_v1 THEN
+      v_fallas := v_fallas || format('G6 · el PATCH de sólo la versión entró o la cambió: %s', v_t);
     END IF;
     v_t := pg_temp.intenta(v_adm, format(
       'UPDATE public.pedidos SET notas = %L, updated_at = %L WHERE id = %s RETURNING updated_at::text',
       'patch', '2000-01-01 00:00:00+00', v_ped));
+    IF v_t NOT LIKE '42501%' THEN
+      v_fallas := v_fallas || format('G6 · el PATCH con la versión entró: %s', v_t);
+    END IF;
+    v_t := pg_temp.intenta(v_adm, format(
+      'UPDATE public.pedidos SET notas = %L WHERE id = %s RETURNING updated_at::text', 'patch', v_ped));
     IF v_t NOT LIKE 'PASA%' OR (SELECT updated_at FROM pedidos WHERE id = v_ped) IS DISTINCT FROM now() THEN
       v_fallas := v_fallas || format('G6 · el PATCH con un cambio no movió la versión a now(): %s', v_t);
     END IF;

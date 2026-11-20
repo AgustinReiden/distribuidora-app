@@ -20,7 +20,8 @@
 --   P8  · 1564-b5   la vista audit_logs_detallado no existe.
 --   P9  · 1564-b6   politica_comercial_reservada() le da la fila a admin y encargado, y a nadie más
 --                   (ni al desactivado). Los grants de lectura no cambian (la parte 2 va después): el
---                   preventista lee el select del front y, todavía, lo reservado por REST.
+--                   preventista lee el select del front y, desde la parte 2 (cierres de C6), ya no lo
+--                   reservado por REST.
 --   P10 · 1564-b7   no se hace (decisión de coordinación): no hay caso.
 --   P11 · 1564-b11  auditoria_rol_sin_activo() devuelve las policies, y ninguna; el depósito sigue
 --                   viendo proveedores y el desactivado no (regresión).
@@ -282,10 +283,11 @@ BEGIN
   IF v_t <> 'PASA 1' THEN
     v_fallas := v_fallas || ('P9 · el preventista no lee lo de vender (regresión): ' || v_t);
   END IF;
-  -- La parte 1 no toca los grants: un bundle viejo del PWA sigue leyendo lo reservado por REST.
+  -- Cambió de regla con la parte 2 (la migración de cierres de la tarjeta C6): lo reservado ya no
+  -- se lee por REST.
   v_t := pg_temp.intenta(v_pre, 'SELECT comision_pct_otros::text FROM politicas_comerciales');
-  IF v_t NOT LIKE 'PASA %' THEN
-    v_fallas := v_fallas || ('P9 · la parte 1 no tenía que sacar el SELECT de lo reservado (bundle viejo): ' || v_t);
+  IF v_t NOT LIKE '42501%' THEN
+    v_fallas := v_fallas || ('P9 · el preventista todavía lee lo reservado por REST (la parte 2): ' || v_t);
   END IF;
   IF to_regproc('public.politica_comercial_reservada') IS NULL THEN
     v_fallas := v_fallas || 'P9 · no existe politica_comercial_reservada()'::text;

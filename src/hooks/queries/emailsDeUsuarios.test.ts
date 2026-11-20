@@ -1,17 +1,15 @@
 /**
- * 1601-b5 (#1601, D53): los emails de otros usuarios salen de la RPC `emails_de_usuarios`, y
- * de la tabla sólo mientras la RPC no exista (PGRST202). Un error se tira, para que la pantalla
- * lo muestre (H2 de la revisión de C6): antes se tragaba y la lista quedaba sin emails sin aviso.
+ * 1601-b5 (#1601, D53): los emails de otros usuarios salen sólo de la RPC `emails_de_usuarios`
+ * (desde los cierres de C6 la tabla ya no los da por REST). Un error se tira, para que la
+ * pantalla lo muestre (H2 de la revisión de C6).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const rpc = vi.fn()
-const inFn = vi.fn()
-const select = vi.fn(() => ({ in: inFn }))
-const from = vi.fn(() => ({ select }))
+const from = vi.fn()
 
 vi.mock('../supabase/base', () => ({
-  supabase: { rpc: (...a: unknown[]) => rpc(...a), from: (...a: unknown[]) => from(...(a as [])) },
+  supabase: { rpc: (...a: unknown[]) => rpc(...a), from: (...a: unknown[]) => from(...a) },
 }))
 vi.mock('../../contexts/SucursalContext', () => ({ useSucursal: () => ({ currentSucursalId: 1 }) }))
 
@@ -19,9 +17,7 @@ import { fetchEmailsDeUsuarios } from './emailsDeUsuarios'
 
 beforeEach(() => {
   rpc.mockReset()
-  inFn.mockReset()
-  select.mockClear()
-  from.mockClear()
+  from.mockReset()
 })
 
 describe('fetchEmailsDeUsuarios', () => {
@@ -33,16 +29,9 @@ describe('fetchEmailsDeUsuarios', () => {
     expect([...mapa]).toEqual([['a', 'a@x.invalid']])
   })
 
-  it('sin la RPC (la migración todavía no está) los lee de la tabla, sólo id y email', async () => {
+  it('con un error (también si la RPC no existe) lo tira y no lee la tabla', async () => {
     rpc.mockResolvedValue({ data: null, error: { code: 'PGRST202', message: 'no existe' } })
-    inFn.mockResolvedValue({ data: [{ id: 'a', email: 'a@x.invalid' }], error: null })
-    const mapa = await fetchEmailsDeUsuarios(['a'])
-    expect(from).toHaveBeenCalledWith('perfiles')
-    expect(select).toHaveBeenCalledWith('id, email')
-    expect(mapa.get('a')).toBe('a@x.invalid')
-  })
-
-  it('con otro error lo tira, en castellano, y no lee la tabla', async () => {
+    await expect(fetchEmailsDeUsuarios(['a'])).rejects.toThrow()
     rpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'permission denied' } })
     await expect(fetchEmailsDeUsuarios(['a'])).rejects.toThrow()
     expect(from).not.toHaveBeenCalled()

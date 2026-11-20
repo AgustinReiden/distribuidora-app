@@ -150,8 +150,13 @@ suelta en `sucursales`.
   Las comisiones, las alertas de combos y la ventana del precio anterior las da
   `politica_comercial_reservada()` a admin y encargado; el front lee por REST sólo lo de vender
   (`POLITICA_COLUMNAS_PARA_VENDER`). Una columna nueva de `politicas_comerciales` elige: si la
-  necesita quien vende, va a esa lista; si no, a la RPC. El REVOKE de lo reservado para
-  `authenticated` (la parte 2) va después, con su issue.
+  necesita quien vende, va a esa lista; si no, a la RPC. Desde los cierres de la tarjeta C6
+  `authenticated` lee la tabla columna por columna (las de vender y `sucursal_id`): una columna nueva
+  nace invisible, y la que es de vender lleva su `GRANT SELECT (col)` y va a la lista.
+- **El email de otro usuario lo leen sólo admin y encargado** (decisión del dueño D53, 1601-b5). Lo
+  da `emails_de_usuarios(ids)`; `perfiles` se lee por REST columna por columna, sin `email`
+  (`PERFIL_COLUMNAS`, `src/lib/perfilColumnas.ts`, y su test), y el propio sale de la sesión. Una
+  columna nueva de `perfiles` nace invisible: su migración la concede y se suma a la lista.
 - **Una `auditoria_*` que lee código limpia el cuerpo con `_sql_sin_comentarios` o
   `_sql_sin_comentarios_ni_literales`** (#1541): una sola pasada que entiende las comillas (también
   la `\'` de un `E'…'`, C5 de #1603). Sacar
@@ -780,8 +785,10 @@ suelta en `sucursales`.
   camino nuevo que pregunte por una clave de alta pasa por ahí.
 - **La versión de un pedido (`updated_at`) la pone el server** (1595-b6): un UPDATE de
   `authenticated` que cambia algo la mueve a `now()` en `pedidos_proteger_columnas`, y uno que no
-  cambia nada la deja. Lo que mande el cliente en esa columna no cuenta. Una RPC que la mueve
-  devuelve `updated_at_anterior` y `updated_at` (la edición adopta con `versionTrasCambioPropio`).
+  cambia nada la deja. Lo que mande el cliente en esa columna no cuenta, y desde los cierres de la
+  tarjeta C6 un PATCH que la nombra da 42501: no está en el `GRANT UPDATE` de `authenticated`. Una
+  RPC que la mueve devuelve `updated_at_anterior` y `updated_at` (la edición adopta con
+  `versionTrasCambioPropio`).
 - **El límite de usos de una promo cuenta el corte, no la línea, y lo hace cumplir un trigger**
   (`trg_limite_usos_promo`, #1300) → `migrations/CLAUDE.md`. Al editar o cambiar el cliente, el
   regalo de una promo que se apagó se conserva (`promosConRegalo`): la política rige el alta.
@@ -875,7 +882,7 @@ corregida en la 263: ni `tsc`, ni los tests (que mockean la RPC), ni `deno task 
 y el digest se habría quedado mudo sin que fallara nada.
 
 Y el cuarto: **nada de columnas computadas ni de `*` sobre una tabla que `authenticated` lee
-columna por columna** (hoy `pedido_items` y `productos`). A una columna computada —una función
+columna por columna** (hoy `pedido_items`, `productos`, `perfiles` y `politicas_comerciales`). A una columna computada —una función
 `f(tabla)` que se pide en el `select`— PostgREST le pasa la fila entera, y la fila pide SELECT
 sobre **todas** las columnas: la consulta entera da `42501` para todos los roles, aunque la
 función tenga `EXECUTE`. Así cayó la lista de Pedidos con `regalo_mueve_stock_foto(pedido_items)`

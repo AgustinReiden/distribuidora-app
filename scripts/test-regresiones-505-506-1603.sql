@@ -120,7 +120,7 @@ BEGIN
       FROM public.pedidos pe JOIN public.recorrido_cambios rc ON rc.pedido_id = pe.id WHERE pe.id = p;
   $f$;
   CREATE FUNCTION pg_temp.patch_entrega(p bigint, p_dia date) RETURNS text LANGUAGE sql AS $f$
-    SELECT format('UPDATE public.pedidos SET estado = ''entregado'', fecha_entrega = %L, updated_at = now() WHERE id = %s RETURNING id::text',
+    SELECT format('UPDATE public.pedidos SET estado = ''entregado'', fecha_entrega = %L WHERE id = %s RETURNING id::text',
                   p_dia::text || 'T12:00:00-03:00', p);
   $f$;
   CREATE FUNCTION pg_temp.producto(p_nombre text, p_stock int, p_cpp numeric) RETURNS bigint LANGUAGE sql AS $f$

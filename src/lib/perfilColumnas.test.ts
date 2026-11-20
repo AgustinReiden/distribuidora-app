@@ -12,15 +12,14 @@ import { PERFIL_COLUMNAS } from './perfilColumnas'
  * login, que lee el perfil propio). Ni `tsc` ni eslint ni los tests que mockean supabase lo
  * ven: este test es esa guarda, en `src/` y en `supabase/functions/`.
  *
- * La única lectura de `email` que queda es el respaldo de `emailsDeUsuarios.ts`, para cuando
- * la RPC todavía no existe.
+ * Desde la migración de cierres de la tarjeta C6 no queda ninguna lectura de `email` por REST:
+ * el de otro usuario sale de `emails_de_usuarios()`.
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SRC = path.resolve(__dirname, '..')
 const RAIZ = path.resolve(SRC, '..')
 const FUNCIONES = path.join(RAIZ, 'supabase', 'functions')
-const RESPALDO = 'src/hooks/queries/emailsDeUsuarios.ts'
 
 function listarArchivos(dir: string, acc: string[] = []): string[] {
   if (!fs.existsSync(dir)) return acc
@@ -64,7 +63,7 @@ function lecturasConEmail(archivos: Record<string, string>): string[] {
       const columnas = sel[2] ?? '*'
       if (sel[1] === ')' || /(^|,)\s*\*\s*(,|$)/.test(columnas)) {
         hallazgos.push(`${archivo}:${linea(texto, desde + sel.index!)} · select * sobre perfiles`)
-      } else if (/\bemail\b/.test(columnas) && archivo !== RESPALDO) {
+      } else if (/\bemail\b/.test(columnas)) {
         hallazgos.push(`${archivo}:${linea(texto, desde + sel.index!)} · select de perfiles con email`)
       }
     }
@@ -100,6 +99,21 @@ describe('perfiles: lecturas por REST sin el email (1601-b5, D53)', () => {
       'g.ts': `supabase.from('perfiles').select('id, nombre').in('id', ids)`,
       'h.ts': `supabase.from('pagos').select('*, usuario:perfiles(id, nombre)')`,
     })).toEqual([])
+  })
+
+  it('PERFIL_COLUMNAS es exactamente lo que la migración le concede a authenticated', () => {
+    // El último `GRANT SELECT (...) ON public.perfiles TO authenticated` de migrations/ (hoy, la
+    // migración de cierres de la tarjeta C6). Una columna nueva de perfiles que se conceda en una
+    // migración nueva va también acá (y al revés).
+    const dir = path.join(RAIZ, 'migrations')
+    const RE_GRANT = /GRANT SELECT \(([^)]*)\)\s+ON public\.perfiles TO authenticated/g
+    const grants = fs.readdirSync(dir)
+      .filter(n => n.endsWith('.sql'))
+      .sort()
+      .flatMap(n => [...fs.readFileSync(path.join(dir, n), 'utf8').matchAll(RE_GRANT)].map(m => m[1]))
+    expect(grants.length).toBeGreaterThan(0)
+    const concedidas = grants[grants.length - 1].split(',').map(c => c.trim()).sort()
+    expect(PERFIL_COLUMNAS.split(',').map(c => c.trim()).sort()).toEqual(concedidas)
   })
 
   it('PERFIL_COLUMNAS no incluye el email ni repite columnas', () => {
