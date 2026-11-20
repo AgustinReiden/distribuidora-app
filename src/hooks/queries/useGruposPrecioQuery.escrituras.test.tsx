@@ -1,11 +1,12 @@
 /**
- * Alta y edición de una condición mayorista: varias escrituras REST sin transacción
- * (#1561, 1561-b12). Sin poder crear una RPC desde el front, lo que se cierra es:
+ * Alta y edición de una condición mayorista en UNA llamada (`guardar_condicion_mayorista`, C4b de
+ * #1603; 1561-b12). Antes eran unas diez escrituras REST sin transacción y el front compensaba
+ * (borraba lo recién creado, o avisaba que había quedado a medias). Ahora:
  *
- *  - un alta que falla a medias se deshace (se borra la condición recién creada), o avisa
- *    que quedó a medias si ni eso se pudo;
- *  - una edición que falla a medias lo dice, y los mínimos por producto ya no se borran
- *    enteros antes de reinsertarlos: se escriben (upsert) y después se borran los que sobran.
+ *  - el alta y la edición son una sola RPC, sin escrituras REST ni compensaciones;
+ *  - el alta manda la clave del formulario (el reintento no crea otra) y la edición, el id;
+ *  - los mínimos por producto viajan sólo los que tienen cantidad;
+ *  - un rechazo del server llega con su motivo, sin «quedó a medias».
  */
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -14,34 +15,27 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const estado = vi.hoisted(() => ({
   log: [] as string[],
-  /** `tabla.operacion` -> respuesta; lo que no está responde bien y vacío. */
-  respuestas: {} as Record<string, { data?: unknown; error?: { code: string; message: string } | null }>,
+  rpcs: [] as Array<{ fn: string; args: Record<string, unknown> }>,
+  respuestaRpc: { data: { id: 9, replay: false } as unknown, error: null as { code: string; message: string } | null },
 }))
 
 vi.mock('../supabase/base', () => ({
   supabase: {
     from: (tabla: string) => {
-      let op = 'select'
-      let filtros = ''
-      const responder = () => {
-        estado.log.push(`${tabla}.${op}${filtros}`)
-        const r = estado.respuestas[`${tabla}.${op}`]
-        return Promise.resolve({ data: r?.data ?? [], error: r?.error ?? null })
-      }
       const b: Record<string, unknown> = {}
-      for (const nombre of ['insert', 'update', 'delete', 'upsert', 'select']) {
-        b[nombre] = (..._args: unknown[]) => {
-          // `select` después de insert/update sólo pide la fila de vuelta: no cambia la operación.
-          if (nombre !== 'select') op = nombre
+      for (const nombre of ['insert', 'update', 'delete', 'upsert', 'select', 'eq', 'in', 'order']) {
+        b[nombre] = () => {
+          if (['insert', 'update', 'delete', 'upsert'].includes(nombre)) estado.log.push(`${tabla}.${nombre}`)
           return b
         }
       }
-      for (const nombre of ['eq', 'in', 'order']) {
-        b[nombre] = (col: string) => { filtros += `[${nombre}:${col}]`; return b }
-      }
-      b.single = () => responder().then(r => ({ ...r, data: Array.isArray(r.data) ? (r.data[0] ?? { id: '1' }) : r.data }))
-      b.then = (ok: (v: unknown) => unknown, ko?: (e: unknown) => unknown) => responder().then(ok, ko)
+      b.single = () => Promise.resolve({ data: null, error: null })
+      b.then = (ok: (v: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(ok)
       return b
+    },
+    rpc: (fn: string, args: Record<string, unknown>) => {
+      estado.rpcs.push({ fn, args })
+      return Promise.resolve(estado.respuestaRpc)
     },
   },
 }))
@@ -60,99 +54,95 @@ function wrapper() {
 }
 
 const entrada = {
+  clave: '00000000-0000-4000-8000-000000000001',
   nombre: 'Almacén',
   descripcion: '',
   productoIds: ['10', '11'],
-  escalas: [{ cantidadMinima: 10, precioUnitario: 900, minimosPorProducto: {} }],
+  escalas: [
+    { cantidadMinima: 10, precioUnitario: 900, etiqueta: 'x10', minimosPorProducto: {} },
+    {
+      cantidadMinima: 24, precioUnitario: 850, minProductosDistintos: 2,
+      minimosPorProducto: { '10': { cantidad: 12, precioOverride: 840 }, '11': { cantidad: 12, precioOverride: null }, '12': { cantidad: 0 } },
+    },
+  ],
 }
 
 beforeEach(() => {
   estado.log = []
-  estado.respuestas = {
-    'grupos_precio.insert': { data: [{ id: '9', nombre: 'Almacén' }] },
-    'grupos_precio.update': { data: [{ id: '9', nombre: 'Almacén' }] },
-  }
+  estado.rpcs = []
+  estado.respuestaRpc = { data: { id: 9, replay: false }, error: null }
 })
 
-describe('crear una condición (1561-b12)', () => {
-  it('si fallan los productos, borra la condición recién creada y dice que no se creó nada', async () => {
-    estado.respuestas['grupo_precio_productos.insert'] = { error: { code: 'P0001', message: 'producto de otra sucursal' } }
+describe('crear una condición en una sola llamada (1561-b12, C4b)', () => {
+  it('llama a guardar_condicion_mayorista con la clave y la condición entera, sin escrituras REST', async () => {
+    const { result } = renderHook(() => useCrearGrupoPrecioMutation(), { wrapper: wrapper() })
+
+    const r = await result.current.mutateAsync(entrada as never)
+
+    expect(r).toEqual({ id: '9', replay: false })
+    expect(estado.log).toEqual([])
+    expect(estado.rpcs).toHaveLength(1)
+    expect(estado.rpcs[0].fn).toBe('guardar_condicion_mayorista')
+    expect(estado.rpcs[0].args).toEqual({
+      p_condicion: {
+        clave: entrada.clave,
+        nombre: 'Almacén',
+        descripcion: null,
+        producto_ids: [10, 11],
+        escalas: [
+          { cantidad_minima: 10, precio_unitario: 900, etiqueta: 'x10', min_productos_distintos: 1, minimos: [] },
+          {
+            cantidad_minima: 24, precio_unitario: 850, etiqueta: null, min_productos_distintos: 2,
+            minimos: [
+              { producto_id: 10, cantidad: 12, precio_override: 840 },
+              { producto_id: 11, cantidad: 12, precio_override: null },
+            ],
+          },
+        ],
+      },
+    })
+  })
+
+  it('un rechazo del server llega con su motivo y no se intenta deshacer nada', async () => {
+    estado.respuestaRpc = { data: null, error: { code: '22023', message: 'No puede haber dos escalas con la misma cantidad mínima.' } }
     const { result } = renderHook(() => useCrearGrupoPrecioMutation(), { wrapper: wrapper() })
 
     const error = await result.current.mutateAsync(entrada as never).catch(e => e as Error)
 
-    expect((error as Error).message).toMatch(/producto de otra sucursal.*No se creó nada/)
-    expect(estado.log).toContain('grupos_precio.delete[eq:id]')
+    expect((error as Error).message).toBe('No puede haber dos escalas con la misma cantidad mínima.')
+    expect(estado.log).toEqual([])
   })
 
-  it('si ni borrarla se pudo, avisa que quedó a medias', async () => {
-    estado.respuestas['grupo_precio_escalas.insert'] = { error: { code: 'P0001', message: 'escala repetida' } }
-    estado.respuestas['grupos_precio.delete'] = { error: { code: 'P0001', message: 'no' } }
+  it('sin respuesta, dice que se puede volver a guardar sin duplicarla', async () => {
+    estado.respuestaRpc = { data: null, error: { code: '', message: 'TypeError: Failed to fetch' } }
     const { result } = renderHook(() => useCrearGrupoPrecioMutation(), { wrapper: wrapper() })
 
     const error = await result.current.mutateAsync(entrada as never).catch(e => e as Error)
 
-    expect((error as Error).message).toMatch(/escala repetida.*quedó creada a medias/)
-  })
-
-  it('si todo sale bien no borra nada', async () => {
-    const { result } = renderHook(() => useCrearGrupoPrecioMutation(), { wrapper: wrapper() })
-
-    await result.current.mutateAsync(entrada as never)
-
-    expect(estado.log.some(l => l.startsWith('grupos_precio.delete'))).toBe(false)
+    expect((error as Error).message).toMatch(/Podés volver a guardar: si ya había entrado, no se crea otra/)
   })
 })
 
-describe('editar una condición (1561-b12)', () => {
-  const edicion = {
-    id: '9',
-    data: {
-      ...entrada,
-      escalas: [{ cantidadMinima: 10, precioUnitario: 900, minimosPorProducto: { '10': { cantidad: 2, precioOverride: null } } }],
-    },
-  }
-
-  beforeEach(() => {
-    estado.respuestas['grupo_precio_productos.select'] = { data: [{ id: 'a', producto_id: '10' }, { id: 'b', producto_id: '11' }] }
-    estado.respuestas['grupo_precio_escalas.select'] = { data: [{ id: '5', cantidad_minima: 10 }] }
-    estado.respuestas['grupo_precio_escalas.update'] = { data: [{ id: '5', cantidad_minima: 10 }] }
-    estado.respuestas['grupo_precio_escala_minimos.select'] = {
-      data: [{ escala_id: '5', producto_id: '10' }, { escala_id: '5', producto_id: '12' }],
-    }
-  })
-
-  it('escribe los mínimos vigentes antes de borrar los que sobran, y no los borra todos', async () => {
+describe('editar una condición en una sola llamada (1561-b12, C4b)', () => {
+  it('manda el id y no la clave, sin escrituras REST', async () => {
     const { result } = renderHook(() => useActualizarGrupoPrecioMutation(), { wrapper: wrapper() })
 
-    await result.current.mutateAsync(edicion as never)
+    await result.current.mutateAsync({ id: '9', data: entrada } as never)
 
-    const minimos = estado.log.filter(l => l.startsWith('grupo_precio_escala_minimos.'))
-    const iUpsert = minimos.findIndex(l => l.startsWith('grupo_precio_escala_minimos.upsert'))
-    const iDelete = minimos.findIndex(l => l.startsWith('grupo_precio_escala_minimos.delete'))
-    expect(iUpsert).toBeGreaterThanOrEqual(0)
-    expect(iDelete).toBeGreaterThan(iUpsert)
-    // El borrado es de un producto puntual (el 12), no de toda la escala.
-    expect(minimos[iDelete]).toContain('[in:producto_id]')
+    expect(estado.log).toEqual([])
+    expect(estado.rpcs).toHaveLength(1)
+    const p = estado.rpcs[0].args.p_condicion as Record<string, unknown>
+    expect(p.id).toBe(9)
+    expect(p).not.toHaveProperty('clave')
+    expect(p.producto_ids).toEqual([10, 11])
   })
 
-  it('si falla un paso a mitad, el error dice que la condición quedó a medias', async () => {
-    estado.respuestas['grupo_precio_escala_minimos.upsert'] = { error: { code: 'P0001', message: 'mínimo inválido' } }
+  it('un rechazo llega tal cual, sin «quedó a medias»', async () => {
+    estado.respuestaRpc = { data: null, error: { code: '22023', message: 'La condición no existe en esta sucursal (puede que otro la haya eliminado).' } }
     const { result } = renderHook(() => useActualizarGrupoPrecioMutation(), { wrapper: wrapper() })
 
-    const error = await result.current.mutateAsync(edicion as never).catch(e => e as Error)
+    const error = await result.current.mutateAsync({ id: '9', data: entrada } as never).catch(e => e as Error)
 
-    expect((error as Error).message).toMatch(/mínimo inválido.*quedó guardada a medias/)
-    // No llegó a borrar nada: los mínimos viejos siguen ahí.
-    expect(estado.log.some(l => l.startsWith('grupo_precio_escala_minimos.delete'))).toBe(false)
-  })
-
-  it('si falla el primer paso (el nombre), no dice «a medias»: no se escribió nada', async () => {
-    estado.respuestas['grupos_precio.update'] = { error: { code: 'P0001', message: 'nombre repetido' } }
-    const { result } = renderHook(() => useActualizarGrupoPrecioMutation(), { wrapper: wrapper() })
-
-    const error = await result.current.mutateAsync(edicion as never).catch(e => e as Error)
-
-    expect((error as Error).message).toBe('nombre repetido')
+    expect((error as Error).message).toBe('La condición no existe en esta sucursal (puede que otro la haya eliminado).')
   })
 })

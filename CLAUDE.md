@@ -399,6 +399,28 @@ suelta en `sucursales`.
   lo frena `trg_promocion_no_se_borra_con_uso`: líneas de pedido de cualquier estado, ajustes de
   stock o salvedades. El front cuenta lo mismo antes de ofrecer "Eliminar"
   (`promocionesEliminacion.ts`): si cambia la regla de un lado, cambia del otro.
+- **Un guardado que escribe varias filas o tablas va en UNA RPC, y el front no compensa** (C4b de
+  #1603): la condición mayorista entera (`guardar_condicion_mayorista`), el alta de una promo
+  (`crear_promocion`), los roles extra (`guardar_roles_extra`) y los descuentos por categoría
+  (`guardar_descuentos_categoria`). Validan adentro lo de la policy, las restricciones y el
+  formulario, y un rechazo es un RAISE (un `{success:false}` después de escribir confirma lo
+  escrito). Un alta que un reintento duplicaría lleva la clave del formulario (`altas_por_clave`,
+  sólo de server). La edición de un combo o de una promo manda la versión que abrió
+  (`updated_at_esperado`, y en un combo las `versiones` del orden que reescribe): si otro guardó, no
+  se pisa y el formulario queda abierto con lo tipeado. La versión de una promo no la mueve la barra
+  (`usos_pendientes`), ni la de un cliente su saldo (`clientes.updated_at`, `trg_clientes_zz_version`).
+  Un cambio sólo en las hijas (los productos o reglas de una promo, los descuentos o preventistas de
+  un cliente) la mueve la RPC que lo hace (el trigger respeta ese movimiento si viene del server, y
+  en un alta de `authenticated` la pone él): una RPC nueva que escriba las hijas hace lo mismo.
+  Estas RPC toman la fila padre `FOR NO KEY UPDATE`, nunca `FOR UPDATE`, que choca con el `KEY
+  SHARE` de la FK de una venta y da deadlock; y antes de insertar hijas que apuntan a productos, los
+  toman `FOR KEY SHARE` por id (las filas toman el `KEY SHARE` de la FK en el orden del JSON, y la
+  venta toma los productos `FOR UPDATE` por id). Lo prueba `scripts/concurrencia/c4b-combo-y-venta.sh`.
+  Nadie se edita a sí mismo por estas RPC.
+  El alta y la edición de un cliente (`guardar_cliente`) y el guardado de un usuario (`guardar_usuario`)
+  corren como quien llama (INVOKER), a propósito: los triggers de `clientes` y `perfiles` se eximen
+  cuando `current_user` no es 'authenticated', y una definer los salteaba. Mientras sean INVOKER
+  necesitan los grants REST de esas tablas: revocarlos obliga a pasarlas a definer con esas guardas.
 - **El stock por lote lo lleva un trigger, no las RPCs** (y cómo devolver, etiquetar y lockear) → `migrations/CLAUDE.md`.
 - **"Venta por vendedor" tiene UNA definición y se escribe siempre igual** (migs 241 y 318, #568):
   `estado = 'entregado'` · `canal <> 'cambio'` · `tipo_factura IS DISTINCT FROM 'VB'` · por
