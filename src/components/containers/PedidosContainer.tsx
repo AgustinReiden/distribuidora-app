@@ -42,6 +42,7 @@ import {
 } from '../../utils/valeBlanco'
 import { puedeVerDeudaCliente, puedeCrearNotaCreditoVenta } from '../../lib/permisos'
 import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
+import { mensajeOrigenPendiente, registrarOrigenPrecios } from '../../utils/origenPrecioPendiente'
 import { useTrabajoEnCurso } from '../../hooks/useTrabajoEnCurso'
 import { cobrarRecordandoSinConfirmar, guardarClavesDeAlta, leerClavesDeAlta } from '../../utils/requestIdPersistente'
 import {
@@ -344,6 +345,9 @@ export default function PedidosContainer(): React.ReactElement {
   const requestIdMasivo = useRequestIdEstable()
   // UUID de idempotencia del cobro que se declara al CREAR el pedido (mig 167).
   const requestIdAlta = useRequestIdEstable()
+  // La clave del alta de un cliente desde el pedido (C4b v2): el mismo cliente reintentado no
+  // se crea dos veces.
+  const claveAltaCliente = useRequestIdEstable()
   /**
    * Clave de idempotencia del ALTA en sí (mig 071, `pedidos.offline_id`).
    *
@@ -557,6 +561,9 @@ export default function PedidosContainer(): React.ReactElement {
   // La última carga de pagos previos falló: el modal no deja cobrar (#1410).
   const [pagosPreviosFallaron, setPagosPreviosFallaron] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig>({ visible: false })
+  // C4b v2: el origen del precio de una edición que no se pudo registrar (los productos ya se
+  // guardaron). Al cerrar el editor se ofrece reintentarlo.
+  const [origenPendiente, setOrigenPendiente] = useState<{ pedidoId: string; origenes: OrigenPrecioItem[] } | null>(null)
 
   // Pedido-specific state for modals
   const [pedidoHistorial, setPedidoHistorial] = useState<PedidoDB | null>(null)
@@ -1479,12 +1486,13 @@ export default function PedidosContainer(): React.ReactElement {
     // habia registrado al crear el pedido ya no existe: hay que reponerlo o esta
     // venta pasa a comisionarse con la regla generica (mig 148/149).
     if (origenes && origenes.length > 0) {
-      const { error: errorOrigen } = await supabase.rpc('registrar_origen_precio_items', {
-        p_pedido_id: pedidoEditando.id,
-        p_origenes: origenes,
-      })
-      // No se propaga: los items ya se guardaron bien y el total es correcto.
-      if (errorOrigen) console.warn('No se pudo registrar el origen del precio:', errorOrigen)
+      // No se propaga: los items ya se guardaron bien y el total es correcto. Pero se avisa (queda
+      // en pantalla) y, al cerrar el editor, se ofrece reintentarlo (C4b v2).
+      const r = await registrarOrigenPrecios(supabase.rpc.bind(supabase), pedidoEditando.id, origenes as OrigenPrecioItem[])
+      if (!r.ok) {
+        notify.error(mensajeOrigenPendiente(pedidoEditando.id), { persist: true })
+        setOrigenPendiente({ pedidoId: String(pedidoEditando.id), origenes: origenes as OrigenPrecioItem[] })
+      }
     }
     // Invalidar cache de pedidos para refrescar datos. Tambien la familia
     // recorridos* para que la hoja de ruta y las comandas (que se descargan
@@ -1504,7 +1512,7 @@ export default function PedidosContainer(): React.ReactElement {
     // por sucursal y aca no hay una a mano: el prefijo las alcanza a todas.
     queryClient.invalidateQueries({ queryKey: ['productos'] })
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
-  }, [pedidoEditando, user, queryClient])
+  }, [pedidoEditando, user, queryClient, notify])
 
   // Reasignar el preventista del pedido en edicion. Solo admin (la UI ya
   // pasa el flag canEditPreventista={isAdmin}). El RPC tambien valida.
@@ -2860,6 +2868,30 @@ export default function PedidosContainer(): React.ReactElement {
     onConfirm: confirmConfig.onConfirm || (() => {}),
   } : null
 
+  // C4b v2: el origen del precio que no se pudo registrar se ofrece reintentar al cerrar el editor
+  // (la confirmación del container queda detrás del modal abierto).
+  useEffect(() => {
+    if (!origenPendiente || modalEditarOpen || confirmConfig.visible) return
+    const pendiente = origenPendiente
+    setOrigenPendiente(null)
+    setConfirmConfig({
+      visible: true,
+      tipo: 'warning',
+      titulo: 'Falta registrar el origen de los precios',
+      mensaje: `${mensajeOrigenPendiente(pendiente.pedidoId)} ¿Reintentar ahora?`,
+      onConfirm: async () => {
+        setConfirmConfig({ visible: false })
+        const r = await registrarOrigenPrecios(supabase.rpc.bind(supabase), pendiente.pedidoId, pendiente.origenes)
+        if (r.ok) {
+          notify.success(`Se registró el origen de los precios del pedido #${pendiente.pedidoId}`)
+        } else {
+          notify.error(mensajeOrigenPendiente(pendiente.pedidoId), { persist: true })
+          setOrigenPendiente(pendiente)
+        }
+      },
+    })
+  }, [origenPendiente, modalEditarOpen, confirmConfig.visible, notify])
+
   return (
     <>
       {/* Una linea de resumen que despliega los dos paneles de alerta (#714):
@@ -3016,7 +3048,9 @@ export default function PedidosContainer(): React.ReactElement {
                   dias_atencion: (clienteData.dias_atencion as string | null) ?? null,
                   duplicado_confirmado: Boolean(clienteData.duplicadoConfirmado),
                 }
-                const newCliente = await crearClienteMut.mutateAsync(dbData)
+                const huella = JSON.stringify(dbData)
+                const newCliente = await crearClienteMut.mutateAsync({ ...dbData, clave: claveAltaCliente(huella) })
+                claveAltaCliente.olvidar([huella])
                 notify.success(`Cliente "${newCliente.nombre_fantasia}" creado`)
                 return { id: newCliente.id }
               } catch (e) {

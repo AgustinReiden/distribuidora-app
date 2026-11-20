@@ -20,6 +20,8 @@ import { traerTodo } from '../../utils/paginacion'
 import { factorDeLaLinea } from '../../utils/unidadesRegalo'
 import { tienePromocionUso, type ReferenciasPromocion } from '../../utils/promocionesEliminacion'
 import type { CupoPromo } from '../../utils/cupoPromo'
+import { nuevoRequestId } from '../../utils/idempotencia'
+import { esConflictoDeVersion, lanzarSiConflicto } from '../../utils/conflictoDeVersion'
 
 // Query keys
 export const promocionesKeys = {
@@ -46,6 +48,11 @@ export interface PromocionConDetalles extends PromocionDB {
 }
 
 export interface PromocionFormInput {
+  /**
+   * La clave del alta (un uuid por vez que se abre el formulario, C4b de #1603): el reintento de
+   * la misma alta devuelve la promo que ya entró y no crea otra. La edición no la usa.
+   */
+  clave?: string
   nombre: string
   tipo: 'bonificacion'
   fechaInicio: string
@@ -204,10 +211,17 @@ async function fetchPromocionesList(): Promise<PromocionConDetalles[]> {
 // MUTATION FUNCTIONS
 // =============================================================================
 
+/**
+ * El alta de una promo con sus productos y sus reglas en UNA llamada y una transacción
+ * (`crear_promocion`, C4b de #1603; 1561-b12). Antes eran tres INSERT REST y, si fallaba uno, el
+ * front borraba la promo recién creada o avisaba que había quedado a medias. Con la clave del
+ * formulario, el reintento después de una respuesta perdida no crea otra.
+ */
 async function createPromocion(input: PromocionFormInput): Promise<PromocionConDetalles> {
-  const { data: promo, error: errorPromo } = await supabase
-    .from('promociones')
-    .insert([{
+  const { data, error } = await supabase.rpc('crear_promocion', {
+    p_promocion: {
+      // El formulario manda su clave (una por vez que se abre). Sin ella, una nueva.
+      clave: input.clave ?? nuevoRequestId(),
       nombre: input.nombre,
       tipo: input.tipo,
       fecha_inicio: input.fechaInicio,
@@ -222,48 +236,13 @@ async function createPromocion(input: PromocionFormInput): Promise<PromocionConD
       unidades_por_bloque: input.unidadesPorBloque ?? null,
       stock_por_bloque: input.stockPorBloque ?? null,
       descripcion_regalo: input.descripcionRegalo ?? null,
-    }])
-    .select()
-    .single()
-
-  if (errorPromo) throw errorDeSupabase(errorPromo, 'Sin conexión: no se pudo confirmar que la promoción se haya creado. Revisá antes de reintentar.')
-
-  const promoId = (promo as PromocionDB).id
-
-  // Son tres INSERT sin transacción (#1561, 1561-b12): si los productos o las reglas fallan,
-  // la promo recién creada se borra (nadie la usó todavía; los hijos caen en cascada) en vez
-  // de quedar activa y vacía, o sin sus reglas. Cerrarlo del todo pide una RPC que cree la
-  // promo entera en una transacción.
-  try {
-  if (input.productoIds.length > 0) {
-    const { error } = await supabase
-      .from('promocion_productos')
-      .insert(input.productoIds.map(pid => ({
-        promocion_id: parseInt(promoId),
-        producto_id: parseInt(pid),
-      })))
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya creado. Revisá antes de reintentar.')
-  }
-
-  if (input.reglas.length > 0) {
-    const { error } = await supabase
-      .from('promocion_reglas')
-      .insert(input.reglas.map(r => ({
-        promocion_id: parseInt(promoId),
-        clave: r.clave,
-        valor: r.valor,
-      })))
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya creado. Revisá antes de reintentar.')
-  }
-
-  } catch (err) {
-    const { error: errorDeshacer } = await supabase.from('promociones').delete().eq('id', promoId)
-    const original = err instanceof Error ? err : new Error(String(err))
-    const aviso = errorDeshacer
-      ? ' La promoción quedó creada a medias: abrila y revisala, o eliminala y volvé a crearla.'
-      : ' No se creó nada: volvé a intentar.'
-    throw Object.assign(original, { message: original.message + aviso })
-  }
+      producto_ids: input.productoIds.map(pid => parseInt(pid)),
+      reglas: input.reglas.map(r => ({ clave: r.clave, valor: r.valor })),
+    },
+  })
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya creado. Podés volver a guardar: si ya había entrado, no se crea otra.')
+  const resultado = data as { id: number | string; promocion: PromocionDB & { usos_pendientes?: number } }
+  const promoId = String(resultado.id)
 
   const { data: productos } = await supabase
     .from('promocion_productos')
@@ -276,15 +255,23 @@ async function createPromocion(input: PromocionFormInput): Promise<PromocionConD
     .eq('promocion_id', promoId)
 
   return {
-    ...(promo as PromocionDB),
-    usos_pendientes: 0,
+    ...resultado.promocion,
+    usos_pendientes: resultado.promocion?.usos_pendientes || 0,
     productos: (productos || []) as PromocionProductoDB[],
     reglas: (reglas || []) as PromocionReglaDB[],
   }
 }
 
 async function updatePromocion(
-  { id, data: input }: { id: string; data: PromocionFormInput }
+  { id, data: input, updatedAtEsperado }: {
+    id: string
+    data: PromocionFormInput
+    /**
+     * El `updated_at` de la promo al abrir el editor (1599-b8): si otro la guardó en el medio, la
+     * RPC no escribe nada y devuelve 'promocion_cambiada'. Sin él no compara (como antes).
+     */
+    updatedAtEsperado?: string | null
+  }
 ): Promise<PromocionConDetalles> {
   // Una sola llamada, una sola transacción (#1491): la RPC escribe la promo entera
   // (el regalo, el contenedor, el factor y lo demás en un mismo UPDATE) y concilia
@@ -313,10 +300,12 @@ async function updatePromocion(
       descripcion_regalo: input.descripcionRegalo ?? null,
       producto_ids: input.productoIds.map(pid => parseInt(pid)),
       reglas: input.reglas.map(r => ({ clave: r.clave, valor: r.valor })),
+      ...(updatedAtEsperado ? { updated_at_esperado: updatedAtEsperado } : {}),
     },
   })
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la promoción se haya guardado. Revisá antes de reintentar.')
-  const resultado = data as { success?: boolean; error?: string; promocion?: PromocionDB & { usos_pendientes?: number } } | null
+  const resultado = data as { success?: boolean; error?: string; codigo?: string; promocion?: PromocionDB & { usos_pendientes?: number } } | null
+  lanzarSiConflicto(resultado)
   if (!resultado?.success || !resultado.promocion) {
     // Un rechazo del servidor no se destraba reintentando (409: el retry global no lo repite).
     throw Object.assign(new Error(resultado?.error || 'No se pudo guardar la promoción'), { status: 409 })
@@ -475,7 +464,7 @@ export function useCrearPromocionMutation() {
   const { currentSucursalId } = useSucursal()
   return useMutation({
     mutationFn: createPromocion,
-    // También si falla: una promo que quedó a medias tiene que verse en la lista.
+    // También si falla: sin respuesta, puede haber entrado.
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: promocionesKeys.all(currentSucursalId) })
     },
@@ -489,6 +478,10 @@ export function useActualizarPromocionMutation() {
     mutationFn: updatePromocion,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: promocionesKeys.all(currentSucursalId) })
+    },
+    // Si otro la cambió, la lista que se va a abrir de nuevo tiene que traer la versión de ahora.
+    onError: (err) => {
+      if (esConflictoDeVersion(err)) queryClient.invalidateQueries({ queryKey: promocionesKeys.all(currentSucursalId) })
     },
   })
 }

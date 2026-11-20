@@ -28,6 +28,8 @@
 --   V2 · Se siguen auditando en productos: una baja de stock con otro origen ('merma'), una
 --        subida con un origen de venta, una baja de venta que además cambia el precio, y el
 --        cambio de precio solo.
+--   P1.6 · C4b v3 (H4 de su revisión): si existe altas_por_clave (la migración de C4b), la purga
+--        borra las claves de más de 30 días y deja las nuevas.
 --   P1 · 1561-b10 (D38): purgar_retencion() existe, sólo la ejecuta service_role, borra los
 --        avisos de más de 90 días y la auditoría de más de 24 meses, deja lo más nuevo, respeta
 --        el lote y dice si quedan; como authenticated da 42501.
@@ -360,6 +362,14 @@ BEGIN
       INSERT INTO audit_logs (tabla, registro_id, accion, created_at) VALUES
         ('b6b', 'viejo', 'INSERT', now() - interval '25 months'),
         ('b6b', 'nuevo', 'INSERT', now() - interval '23 months');
+      -- P1.6: las claves de alta de C4b, si ya está su migración.
+      IF to_regclass('public.altas_por_clave') IS NOT NULL THEN
+        EXECUTE 'DELETE FROM public.altas_por_clave WHERE created_at < now() - interval ''30 days''';
+        EXECUTE format('INSERT INTO public.altas_por_clave (clave, operacion, usuario_id, sucursal_id, contenido, created_at) VALUES '
+                       '(%L, ''cliente'', %L, 1, md5(''viejo''), now() - interval ''31 days''), '
+                       '(%L, ''cliente'', %L, 1, md5(''nuevo''), now() - interval ''29 days'')',
+                       '00000000-0000-4000-8000-0000000c4b01', v_adm, '00000000-0000-4000-8000-0000000c4b02', v_adm);
+      END IF;
       -- De a uno: borra el más viejo de cada tabla y dice que quedan.
       SET LOCAL ROLE service_role;
       v_res := public.purgar_retencion(1);
@@ -382,6 +392,13 @@ BEGIN
       SELECT string_agg(registro_id, ',' ORDER BY registro_id) INTO v_t FROM audit_logs WHERE tabla = 'b6b';
       IF v_t IS DISTINCT FROM 'nuevo' THEN
         v_fallas := v_fallas || format('P1.5 · quedó la auditoría %s (esperaba sólo la de 23 meses)', v_t);
+      END IF;
+      IF to_regclass('public.altas_por_clave') IS NOT NULL THEN
+        EXECUTE 'SELECT string_agg(contenido, '','' ORDER BY contenido) FROM public.altas_por_clave '
+                'WHERE clave IN (''00000000-0000-4000-8000-0000000c4b01'', ''00000000-0000-4000-8000-0000000c4b02'')' INTO v_t;
+        IF v_t IS DISTINCT FROM md5('nuevo') OR NOT (v_res ? 'altas_por_clave') THEN
+          v_fallas := v_fallas || format('P1.6 · las claves de alta: quedaron %s (esperaba sólo la de 29 días); %s', v_t, v_res);
+        END IF;
       END IF;
       v_notas := v_notas || ('P1 · ' || v_res::text);
       RAISE EXCEPTION USING ERRCODE = 'P0099';
