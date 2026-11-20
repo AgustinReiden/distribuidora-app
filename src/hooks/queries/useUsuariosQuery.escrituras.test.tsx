@@ -4,9 +4,10 @@
  * - b2: activar o desactivar a un usuario que la policy no deja tocar da cero filas
  *   (PGRST116) y la pantalla mostraba «Cannot coerce the result…»; ahora dice lo
  *   mismo que la edición.
- * - b12: los roles extra se reemplazaban con DELETE de todo + INSERT de todo, sin
- *   transacción: si el INSERT fallaba el usuario quedaba sin roles. Ahora se
- *   escribe sólo la diferencia, quitando antes de agregar.
+ * - b12: los roles extra se reemplazaban con DELETE + INSERT REST, sin transacción:
+ *   si el INSERT fallaba el usuario quedaba sin roles. Ahora es UNA RPC
+ *   (`guardar_roles_extra`, C4b de #1603) que deja los roles como la lista, en una
+ *   transacción, y el front no escribe perfil_roles por REST.
  */
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -14,9 +15,9 @@ import { renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const estado = vi.hoisted(() => ({
-  rolesActuales: [] as string[],
   llamadas: [] as string[],
-  errorInsert: null as null | { code: string; message: string },
+  rpcs: [] as Array<{ fn: string; args: Record<string, unknown> }>,
+  errorRpc: null as null | { code: string; message: string },
   errorUpdate: null as null | { code: string; message: string },
 }))
 
@@ -32,28 +33,17 @@ vi.mock('../supabase/base', () => ({
         }
         return b
       }
-      // perfil_roles
-      return {
-        select: () => ({
-          eq: () => ({
-            eq: async () => ({ data: estado.rolesActuales.map(rol => ({ rol })), error: null }),
-          }),
-        }),
-        delete: () => {
-          const b = {
-            eq: () => b,
-            in: async (_col: string, roles: string[]) => {
-              estado.llamadas.push(`delete:${roles.join(',')}`)
-              return { error: null }
-            },
-          }
-          return b
-        },
-        insert: async (filas: Array<{ rol: string }>) => {
-          estado.llamadas.push(`insert:${filas.map(f => f.rol).join(',')}`)
-          return { error: estado.errorInsert }
-        },
+      // perfil_roles: ya no se escribe por REST.
+      const registrar = (op: string) => () => { estado.llamadas.push(`${tabla}.${op}`); return Promise.resolve({ error: null }) }
+      return { insert: registrar('insert'), delete: registrar('delete'), update: registrar('update'), upsert: registrar('upsert') }
+    },
+    rpc: async (fn: string, args: Record<string, unknown>) => {
+      estado.rpcs.push({ fn, args })
+      if (fn === 'guardar_usuario') {
+        const p = args.p_usuario as { id: string; campos: Record<string, unknown> }
+        return { data: estado.errorRpc ? null : { success: true, perfil: { id: p.id, ...p.campos } }, error: estado.errorRpc }
       }
+      return { data: estado.errorRpc ? null : { roles: args.p_roles }, error: estado.errorRpc }
     },
   },
 }))
@@ -62,7 +52,7 @@ vi.mock('../../contexts/SucursalContext', () => ({
   useSucursal: () => ({ currentSucursalId: 1 }),
 }))
 
-import { useAsignarPerfilRolesMutation, useToggleUsuarioActivoMutation } from './useUsuariosQuery'
+import { useActualizarUsuarioMutation, useAsignarPerfilRolesMutation, useToggleUsuarioActivoMutation } from './useUsuariosQuery'
 
 function wrapper() {
   const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
@@ -72,9 +62,9 @@ function wrapper() {
 }
 
 beforeEach(() => {
-  estado.rolesActuales = []
   estado.llamadas = []
-  estado.errorInsert = null
+  estado.rpcs = []
+  estado.errorRpc = null
   estado.errorUpdate = null
 })
 
@@ -97,40 +87,67 @@ describe('activar o desactivar un usuario (1599-b2)', () => {
   })
 })
 
-describe('roles extra del usuario (1561-b12)', () => {
-  it('sin cambios no escribe nada', async () => {
-    estado.rolesActuales = ['transportista']
+describe('roles extra del usuario (1561-b12, C4b)', () => {
+  it('es una sola llamada a guardar_roles_extra con la lista entera, sin escrituras REST', async () => {
     const { result } = renderHook(() => useAsignarPerfilRolesMutation(), { wrapper: wrapper() })
 
     await result.current.mutateAsync({ usuarioId: 'u1', roles: ['transportista'] })
 
     expect(estado.llamadas).toEqual([])
+    expect(estado.rpcs).toEqual([{ fn: 'guardar_roles_extra', args: { p_usuario_id: 'u1', p_roles: ['transportista'] } }])
   })
 
-  it('escribe sólo la diferencia: quita lo que sobra y agrega lo que falta, en ese orden', async () => {
-    estado.rolesActuales = ['transportista', 'deposito']
+  it('sacar el rol es mandar la lista vacía', async () => {
     const { result } = renderHook(() => useAsignarPerfilRolesMutation(), { wrapper: wrapper() })
 
-    await result.current.mutateAsync({ usuarioId: 'u1', roles: ['deposito', 'preventista'] })
+    await result.current.mutateAsync({ usuarioId: 'u1', roles: [] })
 
-    expect(estado.llamadas).toEqual(['delete:transportista', 'insert:preventista'])
+    expect(estado.rpcs[0].args).toEqual({ p_usuario_id: 'u1', p_roles: [] })
   })
 
-  it('si falla el alta tras quitar, avisa qué quedó hecho', async () => {
-    estado.rolesActuales = ['transportista']
-    estado.errorInsert = { code: 'P0001', message: 'rol no permitido' }
+  it('un rechazo del server llega con su motivo', async () => {
+    estado.errorRpc = { code: '42501', message: 'No podés editar a este usuario: también trabaja en sucursales que no son tuyas. Lo edita un admin de todas ellas.' }
     const { result } = renderHook(() => useAsignarPerfilRolesMutation(), { wrapper: wrapper() })
 
-    const error = await result.current.mutateAsync({ usuarioId: 'u1', roles: ['preventista'] }).catch(e => e as Error)
-
-    expect((error as Error).message).toMatch(/Se quitaron los roles transportista.*no se pudieron agregar preventista.*rol no permitido/s)
+    await expect(result.current.mutateAsync({ usuarioId: 'u1', roles: ['transportista'] }))
+      .rejects.toThrow('No podés editar a este usuario')
   })
 
-  it('si falla el alta y no se quitó nada, el error es el del server', async () => {
-    estado.rolesActuales = []
-    estado.errorInsert = { code: 'P0001', message: 'rol no permitido' }
+  it('sin respuesta, dice que se puede volver a guardar (deja los roles como se marcaron)', async () => {
+    estado.errorRpc = { code: '', message: 'TypeError: Failed to fetch' }
     const { result } = renderHook(() => useAsignarPerfilRolesMutation(), { wrapper: wrapper() })
 
-    await expect(result.current.mutateAsync({ usuarioId: 'u1', roles: ['preventista'] })).rejects.toThrow('rol no permitido')
+    await expect(result.current.mutateAsync({ usuarioId: 'u1', roles: ['transportista'] }))
+      .rejects.toThrow(/Podés volver a guardar/)
+  })
+})
+
+describe('guardar un usuario: el perfil y los roles extra en una sola llamada (C4b v2)', () => {
+  it('llama a guardar_usuario con los campos y los roles, sin escribir perfiles ni perfil_roles por REST', async () => {
+    const { result } = renderHook(() => useActualizarUsuarioMutation(), { wrapper: wrapper() })
+
+    await result.current.mutateAsync({ id: 'u1', data: { nombre: 'Nuevo', rol: 'deposito', activo: true, zona: null, rolesExtra: ['transportista'] } })
+
+    expect(estado.llamadas).toEqual([])
+    expect(estado.rpcs).toEqual([{
+      fn: 'guardar_usuario',
+      args: { p_usuario: { id: 'u1', campos: { nombre: 'Nuevo', rol: 'deposito', activo: true, zona: null }, roles_extra: ['transportista'] } },
+    }])
+  })
+
+  it('sin roles extra (no cargaron) no los manda', async () => {
+    const { result } = renderHook(() => useActualizarUsuarioMutation(), { wrapper: wrapper() })
+
+    await result.current.mutateAsync({ id: 'u1', data: { nombre: 'Nuevo' } })
+
+    expect((estado.rpcs[0].args.p_usuario as Record<string, unknown>)).not.toHaveProperty('roles_extra')
+  })
+
+  it('un rechazo llega con su motivo (y no quedó nada: es una transacción)', async () => {
+    estado.errorRpc = { code: '42501', message: 'No podés editar a este usuario: también trabaja en sucursales que no son tuyas. Lo edita un admin de todas ellas.' }
+    const { result } = renderHook(() => useActualizarUsuarioMutation(), { wrapper: wrapper() })
+
+    await expect(result.current.mutateAsync({ id: 'u1', data: { nombre: 'X', rolesExtra: [] } }))
+      .rejects.toThrow('No podés editar a este usuario')
   })
 })

@@ -13,9 +13,11 @@ import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { simularGuardarCliente } from '../../test/guardarClienteSimulado'
 
 const insertSpy = vi.fn()
 const updateSpy = vi.fn()
+const rpcSimulado = simularGuardarCliente({ insertSpy: (f) => insertSpy(f), updateSpy: (p) => updateSpy(p) })
 const from = vi.fn()
 
 const SIN_DUPLICADO = {
@@ -25,7 +27,9 @@ const SIN_DUPLICADO = {
 vi.mock('../supabase/base', () => ({
   supabase: {
     from: (...args: unknown[]) => from(...args),
-    rpc: () => Promise.resolve({ data: SIN_DUPLICADO, error: null }),
+    // C4b v2: el alta y la edición van por guardar_cliente; su `campos` es lo que viajaba en el
+    // INSERT o en el PATCH.
+    rpc: (...args: unknown[]) => rpcSimulado(...(args as [string, Record<string, unknown>])),
   },
 }))
 

@@ -12,6 +12,8 @@ import { esClienteOperable } from '../../utils/clienteOperable'
 import type { ClienteDB, TipoComprobanteVenta } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
 import { documentoParaGuardar, type TipoDocumentoCliente } from '../../utils/documentoCliente'
+import { nuevoRequestId } from '../../utils/idempotencia'
+import { lanzarSiConflicto } from '../../utils/conflictoDeVersion'
 import {
   cambiaIdentidadDuplicado,
   mensajeDuplicado,
@@ -99,151 +101,34 @@ async function fetchClienteById(id: string): Promise<ClienteDB | null> {
   return data ? flattenClienteRow(data as ClienteRow) : null
 }
 
-const ERROR_ASIGNACION = 'Sin conexión: no se pudo confirmar el cambio de preventistas del cliente. Revisá la ficha del cliente antes de reintentar, puede haber quedado hecho.'
-
-async function leerPreventistasAsignados(clienteId: string): Promise<string[]> {
-  const { data, error } = await supabase
-    .from('cliente_preventistas')
-    .select('preventista_id')
-    .eq('cliente_id', clienteId)
-  if (error) throw errorDeSupabase(error, ERROR_ASIGNACION)
-  return ((data as { preventista_id: string }[] | null) || []).map(r => r.preventista_id)
+/**
+ * El alta y la edición de un cliente con sus preventistas y sus descuentos por categoría, en UNA
+ * llamada y una transacción (`guardar_cliente`, C4b v2 de #1603). Antes eran el INSERT o el PATCH
+ * de `clientes`, después `cliente_preventistas` (un DELETE y un INSERT por preventista) y después
+ * los descuentos (1598-b5), en llamadas REST separadas: si fallaba una del medio, el cliente
+ * quedaba creado sin su preventista o sin sus descuentos. La RPC corre como quien llama, así que
+ * rigen las mismas policies y triggers que con el REST (quién ve y quién edita, la zona que manda
+ * la asignación, el crédito y el reservado sólo del admin, el documento con su tipo).
+ */
+interface RespuestaGuardarCliente {
+  success: boolean
+  replay?: boolean
+  codigo?: string
+  error?: string
+  cliente?: ClienteDB
+  preventista_ids?: string[]
 }
 
-/**
- * Lleva las filas de `cliente_preventistas` de `previos` a `preventistaIds`:
- * borra sólo las que se sacaron y agrega sólo las que se sumaron (#1316).
- *
- * `previos` es lo que el formulario cargó, no lo que hay hoy en la base. Si
- * mientras la ficha estaba abierta el admin linkeó la zona a otro preventista,
- * guardar sin tocar la asignación no la deshace, y sacar a A no borra a B. El
- * reemplazo entero (borrar todo y volver a insertar la lista del formulario)
- * reponía al preventista viejo.
- *
- * Sin `previos` se compara contra la base, y la lista del formulario reemplaza
- * lo que haya: es el caso del alta y de una edición que cambia la zona o libera
- * un reservado eligiendo preventista, donde el trigger de la zona ya reasignó
- * en el UPDATE y lo que eligió el usuario tiene que ganarle.
- *
- * Las que se suman van de a una, y una que ya está (23505: el trigger ya pudo
- * haber puesto al dueño de la zona, o otro lo asignó mientras tanto) no es un
- * error. No es un upsert porque `cliente_preventistas` no tiene UPDATE REST
- * (#1135). Devuelve lo que quedó en la base.
- */
-async function sincronizarPreventistas(
-  clienteId: string,
-  preventistaIds: string[],
-  previos?: string[],
-): Promise<string[]> {
-  const antes = new Set(previos ?? await leerPreventistasAsignados(clienteId))
-  const despues = new Set(preventistaIds)
-  const sacados = [...antes].filter(pid => !despues.has(pid))
-  const sumados = [...despues].filter(pid => !antes.has(pid))
-
-  if (sacados.length > 0) {
-    const { error: delError } = await supabase
-      .from('cliente_preventistas')
-      .delete()
-      .eq('cliente_id', clienteId)
-      .in('preventista_id', sacados)
-    if (delError) throw errorDeSupabase(delError, ERROR_ASIGNACION)
-  }
-
-  for (const pid of sumados) {
-    const { error: insError } = await supabase
-      .from('cliente_preventistas')
-      .insert({ cliente_id: clienteId, preventista_id: pid })
-    if (insError && insError.code !== '23505') throw errorDeSupabase(insError, ERROR_ASIGNACION)
-  }
-
-  // Lo que quedó, para el cache: puede no ser la lista del formulario (el dueño
-  // que puso el trigger al liberar un reservado, el link de zona de otro).
-  return leerPreventistasAsignados(clienteId)
-}
-
-const ERROR_DESCUENTOS = 'Sin conexión: no se pudo confirmar el cambio de descuentos del cliente. Revisá la ficha del cliente antes de reintentar, puede haber quedado hecho.'
-
-/**
- * Deja los descuentos por categoría de un cliente como la lista pedida. Idempotente. Dedup por
- * categoría normalizada (la última gana) para no chocar con el UNIQUE (cliente_id, categoria).
- * Filas sin categoría se descartan.
- *
- * Antes borraba TODO y después insertaba (dos llamadas sin transacción): si la segunda fallaba, el
- * cliente se quedaba sin ningún descuento (1598-b5). Ahora toca sólo lo que cambió, en este orden:
- *   1. inserta las categorías nuevas (si falla, no se borró nada);
- *   2. borra las que sobran y las de valor distinto (la tabla no tiene UPDATE: ni grant ni policy);
- *   3. inserta las de valor distinto; si falla, restituye las anteriores y relanza.
- * La ventana que queda (el paso 3 y su restitución fallan los dos) alcanza sólo a las categorías
- * cuyo valor cambió. Cerrarla del todo pide una RPC transaccional, que esta tarjeta no podía crear.
- */
-export async function replaceCategoriaDiscounts(
-  clienteId: string,
-  descuentos: { categoria: string; descuento_porcentaje: number }[]
-): Promise<void> {
-  const clave = (categoria: string): string => categoria.trim().toUpperCase()
-
-  const dedup = new Map<string, { cliente_id: string; categoria: string; descuento_porcentaje: number }>()
-  for (const d of descuentos || []) {
-    const categoria = (d.categoria || '').trim()
-    if (!categoria) continue
-    dedup.set(clave(categoria), {
-      cliente_id: clienteId,
-      categoria,
-      descuento_porcentaje: d.descuento_porcentaje,
-    })
-  }
-
-  const { data: existentes, error: selError } = await supabase
-    .from('cliente_descuentos_categoria')
-    .select('categoria, descuento_porcentaje')
-    .eq('cliente_id', clienteId)
-  if (selError) throw errorDeSupabase(selError, ERROR_DESCUENTOS)
-
-  const actuales = (existentes ?? []) as { categoria: string; descuento_porcentaje: number }[]
-  const porClave = new Map<string, { categoria: string; descuento_porcentaje: number }[]>()
-  for (const f of actuales) porClave.set(clave(f.categoria), [...(porClave.get(clave(f.categoria)) ?? []), f])
-
-  const nuevas: { cliente_id: string; categoria: string; descuento_porcentaje: number }[] = []
-  const cambiadas: typeof nuevas = []
-  const sobran: string[] = []
-  const anteriores: typeof nuevas = []
-  for (const [k, destino] of dedup) {
-    const previas = porClave.get(k)
-    if (!previas) { nuevas.push(destino); continue }
-    const igual = previas.length === 1 && Number(previas[0].descuento_porcentaje) === Number(destino.descuento_porcentaje)
-    if (igual) continue
-    cambiadas.push(destino)
-    for (const p of previas) {
-      sobran.push(p.categoria)
-      anteriores.push({ cliente_id: clienteId, categoria: p.categoria, descuento_porcentaje: p.descuento_porcentaje })
-    }
-  }
-  for (const [k, previas] of porClave) {
-    if (!dedup.has(k)) for (const p of previas) sobran.push(p.categoria)
-  }
-
-  if (nuevas.length > 0) {
-    const { error } = await supabase.from('cliente_descuentos_categoria').insert(nuevas)
-    if (error) throw errorDeSupabase(error, ERROR_DESCUENTOS)
-  }
-
-  if (sobran.length > 0) {
-    const { error } = await supabase
-      .from('cliente_descuentos_categoria')
-      .delete()
-      .eq('cliente_id', clienteId)
-      .in('categoria', sobran)
-    if (error) throw errorDeSupabase(error, ERROR_DESCUENTOS)
-  }
-
-  if (cambiadas.length > 0) {
-    const { error } = await supabase.from('cliente_descuentos_categoria').insert(cambiadas)
-    if (error) {
-      // Los valores anteriores ya se borraron: se devuelven para no dejar al cliente sin ellos.
-      await supabase.from('cliente_descuentos_categoria').insert(anteriores)
-      throw errorDeSupabase(error, ERROR_DESCUENTOS)
-    }
-  }
+async function guardarClienteRpc(
+  payload: Record<string, unknown>,
+  mensajeSinConexion: string,
+): Promise<{ cliente: ClienteDB; preventistaIds: string[] }> {
+  const { data, error } = await supabase.rpc('guardar_cliente', { p_cliente: payload })
+  if (error) throw errorDeSupabase(error, mensajeSinConexion)
+  const r = data as RespuestaGuardarCliente | null
+  lanzarSiConflicto(r)
+  if (!r?.success || !r.cliente) throw new Error(r?.error || 'No se pudo guardar el cliente')
+  return { cliente: r.cliente, preventistaIds: (r.preventista_ids ?? []).map(String) }
 }
 
 // Mutation types
@@ -301,6 +186,16 @@ interface ClienteCreateInput {
    * No es una columna: se descarta antes del INSERT.
    */
   duplicado_confirmado?: boolean
+  /**
+   * La clave del alta (C4b v2): el reintento de la misma alta devuelve el cliente que ya entró. No
+   * es una columna.
+   */
+  clave?: string
+  /**
+   * La versión del cliente al abrir la ficha (`updated_at`): si otro lo guardó en el medio, la
+   * edición no lo pisa ('cliente_cambiado'). No es una columna.
+   */
+  updated_at_esperado?: string | null
 }
 
 // Mutation functions
@@ -335,18 +230,21 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
     )
   }
 
-  const { preventista_ids, descuentos_categoria, duplicado_confirmado: _confirmadoAlta, ...clienteFields } = cliente
-  void _confirmadoAlta
-  const { data, error } = await supabase
-    .from('clientes')
-    .insert([{
+  const {
+    preventista_ids, descuentos_categoria, duplicado_confirmado, clave, updated_at_esperado: _v, ...clienteFields
+  } = cliente
+  void _v
+  const { cliente: newCliente, preventistaIds } = await guardarClienteRpc({
+    // Sin la clave del formulario, una nueva: no hay reintento que reconocer.
+    clave: clave ?? nuevoRequestId(),
+    duplicado_confirmado: duplicado_confirmado ?? false,
+    campos: {
       razon_social: clienteFields.razon_social,
       nombre_fantasia: clienteFields.nombre_fantasia,
       direccion: clienteFields.direccion,
       aclaracion_direccion: clienteFields.aclaracion_direccion ?? null,
       telefono: clienteFields.telefono || null,
-      // El documento con su tipo, que sale del valor (B17, #1561): esta lista nombra
-      // las columnas una por una, y sin el tipo todo cliente nacía 'CUIT'.
+      // El documento con su tipo, que sale del valor (B17, #1561).
       ...documentoParaGuardar(clienteFields.cuit),
       // zona_id es la FK canónica. '' (string vacío) y undefined → null para limpiar la FK.
       zona_id: clienteFields.zona_id ? clienteFields.zona_id : null,
@@ -363,27 +261,16 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
       notas: clienteFields.notas || null,
       tipo_factura_default: clienteFields.tipo_factura_default ?? 'ZZ',
       place_id: clienteFields.place_id || null,
-      // "Solo administradores" (mig 214). Esta lista es explicita, asi que sin
-      // esta linea la marca se perderia en silencio al crear. La RLS de INSERT
-      // solo la acepta en true si el que crea es admin.
+      // "Solo administradores" (mig 214): la marca no se pierde en el alta. El trigger la acepta
+      // en true sólo si el que crea es admin.
       reservado_admin: clienteFields.reservado_admin ?? false,
-      sucursal_id: sucursalId,
-    }])
-    .select()
-    .single()
+    },
+    ...(preventista_ids !== undefined ? { preventista_ids } : {}),
+    ...(descuentos_categoria !== undefined ? { descuentos_categoria } : {}),
+  }, 'Sin conexión: no se pudo confirmar el alta del cliente. Podés volver a guardar: si ya había entrado, no se crea otro.')
 
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el alta del cliente. Revisá la lista de clientes antes de reintentar, puede haber quedado hecho.')
-  const newCliente = data as ClienteDB
-
-  if (preventista_ids !== undefined) {
-    newCliente.preventista_ids = await sincronizarPreventistas(newCliente.id, preventista_ids)
-  }
-
-  if (descuentos_categoria !== undefined) {
-    await replaceCategoriaDiscounts(newCliente.id, descuentos_categoria)
-    newCliente.descuentos_categoria = descuentos_categoria
-  }
-
+  if (preventista_ids !== undefined) newCliente.preventista_ids = preventistaIds
+  if (descuentos_categoria !== undefined) newCliente.descuentos_categoria = descuentos_categoria
   return newCliente
 }
 
@@ -397,9 +284,12 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
     preventista_ids_previos,
     descuentos_categoria,
     duplicado_confirmado: _confirmado,
+    clave: _clave,
+    updated_at_esperado,
     ...clienteFields
   } = cliente
   void _confirmado
+  void _clave
 
   // Coerce '' → null para zona_id (FK column). PostgREST rechaza '' en columnas FK.
   // Solo aplicamos si el campo viene en el patch (Partial), preservando undefined
@@ -458,25 +348,18 @@ async function updateCliente({ id, data: cliente }: { id: string; data: Partial<
     }
   }
 
-  const { data, error } = await supabase
-    .from('clientes')
-    .update(payload)
-    .eq('id', id)
-    .select()
-    .single()
+  const { cliente: updated, preventistaIds } = await guardarClienteRpc({
+    id: Number(id),
+    duplicado_confirmado: cliente.duplicado_confirmado ?? false,
+    ...(updated_at_esperado ? { updated_at_esperado } : {}),
+    campos: payload,
+    ...(preventista_ids !== undefined ? { preventista_ids } : {}),
+    ...(preventista_ids !== undefined && preventista_ids_previos !== undefined ? { preventista_ids_previos } : {}),
+    ...(descuentos_categoria !== undefined ? { descuentos_categoria } : {}),
+  }, 'Sin conexión: no se pudo confirmar los cambios del cliente. Podés volver a guardar: deja el cliente como lo cargaste.')
 
-  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar los cambios del cliente. Revisá la ficha del cliente antes de reintentar, puede haber quedado hecho.')
-  const updated = data as ClienteDB
-
-  if (preventista_ids !== undefined) {
-    updated.preventista_ids = await sincronizarPreventistas(id, preventista_ids, preventista_ids_previos)
-  }
-
-  if (descuentos_categoria !== undefined) {
-    await replaceCategoriaDiscounts(id, descuentos_categoria)
-    updated.descuentos_categoria = descuentos_categoria
-  }
-
+  if (preventista_ids !== undefined) updated.preventista_ids = preventistaIds
+  if (descuentos_categoria !== undefined) updated.descuentos_categoria = descuentos_categoria
   return updated
 }
 
