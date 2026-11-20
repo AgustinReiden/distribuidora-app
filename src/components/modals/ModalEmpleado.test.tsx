@@ -313,6 +313,53 @@ describe('ModalEmpleado', () => {
     expect(payload.saldo_inicial).toBeUndefined()
   })
 
+  // 1597-b6 (#1597): la fecha de ingreso no puede ser futura, como en guardar_empleado.
+  it('una fecha de ingreso futura queda en rojo junto al campo y no guarda', async () => {
+    const { onSave, user } = renderModal()
+    await cargarAlta(user)
+    await user.type(screen.getByLabelText(/^Sueldo fijo/), '280000')
+    const ingreso = screen.getByLabelText('Ingresó el') as HTMLInputElement
+    // Sin `max` nativo: frenaría también la ficha que ya tenía una fecha futura y no se toca.
+    expect(ingreso.max).toBe('')
+    fireEvent.change(ingreso, { target: { value: '2026-10-30' } })
+
+    expect(ingreso).toHaveAttribute('aria-invalid', 'true')
+    expect(ingreso).toHaveAccessibleDescription('La fecha de ingreso no puede ser futura')
+    fireEvent.submit(screen.getByRole('button', { name: 'Dar de alta' }).closest('form') as HTMLFormElement)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('hoy como fecha de ingreso sí guarda', async () => {
+    const { onSave, user } = renderModal()
+    await cargarAlta(user)
+    await user.type(screen.getByLabelText(/^Sueldo fijo/), '280000')
+    fireEvent.change(screen.getByLabelText('Ingresó el'), { target: { value: '2026-10-29' } })
+    expect(screen.getByLabelText('Ingresó el')).not.toHaveAttribute('aria-invalid')
+    await user.click(screen.getByRole('button', { name: 'Dar de alta' }))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ fecha_ingreso: '2026-10-29' })
+  })
+
+  it('una ficha que ya tenía una fecha de ingreso futura se edita sin tocarla', async () => {
+    const { onSave, user } = renderModal({ empleado: { ...EMPLEADO, fecha_ingreso: '2026-11-15' } })
+    expect(screen.getByLabelText('Ingresó el')).not.toHaveAttribute('aria-invalid')
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ fecha_ingreso: '2026-11-15' })
+  })
+
+  it('el motivo del server sobre la fecha de ingreso se muestra junto al campo', async () => {
+    const onSave = vi.fn<OnSave>(() => Promise.reject(new Error('La fecha de ingreso no puede ser futura')))
+    const { user } = renderModal({ empleado: EMPLEADO, onSave })
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    const ingreso = screen.getByLabelText('Ingresó el')
+    expect(await screen.findByRole('alert')).toHaveTextContent('La fecha de ingreso no puede ser futura')
+    expect(ingreso).toHaveAttribute('aria-invalid', 'true')
+    expect(ingreso).toHaveAccessibleDescription('La fecha de ingreso no puede ser futura')
+    // Al tocar la fecha, el rojo del server se va.
+    fireEvent.change(ingreso, { target: { value: '2025-02-04' } })
+    expect(ingreso).not.toHaveAttribute('aria-invalid')
+  })
+
   it('al editar, una sucursal que no se toca se conserva', async () => {
     const { onSave, user } = renderModal({
       empleado: { ...EMPLEADO, sucursal_id: 2 },

@@ -31,6 +31,7 @@ import type { ClienteSaveData } from '../modals/ModalCliente'
 import { cambiaIdentidadDuplicado, SIN_DUPLICADO_RPC } from '../../utils/duplicadoCliente'
 import { asignacionContraLaBase } from '../../utils/zonasPreventista'
 import { lazyWithReload } from '../../utils/lazyWithReload'
+import { useRequestIdEstable } from '../../hooks/useRequestIdEstable'
 import { formatCurrency, formatPrecio } from '../../utils/formatters'
 
 // Lazy load de componentes
@@ -82,6 +83,9 @@ export default function ClientesContainer(): React.ReactElement {
 
   // Mutations
   const crearCliente = useCrearClienteMutation()
+  // La clave del alta (C4b v2): el mismo formulario reintentado lleva la misma y el server no crea
+  // otro cliente; otro contenido es otra alta.
+  const claveAlta = useRequestIdEstable()
   const actualizarCliente = useActualizarClienteMutation()
   const eliminarCliente = useEliminarClienteMutation()
   const crearCambioEnRutaMut = useCrearPedidoCambioEnRutaMutation()
@@ -487,6 +491,8 @@ export default function ClientesContainer(): React.ReactElement {
         horario_entrega: data.horario_entrega || null,
         rubro: data.rubro || null,
         notas: data.notas || null,
+        // La versión con la que se abrió la ficha (C4b v2): si otro la guardó, no se pisa.
+        updated_at_esperado: clienteEditando!.updated_at ?? null,
       }
       try {
         await actualizarCliente.mutateAsync({ id: clienteEditando!.id, data: patchRestringido })
@@ -564,10 +570,16 @@ export default function ClientesContainer(): React.ReactElement {
 
     try {
       if (clienteEditando) {
-        await actualizarCliente.mutateAsync({ id: clienteEditando.id, data: dbData })
+        // La versión con la que se abrió la ficha (C4b v2): si otro la guardó, no se pisa.
+        await actualizarCliente.mutateAsync({
+          id: clienteEditando.id,
+          data: { ...dbData, updated_at_esperado: clienteEditando.updated_at ?? null },
+        })
         notify.success('Cliente actualizado')
       } else {
-        await crearCliente.mutateAsync(dbData)
+        const huella = JSON.stringify(dbData)
+        await crearCliente.mutateAsync({ ...dbData, clave: claveAlta(huella) })
+        claveAlta.olvidar([huella])
         notify.success('Cliente creado')
       }
       setModalClienteOpen(false)
@@ -576,7 +588,7 @@ export default function ClientesContainer(): React.ReactElement {
       notify.error((error as Error).message || 'Error al guardar cliente')
       throw error
     }
-  }, [clienteEditando, actualizarCliente, crearCliente, notify, isAdmin, isPreventista, edicionRestringida, user])
+  }, [clienteEditando, actualizarCliente, crearCliente, notify, isAdmin, isPreventista, edicionRestringida, user, claveAlta])
 
   return (
     <>
