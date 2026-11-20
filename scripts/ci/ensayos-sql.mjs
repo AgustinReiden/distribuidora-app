@@ -58,12 +58,6 @@ const lista = JSON.parse(readFileSync(new URL('../ensayos-sql-excepciones.json',
 const excepciones = lista.ensayos ?? {};
 // Los que no se corren: piden dos sesiones a la vez y CONFIRMAN datos (ensucian la base).
 const omitidos = lista.omitir ?? {};
-// Los sensibles al tiempo (B13e, #1603): afirman que una sentencia entra en su statement_timeout REAL (el de
-// `authenticated`, 8 s), y en un runner lento la sentencia se corta por el runner y no por el código. Si fallan
-// por «statement timeout» se corren UNA vez más, y sólo pasan si la segunda da ENSAYO OK: una regresión de
-// verdad (un lote que ya no entra en 8 s) se corta las dos veces y sigue poniendo rojo. Lista explícita y corta.
-const sensibles = lista.sensibles_al_tiempo ?? {};
-const CORTE_POR_TIEMPO = /canceling statement due to statement timeout/i;
 const archivos = readdirSync(carpeta)
   .filter((f) => /^test-.*\.sql$/.test(f) && !Object.hasOwn(omitidos, f))
   .filter((f) => !solo || f.includes(solo))
@@ -78,16 +72,8 @@ const t0 = Date.now();
 for (const f of archivos) {
   const sql = readFileSync(new URL(f, carpeta), 'utf8').replaceAll('\r\n', '\n');
   const t = Date.now();
-  const correr = () => {
-    const r = psqlCompleto(sql, { destino: d, tz });
-    return `${r.stdout}\n${r.stderr}`;
-  };
-  let salida = correr();
-  let { ok, firma: motivo } = veredicto(salida);
-  if (!ok && Object.hasOwn(sensibles, f) && CORTE_POR_TIEMPO.test(salida)) {
-    console.log(`REINTENTO ${f}  ← se cortó por statement timeout (${((Date.now() - t) / 1000).toFixed(1)} s): se corre una vez más`);
-    ({ ok, firma: motivo } = veredicto(correr()));
-  }
+  const r = psqlCompleto(sql, { destino: d, tz });
+  const { ok, firma: motivo } = veredicto(`${r.stdout}\n${r.stderr}`);
   resultados.push({ f, ok, motivo, seg: (Date.now() - t) / 1000 });
   console.log(`${ok ? 'OK   ' : 'FALLA'} ${f}${ok ? '' : `  ← ${motivo}`}  (${((Date.now() - t) / 1000).toFixed(1)} s)`);
 }
