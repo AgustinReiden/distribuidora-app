@@ -1,6 +1,7 @@
 import { useState, useMemo, memo } from 'react'
 import { Loader2, Search, Calendar, AlertTriangle } from 'lucide-react'
 import ModalBase from './ModalBase'
+import QueryErrorState from '../layout/QueryErrorState'
 import { Button } from '../ui/Button'
 // La confirmación se renderiza DENTRO del ModalBase: ModalBase es un Radix
 // Dialog que portalea su contenido con z-50, así que un hermano `fixed inset-0
@@ -51,7 +52,7 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
   const [fechaPago, setFechaPago] = useState<string>(hoy)
   const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null)
 
-  const { data: pedidos = [], isLoading } = usePedidosNoPagadosQuery(true)
+  const { data: pedidos = [], isLoading, isError, refetch } = usePedidosNoPagadosQuery(true)
   const { data: rendicionCerrada = false } = useRendicionCerradaQuery(fechaPago, fechaBloqueada)
 
   const pedidosFiltrados = useMemo(() => {
@@ -244,6 +245,9 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
               <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
               <span className="ml-2 text-gray-500">Cargando pedidos...</span>
             </div>
+          ) : isError ? (
+            // H2 de la revisión de C7: un error de lectura no es «no hay pedidos».
+            <QueryErrorState onRetry={() => { void refetch() }} />
           ) : pedidosFiltrados.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               No hay pedidos pendientes de pago

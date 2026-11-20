@@ -17,6 +17,7 @@ import {
   totalesAjusteNotaCredito,
 } from '../../utils/notaCredito'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
+import { useAtrasCierraModal } from '../../hooks/useAtrasCierraModal'
 import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
 
 interface CompraItem {
@@ -66,6 +67,8 @@ export default function ModalNotaCredito({
   onSave,
   onClose,
 }: ModalNotaCreditoProps): React.ReactElement {
+  // Modal hecho a mano (no pasa por `ui/Dialog`): el «atrás» del teléfono lo cierra (decisión 4 del dueño, #1603).
+  useAtrasCierraModal(onClose)
   // B20: los campos de número en rojo frenan el guardado.
   const ilegibles = useRegistroIlegibles()
   const [saving, setSaving] = useState(false)
@@ -359,7 +362,9 @@ export default function ModalNotaCredito({
                           value={cant}
                           aria-label={`Cantidad a acreditar de ${item.producto?.nombre || 'Producto'}`}
                           onChange={(n) => handleCantidadChange(item.id, String(n))}
-                          disabled={max <= 0}
+                          // H6a de la revisión de C7: con un valor cargado no se deshabilita (si el límite bajó a 0
+                          // queda en rojo y hay que poder corregirlo).
+                          disabled={max <= 0 && cant <= 0}
                           className="w-20 px-2 py-1 text-center border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
                         {max > 0 && (

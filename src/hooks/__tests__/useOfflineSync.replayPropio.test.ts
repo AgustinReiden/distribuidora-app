@@ -41,7 +41,7 @@ describe('verificarRespuestaIdempotente (H2)', () => {
   it('mismo cliente y otro total con una clave por intención: es el propio, cambiado después', () => {
     const cancelado = { idempotente: true, id: 42, clienteId: 7, total: 0, cargoEnvio: 0 }
     expect(verificarRespuestaIdempotente(cancelado, encolado, CLAVE_UUID)).toBeNull()
-    expect(avisoPedidoQueYaHabiaEntrado(cancelado, encolado)).toMatch(/#42 ya estaba cargado.*cambió.*no se cargó otro/)
+    expect(avisoPedidoQueYaHabiaEntrado(cancelado, encolado)).toMatch(/#42 ya estaba cargado.*lo cambió.*ahora su total es.*No se cargó otro pedido y el cobro NO se registró.*Cobralo desde el pedido/)
   })
 
   it('otro cliente sigue siendo «otro pedido», terminal', () => {

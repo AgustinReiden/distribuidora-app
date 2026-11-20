@@ -33,6 +33,7 @@ import type { TipoMeta, AvanceMeta } from '../../hooks/queries';
 import { useSucursal } from '../../contexts/SucursalContext';
 import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo';
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles';
+import { ymdLocal, ultimoDiaDelMes } from '../../utils/fechaLocal';
 
 export interface ModalMetasPreventistaProps {
   /** Período 'YYYY-MM-01' del panel; da el mes por defecto del formulario. */
@@ -52,10 +53,13 @@ const TIPOS: Array<{ valor: TipoMeta; label: string; ayuda: string }> = [
 const ADMITE_ALCANCE: TipoMeta[] = ['facturacion', 'unidades'];
 const EXIGE_ALCANCE: TipoMeta[] = ['unidades'];
 
-/** Último día del mes de una fecha ISO 'YYYY-MM-DD'. */
+/**
+ * Último día del mes de una fecha ISO 'YYYY-MM-DD'. Es una cuenta de calendario, sin pasar por UTC:
+ * `new Date(y, m, 0).toISOString()` corría el día hacia atrás en un dispositivo al este de UTC (1600-b12).
+ */
 function finDeMes(iso: string): string {
   const [y, m] = iso.split('-').map(Number);
-  return new Date(y, m, 0).toISOString().slice(0, 10);
+  return ymdLocal(y, m - 1, ultimoDiaDelMes(y, m - 1));
 }
 
 const ModalMetasPreventista = memo(function ModalMetasPreventista({

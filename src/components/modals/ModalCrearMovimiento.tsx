@@ -5,7 +5,7 @@
  * Desde la mig 139 crear DESCUENTA el stock del origen en el acto (la
  * mercadería ya salió del depósito), y editar lo ajusta por diferencia.
  */
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Search, Plus, Trash2, Building2, PackageMinus } from 'lucide-react'
 import ModalBase from './ModalBase'
 import NumberInput from '../ui/NumberInput'
@@ -73,9 +73,15 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
   const stockDe = (productoId: string, stockActual: number) =>
     stockDisponibleParaEnvio(stockActual, reservadoPorProducto.get(productoId) ?? 0)
 
-  // Prellenar las líneas cuando llegan los items del envío que se edita.
+  // Prellenar las líneas cuando llegan los items del envío que se edita. Una vez por versión guardada del
+  // envío (H6b de la revisión de C7): antes dependía de `productos` y cualquier refetch del catálogo
+  // devolvía las líneas a lo guardado, perdiendo lo tipeado y lo agregado.
+  const prellenadoDe = useRef<string | null>(null)
   useEffect(() => {
     if (!esEditar || !itemsIniciales?.length) return
+    const huella = JSON.stringify(itemsIniciales.map(it => [String(it.producto_origen_id), it.cantidad]))
+    if (prellenadoDe.current === huella) return
+    prellenadoDe.current = huella
     setLineas(itemsIniciales.map(it => {
       const pid = String(it.producto_origen_id)
       const prod = productos.find(p => String(p.id) === pid)
@@ -87,6 +93,23 @@ const ModalCrearMovimiento = memo(function ModalCrearMovimiento({
       }
     }))
   }, [esEditar, itemsIniciales, productos])
+
+  // Un catálogo nuevo sólo actualiza el stock disponible de cada línea: la cantidad es de quien edita.
+  useEffect(() => {
+    setLineas(prev => {
+      if (prev.length === 0) return prev
+      let cambio = false
+      const next = prev.map(l => {
+        const prod = productos.find(p => String(p.id) === l.productoId)
+        if (!prod) return l
+        const stock = stockDisponibleParaEnvio(prod.stock ?? 0, reservadoPorProducto.get(l.productoId) ?? 0)
+        if (stock === l.stock) return l
+        cambio = true
+        return { ...l, stock }
+      })
+      return cambio ? next : prev
+    })
+  }, [productos, reservadoPorProducto])
 
   const resultados = useMemo(() => {
     const term = busqueda.trim().toLowerCase()

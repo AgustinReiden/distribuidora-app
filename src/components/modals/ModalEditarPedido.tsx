@@ -226,6 +226,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const [mostrarBuscador, setMostrarBuscador] = useState<boolean>(false);
   const [busquedaProducto, setBusquedaProducto] = useState<string>('');
   const [itemsModificados, setItemsModificados] = useState<boolean>(false);
+  // Sólo lo que tocó el usuario en los renglones (sin `bonifDifierenDeDB`: un regalo que la promo de hoy ya no
+  // da prende `itemsModificados` sin que nadie toque nada). Es lo que decide «Salir sin guardar» (N5, C7).
+  const [lineasTocadas, setLineasTocadas] = useState<boolean>(false);
   const [errorStock, setErrorStock] = useState<string | null>(null);
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
   // T8 de la tercera pasada: tocar la X marca «cancelando» ANTES de que el navegador pueda sacarle el
@@ -336,13 +339,18 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   const inicioLineasRef = useRef<InicioDeLineas | null>(null);
   // Lo escribe el efecto que detecta cambios (abajo): ¿las líneas difieren de lo guardado?
   const lineasTocadasRef = useRef(false);
+  // H1 de la revisión de C7: los renglones ya se guardaron pero el `pedido` que recibe el modal todavía es
+  // el de antes (la edición quedó a medias: fallaron las fechas o las notas). Un refresco de `productos` no
+  // tiene que volver las líneas a ese `pedido` viejo: lo guardado vale más que lo que dice la foto.
+  const lineasGuardadasSinRefrescarRef = useRef(false);
   useEffect(() => {
     if (pedido?.items) {
       const inicio: InicioDeLineas = {
         pedidoId: String(pedido.id),
         huella: huellaLineasGuardadas(pedido.items),
       };
-      if (!debeReiniciarLineas(inicioLineasRef.current, inicio, lineasTocadasRef.current)) return;
+      if (!debeReiniciarLineas(inicioLineasRef.current, inicio, lineasTocadasRef.current || lineasGuardadasSinRefrescarRef.current)) return;
+      lineasGuardadasSinRefrescarRef.current = false;
       inicioLineasRef.current = inicio;
       // #1191: un producto en combo se guarda en dos líneas (la del combo y la
       // suelta). Acá es UNA fila por producto: los combos se vuelven a armar
@@ -874,6 +882,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     if (itemsOriginales.length === 0) {
       // Un pedido sin líneas de venta: lo agregado tampoco se pisa con un refresco.
       lineasTocadasRef.current = items.length > 0;
+      setLineasTocadas(items.length > 0);
       return;
     }
 
@@ -891,6 +900,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       itemsOriginales.some(o => !items.find(i => i.productoId === o.productoId));
 
     lineasTocadasRef.current = cambios;
+    setLineasTocadas(cambios);
     setItemsModificados(cambios || bonifDifierenDeDB);
   }, [items, itemsOriginales, bonifDifierenDeDB]);
 
@@ -1216,6 +1226,13 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         }
         try {
           await onSaveItems(todosLosItems, origenes, decisionEnvio);
+          // H1 de la revisión de C7: los renglones ya están guardados. Si lo que sigue (fechas, notas) falla y
+          // el modal queda abierto, lo guardado es lo «original»: el disponible (stock + lo que el pedido
+          // tiene), el piso de venta, el aviso de cambios y el «Anterior» se miden contra eso. Con lo que había
+          // al abrir, el refetch del stock ya descontado ponía en rojo lo recién guardado.
+          lineasGuardadasSinRefrescarRef.current = true;
+          setItemsOriginales(JSON.parse(JSON.stringify(items)));
+          setItems(items.map(i => ({ ...i, cantidadOriginal: i.cantidad })));
         } catch (err) {
           // La política cambió mientras el modal estaba abierto: el server pide
           // la decisión que el modal no supo pedir. Se pregunta y se reintenta.
@@ -1254,6 +1271,14 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     void conGuardadoUnico(() => doGuardar(pregunta.notas, pregunta.fechaEntregaCambio, decision));
   };
 
+  // La X, Escape y el «atrás» del teléfono preguntan «Salir sin guardar» si lo editado difiere de lo guardado
+  // (decisión 4 del dueño, #1603): renglones, promos, notas, fechas. Un pedido sin tocar no pregunta.
+  const hayCambiosSinGuardar = lineasTocadas || hayPromosQuitadas || promosAgregadas.length > 0
+    || notas !== (pedido?.notas || '')
+    || fecha !== (pedido?.fecha || '')
+    || fechaEntrega !== fechaEntregaOriginal
+    || fechaEntregaProgramada !== fechaEntregaProgramadaOriginal;
+
   const getStockDisponible = (productoId: string): number => {
     const producto = productos.find(p => p.id === productoId);
     const cantidadOriginal = itemsOriginales.find(o => o.productoId === productoId)?.cantidad || 0;
@@ -1267,6 +1292,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       description="Editar items, fechas y notas del pedido. El pago se gestiona desde el menú del pedido."
       onClose={onClose}
       maxWidth="max-w-2xl"
+      hayCambios={hayCambiosSinGuardar}
+      guardando={guardando || guardandoLocal}
     >
       <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
         {/* Info del cliente */}

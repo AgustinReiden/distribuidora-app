@@ -5,9 +5,17 @@
  * supabase siguen la forma real: el error es un objeto plano.
  */
 import React from 'react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest'
+import { renderHook, waitFor, configure, getConfig } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+
+// 1587-t3: con la máquina cargada (varias sesiones corriendo vitest, o la suite entera en el CI) los
+// `waitFor` de este archivo se quedaban sin sus 5 s del setup y «llama empleados_para_elegir…» fallaba
+// sin que nada estuviera roto. Margen propio, sólo para este archivo: cuando la consulta contesta, el
+// `waitFor` vuelve en el acto, así que no alarga las corridas buenas.
+const ESPERA_DEL_SETUP = getConfig().asyncUtilTimeout
+beforeAll(() => configure({ asyncUtilTimeout: 20000 }))
+afterAll(() => configure({ asyncUtilTimeout: ESPERA_DEL_SETUP }))
 
 type ErrorDeSupabase = { message: string; details?: string; hint?: string; code: string }
 

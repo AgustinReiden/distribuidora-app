@@ -4,7 +4,9 @@
  * factura A al 21% dan IVA 8.677,69 y neto 41.322,31.
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
+import { asentar, atras } from '../../test/atrasHelpers'
 import { fireEvent, render, screen, within } from '@testing-library/react'
+import { reiniciarAtrasModales } from '../../utils/atrasModales'
 import userEvent from '@testing-library/user-event'
 // La lectura de km del gasto vive en `vehiculo_km`: el modal la pide con un hook que acá se
 // reemplaza por el valor que se quiera.
@@ -1579,5 +1581,67 @@ describe('ModalGasto — importes tipeados con puntos de miles', () => {
 
     expect(onSave).not.toHaveBeenCalled()
     expect(await screen.findByText(MENSAJE)).toBeInTheDocument()
+  })
+})
+
+// Decisión 4 del dueño (#1603): la X, Escape y el «atrás» del teléfono preguntan «Salir sin guardar» si el
+// formulario cambió respecto de como abrió; sin tocar, cierran de una.
+describe('ModalGasto — salir sin guardar', () => {
+  const GASTO_PARA_EDITAR = {
+    id: 41, sucursal_id: 1, compartido: false, fecha: '2026-10-15', rubro_id: 3, monto_total: 8500,
+    comprobante: 'ticket' as const, comprobante_numero: null, alicuota_iva: null, iva: 0, percepcion_iva: 0,
+    percepcion_iibb: 0, otros_impuestos: 0, neto: 8500, costo: 8500, vehiculo_id: null, litros: null,
+    mes_imputado: '2026-10-01', repartir_meses: 1, mes_fin: '2026-10-01', origen_pago: 'oficina' as const,
+    observacion: null, creado_por: 'u-1', rendicion_transportista_id: null, rendicion_fecha: null, empleado_id: null,
+    anulado_at: null, created_at: '2026-10-15T10:00:00Z', updated_at: '2026-10-15T10:00:00.123456+00:00',
+  }
+  const botonX = () => screen.getByRole('button', { name: /cerrar/i })
+
+  beforeEach(async () => {
+    reiniciarAtrasModales()
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('sin tocar nada, la X, Escape y el «atrás» cierran de una', async () => {
+    const { onClose, user } = renderModal()
+    await asentar()
+    await user.click(botonX())
+    expect(onClose).toHaveBeenCalledTimes(1)
+    await user.keyboard('{Escape}')
+    expect(onClose).toHaveBeenCalledTimes(2)
+    await atras()
+    expect(onClose).toHaveBeenCalledTimes(3)
+    expect(screen.queryByText('Salir sin guardar')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['la X', async (user: ReturnType<typeof userEvent.setup>) => { await user.click(botonX()) }],
+    ['Escape', async (user: ReturnType<typeof userEvent.setup>) => { await user.keyboard('{Escape}') }],
+    ['el «atrás» del teléfono', async () => { await atras() }],
+  ])('con un monto tipeado, %s pregunta; «Seguir editando» conserva el monto y «Salir igual» cierra', async (_camino, accion) => {
+    const { onClose, user } = renderModal()
+    await asentar()
+    poner(/Monto total/, '50000')
+    await asentar()
+
+    await accion(user)
+    expect(await screen.findByText('Salir sin guardar')).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Seguir editando' }))
+    await asentar()
+    expect((screen.getByLabelText(/Monto total/) as HTMLInputElement).value).not.toBe('')
+    expect(onClose).not.toHaveBeenCalled()
+
+    await accion(user)
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('una edición sin tocar no pregunta', async () => {
+    const { onClose, user } = renderModal({ gasto: GASTO_PARA_EDITAR as never })
+    await asentar()
+    await user.click(botonX())
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })

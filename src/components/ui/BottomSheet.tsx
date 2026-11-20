@@ -38,6 +38,7 @@ import * as React from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { useAtrasCierraModal } from '../../hooks/useAtrasCierraModal';
 
 export interface BottomSheetProps {
   open: boolean;
@@ -225,6 +226,9 @@ export function BottomSheet({
     ...(teclado ? { bottom: teclado.tapa } : {}),
   };
   const paddingFondo = teclado ? '0px' : 'env(safe-area-inset-bottom)';
+
+  // El «atrás» del teléfono cierra el sheet abierto, por el mismo camino que la X y Escape (decisión 4, #1603).
+  useAtrasCierraModal(onClose, open);
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={(v) => !v && onClose()}>

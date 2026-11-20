@@ -10,6 +10,7 @@ import { useClientesQuery, usePreventistasQuery } from '../../hooks/queries'
 import { useOptimizarRutaPreventista } from '../../hooks/useOptimizarRutaPreventista'
 import type { ClienteDB } from '../../types'
 import { lazyWithReload } from '../../utils/lazyWithReload'
+import { volverUnaPantalla } from '../../utils/atrasModales'
 
 const ModalOptimizarRutaPreventista = lazyWithReload(() => import('../modals/ModalOptimizarRutaPreventista'))
 
@@ -32,7 +33,8 @@ export default function RecorridoPreventistaContainer(): React.ReactElement {
 
   const handleClose = useCallback(() => {
     limpiarRuta()
-    window.history.back()
+    // No `history.back()` pelado: con el modal abierto, el historial tiene la entrada de la ventana arriba.
+    volverUnaPantalla()
   }, [limpiarRuta])
 
   return (
