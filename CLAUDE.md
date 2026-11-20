@@ -33,6 +33,11 @@ que inserta (`ANALYZE`): el plan de un ensayo sale de lo que el autovacuum dejó
 anterior, y un plan que elige el índice equivocado tarda 10 veces más sin que el código haya cambiado
 (`test-precios-masivo-30000-1561.sql`; los controles negativos están en `scripts/ci/gates-muerden.sh`).
 
+Después de una carga masiva de datos (una importación, la base inicial de un comercio nuevo) se corre
+`ANALYZE`: con estadísticas viejas el planner cree que `pedidos` y `pedido_items` están casi vacías, arma
+nested loops, y el gerencial, `tablero_categorias`, el bot y Rendimiento pasan el timeout de 8 s (N8 de
+#1603). Se mide con `scripts/tiempos-ventas-estadisticas-viejas-ola2-1603.sql`.
+
 Deploy: push a `main` → webhook de Coolify. La config de nginx de producción **vive en el
 panel de Coolify**, no en el `nginx.conf` del repo — editar el repo no cambia nada.
 Verificá siempre con `curl -I`, nunca leyendo el archivo.
@@ -144,7 +149,8 @@ suelta en `sucursales`.
   necesita quien vende, va a esa lista; si no, a la RPC. El REVOKE de lo reservado para
   `authenticated` (la parte 2) va después, con su issue.
 - **Una `auditoria_*` que lee código limpia el cuerpo con `_sql_sin_comentarios` o
-  `_sql_sin_comentarios_ni_literales`** (#1541): una sola pasada que entiende las comillas. Sacar
+  `_sql_sin_comentarios_ni_literales`** (#1541): una sola pasada que entiende las comillas (también
+  la `\'` de un `E'…'`, C5 de #1603). Sacar
   primero los `--` y después los literales rompe la paridad con un literal `' -- '` y esconde lo
   que sigue. Espejo en `scripts/lib/locks.mjs`.
 - **Los avisos se guardan 90 días y `audit_logs` 24 meses** (1561-b10 y 1596-b10, decisión del
@@ -296,6 +302,11 @@ suelta en `sucursales`.
   `anular_salvedad` se lo devuelve, con tope en lo que la boleta debe. Si el recorte lo borró, o
   el cobro ya está en una rendición confirmada o en un día con la caja cerrada, vuelve como un
   cobro nuevo con sus datos (con la fecha de hoy si la suya está cerrada), y la foto no cambia.
+  Ese cobro nuevo lleva las marcas del recortado (`a_cuenta`, `pago_origen_id` y `pago_padre_id`;
+  1595-b2): un adelanto de sueldo del FIFO de la ficha sigue a cuenta y `desimputar_pago` lo acepta.
+  Reponer un adelanto a un empleado dado de baja se rechaza siempre: raíz, pedazo o sumado al pago
+  vivo, mirando la ficha de hoy y los movimientos de esa familia de pagos (a quien el trigger de la
+  cuenta carga), y sólo si hay algo que reponer (H4 de la revisión de C1).
   Lo que quedó a favor, o un cobro que alguien borró o movió después, no se repone.
   **La línea que la salvedad borró vuelve con su foto** (VTA-1, #1595): al borrarla,
   `registrar_salvedad` guarda su costo, su lista, su origen, su descuento y su escala en
@@ -305,7 +316,9 @@ suelta en `sucursales`.
   combo), y uno que repunte escalas repunta también la de la foto.
   Anular una salvedad que devuelve el derecho a un regalo se rechaza si **cualquier** salvedad
   del pedido, viva o anulada, recortó un regalo de esa promo (1592-b5 y su revisión): mirar
-  sólo la propia hacía que el resultado dependiera del orden en que se anulan.
+  sólo la propia hacía que el resultado dependiera del orden en que se anulan. Una salvedad sobre
+  el propio regalo (baja esa línea, no la venta) no es un recorte y no cuenta: como no se puede
+  anular, el resultado sigue sin depender del orden (1592-b5 residual).
   **La boleta nueva absorbe el saldo a favor al crearse** (mig 463c, #1469; decisión del dueño):
   FIFO, por `aplicar_credito_cliente`, en `crear_pedido_completo` y el bot. Un camino nuevo que
   cree una boleta hace lo mismo con `_alta_bloquea_boletas_credito` (antes de los productos),
@@ -336,7 +349,9 @@ suelta en `sucursales`.
   de total ya no absorbe sola el crédito suelto: lo absorbe el próximo pedido o una imputación a
   mano. El FIFO es uno, `_aplicar_credito_pagos(cliente, sucursal, pagos)`, y
   `aplicar_credito_cliente` lo llama con todos: sólo barren todo el alta y el FIFO de la ficha. Un
-  camino nuevo que deje plata a favor pasa la lista de sus pagos. **El saldo a favor aplicado a
+  camino nuevo que deje plata a favor pasa la lista de sus pagos. El crédito que se aplica a una
+  boleta pierde sus marcas de saldo a favor en las notas por `_notas_sin_saldo_a_favor` (las tres:
+  la común, la de cancelación y la de cambio de cliente; COB-b6). **El saldo a favor aplicado a
   una boleta no se borra:** un pago con `de_saldo_a_favor`, `a_cuenta`, `pago_origen_id` o
   `nota_credito_id` se quita con `desimputar_pago` y vuelve suelto, sin reaplicarse solo (decisión
   del dueño); el `DELETE` REST lo rechaza `trg_pagos_guard_credito_aplicado`. Anular una NC
