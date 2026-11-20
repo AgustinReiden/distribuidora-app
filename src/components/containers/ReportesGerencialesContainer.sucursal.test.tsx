@@ -35,6 +35,11 @@ vi.mock('../../hooks/useAlertasCombos', () => ({
   useAlertasCombos: () => [],
 }))
 
+// El container avisa si una meta no se guardó (1600-b5): acá no se prueba.
+vi.mock('../../contexts/NotificationContext', () => ({
+  useNotification: () => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }),
+}))
+
 vi.mock('../../contexts/SucursalContext', () => ({
   useSucursal: () => mockCtx,
 }))

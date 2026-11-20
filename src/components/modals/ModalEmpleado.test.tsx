@@ -3,8 +3,10 @@
  * primer arreglo y, si hace falta, el saldo con que arranca; la edición muestra el arreglo
  * vigente sin tocarlo.
  */
-import { describe, it, expect, vi, type Mock } from 'vitest'
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
+import { asentar, atras } from '../../test/atrasHelpers'
 import { fireEvent, render, screen } from '@testing-library/react'
+import { reiniciarAtrasModales } from '../../utils/atrasModales'
 import userEvent from '@testing-library/user-event'
 import ModalEmpleado, { modalEmpleadoSchema, type ModalEmpleadoProps } from './ModalEmpleado'
 import { formatPrecio } from '../../utils/formatters'
@@ -510,5 +512,70 @@ describe('modalEmpleadoSchema', () => {
     const r = modalEmpleadoSchema.safeParse({ ...base, id: 3, cliente_id: '11', vehiculo_id: '7' })
     expect(r.success && r.data.cliente_id).toBe(11)
     expect(r.success && r.data.vehiculo_id).toBe(7)
+  })
+})
+
+// Decisión 4 del dueño (#1603): la X, Escape y el «atrás» del teléfono preguntan «Salir sin guardar» si el
+// formulario cambió respecto de como abrió; sin tocar, cierran de una.
+describe('ModalEmpleado — salir sin guardar', () => {
+  const botonX = () => screen.getByRole('button', { name: /cerrar/i })
+
+  beforeEach(() => {
+    reiniciarAtrasModales()
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('un alta sin tocar, la X, Escape y el «atrás» cierran de una', async () => {
+    const { onClose, user } = renderModal()
+    await asentar()
+    await user.click(botonX())
+    expect(onClose).toHaveBeenCalledTimes(1)
+    await user.keyboard('{Escape}')
+    expect(onClose).toHaveBeenCalledTimes(2)
+    await atras()
+    expect(onClose).toHaveBeenCalledTimes(3)
+    expect(screen.queryByText('Salir sin guardar')).not.toBeInTheDocument()
+  })
+
+  it('una edición sin tocar no pregunta', async () => {
+    const { onClose, user } = renderModal({ empleado: EMPLEADO })
+    await asentar()
+    await user.click(botonX())
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['la X', async (user: ReturnType<typeof userEvent.setup>) => { await user.click(botonX()) }],
+    ['Escape', async (user: ReturnType<typeof userEvent.setup>) => { await user.keyboard('{Escape}') }],
+    ['el «atrás» del teléfono', async () => { await atras() }],
+  ])('con el nombre tipeado, %s pregunta; «Seguir editando» conserva lo tipeado y «Salir igual» cierra', async (_camino, accion) => {
+    const { onClose, user } = renderModal()
+    await asentar()
+    await user.type(screen.getByLabelText(/^Nombre y apellido/), 'Ana Gómez')
+    await asentar()
+
+    await accion(user)
+    expect(await screen.findByText('Salir sin guardar')).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Seguir editando' }))
+    await asentar()
+    expect(screen.getByLabelText(/^Nombre y apellido/)).toHaveValue('Ana Gómez')
+    expect(onClose).not.toHaveBeenCalled()
+
+    await accion(user)
+    await user.click(await screen.findByRole('button', { name: 'Salir igual' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('al editar y volver al valor de antes, ya no hay cambios y no pregunta', async () => {
+    const { onClose, user } = renderModal({ empleado: EMPLEADO })
+    await asentar()
+    const telefono = screen.getByLabelText(/^Teléfono/)
+    await user.type(telefono, '9')
+    await user.type(telefono, '{Backspace}')
+    await asentar()
+    await user.click(botonX())
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })
