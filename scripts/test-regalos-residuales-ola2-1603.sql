@@ -37,10 +37,17 @@
 --        P3g · sube la venta (V×30, R×15): entra, X×2 corte 15 (se conserva y no crece de más).
 --        P3h · baja a V×2 y vuelve el regalo a su producto (`regalo_original`): entra, R×1 corte 1,
 --              sin cadena; R sale del stock y X vuelve.
+--   P4 · H1 de la segunda revisión de C2: en dos guardados tampoco.
+--        P4a · Q1: el encargado guarda sin regalo (V×1) y después V×2 + R×1: rechazo (sin línea
+--              guardada de la cadena cuenta como que bajó). Antes entraba X×1 con corte 1.
+--        P4b · el mismo rubro, igual: entra W×1.
+--        P4c · sin regalo y después V×20 + R×10: entra X×1 con corte 10 (vale lo mismo).
+--        P4d · Q2: vuelve al original (R×1; la cadena queda cerrada con una fila de reparto R→R),
+--              sin regalo y después V×20 + R×10: vuelve R×10, no X. Antes volvía X.
 --   A1 · ningún check de auditoria_integridad() suma violaciones.
 --
--- Sin la migración tiene que FALLAR en P1b, P2a, P2b, P3a, P3b, P3c y P3h. P1a, P1c, P1d, P2c, P2d,
--- P3d, P3e, P3f y P3g son regresión.
+-- Sin la migración tiene que FALLAR en P1b, P2a, P2b, P3a, P3b, P3c, P3h, P4a y P4d. P1a, P1c, P1d,
+-- P2c, P2d, P3d, P3e, P3f, P3g, P4b y P4c son regresión.
 -- Corre contra una base con el schema de prod SIN dejar rastro (salvo valores de secuencia): un
 -- único DO que termina SIEMPRE en una excepción. Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ …'.
 --
@@ -416,6 +423,62 @@ BEGIN
     END;
   END LOOP;
 
+  -- ==================================================================== P4 ===
+  -- H1 de la segunda revisión de C2: el bloqueo no se esquiva en dos guardados, y «Volver al
+  -- regalo original» queda. Mismo armado que P3 (R a $ 100, X a $ 1.000 de otro rubro o W del mismo).
+  FOR v_caso IN SELECT * FROM (VALUES
+      ('P4a Q1 X: el encargado guarda sin regalo (V×1) y después V×2 + R×1',            'X', false, 2,  1,  false, '-'),
+      ('P4b el mismo rubro: sin regalo (V×1) y después V×2 + R×1',                      'W', false, 2,  1,  true,  'W×1/1'),
+      ('P4c sin regalo (V×1) y después V×20 + R×10: X×1 vale lo mismo que R×10',        'X', false, 20, 10, true,  'X×1/10'),
+      ('P4d Q2: vuelve al original (V×2, R×1), sin regalo (V×1) y después V×20 + R×10', 'X', true,  20, 10, true,  'R×10/10')
+    ) AS t(caso, sust, original, venta, cant, entra, despues)
+  LOOP
+    BEGIN
+      vv := pg_temp.prod('[]', 500);
+      r  := pg_temp.prod('[]', 500);
+      xs := pg_temp.prod('[]', 500, 1000, CASE WHEN v_caso.sust = 'X' THEN 'ZZ ensayo C2 otro rubro' ELSE 'ZZ ensayo C2 cat' END);
+      INSERT INTO promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id, limite_usos)
+      VALUES ('ZZ ensayo C2 2V1R h1b', 'bonificacion', public._tablero_hoy() - 1, v_suc, true, r, 100) RETURNING id INTO v_promo;
+      INSERT INTO promocion_reglas (promocion_id, clave, valor, sucursal_id)
+      VALUES (v_promo, 'cantidad_compra', 2, v_suc), (v_promo, 'cantidad_bonificacion', 1, v_suc);
+      INSERT INTO promocion_productos (promocion_id, producto_id, sucursal_id) VALUES (v_promo, vv, v_suc);
+      v_x := pg_temp.alta(v_cli, v_adm, jsonb_build_array(pg_temp.it(vv, 20), pg_temp.reg(r, 10, v_promo)));
+      PERFORM pg_temp.como(v_adm);
+      v_j := public.sustituir_regalo_pedido((SELECT id FROM pedido_items WHERE pedido_id = v_x AND es_bonificacion),
+                                            xs, 1, 'ensayo C2 H1b', NULL, NULL);
+      PERFORM pg_temp.limpiar();
+      IF NOT COALESCE((v_j->>'success')::boolean, false) THEN RAISE EXCEPTION 'sustituir: %', v_j; END IF;
+
+      IF v_caso.original THEN
+        v_res := pg_temp.editar(v_x, v_enc, jsonb_build_array(pg_temp.it(vv, 2),
+                                pg_temp.reg(r, 1, v_promo) || jsonb_build_object('regalo_original', true)));
+        IF v_res <> 'ok' THEN RAISE EXCEPTION 'volver al original: %', left(v_res, 200); END IF;
+        IF NOT EXISTS (SELECT 1 FROM pedido_item_sustituciones s
+                        WHERE s.pedido_id = v_x AND s.reparto_id IS NOT NULL
+                          AND s.producto_original_id = r AND s.producto_sustituto_id = r) THEN
+          v_fallas := v_fallas || format('%s: la cadena no quedó cerrada', v_caso.caso);
+        END IF;
+      END IF;
+      v_res := pg_temp.editar(v_x, v_enc, jsonb_build_array(pg_temp.it(vv, 1)));
+      IF v_res <> 'ok' OR pg_temp.regalos(v_x) <> '-' THEN
+        v_fallas := v_fallas || format('%s: guardar sin regalo dio %s y quedó %s', v_caso.caso, left(v_res, 160), pg_temp.regalos(v_x));
+      END IF;
+      v_res := pg_temp.editar(v_x, v_enc, jsonb_build_array(pg_temp.it(vv, v_caso.venta), pg_temp.reg(r, v_caso.cant, v_promo)));
+      IF v_caso.entra AND v_res <> 'ok' THEN
+        v_fallas := v_fallas || format('%s: se rechazó (%s)', v_caso.caso, left(v_res, 240));
+      ELSIF NOT v_caso.entra AND (v_res = 'ok' OR position('"codigo": "regalo_sustituto_sobre_tope"' IN v_res) = 0) THEN
+        v_fallas := v_fallas || format('%s: esperaba el rechazo, vino %s', v_caso.caso, left(v_res, 240));
+      END IF;
+      v_res := replace(replace(pg_temp.regalos(v_x), xs::text || '×', CASE WHEN v_caso.sust = 'X' THEN 'X×' ELSE 'W×' END),
+                       r::text || '×', 'R×');
+      IF v_res <> v_caso.despues THEN
+        v_fallas := v_fallas || format('%s: quedó %s (esperado %s)', v_caso.caso, v_res, v_caso.despues);
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      v_fallas := v_fallas || format('%s error: %s', v_caso.caso, SQLERRM);
+    END;
+  END LOOP;
+
   -- ------------------------------------------------------------------- A1 ---
   PERFORM pg_temp.como(v_adm);
   SELECT jsonb_object_agg(x->>'id', (x->>'violaciones')::bigint) INTO v_checks
@@ -427,7 +490,7 @@ BEGIN
   END LOOP;
 
   IF cardinality(v_fallas) = 0 THEN
-    RAISE EXCEPTION 'ENSAYO OK · P1a–P1d, P2a–P2d, P3a–P3h y A1 (el tope de un regalo cambiado por valor va en su corte, el sustituto de otro rubro no vale más que lo que da la promo cuando baja, y el cambio de factor sin stock se rechaza con su motivo)';
+    RAISE EXCEPTION 'ENSAYO OK · P1a–P1d, P2a–P2d, P3a–P3h, P4a–P4d y A1 (el tope de un regalo cambiado por valor va en su corte, el sustituto de otro rubro no vale más que lo que da la promo cuando baja, y el cambio de factor sin stock se rechaza con su motivo)';
   END IF;
   RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' || ');
 END

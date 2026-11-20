@@ -40,6 +40,7 @@ import { usePoliticasComercialesQuery } from '../../hooks/queries/usePoliticasCo
 import { cargoTrasEdicion, franjaCargo, reglaMinimoDe, ventaDePedido, type CargoEnvioEstado, type DecisionEnvio } from '../../utils/montoMinimo';
 import { esRechazoDeEnvio, RechazoDeNegocioError } from '../../utils/rechazoDeNegocio';
 import { regaloSustitutoCaro, CODIGO_REGALO_SUSTITUTO_SOBRE_TOPE } from '../../utils/regaloSustitutoCaro';
+import { supabase } from '../../lib/supabase';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../ui/Dialog';
 import { useFotosCombosPedidoQuery } from '../../hooks/queries/useCombosQuery';
 import { aplicarCombosAlPedido, camposCombo, type CamposCombo } from '../../utils/combosPedido';
@@ -224,7 +225,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // sino que se avisa». Las promos cuyo regalo el usuario volvió a su producto, y el rechazo
   // del server cuando el aviso no se pudo dar antes.
   const [regalosAlOriginal, setRegalosAlOriginal] = useState<string[]>([]);
-  const [rechazoRegaloCaro, setRechazoRegaloCaro] = useState<{ mensaje: string; promos: string[] } | null>(null);
+  // `sinStock`: no se puede volver al regalo original porque no hay stock (decisión del dueño:
+  // «si no hay stock no se regala»): el aviso sólo ofrece dejar el pedido como estaba.
+  const [rechazoRegaloCaro, setRechazoRegaloCaro] = useState<{ mensaje: string; promos: string[]; sinStock?: boolean } | null>(null);
 
   // Zod validation (solo notas; el pago se maneja en ModalRegistrarPago)
   const { validate } = useZodValidation(modalEditarPedidoSchema);
@@ -785,6 +788,29 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
   // Y un regalo repartido en sabores (mig 275, #831) son VARIAS lineas de la
   // misma promo: el resolver devuelve una sola, asi que si la cantidad total
   // de la promo no cambio se muestran y se guardan las lineas que ya estaban.
+  // H2 de la segunda revisión de C2: el server mide el regalo cambiado contra el corte guardado
+  // de su línea (`regalo_corte`), que el front lee por RPC. Sin ese dato la pantalla no avisa
+  // antes: decide el server, y su rechazo muestra el mismo aviso.
+  // La RPC `regalo_corte_de_linea` es de admin y encargado; para el resto, o si falla, null.
+  const idsConCadena = (pedido?.items ?? [])
+    .filter(i => i.es_bonificacion && i.regalo_cadena_id && i.id != null)
+    .map(i => String(i.id))
+    .join(',');
+  const [cortesGuardados, setCortesGuardados] = useState<Map<string, number | null>>(() => new Map());
+  useEffect(() => {
+    if (!idsConCadena) return;
+    let vigente = true;
+    void Promise.all(idsConCadena.split(',').map(async (id): Promise<[string, number | null]> => {
+      try {
+        const { data, error } = await supabase.rpc('regalo_corte_de_linea', { p_pedido_item_id: Number(id) });
+        const corte = Number(data);
+        return [id, !error && data != null && Number.isFinite(corte) && corte > 0 ? corte : null];
+      } catch {
+        return [id, null];
+      }
+    })).then(pares => { if (vigente) setCortesGuardados(new Map(pares)); });
+    return () => { vigente = false; };
+  }, [idsConCadena]);
   const { bonificacionesCalculadas, repartosPerdidos } = useMemo(() => {
     const calculadas = itemsFinales
       .filter(i => i.esBonificacion)
@@ -814,18 +840,22 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
         }
         const producto = productos.find(p => String(p.id) === muestra.productoId);
         // H1: ¿el sustituto de otro rubro pasa a valer más que lo que da la promo ahora?
-        const lineaGuardada = (pedido?.items ?? []).find(i => i.es_bonificacion
-          && String(i.promocion_id) === String(bonif.promoId)
-          && String(i.producto_id) === muestra.productoId
+        const lineasDeLaPromo = (pedido?.items ?? []).filter(i => i.es_bonificacion
+          && String(i.promocion_id) === String(bonif.promoId));
+        const lineaGuardada = lineasDeLaPromo.find(i => String(i.producto_id) === muestra.productoId
           && (i.regalo_cadena_id ?? null) === (cadenaId ?? null));
+        // Sin ninguna línea de la promo, el regalo se cayó y vuelve con la cadena enganchada:
+        // el server lo mide como que bajó (H1 de la segunda revisión de C2). Con la línea, su
+        // corte guardado si se pudo leer; si no, no se sabe (null) y no se avisa antes.
+        const corteGuardado = lineasDeLaPromo.length === 0
+          ? Number.POSITIVE_INFINITY
+          : lineaGuardada?.id != null ? (cortesGuardados.get(String(lineaGuardada.id)) ?? null) : null;
         const sustitutoCaro = muestra.productoId !== envio.productoId && regaloSustitutoCaro({
           esAdmin: !!isAdmin,
           regalo: regaloPromo,
           sustituto: producto,
           corteNuevo: envio.cantidad,
-          corteGuardado: lineaGuardada
-            ? cantidadBaseDeLinea(sustituciones, lineaGuardada.promocion_id, lineaGuardada.regalo_cadena_id, Number(lineaGuardada.cantidad))
-            : null,
+          corteGuardado,
           cantidadSustituto: muestra.cantidad,
           porLinea: promoInfoMap.get(String(bonif.promoId))?.mueveStock ?? false,
         });
@@ -870,13 +900,31 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       linea => cantidadBaseDeLinea(sustituciones, linea.promocion_id, linea.regalo_cadena_id, Number(linea.cantidad)),
     );
     return { bonificacionesCalculadas: bonificaciones, repartosPerdidos: perdidos };
-  }, [itemsFinales, productos, sustituciones, pedido, regalosAlOriginal, isAdmin, promoInfoMap]);
+  }, [itemsFinales, productos, sustituciones, pedido, regalosAlOriginal, isAdmin, promoInfoMap, cortesGuardados]);
 
   // H1: lo que el aviso tiene que decir, antes de tocar Guardar (con lo que el modal sabe) o
   // con el rechazo del server. Nada se cambia solo: el usuario elige volver al regalo de la
   // promo o dejar el pedido como estaba.
   const regalosCaros = bonificacionesCalculadas.filter(b => b.sustitutoCaro);
   const volverRegalosAlOriginal = (promos: string[]): void => {
+    // H4 de la segunda revisión de C2 (decisión del dueño: «si no hay stock no se regala»): si
+    // el regalo de la promo no tiene stock para lo que da ahora, no se puede volver a él; el
+    // aviso lo dice y ofrece sólo dejar el pedido como estaba.
+    const sinStock = bonificacionesCalculadas.filter(b => promos.includes(String(b.promocionId))
+      && b.esSustituido
+      && (promoInfoMap.get(String(b.promocionId))?.mueveStock ?? false)
+      && Number(productos.find(p => String(p.id) === b.productoIdEnvio)?.stock ?? Infinity) < b.cantidadEnvio);
+    if (sinStock.length > 0) {
+      setRechazoRegaloCaro({
+        mensaje: sinStock.map(b => {
+          const stock = Number(productos.find(p => String(p.id) === b.productoIdEnvio)?.stock ?? 0);
+          return `«${b.nombreRegaloPromo ?? 'el regalo de la promo'}» no tiene stock para volver al regalo original (hay ${stock} y hacen falta ${b.cantidadEnvio})`;
+        }).join('; ') + '. Si no hay stock no se regala: dejá el pedido como estaba.',
+        promos,
+        sinStock: true,
+      });
+      return;
+    }
     setRegalosAlOriginal(prev => Array.from(new Set([...prev, ...promos])));
     setRechazoRegaloCaro(null);
     setErrorValidacion('');
@@ -906,6 +954,9 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     // de fecha_entrega o de notas se perdía con él.
     if (pedidoEntregado) return false;
     if (promosLoading || sustitucionesCargando || !promoMapDelPedidoListo || !pedido?.items || items.length === 0) return false;
+    // Sin las sustituciones (la consulta falló) los regalos salen sin su cambio y diferirían de lo
+    // guardado: eso prendía `itemsModificados` y frenaba hasta guardar una nota. No se compara.
+    if (sustitucionesQuery.data == null) return false;
     const originales = pedido.items.filter(i => i.es_bonificacion);
     if (originales.length !== bonificacionesCalculadas.length) return true;
     const mapOrig = new Map(originales.map(b => [String(b.producto_id), b.cantidad]));
@@ -913,7 +964,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       if (mapOrig.get(String(b.productoId)) !== b.cantidad) return true;
     }
     return false;
-  }, [pedidoEntregado, promosLoading, sustitucionesCargando, promoMapDelPedidoListo, pedido, items, bonificacionesCalculadas]);
+  }, [pedidoEntregado, promosLoading, sustitucionesCargando, promoMapDelPedidoListo, pedido, items, bonificacionesCalculadas, sustitucionesQuery.data]);
 
   // Cargo de envío (mig 389, #1220): lo fijó el servidor al crear. pedidos.total
   // lo incluye, `totalFinal` no. cargo_2_edicion: si la edición cruza la franja
@@ -1325,6 +1376,18 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
           ? (err.detalle.promociones as unknown[]).map(String)
           : bonificacionesCalculadas.filter(b => b.esSustituido).map(b => String(b.promocionId));
         setRechazoRegaloCaro({ mensaje: err.message, promos });
+        return;
+      }
+      // H4: se intentó volver al regalo original y el server no lo dejó (p. ej. sin stock):
+      // el aviso sigue a la vista, con el motivo, y la salida es dejar el pedido como estaba.
+      const alOriginal = bonificacionesCalculadas.filter(b => b.regaloOriginal).map(b => String(b.promocionId));
+      if (alOriginal.length > 0) {
+        setRegalosAlOriginal([]);
+        setRechazoRegaloCaro({
+          mensaje: `No se pudo volver al regalo original: ${(err as Error).message || 'el server lo rechazó'} Si no hay stock no se regala: dejá el pedido como estaba.`,
+          promos: alOriginal,
+          sinStock: true,
+        });
         return;
       }
       const error = err as Error;
@@ -2114,13 +2177,15 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
             <Button onClick={onClose} variant="ghost" size="sm">
               Dejar el pedido como estaba
             </Button>
-            <Button
-              onClick={() => volverRegalosAlOriginal(rechazoRegaloCaro?.promos ?? regalosCaros.map(b => String(b.promocionId)))}
-              variant="primary"
-              size="sm"
-            >
-              Volver al regalo original
-            </Button>
+            {!rechazoRegaloCaro?.sinStock && (
+              <Button
+                onClick={() => volverRegalosAlOriginal(rechazoRegaloCaro?.promos ?? regalosCaros.map(b => String(b.promocionId)))}
+                variant="primary"
+                size="sm"
+              >
+                Volver al regalo original
+              </Button>
+            )}
           </div>
         </div>
       )}

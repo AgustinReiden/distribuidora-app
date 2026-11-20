@@ -21,6 +21,8 @@ describe('regaloSustitutoCaro (H1 de la revisión de C2, decisión del dueño de
     ['el admin', { esAdmin: true }, false],
     ['una promo de fracción (lo decide el server)', { porLinea: false }, false],
     ['sin el corte guardado', { corteGuardado: null }, false],
+    ['sin línea guardada: el regalo se cayó y vuelve (cuenta como que bajó)', { corteGuardado: Number.POSITIVE_INFINITY }, true],
+    ['con el corte guardado en 5 y la promo da 7 (no bajó)', { corteGuardado: 5, corteNuevo: 7 }, false],
     ['un sustituto que alcanza por valor (X a $ 100)', { sustituto: { ...X, precio: 100 } }, false],
     ['sin el precio del sustituto (avisa el server)', { sustituto: { ...X, precio: null } }, false],
   ] as const)('%s', (_caso, cambio, esperado) => {

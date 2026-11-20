@@ -25,7 +25,11 @@ export interface RegaloSustitutoCaroArgs {
   sustituto: (ProductoRegalo & { precio?: number | string | null }) | null | undefined
   /** Lo que da la promo con esta edición, en la unidad del regalo (el corte que se manda). */
   corteNuevo: number
-  /** El corte de la línea guardada. */
+  /**
+   * El corte de la línea guardada (`regalo_corte`, por la RPC `regalo_corte_de_linea`). null: no
+   * se sabe (no avisa; decide el server). Infinito: no hay línea guardada (el regalo se cayó y
+   * vuelve con su cadena), que el server mide como que bajó.
+   */
   corteGuardado: number | null | undefined
   /** Las unidades del sustituto que quedarían (la cadena aplicada al corte nuevo). */
   cantidadSustituto: number

@@ -270,8 +270,13 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   sustituto es de otro rubro: ahí no puede valer más que el regalo nuevo y se rechaza
   (`regalo_sustituto_sobre_tope`, con las promos en `promociones`). Decisión del dueño del 19/11:
   «No deja guardar así: o vuelve al regalo original (R) o el pedido queda como está. Este bloqueo
-  no es silencioso sino que se avisa». La pantalla lo avisa antes y ofrece «Volver al regalo
-  original», que viaja con `regalo_original` (la línea entra sin su cadena). Y el tope de la promo se mide en el corte también cuando
+  no es silencioso sino que se avisa». Sin línea guardada de la cadena (el regalo se cayó y vuelve
+  con la cadena enganchada) también cuenta como que bajó. La pantalla lo avisa antes cuando sabe el
+  corte guardado (RPC `regalo_corte_de_linea`; si no, decide el server) y ofrece «Volver al regalo
+  original», que viaja con `regalo_original`: la línea entra sin su cadena, y la cadena queda
+  cerrada con una fila de reparto del regalo a sí mismo, así que si el regalo se cae y vuelve,
+  vuelve el regalo de la promo (`regalo_elemento_con_cadena` y `cadenaDelRegalo` no enganchan una
+  cadena con reparto). Y el tope de la promo se mide en el corte también cuando
   la edición recibe la línea cambiada por valor tal como está (W×1 con corte 10 cuenta 10; C2 de la
   ola 2). El admin, sin tope.
 - **Un regalo se mide contra la promo con la que se armó, no contra la vigente** (mig 370,

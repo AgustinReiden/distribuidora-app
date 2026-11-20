@@ -15,7 +15,9 @@ import userEvent from '@testing-library/user-event'
 import type { PromoMap, PromocionActiva } from '../../utils/promociones'
 import { RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
 
-const estado = vi.hoisted(() => ({ mueveStock: true }))
+// `corte`: lo que contesta `regalo_corte_de_linea` (null: no se pudo leer). `sustError`: la consulta
+// de sustituciones falló. `stockR`: el stock del regalo de la promo.
+const estado = vi.hoisted(() => ({ mueveStock: true, corte: 10 as number | null, sustError: false, stockR: 500 }))
 
 const { promoMap } = vi.hoisted(() => {
   const promo: PromocionActiva = {
@@ -38,6 +40,9 @@ vi.mock('../../hooks/queries/useCombosQuery', () => ({
 vi.mock('../../lib/supabase', () => ({
   supabase: {
     from: vi.fn(() => ({ select: vi.fn(() => ({ data: [], error: null })) })),
+    rpc: vi.fn(async (fn: string) => (fn === 'regalo_corte_de_linea'
+      ? (estado.corte == null ? { data: null, error: { message: 'sin permiso' } } : { data: estado.corte, error: null })
+      : { data: null, error: null })),
     auth: {
       getSession: vi.fn(() => Promise.resolve({ data: { session: null } })),
       onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
@@ -55,15 +60,17 @@ vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
     data: [{ id: 13, nombre: 'Promo 2V1R', regalo_mueve_stock: estado.mueveStock, producto_regalo_id: 81 }],
     isLoading: false,
   }),
-  usePedidoSustitucionesQuery: () => ({
-    data: [{
-      id: 1, promocion_id: '13', producto_original_id: '81', producto_sustituto_id: '200',
-      cantidad_original: 10, cantidad_sustituta: 1, reparto_id: null,
-      cadena_id: '11111111-1111-4111-8111-111111111111', created_at: '2026-11-18T10:00:00Z',
-    }],
-    isLoading: false,
-    isFetching: false,
-  }),
+  usePedidoSustitucionesQuery: () => (estado.sustError
+    ? { data: undefined, isLoading: false, isFetching: false, isError: true, refetch: vi.fn() }
+    : {
+        data: [{
+          id: 1, promocion_id: '13', producto_original_id: '81', producto_sustituto_id: '200',
+          cantidad_original: 10, cantidad_sustituta: 1, reparto_id: null,
+          cadena_id: '11111111-1111-4111-8111-111111111111', created_at: '2026-11-18T10:00:00Z',
+        }],
+        isLoading: false,
+        isFetching: false,
+      }),
 }))
 vi.mock('../../hooks/queries/useProductosQuery', () => ({
   useMinimosVentaQuery: () => ({ data: new Map(), isLoading: false }),
@@ -74,11 +81,12 @@ vi.mock('../../hooks/queries/usePoliticasComercialesQuery', () => ({
 
 import ModalEditarPedido from './ModalEditarPedido'
 
-const productos = [
+const productosCon = (stockR: number) => [
   { id: '1', nombre: 'Venta V', codigo: 'P001', precio: 250, stock: 100, categoria: 'Almacén' },
-  { id: '81', nombre: 'Regalo R', codigo: 'P081', precio: 100, stock: 500, categoria: 'Bebidas' },
+  { id: '81', nombre: 'Regalo R', codigo: 'P081', precio: 100, stock: stockR, categoria: 'Bebidas' },
   { id: '200', nombre: 'Sustituto X', codigo: 'P200', precio: 1000, stock: 500, categoria: 'Snacks' },
 ] as any[]
+const productos = productosCon(500)
 
 const pedido = () => ({
   id: 801, notas: '', estado: 'en_preparacion', total: 5000,
@@ -107,6 +115,9 @@ const bajarVentaA = (n: number): void => {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  estado.corte = 10
+  estado.sustError = false
+  estado.stockR = 500
   estado.mueveStock = true
 })
 
@@ -197,5 +208,91 @@ describe('ModalEditarPedido — el regalo cambiado no puede valer más que lo qu
     await waitFor(() => expect(screen.getByText('Venta V')).toBeInTheDocument())
     bajarVentaA(2)
     expect(screen.queryByRole('alert', { name: 'Regalo cambiado' })).not.toBeInTheDocument()
+  })
+})
+
+describe('ModalEditarPedido — segunda revisión de C2 (H2, H1 en dos guardados, H4 y la nota)', () => {
+  // H2: el admin ya había bajado la venta a V×10: la línea es X×1 con corte 5 (el eslabón dice 10 → 1).
+  const pedidoV10 = () => ({ ...pedido(), items: [{ ...pedido().items[0], cantidad: 10 }, pedido().items[1]] }) as any
+
+  it('H2: con el corte guardado en 5, subir la venta (R×7) no avisa ni frena: decide el server', async () => {
+    estado.corte = 5
+    const user = userEvent.setup()
+    const onSaveItems = vi.fn().mockResolvedValue(undefined)
+    render(<ModalEditarPedido {...props} pedido={pedidoV10()} onSaveItems={onSaveItems} />)
+    await waitFor(() => expect(screen.getByText('Venta V')).toBeInTheDocument())
+    bajarVentaA(14)
+    await user.click(await screen.findByRole('button', { name: 'Guardar Todo' }))
+    await waitFor(() => expect(onSaveItems).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('alert', { name: 'Regalo cambiado' })).not.toBeInTheDocument()
+  })
+
+  it('H2: sin poder leer el corte guardado no avisa antes ni frena Guardar (decide el server)', async () => {
+    estado.corte = null
+    const onSaveItems = vi.fn().mockResolvedValue(undefined)
+    render(<ModalEditarPedido {...props} pedido={pedido()} onSaveItems={onSaveItems} />)
+    await waitFor(() => expect(screen.getByText('Venta V')).toBeInTheDocument())
+    bajarVentaA(2)
+    expect(screen.queryByRole('alert', { name: 'Regalo cambiado' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Guardar Todo' })).toBeEnabled())
+  })
+
+  it('H1: si el regalo se cayó (V×1) y vuelve con la cadena, avisa y frena aunque no haya línea guardada', async () => {
+    const sinRegalo = { ...pedido(), items: [{ ...pedido().items[0], cantidad: 1 }] } as any
+    const onSaveItems = vi.fn().mockResolvedValue(undefined)
+    render(<ModalEditarPedido {...props} pedido={sinRegalo} onSaveItems={onSaveItems} />)
+    await waitFor(() => expect(screen.getByText('Venta V')).toBeInTheDocument())
+    bajarVentaA(2)
+    const aviso = await screen.findByRole('alert', { name: 'Regalo cambiado' })
+    expect(aviso).toHaveTextContent('el regalo «Sustituto X» × 1 vale más')
+    expect(screen.getByRole('button', { name: 'Guardar Todo' })).toBeDisabled()
+  })
+
+  it('H4: «Volver al regalo original» sin stock de R lo dice y sólo deja dejar el pedido como estaba', async () => {
+    const user = userEvent.setup()
+    const onSaveItems = vi.fn().mockResolvedValue(undefined)
+    render(<ModalEditarPedido {...props} productos={productosCon(0)} pedido={pedido()} onSaveItems={onSaveItems} />)
+    await waitFor(() => expect(screen.getByText('Venta V')).toBeInTheDocument())
+    bajarVentaA(2)
+    await user.click(await screen.findByRole('button', { name: 'Volver al regalo original' }))
+    const aviso = screen.getByRole('alert', { name: 'Regalo cambiado' })
+    expect(aviso).toHaveTextContent('«Regalo R» no tiene stock para volver al regalo original (hay 0 y hacen falta 1)')
+    expect(aviso).toHaveTextContent('Si no hay stock no se regala: dejá el pedido como estaba.')
+    expect(within(aviso).queryByRole('button', { name: 'Volver al regalo original' })).not.toBeInTheDocument()
+    expect(within(aviso).getByRole('button', { name: 'Dejar el pedido como estaba' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Guardar Todo' })).toBeDisabled()
+    expect(onSaveItems).not.toHaveBeenCalled()
+  })
+
+  it('H4: si el server rechaza la vuelta al original (sin stock), el aviso sigue con el motivo', async () => {
+    estado.mueveStock = false // la pantalla no hace la cuenta del stock: lo dice el server
+    const user = userEvent.setup()
+    const onSaveItems = vi.fn()
+      .mockRejectedValueOnce(new RechazoDeNegocioError('El regalo cambiado vale más. El pedido no se modificó.', 'regalo_sustituto_sobre_tope', { promociones: [13] }))
+      .mockRejectedValueOnce(new Error('«Regalo R»: stock insuficiente (disponible: 0, adicional: 1).'))
+    render(<ModalEditarPedido {...props} pedido={pedido()} onSaveItems={onSaveItems} />)
+    await waitFor(() => expect(screen.getByText('Venta V')).toBeInTheDocument())
+    bajarVentaA(2)
+    await user.click(screen.getByRole('button', { name: 'Guardar Todo' }))
+    await user.click(await screen.findByRole('button', { name: 'Volver al regalo original' }))
+    await user.click(screen.getByRole('button', { name: 'Guardar Todo' }))
+    const aviso = await screen.findByRole('alert', { name: 'Regalo cambiado' })
+    await waitFor(() => expect(aviso).toHaveTextContent('No se pudo volver al regalo original: «Regalo R»: stock insuficiente'))
+    expect(within(aviso).getByRole('button', { name: 'Dejar el pedido como estaba' })).toBeEnabled()
+    expect(onSaveItems).toHaveBeenCalledTimes(2)
+  })
+
+  it('con las sustituciones caídas y el regalo ya sustituido, guardar sólo una nota guarda la nota', async () => {
+    estado.sustError = true
+    const user = userEvent.setup()
+    const onSaveItems = vi.fn().mockResolvedValue(undefined)
+    render(<ModalEditarPedido {...props} pedido={pedido()} onSaveItems={onSaveItems} />)
+    await waitFor(() => expect(screen.getByText('Venta V')).toBeInTheDocument())
+    await user.type(screen.getByPlaceholderText(/Observaciones importantes/), 'Dejar con el encargado')
+    const guardar = screen.getByRole('button', { name: 'Guardar' })
+    expect(guardar).toBeEnabled()
+    await user.click(guardar)
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSaveItems).not.toHaveBeenCalled()
   })
 })

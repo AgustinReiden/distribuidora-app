@@ -7,7 +7,7 @@
 --        revisión de C2)
 --
 -- Parcha por ancla, con premisa de md5 sobre los cuerpos vivos (ledger en la
--- 531, los mismos cuerpos de la 530), tres funciones: `actualizar_pedido_items`
+-- 533, los mismos cuerpos de la 530), tres funciones: `actualizar_pedido_items`
 -- (sólo su tramo de regalos), `_regalo_tope_de_cadena` y
 -- `renormalizar_bloques_por_cambio_factor`. No crea funciones, no cambia firmas
 -- ni permisos y no toca tablas (sin locks de tabla). Las tres quedan con
@@ -80,6 +80,13 @@
 -- #1592 16/11: «El admin sigue sin tope»), ni una edición que no baja lo que da
 -- la promo. La salida del dueño: el regalo que llega con `regalo_original` no
 -- hereda la cadena de la línea y entra como el regalo de la promo.
+-- Segunda revisión de C2 (H1): tampoco en dos guardados. Sin línea guardada de
+-- la cadena (el regalo se cayó y vuelve con la cadena enganchada) cuenta como que
+-- bajó; y «volver al regalo original» deja la cadena cerrada con una fila de
+-- reparto del regalo a sí mismo (la forma de la mig 275: «lo anterior ya no
+-- vale»), así que si el regalo se cae y vuelve, vuelve el regalo de la promo.
+-- `regalo_elemento_con_cadena` y su espejo `cadenaDelRegalo` ya no enganchan una
+-- cadena con reparto (también un bundle viejo), y PROMO-B no cuenta repartos.
 --
 -- Revertir: volver las tres funciones a los cuerpos de la premisa (y su
 -- `search_path` a `public`).
@@ -98,7 +105,7 @@ END
 $lf$;
 
 -- ---------------------------------------------------------------------------
--- Premisas: los cuerpos vivos (ledger en la 531) y lo que el arreglo usa tal
+-- Premisas: los cuerpos vivos (ledger en la 533) y lo que el arreglo usa tal
 -- como está (la regla del tope de la promo y la del sustituto).
 -- ---------------------------------------------------------------------------
 DO $premisas$
@@ -112,7 +119,8 @@ BEGIN
     ('public.regalo_fuera_de_promo(jsonb,jsonb,bigint,bigint,date)', '29f0aa33fd68e34746cb959550f6212f'),
     ('public.regalo_tope_promo(jsonb,jsonb,numeric,numeric)', 'c075ce6f17844ba31466c6ccb9f4f5d1'),
     ('public.regalo_raiz_cadena(bigint,bigint,bigint,bigint,uuid)', '9300c56aeea585f3ae883c806e0e1062'),
-    ('public._regalo_tope_de_cadena(bigint,bigint,bigint,bigint,numeric,uuid)', '82c25d84bb5a13efac0105c78f4d8c8a')
+    ('public._regalo_tope_de_cadena(bigint,bigint,bigint,bigint,numeric,uuid)', '82c25d84bb5a13efac0105c78f4d8c8a'),
+    ('public.regalo_elemento_con_cadena(bigint,bigint,bigint,jsonb,integer)', 'fa8e411b125abd44bc2fcdc7acf8c9a1')
   ) AS t(f, h) LOOP
     IF to_regprocedure(r.f) IS NULL THEN
       RAISE EXCEPTION 'mig NNN · % no existe: rehacer sobre lo vigente', r.f;
@@ -140,6 +148,8 @@ $r$  v_cadena       UUID;
   v_items_pre    JSONB;
   v_conv         JSONB;
   v_cant_corte   JSONB;
+  -- H1 de la segunda revisión de C2: las cadenas que esta edición devuelve al regalo original.
+  v_cerrar       JSONB;
 $r$),
 (2, 'public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)', 'antes de 1592-b1',
 $a$  SELECT COALESCE(jsonb_agg(CASE WHEN l.corte IS NOT NULL
@@ -331,7 +341,8 @@ $r$  SELECT t.regalo, t.tope INTO v_reg, v_t
   -- H1 de la revisión de C2 (#1592, decisión del dueño del 19/11: «No deja guardar así: o
   -- vuelve al regalo original (R) o el pedido queda como está»). Lo que armó un admin se
   -- conserva y no crece, SALVO que el corte de esta edición sea menor que el de la línea
-  -- guardada (bajó lo que da la promo) y el sustituto sea de otro rubro: ahí no tiene la
+  -- guardada (bajó lo que da la promo), o que no haya línea guardada, y el sustituto sea de
+  -- otro rubro: ahí no tiene la
   -- exención y su tope es el de valor. El mismo rubro no cambia (igual o menor cantidad).
   SELECT SUM(COALESCE(pi.regalo_corte,
                       public.regalo_usos_de_linea(public.regalo_eslabones(p_pedido_id, p_promocion_id, p_sucursal_id),
@@ -341,12 +352,66 @@ $r$  SELECT t.regalo, t.tope INTO v_reg, v_t
    WHERE pi.pedido_id = p_pedido_id AND pi.sucursal_id = p_sucursal_id
      AND COALESCE(pi.es_bonificacion, false) AND pi.promocion_id = p_promocion_id
      AND pi.regalo_cadena_id = p_cadena;
-  IF p_cantidad < v_corte_g
+  -- Sin línea guardada de esa cadena (el regalo se cayó y vuelve, y la cadena se volvió a
+  -- enganchar) tampoco hay exención: cuenta como que bajó (H1 de la segunda revisión de C2).
+  IF (v_corte_g IS NULL OR p_cantidad < v_corte_g)
      AND v_reg IS DISTINCT FROM v_s.producto_sustituto_id
      AND NOT COALESCE(public.regalo_misma_categoria(v_reg, v_s.producto_sustituto_id, p_sucursal_id), false) THEN
     tope := COALESCE(v_t, 0);
   ELSE
     tope := GREATEST(v_s.cantidad_sustituta, COALESCE(v_t, 0) + array_length(v_pasos, 1));
+  END IF;
+$r$),
+(11, 'public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)', 'qué cadena vuelve al original',
+$a$  -- mig 338 (#1057): la clave de cadena de cada regalo (ver
+$a$,
+$r$  -- H1 de la segunda revisión de C2 (decisión del dueño del 19/11): el regalo que vuelve al
+  -- original deja su cadena CERRADA, para que si después se cae y vuelve, vuelva el regalo
+  -- de la promo y no el cambio. Se anota acá qué cadena habría heredado (la misma cuenta que
+  -- la CASE de abajo) y se cierra al final, cuando la edición ya no se puede rechazar.
+  SELECT jsonb_agg(jsonb_build_object(
+           'promo', (x.e->>'promocion_id')::BIGINT,
+           'cadena', z.c->>'_cadena',
+           'raiz', (z.c->>'producto_id')::BIGINT,
+           'corte', (z.c->>'cantidad')::NUMERIC))
+    INTO v_cerrar
+    FROM jsonb_array_elements(v_items) WITH ORDINALITY AS x(e, o)
+   CROSS JOIN LATERAL (
+     SELECT public.regalo_elemento_con_cadena(
+              p_pedido_id, (x.e->>'promocion_id')::BIGINT, v_sucursal, x.e - '_reparto' - 'regalo_original',
+              (SELECT count(*)::INT FROM jsonb_array_elements(v_items) j
+                WHERE COALESCE((j->>'es_bonificacion')::BOOLEAN, false)
+                  AND j->>'promocion_id' = x.e->>'promocion_id'
+                  AND j->>'_reparto' IS DISTINCT FROM v_marca_reparto)) AS c) z
+   WHERE COALESCE((x.e->>'es_bonificacion')::BOOLEAN, false)
+     AND x.e->>'promocion_id' IS NOT NULL
+     AND x.e->>'_reparto' IS DISTINCT FROM v_marca_reparto
+     AND COALESCE((x.e->>'regalo_original')::BOOLEAN, false)
+     AND z.c->>'_cadena' IS NOT NULL;
+
+  -- mig 338 (#1057): la clave de cadena de cada regalo (ver
+$r$),
+(12, 'public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)', 'la cadena queda cerrada',
+$a$  PERFORM public._guardar_combos_pedido(p_pedido_id, v_sucursal);
+$a$,
+$r$  PERFORM public._guardar_combos_pedido(p_pedido_id, v_sucursal);
+
+  -- H1 de la segunda revisión de C2: la cadena que volvió al regalo original queda cerrada
+  -- con una fila de reparto (la forma que ya existe: «lo anterior ya no vale», mig 275) del
+  -- regalo de la promo a sí mismo con su corte. Así `regalo_elemento_con_cadena` (sin línea
+  -- de la promo) y su espejo `cadenaDelRegalo` no la vuelven a enganchar: si el regalo se
+  -- cae y vuelve, vuelve el regalo de la promo. PROMO-B no cuenta filas de reparto.
+  IF v_cerrar IS NOT NULL THEN
+    INSERT INTO pedido_item_sustituciones (
+      pedido_id, pedido_item_id, promocion_id, producto_original_id, producto_sustituto_id,
+      cantidad_original, cantidad_sustituta, motivo, autorizado_por, sucursal_id,
+      reparto_id, cadena_id, producto_raiz_id)
+    SELECT p_pedido_id, NULL, (c->>'promo')::BIGINT, (c->>'raiz')::BIGINT, (c->>'raiz')::BIGINT,
+           (c->>'corte')::NUMERIC, (c->>'corte')::NUMERIC,
+           'Volvió al regalo original al editar el pedido', p_usuario_id, v_sucursal,
+           gen_random_uuid(), (c->>'cadena')::UUID, (c->>'raiz')::BIGINT
+      FROM jsonb_array_elements(v_cerrar) c
+     ORDER BY (c->>'promo')::BIGINT;
   END IF;
 $r$),
 -- 2 · PRM-2 residual
@@ -420,13 +485,13 @@ DECLARE
 BEGIN
   FOR r IN SELECT * FROM (VALUES
     ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)',
-     '3ea0a93f349ec3c6e903501672bff8e9', 'ab1726cabaf6d2d324cf71cd522385ee',
+     '11693bc941b3ae7f38eccc1748853f1a', 'ab1726cabaf6d2d324cf71cd522385ee',
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', true),
     ('public.renormalizar_bloques_por_cambio_factor()',
      '61e0ed9c7ab53c79e95c9ebfaf64e446', '2b282b2a6629e3b067f4de39157889e9',
      '{postgres=X/postgres,service_role=X/postgres}', true),
     ('public._regalo_tope_de_cadena(bigint,bigint,bigint,bigint,numeric,uuid)',
-     'f6ce3c2f3ceaa046907368a7372aaaf8', '82c25d84bb5a13efac0105c78f4d8c8a',
+     'cd46ab61ac31683dd3d3910493e44744', '82c25d84bb5a13efac0105c78f4d8c8a',
      '{postgres=X/postgres,service_role=X/postgres}', false)
   ) AS v(fn, h, h_antes, acl, def) LOOP
     SELECT prosrc, md5(prosrc) AS h, proacl::text AS a, prosecdef AS def, proconfig::text AS cfg INTO x
