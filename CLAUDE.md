@@ -26,6 +26,12 @@ de excepciones (`scripts/*-permitidas.json`, `ensayos-sql-excepciones.json`) con
 lista **sólo se achica**. Localmente: `GATE_DB_CONTENEDOR=<contenedor> bash scripts/ci/gates-locales.sh`
 (la base se arma con `scripts/concurrencia/docker-local.mjs` y la semilla de `scripts/ci/`; esa semilla
 y ese criterio de «ensayo OK» son los del CI).
+**Un ensayo que vigila rendimiento cuenta trabajo, no segundos** (C8 de #1603): bloques tocados
+(`pg_stat_get_xact_blocks_fetched`), WAL y llamadas por fila, y la forma (los últimos lotes no cuestan
+más que los primeros); el tiempo, sólo contra una referencia medida en el mismo runner. Y analiza lo
+que inserta (`ANALYZE`): el plan de un ensayo sale de lo que el autovacuum dejó después del ensayo
+anterior, y un plan que elige el índice equivocado tarda 10 veces más sin que el código haya cambiado
+(`test-precios-masivo-30000-1561.sql`; los controles negativos están en `scripts/ci/gates-muerden.sh`).
 
 Deploy: push a `main` → webhook de Coolify. La config de nginx de producción **vive en el
 panel de Coolify**, no en el `nginx.conf` del repo — editar el repo no cambia nada.
@@ -85,6 +91,16 @@ suelta en `sucursales`.
   falla ante lo alcanzable con la **anon key**, no con una sesión—. Pasó con
   `bot_digest_destinatarios` (261, corregida en la 262): devolvía los `telegram_user_id` de
   todos los admins y cualquier preventista logueado podía enumerarlos.
+- **El search_path termina en `pg_temp`** (mig 531, B15 de #1603), en dos mitades: toda `SECURITY DEFINER`
+  nueva o reemplazada fija `SET search_path = public, pg_temp`; y **toda función que fije
+  search_path, definer o no**, lo termina en `pg_temp` (`public, pg_temp`, o el suyo con `pg_temp`
+  al final). Sin `pg_temp` escrito, Postgres busca primero en las tablas temporales de la sesión:
+  una `perfiles` temporal del que llama hacía que `es_admin()` le diera true, y una INVOKER con su
+  propio `SET search_path = public` que llama una definer corre como postgres y hace lo mismo. Una
+  INVOKER que no fija search_path está bien (hereda el de quien la llama; una SQL sin `SET` se
+  inlinea, como `_cliente_visible`). Un `CREATE OR REPLACE` sin el `SET` lo pierde, y copiar el
+  `SET search_path TO 'public'` de una función vieja lo vuelve a abrir. Lo vigila
+  `scripts/check-search-path.mjs`, sin lista de permitidas.
 - **El alta de un usuario no le cree al usuario, y el admin gestiona a los de sus sucursales**
   (migs 403b y 404, #1243 y #1244). `handle_new_user()` toma el rol y la sucursal de
   `raw_app_meta_data`: en la admin API, `app_metadata: {rol, sucursal_id}`; por SQL, la

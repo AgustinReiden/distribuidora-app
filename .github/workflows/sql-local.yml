@@ -13,7 +13,7 @@ name: SQL local
 #      del PR (migrations/NNN_*.sql, con el NNN literal: las que todavía no tienen número).
 #   3. Corre los gates (scripts/ci/gates-locales.sh): los mismos scripts del cron, apuntados
 #      a un PostgREST de juguete, más los que leen el catálogo (Realtime, mensajes de error
-#      de los triggers, cruce por ids de otra sucursal).
+#      de los triggers, search_path de las funciones, cruce por ids de otra sucursal).
 #   4. Corre los ensayos (scripts/ci/ensayos-sql.mjs: todos los scripts/test-*.sql, salvo los
 #      de scripts/ensayos-sql-excepciones.json).
 #

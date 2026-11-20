@@ -10,7 +10,7 @@
 -- Toma un lock de tabla: `LOCK TABLE compras ACCESS EXCLUSIVE NOWAIT` al principio, por el CHECK de
 -- la sección 4 (o lo consigue al instante o falla y se reintenta). Crea una tabla sólo de server (la
 -- del recálculo de la sección 5, con dos funciones sólo de server que lo hacen) y un trigger en
--- productos (sección 6). Se aplica sobre la 532 (o la 531: los cuerpos que parcha son los mismos).
+-- productos (sección 6). Se aplica sobre la 533 (o la 531 y la 532: los cuerpos que parcha son los mismos).
 --
 -- =========================================================================
 -- 1 · STK-13: LA EDICIÓN Y SUS LOTES, UNA SOLA TRANSACCIÓN
@@ -85,7 +85,7 @@ END
 $lf$;
 
 -- ---------------------------------------------------------------------------
--- Premisas: los cuerpos vivos de producción en la 532 (los mismos md5 que la 530 y la 531).
+-- Premisas: los cuerpos vivos de producción en la 533 (los mismos md5 que la 530, la 531 y la 532).
 -- ---------------------------------------------------------------------------
 DO $premisas$
 DECLARE
