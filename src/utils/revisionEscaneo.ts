@@ -228,6 +228,18 @@ export function ordenRevision(lineas: LineaRevision[]): number[] {
   return orden
 }
 
+/**
+ * El orden de la tabla: arriba lo que falta resolver, en el orden de la factura,
+ * y debajo lo ya agregado a la compra u omitido (con sus duplicados juntos, como
+ * en `ordenRevision`). Con una factura larga, lo agregado arriba tapaba lo que
+ * faltaba (lo reportó el dueño desde el teléfono, con diez renglones agregados).
+ */
+export function ordenConPendientesPrimero(lineas: LineaRevision[]): number[] {
+  const orden = ordenRevision(lineas)
+  const pendiente = (i: number) => lineas[i].resolucion.tipo === 'pendiente'
+  return [...orden.filter(pendiente), ...orden.filter(i => !pendiente(i))]
+}
+
 // =============================================================================
 // Conversión bulto → unidad
 // =============================================================================
