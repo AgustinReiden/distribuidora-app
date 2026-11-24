@@ -1,4 +1,4 @@
--- Ensayo de la migración NNN_venta_cobros_stock_gastos_tanda6 (plan #1603, tanda 6, tarjeta D:
+-- Ensayo de la migración 542_venta_cobros_stock_gastos_tanda6 (plan #1603, tanda 6, tarjeta D:
 -- los bajos de venta, cobros, stock y gastos/personal de la reauditoría del 24/11).
 --
 -- No deja rastro (salvo valores de secuencia): un único DO que termina SIEMPRE en una excepción.
