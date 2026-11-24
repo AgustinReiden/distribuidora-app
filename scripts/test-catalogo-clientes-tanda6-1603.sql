@@ -1,5 +1,5 @@
 -- Ensayo de la tarjeta C de la tanda 6 del plan #1603 (reauditoría del núcleo del 24/11): permisos,
--- catálogo y clientes. Migración: NNN_catalogo_clientes_tanda6.
+-- catálogo y clientes. Migración: 543_catalogo_clientes_tanda6.
 --
 --   S1 · SEG-1        el preventista lee los descuentos por rubro sólo de los clientes que ve
 --                     (`_cliente_visible`, por la RLS de clientes): no los de otro preventista ni los

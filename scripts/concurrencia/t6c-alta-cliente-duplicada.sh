@@ -5,7 +5,7 @@
 #
 #   CONTENEDOR=<contenedor> bash scripts/concurrencia/t6c-alta-cliente-duplicada.sh
 #
-# Con la migración (NNN_catalogo_clientes_tanda6): S2 espera el lock de los duplicados de la sucursal y,
+# Con la migración (543_catalogo_clientes_tanda6): S2 espera el lock de los duplicados de la sucursal y,
 # cuando S1 confirma, ve el cliente y se rechaza («Ya hay un cliente en esa dirección…»): queda UN cliente.
 # Sin ella, las dos pasan y quedan dos clientes en la misma puerta. Al final borra lo que creó.
 # Sale con 1 si no queda uno solo.

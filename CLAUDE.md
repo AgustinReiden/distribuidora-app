@@ -408,7 +408,7 @@ suelta en `sucursales`.
   era obligatorio se inventaba un número corto, y el campo lo rellenaba con ceros
   (`00-00000123-4`): no hagas obligatorio un dato que el cliente no siempre tiene. Un DNI de 7 u 8
   cifras se guarda en `clientes.cuit` como `00-XXXXXXXX-0` con `tipo_documento = 'DNI'`, y ningún
-  CUIT empieza con 00. Lo pone `trg_clientes_tipo_documento_del_valor` (sólo ceros queda NULL) y lo
+  CUIT empieza con 00. Lo pone `trg_clientes_tipo_documento_del_valor` (sólo ceros, o sin ningún dígito, queda NULL) y lo
   cierra el CHECK `clientes_documento_con_su_tipo`, que rechaza un número corto rellenado; espejo en
   `documentoParaGuardar` (`src/utils/documentoCliente.ts`). Un camino nuevo que escriba el
   documento no manda el tipo. Un CUIT nuevo o cambiado tiene 11 dígitos y el verificador bien (D37):
