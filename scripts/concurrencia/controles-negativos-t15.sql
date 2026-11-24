@@ -19,6 +19,7 @@
 -- abortaba entero sin mutar nada (las cinco variantes corrían sin mutación). La 470 (#1489) no cambió los locks de esa
 -- función. Ahora M11 pasa los seis a `ORDER BY id /* MUTADO */` (sin lock) y el DO exige que sean exactamente seis; M12
 -- (imputar_credito_a_pedido_impl) no cambió.
+-- Tarjeta G de la tanda 6 (24/11, esquema de la 540): son SIETE bloques (migraciones posteriores sumaron uno), así que el DO exige siete.
 --
 -- Medido el 06/11 (base reconstruida hasta la 474, huella igual a prod, PC de 22 hilos), con las dos mutaciones puestas;
 -- correctas / 40P01 sobre 100 rondas por variante:
@@ -53,7 +54,7 @@ BEGIN
     EXECUTE replace(d, pat, rep);
   END LOOP;
   SELECT def INTO d FROM conc.mut_orig WHERE firma LIKE 'cambiar_cliente_pedido(%';
-  IF regexp_count(d, E'\n    ORDER BY id\n      FOR (NO KEY )?UPDATE;') <> 6 THEN RAISE EXCEPTION 'cambiar_cliente_pedido: esperaba 6 locks de pre-bloqueo, hay %', regexp_count(d, E'\n    ORDER BY id\n      FOR (NO KEY )?UPDATE;'); END IF;
+  IF regexp_count(d, E'\n    ORDER BY id\n      FOR (NO KEY )?UPDATE;') <> 7 THEN RAISE EXCEPTION 'cambiar_cliente_pedido: esperaba 7 locks de pre-bloqueo, hay %', regexp_count(d, E'\n    ORDER BY id\n      FOR (NO KEY )?UPDATE;'); END IF;
   EXECUTE regexp_replace(d, E'\n    ORDER BY id\n      FOR (NO KEY )?UPDATE;', E'\n    ORDER BY id /* MUTADO */;', 'g');
 END
 $m$;
