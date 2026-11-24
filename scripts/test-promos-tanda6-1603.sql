@@ -1,5 +1,5 @@
 -- Ensayo de la tarjeta B de la tanda 6 del plan #1603 (reauditoría del 24/11):
--- migrations/NNN_promos_tipo_con_bloques_y_sustituto_con_bulto.sql.
+-- migrations/544_promos_tipo_con_bloques_y_sustituto_con_bulto.sql.
 --
 --   A · PRM-1 (decisión del dueño del 24/11): una promo de fracción cuya barra ya
 --       cerró bloques, con pedidos abiertos en esa barra, no pasa a unidad entera.
