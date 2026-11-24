@@ -1,5 +1,5 @@
 -- Ensayo de la tarjeta A de la tanda 6 del plan #1603 (reauditoría del núcleo del 24/11):
--- compras y costos. Migración: NNN_compras_promedio_huella_y_avisos.
+-- compras y costos. Migración: 541_compras_promedio_huella_y_avisos.
 --
 -- Un único DO con datos propios que termina SIEMPRE en una excepción: no deja rastro (salvo
 -- valores de secuencia). Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ' con la lista. Sin la
