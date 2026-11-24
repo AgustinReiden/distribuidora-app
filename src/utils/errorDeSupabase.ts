@@ -158,6 +158,10 @@ const CHECKS_CONOCIDOS: Array<[RegExp, string]> = [
   [/cantidad_minima_venta/, 'La cantidad mínima de venta tiene que ser mayor que 0 y de hasta 99.999.999 unidades (o quedar vacía, sin mínimo).'],
   [/impuestos_internos/, 'El impuesto interno está fuera de rango.'],
   [/clientes_documento/, 'Ese número no es un CUIT ni un DNI. Si el cliente no tiene documento, dejá el campo vacío.'],
+  // Tanda 6 de #1603 (catalogo-B2 y B5): los CHECK nuevos de clientes y productos.
+  [/clientes_(latitud|longitud)_rango/, 'La ubicación del cliente está fuera de rango: la latitud va de -90 a 90 y la longitud de -180 a 180. Volvé a marcarla en el mapa.'],
+  [/productos_precios_venta_neto_hasta_final/, 'El precio neto (sin IVA) no puede ser mayor que el precio final. Revisá el precio y el IVA del producto.'],
+  [/productos_nombre_largo/, 'El nombre del producto puede tener hasta 200 caracteres.'],
   [/(nombre|razon_social|direccion|fantasia).*(blank|vacio|trim|no_vacio|not_empty)|(blank|vacio|trim|no_vacio|not_empty).*(nombre|razon_social|direccion|fantasia)/, 'Hay un dato obligatorio vacío o con sólo espacios (nombre, razón social o dirección).'],
 ]
 

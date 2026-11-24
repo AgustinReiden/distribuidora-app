@@ -588,7 +588,8 @@ BEGIN
   v_foto := pg_temp.audit_foto();
   PERFORM pg_temp.como(v_adm, 1);
   PERFORM set_config('app.rubro_masivo', 'renombrar_rubro', true);
-  UPDATE productos SET categoria = 'ZZ C4a R4 b', precio = 999 WHERE id = v_a;
+  -- 1331 y no 999: desde la tanda 6 (catalogo-B5) el final no baja del neto (1000).
+  UPDATE productos SET categoria = 'ZZ C4a R4 b', precio = 1331 WHERE id = v_a;
   UPDATE productos SET stock_minimo = 9 WHERE id = v_b;
   v_desp := pg_temp.filas('productos', ARRAY[v_a::text, v_b::text]);
   PERFORM set_config('app.rubro_masivo', '', true);
@@ -917,7 +918,8 @@ BEGIN
   v_desp := pg_temp.filas('productos', ARRAY[v_a::text]);
   v_esp := pg_temp.esperado('productos', 'INSERT', '{}', v_desp);
   v_antes := v_desp;
-  UPDATE productos SET nombre = 'ZZ C4a A6 cambiado', precio = 999 WHERE id = v_a;
+  -- 1331 y no 999: el final no baja del neto (1000), catalogo-B5 de la tanda 6.
+  UPDATE productos SET nombre = 'ZZ C4a A6 cambiado', precio = 1331 WHERE id = v_a;
   v_desp := pg_temp.filas('productos', ARRAY[v_a::text]);
   v_esp := v_esp || pg_temp.esperado('productos', 'UPDATE', v_antes, v_desp);
   DELETE FROM productos WHERE id = v_a;

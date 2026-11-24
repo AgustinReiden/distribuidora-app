@@ -411,7 +411,9 @@ suelta en `sucursales`.
   CUIT empieza con 00. Lo pone `trg_clientes_tipo_documento_del_valor` (sólo ceros queda NULL) y lo
   cierra el CHECK `clientes_documento_con_su_tipo`, que rechaza un número corto rellenado; espejo en
   `documentoParaGuardar` (`src/utils/documentoCliente.ts`). Un camino nuevo que escriba el
-  documento no manda el tipo.
+  documento no manda el tipo. Un CUIT nuevo o cambiado tiene 11 dígitos y el verificador bien (D37):
+  lo rechaza el mismo trigger, también por REST; uno que ya estaba mal no traba la edición mientras
+  sus dígitos no cambien, como `errorDeCuit` (catalogo-B1, tanda 6 de #1603).
 - **Una promo con uso no se borra: se desactiva** (1556-b1, decisión del dueño). Sus FKs no son
   RESTRICT (el regalo de un pedido quedaba sin promo y no volvía al stock al cancelarlo), así que
   lo frena `trg_promocion_no_se_borra_con_uso`: líneas de pedido de cualquier estado, ajustes de
@@ -715,7 +717,9 @@ suelta en `sucursales`.
   hereda nada. `verificar_duplicado_cliente` queda afuera a propósito (avisa de un duplicado entre
   todos), y el bot va aparte. Una lectura nueva de clientes con permisos de server usa esa función,
   como `EXISTS (SELECT 1 FROM _cliente_visible(...))`: es `SETOF` para que la policy la inlinee (una
-  función SQL escalar con subconsultas se llama fila por fila). Todo
+  función SQL escalar con subconsultas se llama fila por fila). Una tabla hija de clientes que
+  lee el preventista (los descuentos por rubro, `cdc_select`) suma un `EXISTS` sobre `clientes`, que
+  pasa por esa RLS: no repite la regla (SEG-1, tanda 6 de #1603). Todo
   camino nuevo que ofrezca clientes *para operar* lo excluye; todo camino de *historial* lo
   sigue mostrando.
   Desde la 358 esa excepción de historial vale para **cualquier** cliente, no sólo el

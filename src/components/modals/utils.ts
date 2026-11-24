@@ -72,6 +72,8 @@ const PESOS_CUIT = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
  * Valida un CUIT argentino: 11 dígitos (con o sin guiones) y dígito
  * verificador correcto (módulo 11). Vacío se permite (es opcional).
  * Decisión del dueño en #1561 (D37, 1561-b11): uno inválido se rechaza.
+ * El server lo valida igual al guardar un CUIT nuevo o cambiado
+ * (`clientes_tipo_documento_del_valor`, catalogo-B1 de la tanda 6 de #1603).
  * @param cuit - CUIT a validar
  * @returns true si es válido o está vacío
  * @example
