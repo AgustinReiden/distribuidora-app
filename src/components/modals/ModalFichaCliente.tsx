@@ -18,7 +18,7 @@ import { formaPagoLabel, esFormaPagoNoDineraria } from '../../constants/formasPa
 import NotasCreditoVentaCliente from './NotasCreditoVentaCliente'
 import CanjesCliente from './CanjesCliente'
 import { lazyWithReload } from '../../utils/lazyWithReload'
-import { esSaldoAFavorAplicado } from '../../utils/saldoAFavor'
+import { esSaldoAFavorAplicado, textoNotaCreditoAplicada, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor'
 import { TOLERANCIA_CENTAVOS } from '../../utils/imputacionCredito'
 import type { CreditoAImputar } from './ModalImputarCredito'
 import type { ClienteDB, PedidoDB, PagoDBWithUsuario, ResumenCuenta, EstadisticasCliente, PedidoClienteWithItems } from '../../types'
@@ -410,6 +410,16 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                     {formatCurrency(estadisticas?.montoPagado || 0)}
                   </p>
                   <p className="text-sm text-green-600">{estadisticas?.pedidosPagados || 0} pedidos</p>
+                  {textoNotaCreditoAplicada(estadisticas?.notaCreditoAplicada ?? 0) && (
+                    <p className="mt-1 text-xs text-green-700 dark:text-green-400" data-testid="ficha-nc-aplicada">
+                      {textoNotaCreditoAplicada(estadisticas?.notaCreditoAplicada ?? 0)}
+                    </p>
+                  )}
+                  {textoSaldoAFavorAplicado(estadisticas?.saldoAFavorAplicado ?? 0) && (
+                    <p className="mt-1 text-xs text-green-700 dark:text-green-400" data-testid="ficha-saldo-aplicado">
+                      {textoSaldoAFavorAplicado(estadisticas?.saldoAFavorAplicado ?? 0)}
+                    </p>
+                  )}
                 </div>
                 <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-xl">
                   <div className="flex items-center gap-2 text-yellow-600 dark:text-yellow-400 mb-2">

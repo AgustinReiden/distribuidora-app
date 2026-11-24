@@ -10,6 +10,9 @@ import { filtrarProductosOperativos } from '../../utils/productosOperativos'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { calcularNetoVenta } from '../../utils/calculations'
 import { alicuotaIvaVenta } from '../../utils/alicuotaIvaVenta'
+import { preventistaIdsDelAlta } from '../../utils/asignacionClienteAlAlta'
+import { catalogoDebeRelerse } from '../../utils/catalogoDeVenta'
+import { formularioAltaAlAbrir } from '../../utils/formularioAltaAlAbrir'
 import { avisoCobroAltaRecortado, mensajeSaldoAFavorAlta, saldoMostradoAlta } from '../../utils/saldoAFavor'
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio'
 import AvisosPedidos from '../pedidos/AvisosPedidos'
@@ -307,7 +310,7 @@ export default function PedidosContainer(): React.ReactElement {
   // sirve para resolver por id. Los selectores donde se ELIGE un cliente para
   // trabajar reciben sólo los operables.
   const { data: clientesOperativos = [] } = useClientesOperativosQuery()
-  const { data: productos = [] } = useProductosQuery()
+  const { data: productos = [], refetch: refetchProductos, dataUpdatedAt: productosActualizadosAt } = useProductosQuery()
   const { data: subcategoriasTabla = [] } = useSubcategoriasQuery()
   // El manifiesto de carga agrupa por rubro -> subrubro (#829). El embed del
   // producto trae `categoria` (rubro) y `subcategoria_id`; el nombre del
@@ -635,6 +638,28 @@ export default function PedidosContainer(): React.ReactElement {
     fechaEntregaProgramada: undefined as string | undefined,
     preventistaId: undefined as string | undefined,
   })
+
+  // frv-B1 (tanda 6): el formulario del alta nace al montar la pantalla. Abierta de un día para el
+  // otro, «Nuevo pedido» cargaba la fecha de ayer: al abrirlo, uno todavía en blanco toma hoy.
+  useEffect(() => {
+    if (!modalPedidoOpen) return
+    setNuevoPedido(prev => formularioAltaAlAbrir(prev, fechaLocalISO()))
+  }, [modalPedidoOpen])
+
+  // INF-1 (tanda 6): Realtime sólo publica `pedidos`; nada refresca el stock de una pantalla que
+  // se queda abierta. Al abrir el alta o la edición se relee el catálogo si su copia tiene más de
+  // un minuto, para que un stock cacheado en 0 no deje un producto sin poder elegirse (ni uno
+  // que ya no tiene stock se ofrezca). Se lee de refs: lo que dispara es la apertura, no el dato.
+  const productosActualizadosAtRef = useRef(productosActualizadosAt)
+  productosActualizadosAtRef.current = productosActualizadosAt
+  const refetchProductosRef = useRef(refetchProductos)
+  refetchProductosRef.current = refetchProductos
+  useEffect(() => {
+    if (!modalPedidoOpen && !modalEditarOpen) return
+    if (catalogoDebeRelerse(productosActualizadosAtRef.current, Date.now())) {
+      void refetchProductosRef.current?.()
+    }
+  }, [modalPedidoOpen, modalEditarOpen])
 
   // Override del regalo al crear (solo admin). promoId -> partes elegidas: una
   // parte cambia el producto; dos o más reparten el regalo en sabores.
@@ -1118,9 +1143,9 @@ export default function PedidosContainer(): React.ReactElement {
   }, [])
 
   const handleCancelarPedido = useCallback((pedido: PedidoDB) => {
-    // Si el pedido ya tiene plata cobrada, avisar ANTES: cancelar no devuelve
-    // nada solo, y hasta ahora el pedido cancelado no ofrecia ninguna accion de
-    // pago, asi que ese cobro quedaba colgado sin camino desde la app.
+    // Si el pedido ya tiene plata cobrada, avisar ANTES qué pasa con ella. Desde la 479 (#1512,
+    // COB-1) la cancelación libera el cobro como saldo a favor del cliente y lo aplica FIFO a
+    // sus otras boletas impagas; el pedido cancelado ya no tiene pagos que anular (FRV-3, tanda 6).
     // Un vale blanco tiene monto_pagado = total sin un solo pago (saldado por
     // naturaleza): el aviso de "tiene $X cobrados" sería falso.
     const cobrado = esTipoVB(pedido.tipo_factura) ? 0 : Number(pedido.monto_pagado ?? 0)
@@ -1128,10 +1153,10 @@ export default function PedidosContainer(): React.ReactElement {
       setConfirmConfig({
         visible: true, tipo: 'warning', titulo: 'El pedido tiene pagos registrados',
         mensaje:
-          `Este pedido tiene ${formatPrecio(cobrado)} cobrados. Cancelarlo NO devuelve ` +
-          'esa plata ni anula los pagos. Si el cobro no corresponde, anulalo desde ' +
-          '"Ver/Anular Pagos" — la accion sigue disponible con el pedido cancelado. ' +
-          'Al confirmar se continua con la cancelacion.',
+          `Este pedido tiene ${formatPrecio(cobrado)} cobrados. Al cancelarlo, ese cobro no se ` +
+          'devuelve: queda como saldo a favor del cliente y se aplica solo a sus otras boletas ' +
+          'impagas (la más vieja primero). Lo que sobre le queda a favor. ' +
+          'Al confirmar se continúa con la cancelación.',
         onConfirm: () => {
           setConfirmConfig({ visible: false })
           setPedidoCancelando(pedido)
@@ -3054,6 +3079,7 @@ export default function PedidosContainer(): React.ReactElement {
             }}
             onCrearCliente={async (clienteData: Record<string, unknown>) => {
               try {
+                const idsAsignados = preventistaIdsDelAlta({ isAdmin, isPreventista, userId: user?.id })
                 const dbData = {
                   razon_social: (clienteData.razonSocial as string) || (clienteData.nombreFantasia as string) || '',
                   nombre_fantasia: (clienteData.nombreFantasia as string) || (clienteData.nombre as string) || '',
@@ -3064,6 +3090,10 @@ export default function PedidosContainer(): React.ReactElement {
                   horarios_atencion: (clienteData.horariosAtencion as string) || undefined,
                   dias_atencion: (clienteData.dias_atencion as string | null) ?? null,
                   duplicado_confirmado: Boolean(clienteData.duplicadoConfirmado),
+                  // FRV-2 (tanda 6, decisión del dueño): el cliente que da de alta un preventista
+                  // queda asignado a él, como en /clientes. Sin esto nacía «libre» (visible para
+                  // todos los preventistas). El admin no manda nada: queda sin asignar, como hoy.
+                  ...(idsAsignados && idsAsignados.length > 0 ? { preventista_ids: idsAsignados } : {}),
                 }
                 const huella = JSON.stringify(dbData)
                 const newCliente = await crearClienteMut.mutateAsync({ ...dbData, clave: claveAltaCliente(huella) })

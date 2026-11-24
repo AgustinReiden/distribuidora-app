@@ -69,3 +69,6 @@ reportes-privados/
 # Salidas generadas localmente, no artefactos del repo
 /out.json
 /output/
+
+# Estado local del CLI de Supabase (ref del proyecto, id de la organizacion): no va al repo publico
+supabase/.temp/

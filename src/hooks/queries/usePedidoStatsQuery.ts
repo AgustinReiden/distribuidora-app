@@ -168,6 +168,9 @@ async function fetchPedidoStats(
       consumoInterno.monto += monto
       continue
     }
+    // frv-B8 (tanda 6): un pedido cancelado (con «Ver cancelados») no es venta ni deuda: ni «Total»
+    // ni «Impagos» lo cuentan, así «Total» cierra con la suma de lo que muestran las demás tarjetas.
+    if (p.estado === 'cancelado') continue
     summary.total.count += 1
     summary.total.monto += monto
     if (p.estado === 'pendiente') {

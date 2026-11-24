@@ -9,6 +9,10 @@
  * (`fecha`, no `created_at` en UTC) no mueve el total; sí importaría si algún
  * día se filtra por período, por eso las filas traen `fecha`.
  *
+ * «Total comprado» es NETO de las notas de crédito de venta vigentes del cliente (REP-1, tanda 6;
+ * decisión del dueño): con 1.050 vendidos y 350 en notas son 700, como en Ventas por cliente. La
+ * cantidad de compras no cambia: una nota resta plata, no pedidos.
+ *
  * Lo pendiente de entrega reusa `agregarMetricasPeriodo`, la misma cuenta del
  * Dashboard ("+$X en curso (N)"): todo lo no entregado y no cancelado, sin canjes.
  *
@@ -19,6 +23,7 @@ import { agregarMetricasPeriodo, diffDiasISO } from './metricasDashboard'
 import { fechaLocalISO } from './formatters'
 import { esTipoVB } from './valeBlanco'
 import { ventaDePedido } from './montoMinimo'
+import { totalNotasQueRestan, type NotaCreditoVentaMetricaRow } from './notasCreditoVentaMetrica'
 
 export interface PedidoVentaCliente {
   id: string
@@ -50,7 +55,10 @@ export const esValeBlanco = (p: { tipo_factura?: string | null }): boolean => es
 const esVenta = (p: PedidoVentaCliente): boolean =>
   p.estado === 'entregado' && p.canal !== 'cambio' && !esValeBlanco(p)
 
-export function calcularVentaCliente(pedidos: PedidoVentaCliente[]): VentaCliente {
+export function calcularVentaCliente(
+  pedidos: PedidoVentaCliente[],
+  notas: readonly NotaCreditoVentaMetricaRow[] = [],
+): VentaCliente {
   const ventas = pedidos.filter(esVenta)
   const vales = pedidos.filter(p => p.estado === 'entregado' && p.canal !== 'cambio' && esValeBlanco(p))
   // Un VB nace entregado, así que no tiene "en curso"; igual se lo saca por si acaso.
@@ -61,7 +69,8 @@ export function calcularVentaCliente(pedidos: PedidoVentaCliente[]): VentaClient
       monto: vales.reduce((s, p) => s + (p.total || 0), 0),
       cantidad: vales.length,
     },
-    totalComprado: ventas.reduce((s, p) => s + ventaDePedido({ total: p.total || 0, cargo_envio: p.cargo_envio }), 0),
+    totalComprado: ventas.reduce((s, p) => s + ventaDePedido({ total: p.total || 0, cargo_envio: p.cargo_envio }), 0)
+      - totalNotasQueRestan(notas),
     cantidadCompras: ventas.length,
     pedidosPagados: ventas.filter(p => p.estado_pago === 'pagado').length,
     pendienteEntrega: ventasEnCurso,
@@ -108,3 +117,55 @@ export function calcularRitmoCompra(pedidos: PedidoVentaCliente[], hoyISO: strin
   // `fecha` es editable: una venta re-fechada a futuro no deja los días en negativo.
   return { diasDesdeUltimaCompra: Math.max(0, diffDiasISO(ultima, hoyISO)), frecuenciaCompra }
 }
+
+/** Un pago del cliente, con lo que hace falta para decir qué es (frv-B3, tanda 6). */
+export interface PagoFichaCliente {
+  monto: number | string | null
+  forma_pago?: string | null
+  de_saldo_a_favor?: boolean | null
+  pedido_id?: number | string | null
+}
+
+export interface PagosFicha {
+  /** Plata cobrada: lo que el cliente pagó. */
+  cobrado: number
+  /** Notas de crédito aplicadas a una boleta: se muestran aparte («Nota de crédito aplicada»). */
+  notaCreditoAplicada: number
+  /** Saldo a favor aplicado a una boleta: se muestra aparte («Saldo a favor aplicado»). */
+  saldoAFavorAplicado: number
+}
+
+const aCentavos = (n: number): number => Math.round(n * 100) / 100
+
+/**
+ * El «Pagado» de la ficha cuenta SÓLO la plata cobrada (frv-B3, tanda 6; decisión del dueño del
+ * 24/11). Con $ 10.000 en efectivo y una nota de crédito de $ 5.000 la ficha dice «Pagado:
+ * $ 10.000»: la nota y el saldo a favor aplicado van aparte, con su rótulo (una NC nunca se
+ * rotula «Saldo a favor aplicado»: `saldoAFavor.ts`). Un adelanto de sueldo no es plata cobrada
+ * y no se cuenta en ningún lado. El crédito de una nota que quedó suelto (sin boleta) no se
+ * aplicó: no es cobro ni se muestra como aplicado.
+ */
+export function separarPagosFicha(pagos: readonly PagoFichaCliente[]): PagosFicha {
+  let cobrado = 0
+  let notaCreditoAplicada = 0
+  let saldoAFavorAplicado = 0
+  for (const p of pagos) {
+    const monto = Number(p.monto) || 0
+    if (p.forma_pago === 'adelanto_sueldo') continue
+    if (p.forma_pago === 'nota_credito') {
+      if (p.pedido_id != null) notaCreditoAplicada += monto
+      continue
+    }
+    if (p.de_saldo_a_favor) {
+      saldoAFavorAplicado += monto
+      continue
+    }
+    cobrado += monto
+  }
+  return {
+    cobrado: aCentavos(cobrado),
+    notaCreditoAplicada: aCentavos(notaCreditoAplicada),
+    saldoAFavorAplicado: aCentavos(saldoAFavorAplicado),
+  }
+}
+

@@ -474,6 +474,13 @@ suelta en `sucursales`.
   y Rentabilidad siguen por boleta. Lo que le toca al VENDEDOR resta sólo las notas cuyo motivo le
   descuenta (ver «Los motivos de una nota de crédito de venta»): la comisión, las metas y Rendimiento,
   cada uno con su foto. Un ranking nuevo de venta resta `_ventas_nc` igual.
+  **El Dashboard y la ficha del cliente también son netos** (REP-1, tanda 6; decisión del dueño del
+  24/11): «Venta entregada», los clientes más activos y el «Total comprado» restan las notas vigentes de
+  boletas que son venta (`src/utils/notasCreditoVentaMetrica.ts`, mismo corte que `_ventas_nc`; la plata es
+  `total` de la nota). Las notas las lee por REST sólo admin y encargado (`mt_notas_credito_venta_select`):
+  a un preventista la consulta le vuelve vacía y sus cifras siguen brutas hasta que haya una RPC para él.
+  El «Pagado» de la ficha cuenta sólo plata cobrada: la nota de crédito aplicada y el saldo a favor
+  aplicado van aparte, con su rótulo, y un adelanto de sueldo no cuenta (`separarPagosFicha`, frv-B3).
   **La nota de crédito de venta se imputa al día de su boleta** (B16, #1545; decisión del dueño):
   `notas_credito_venta.fecha` es la de imputación, la de `pedidos.fecha`, y es la que cuenta para los
   reportes y la posición fiscal; cuándo se emitió es `created_at`, y su crédito (los pagos) es plata
@@ -724,6 +731,8 @@ suelta en `sucursales`.
   listado, selector o contador nuevo usa `useClientesOperativosQuery` (o
   `esClienteOperable`); `useClientesQuery` queda para resolver por id.
   Ver no es editar: `mt_clientes_update` le pide al preventista la misma rama de operar.
+  **El cliente que da de alta un preventista queda asignado a él**, por /clientes y por el alta rápida del
+  pedido (FRV-2, tanda 6; decisión del dueño): la regla es una, `preventistaIdsDelAlta`.
   Desde la 378 (#1182/#1183), el que reparte un pedido (sin VB) ve su cliente sin poder
   operarlo, y sólo quien actúa como preventista en la sucursal (`_actua_como_preventista`) puede
   tener clientes asignados: el trigger de `cliente_preventistas` frena al transportista y al

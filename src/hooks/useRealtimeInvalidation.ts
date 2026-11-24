@@ -14,6 +14,15 @@
  *   `invalidateTrasReconexion`). Nunca por eventos: ninguna tabla de esas dos
  *   tiene canal, y sumarlas a cada evento deshace lo de #1347.
  *
+ * OJO (INF-1, tanda 6 de #1603): la publicación `supabase_realtime` de producción tiene UNA
+ * sola tabla, `pedidos` (lo vigila `scripts/check-realtime.mjs`; `productos` y `pedido_items`
+ * quedan afuera a propósito por el costo). Los canales de `pedido_items` y de `productos` de
+ * acá abajo suscriben bien pero NUNCA reciben un evento: se dejan como están (sacarlos no
+ * arregla nada y, si algún día se publican esas tablas, ya funcionan), pero no hay que
+ * confiar en ellos para que el stock se refresque. Lo que sí lo refresca es
+ * `PedidosContainer`: al abrir «Nuevo pedido» o la edición relee el catálogo si su copia tiene
+ * más de un minuto (`catalogoDebeRelerse`).
+ *
  * Usa debounce de 300ms para agrupar cambios rápidos (ej: batch de stock).
  */
 import { useRef, useCallback, useEffect } from 'react'
