@@ -17,6 +17,8 @@ import { claveRendicion } from '../../utils/rendicionGastos'
 import { vehiculosKeys } from './useVehiculosQuery'
 import { personalKeys } from './usePersonalQuery'
 import { GASTO_COLUMNAS } from './gastoColumnas'
+import { useRequestIdEstable } from '../useRequestIdEstable'
+import { huellaDeAlta } from '../../utils/huellaDeAlta'
 
 export { GASTO_COLUMNAS }
 
@@ -84,12 +86,19 @@ export function useRendicionesCerradasQuery(claves: Array<{ transportista_id: st
 export function useGuardarGastoMutation() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
+  // reportes-R3 (tanda 6 de #1603): el alta lleva una clave estable por contenido. Si la
+  // respuesta se perdió y se reintenta lo mismo, el server devuelve el gasto del primer
+  // intento en vez de cargarlo otra vez (con su reintegro al empleado). La edición no la lleva.
+  const claveAlta = useRequestIdEstable()
   return useMutation({
     mutationFn: async (payload: GuardarGastoPayload): Promise<number> => {
-      const { data, error } = await supabase.rpc('guardar_gasto', { p_gasto: payload })
-      // `guardar_gasto` no es idempotente: si la respuesta se perdió, reintentar
-      // a ciegas puede duplicar el gasto.
+      const huella = huellaDeAlta(currentSucursalId, payload)
+      const enviado = huella ? { ...payload, clave: payload.clave ?? claveAlta(huella) } : payload
+      const { data, error } = await supabase.rpc('guardar_gasto', { p_gasto: enviado })
+      // Con la clave, reintentar lo mismo no duplica; un gasto con otros datos sí es otro.
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el gasto. Revisá la lista del mes antes de reintentar, puede haber quedado registrado.')
+      // Salió bien: la próxima alta igual (dos tickets iguales) es otro gasto, con otra clave.
+      if (huella) claveAlta.olvidar([huella])
       return data as number
     },
     onSuccess: () => {

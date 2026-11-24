@@ -77,6 +77,7 @@ function nuevoCliente() {
 }
 
 const ERROR_DE_RED: ErrorDeSupabase = { message: 'TypeError: Failed to fetch', code: '' }
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const EMPLEADO: Empleado = {
   id: 7,
@@ -296,10 +297,32 @@ describe('useGuardarEmpleadoMutation', () => {
     const id = await result.current.mutateAsync(payload)
 
     expect(id).toBe(12)
-    expect(rpcCalls).toEqual([{ fn: 'guardar_empleado', args: { p_empleado: payload } }])
+    // reportes-R3 (tanda 6 de #1603): cambió de regla. El alta lleva la clave del alta (un uuid).
+    expect(rpcCalls).toEqual([{ fn: 'guardar_empleado', args: { p_empleado: { ...payload, clave: expect.stringMatching(UUID) } } }])
     await waitFor(() => expect(invalidar).toHaveBeenCalled())
     const keys = invalidar.mock.calls.map(c => (c[0] as { queryKey: unknown[] }).queryKey)
     expect(keys).toContainEqual(['personal', 1])
+  })
+
+  // reportes-R3 (tanda 6 de #1603): un reintento del mismo alta no duplica el empleado.
+  it('el reintento del mismo alta después de un error manda la misma clave; la edición no lleva clave', async () => {
+    rpcResult = { data: null, error: ERROR_DE_RED }
+    const { result } = renderHook(() => useGuardarEmpleadoMutation(), { wrapper: makeWrapper(nuevoCliente()) })
+    const alta = { nombre: 'Ana Pérez', puesto: 'ayudante', arreglo: ARREGLO } as GuardarEmpleadoPayload
+
+    await result.current.mutateAsync(alta).catch(() => undefined)
+    rpcResult = { data: 12, error: null }
+    await result.current.mutateAsync({ ...alta })
+    await result.current.mutateAsync({ ...alta })
+    await result.current.mutateAsync({ ...alta, id: 12 })
+
+    const claves = rpcCalls.map(c => (c.args?.p_empleado as { clave?: string }).clave)
+    expect(claves[0]).toMatch(UUID)
+    expect(claves[1]).toBe(claves[0])
+    // Salió bien: otra alta igual es otra, con otra clave.
+    expect(claves[2]).toMatch(UUID)
+    expect(claves[2]).not.toBe(claves[0])
+    expect(rpcCalls[3].args?.p_empleado).not.toHaveProperty('clave')
   })
 
   it('un error de red da el mensaje "Sin conexión"', async () => {
