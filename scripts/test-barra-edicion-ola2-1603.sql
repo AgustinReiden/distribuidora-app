@@ -856,6 +856,10 @@ BEGIN
     s2 := pg_temp.prod('[]', 100);
     c := pg_temp.prod('[{"dias":30,"cantidad":100,"restante":50}]', 0);
     t := pg_temp.prod('[{"dias":30,"cantidad":100,"restante":50}]', 10);
+    -- Tanda 6 de #1603 (promos-B1), cambió de regla: una barra que no es la del contenedor de la
+    -- promo cuenta con el bulto de SU contenedor y, sin el dato, el reparto se rechaza. C2 trae
+    -- el mismo bulto que el N de la promo (2): la cuenta del caso es la de siempre.
+    UPDATE productos SET unidades_por_bulto = 2 WHERE id = t;
     v_promo := pg_temp.promo_barra(a, s, c);
     INSERT INTO promo_acumuladores (promocion_id, producto_regalo_id, ajuste_producto_id, usos_pendientes, sucursal_id)
     VALUES (v_promo, s2, t, 0, v_suc);

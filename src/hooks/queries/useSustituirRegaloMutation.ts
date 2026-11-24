@@ -82,6 +82,48 @@ export function useCorteRegaloQuery(pedidoItemId: string | number | null | undef
   })
 }
 
+/** El regalo contra el que el server mide el sustituto de una línea (promos-B2). */
+export interface RegaloReferencia {
+  productoId: string
+  precio: number | null
+  factor: number
+}
+
+/**
+ * promos-B2 (tanda 6 de #1603), decisión del dueño (24/11): el tope del sustituto se mide
+ * contra el regalo DEL PEDIDO (lo que daba la promo y lo que valía cuando se armó), no
+ * contra el regalo de hoy de la promo. Ese regalo sale de la foto del pedido por
+ * audit_logs, que la pantalla no lee: lo da la RPC `regalo_referencia_de_linea` (admin y
+ * encargado). Si falla o no hay, null, y la pantalla cae al regalo de la promo (el server
+ * sigue topeando con el del pedido).
+ */
+export function useRegaloReferenciaQuery(pedidoItemId: string | number | null | undefined) {
+  const id = pedidoItemId == null ? '' : String(pedidoItemId)
+  return useQuery({
+    queryKey: ['pedido-items', 'regalo-referencia', id] as const,
+    queryFn: async (): Promise<RegaloReferencia | null> => {
+      const { data, error } = await supabase.rpc('regalo_referencia_de_linea', { p_pedido_item_id: Number(id) })
+      if (error || data == null) return null
+      return regaloReferenciaDeRpc(data)
+    },
+    enabled: id !== '',
+    staleTime: 30 * 1000,
+  })
+}
+
+/** Lo que devuelve `regalo_referencia_de_linea`, o null si no se entiende. */
+export function regaloReferenciaDeRpc(data: unknown): RegaloReferencia | null {
+  const raw = (data ?? {}) as { producto_id?: unknown; precio?: unknown; factor?: unknown }
+  if (raw.producto_id == null) return null
+  const precio = Number(raw.precio)
+  const factor = Number(raw.factor)
+  return {
+    productoId: String(raw.producto_id),
+    precio: raw.precio != null && Number.isFinite(precio) ? precio : null,
+    factor: Number.isFinite(factor) && factor > 0 ? factor : 1,
+  }
+}
+
 /**
  * Hook que expone la mutation. En `onSuccess` invalida pedidos + productos
  * para que la UI vea el nuevo stock y la nueva composicion del pedido.

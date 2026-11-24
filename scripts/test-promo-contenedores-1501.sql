@@ -189,7 +189,8 @@ BEGIN
         ('public.promo_factor_bloquea_contenedores()', '859e10cd31a27610ef43c5b1b6f63eb7',
          '{postgres=X/postgres,service_role=X/postgres}'),
         -- C4b (ola 2 de #1603): el cuerpo con el control de versión (updated_at_esperado y la versión por las hijas).
-        ('public.cambiar_regalo_promocion(bigint,bigint,bigint,boolean,jsonb)', '500ca25bc79a22ac9355feaca0e20733',
+        -- Tanda 6 de #1603 (promos-B3): y lo que valida el alta.
+        ('public.cambiar_regalo_promocion(bigint,bigint,bigint,boolean,jsonb)', 'ae43fe7380d9b92e06521c911972833c',
          '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
         ('public._rendicion_pagos(bigint,date,date,bigint)', '25f0aebcefe469fdc1a6e5205ea83efa',
          '{postgres=X/postgres,service_role=X/postgres}'),

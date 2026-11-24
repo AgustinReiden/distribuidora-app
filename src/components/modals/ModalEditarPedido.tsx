@@ -18,6 +18,7 @@ import { usePromocionesListQuery, usePedidoSustitucionesQuery, usePromoCuposQuer
 import { promosSinRegaloEnElPedido } from '../../utils/promosSinRegalo';
 import { entradaDeConsulta, motivoDatosDePrecio, resumirDatosDePrecio, sePuedeReintentarDatos } from '../../utils/datosDePrecio';
 import { cadenaDelRegalo, cantidadBaseDeLinea, conservarRepartos, regaloParaEditar } from '../../utils/repartoRegalo';
+import { regaloQueNoCrece } from '../../utils/regaloPromoApagada';
 import { avisosDeCupo, promosConRegalo } from '../../utils/cupoPromo';
 import { AvisoCupoPromo } from '../ui/AvisoCupoPromo';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
@@ -820,8 +821,31 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     return () => { vigente = false; };
   }, [idsConCadena]);
   const { bonificacionesCalculadas, repartosPerdidos } = useMemo(() => {
+    // promos-B6 (tanda 6 de #1603, decisión del dueño del 24/11): el regalo de una promo que
+    // ya no rige se conserva pero no crece, como mide el server (regalo_fuera_de_promo). Lo
+    // guardado, en cortes. El admin no tiene ese tope. Una promo con varias líneas (un reparto
+    // que se conserva) no creció: sólo se mira la de una línea.
+    const bonifsPorPromo = new Map<string, number>();
+    for (const i of itemsFinales) {
+      if (i.esBonificacion) bonifsPorPromo.set(String(i.promoId), (bonifsPorPromo.get(String(i.promoId)) ?? 0) + 1);
+    }
+    const hoy = fechaLocalISO();
+    const sinCrecer = (bonif: { promoId?: string | number | null; cantidad: number }): number => {
+      if (isAdmin || bonif.promoId == null || bonifsPorPromo.get(String(bonif.promoId)) !== 1) return bonif.cantidad;
+      const conservado = (pedido?.items ?? [])
+        .filter(i => i.es_bonificacion && String(i.promocion_id) === String(bonif.promoId))
+        .reduce((s, i) => s + cantidadBaseDeLinea(sustituciones, i.promocion_id, i.regalo_cadena_id, Number(i.cantidad)), 0);
+      return regaloQueNoCrece({
+        cantidad: bonif.cantidad,
+        promo: promociones.find(p => String(p.id) === String(bonif.promoId)) ?? null,
+        fechaPedido: pedido?.fecha ? String(pedido.fecha).slice(0, 10) : null,
+        hoy,
+        conservado,
+      });
+    };
     const calculadas = itemsFinales
       .filter(i => i.esBonificacion)
+      .map(bonifResuelta => ({ ...bonifResuelta, cantidad: sinCrecer(bonifResuelta) }))
       .map(bonif => {
         // #1057: la cadena de la línea, no la de toda la promo.
         const cadenaId = cadenaDelRegalo(pedido?.items ?? [], sustituciones, bonif.promoId, bonif.productoId);
@@ -908,7 +932,7 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       linea => cantidadBaseDeLinea(sustituciones, linea.promocion_id, linea.regalo_cadena_id, Number(linea.cantidad)),
     );
     return { bonificacionesCalculadas: bonificaciones, repartosPerdidos: perdidos };
-  }, [itemsFinales, productos, sustituciones, pedido, regalosAlOriginal, isAdmin, promoInfoMap, cortesGuardados]);
+  }, [itemsFinales, productos, sustituciones, pedido, regalosAlOriginal, isAdmin, promoInfoMap, cortesGuardados, promociones]);
 
   // H1: lo que el aviso tiene que decir, antes de tocar Guardar (con lo que el modal sabe) o
   // con el rechazo del server. Nada se cambia solo: el usuario elige volver al regalo de la

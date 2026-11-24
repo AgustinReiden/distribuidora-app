@@ -286,10 +286,13 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   una línea cambiada por valor (A×4 → P×19) está en la unidad del sustituto.
   **El sustituto de un regalo tiene tope para quien no es admin** (#1592 PRM-1, decisión del dueño
   del 16/11): entra si es del mismo rubro que el regalo con igual o menor cantidad, o si no vale
-  más a precio de lista (por unidad de la línea, para abajo). Siempre contra el regalo que da la
-  promo (`_regalo_de_la_promo`) con el corte de la línea, nunca contra la línea de hoy ni el
-  producto con que se cargó: ni sustituir dos veces, ni cargar otro sabor, ni repartir suben el
-  techo. La regla es una, `regalo_tope_sustituto`, con espejo en `topeSustitutoRegalo` (gate:
+  más a precio de lista (por unidad de la línea, para abajo). Siempre contra el regalo que daba la
+  promo al armarse el pedido, con lo que valía entonces (`_regalo_de_la_promo`: la foto, por
+  `audit_logs`; promos-B2, decisión del dueño del 24/11: si el admin cambia el regalo de la promo de
+  un caramelo de $ 5 a un perfume de $ 500, el pedido de antes sigue topeado en $ 5), con el corte
+  de la línea, nunca contra la línea de hoy ni el producto con que se cargó: ni sustituir dos
+  veces, ni cargar otro sabor, ni repartir suben el techo. La pantalla lee ese regalo con
+  `regalo_referencia_de_linea`. La regla es una, `regalo_tope_sustituto`, con espejo en `topeSustitutoRegalo` (gate:
   `topeSustituto.espejo.json`); la pantalla sugiere con ella. El reparto la cumple sobre la suma
   de las partes, y la edición no escala una cadena por encima (`_regalo_tope_de_cadena`): lo que
   armó un admin se conserva pero no crece, **salvo** cuando la edición baja lo que da la promo y el
@@ -349,7 +352,13 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   contenedor y el ajuste automático de una promo de fracción no cambian mientras haya pedidos sin
   entregar ni cancelar que entraron en ella (`trg_promo_config_barra_con_pedidos`, #1592 PRM-2;
   decisión del dueño, como el bulto de un producto). El tipo sí, y el regalo con su contenedor cuando
-  el contenedor era el mismo regalo (la rotación muda la barra). Y sólo una promo de fracción con
+  el contenedor era el mismo regalo (la rotación muda la barra); pero pasarla de fracción a unidad
+  entera se rechaza mientras su barra tenga bloques vivos y haya pedidos abiertos en ella
+  (`trg_promo_tipo_con_bloques_vivos`, PRM-1 de la tanda 6 de #1603, decisión del dueño del 24/11:
+  con la promo en unidad entera esos pedidos ya no abren el bloque y el contenedor queda un fardo
+  abajo). Un sustituto o un sabor de reparto cuya barra no es la del contenedor de la promo cuenta
+  con su propio bulto (`unidades_por_bulto` del contenedor), también del mismo rubro: sin el dato
+  se rechaza (promos-B1; antes heredaba el N de la promo, que es el empaque del regalo). Y sólo una promo de fracción con
   ajuste automático tiene barra: en la que mueve stock o no tiene ajuste, `usos_pendientes` es un
   contador en la unidad de la línea, que `aplicar_uso_promo_acumulador` no convierte en bloques ni
   la renormalización tampoco (1592-b2), y la sustitución le pasa la diferencia (1592-b3).

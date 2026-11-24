@@ -159,7 +159,9 @@ export default function ModalPromocion({
   // issue #535). El preview es read-only y comparte la aritmética con ese
   // trigger, así que lo que se muestra acá es lo que va a pasar.
   // #1324 (decisión del dueño, 2026-10-29): se puede cambiar con pedidos abiertos,
-  // avisando. Esos pedidos leen su foto (pedido_promo_reglas) y no cambian.
+  // avisando. Esos pedidos leen su foto (pedido_promo_reglas) y no cambian. Salvo de
+  // fracción a unidad entera con bloques ya cerrados en la barra: eso lo rechaza el server
+  // (PRM-1, tanda 6 de #1603, trg_promo_tipo_con_bloques_vivos).
   const tipoCambia = isEditing && (tipoRegalo === 'unidad_entera') !== Boolean(promocion?.regalo_mueve_stock)
   const { data: pedidosAbiertos = 0 } = usePromoPedidosAbiertosQuery(promocion?.id ?? null, tipoCambia)
 
@@ -497,10 +499,21 @@ export default function ModalPromocion({
                 className="flex items-start gap-2 mt-2 p-2 text-xs rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300"
               >
                 <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                <span>
-                  Esta promo tiene {pedidosAbiertos} {pedidosAbiertos === 1 ? 'pedido abierto' : 'pedidos abiertos'}.
-                  Siguen con el tipo de regalo con el que se armaron: el cambio vale para los pedidos nuevos.
-                </span>
+                {/* PRM-1 (tanda 6 de #1603, decisión del dueño del 24/11): de fracción a unidad
+                    entera, si la barra ya cerró bloques con esos pedidos, el server rechaza el
+                    cambio con el motivo y cuáles son; al revés, esos pedidos siguen con su foto. */}
+                {tipoRegalo === 'unidad_entera' ? (
+                  <span>
+                    Esta promo tiene {pedidosAbiertos} {pedidosAbiertos === 1 ? 'pedido abierto' : 'pedidos abiertos'}.
+                    Si su barra ya cerró algún bloque del contenedor, no se puede pasar a unidad entera hasta
+                    que esos pedidos se entreguen o se cancelen: al guardar te decimos cuáles.
+                  </span>
+                ) : (
+                  <span>
+                    Esta promo tiene {pedidosAbiertos} {pedidosAbiertos === 1 ? 'pedido abierto' : 'pedidos abiertos'}.
+                    Siguen con el tipo de regalo con el que se armaron: el cambio vale para los pedidos nuevos.
+                  </span>
+                )}
               </p>
             )}
           </div>

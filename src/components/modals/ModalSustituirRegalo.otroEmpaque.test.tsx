@@ -31,6 +31,7 @@ vi.mock('../../hooks/queries/useSustituirRegaloMutation', () => ({
   useSustituirRegaloMutation: () => ({ mutateAsync: sustituir, isPending: false }),
   useDividirRegaloMutation: () => ({ mutateAsync: dividir, isPending: false }),
   useCorteRegaloQuery: () => ({ data: null }),
+  useRegaloReferenciaQuery: () => ({ data: null }),
 }))
 vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => ({ success: vi.fn(), error: vi.fn() }),
@@ -120,7 +121,8 @@ describe('ModalSustituirRegalo — otro empaque u otro producto (#950)', () => {
   it('otra categoría sin unidades por bulto: pide cargarlo y no deja confirmar', () => {
     renderModal()
     elegir(1, '500')
-    expect(screen.getByRole('alert').textContent).toMatch(/Papas Fritas es de otra categoría y no tiene cargadas/)
+    // promos-B1 (tanda 6 de #1603): el mismo aviso vale ahora también para el mismo rubro.
+    expect(screen.getByRole('alert').textContent).toMatch(/Papas Fritas no tiene cargadas sus unidades/)
     motivo('quiere papas')
     const confirmar = screen.getByRole('button', { name: /cambiar regalo/i })
     expect(confirmar).toBeDisabled()
