@@ -11,6 +11,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
+import { PAGINA_SUPABASE, TOPE_SEGURIDAD } from '../../utils/paginacion'
 import { useSucursal } from '../../contexts/SucursalContext'
 import type { ConceptoCargo, MedidaCargo, MedidaFichaInput, MedidasPorProducto } from '../../utils/medidasCargo'
 import type { CompraCargoInput } from '../../types'
@@ -102,15 +103,27 @@ async function fetchMedidas(): Promise<MedidaCargo[]> {
  * se agregue, así que se piden enteras una vez.
  */
 async function fetchProductoMedidas(sucursalId: number | null): Promise<MedidasPorProducto<number>> {
-  let query = supabase.from('producto_medidas').select('producto_id, medida_id, unidades_por')
-  if (sucursalId !== null) query = query.eq('sucursal_id', sucursalId)
-  const { data, error } = await query
-  if (error) {
-    if (noExiste(error)) return {}
-    throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las medidas de los productos. Revisá la señal e intentá de nuevo.')
+  // gestion-B2: paginado y con un orden único (la clave de la tabla). Sin esto PostgREST corta en
+  // 1.000 filas sin avisar y faltaban las unidades por pallet de los demás productos. A mano y no
+  // con `traerTodo`: una tabla que todavía no existe tiene que dar «sin medidas», no un error.
+  const filas: Array<{ producto_id: number | string; medida_id: number | string; unidades_por: number | string }> = []
+  let completo = false
+  for (let desde = 0; desde < TOPE_SEGURIDAD; desde += PAGINA_SUPABASE) {
+    let query = supabase.from('producto_medidas').select('producto_id, medida_id, unidades_por')
+    if (sucursalId !== null) query = query.eq('sucursal_id', sucursalId)
+    const { data, error } = await query
+      .order('producto_id').order('medida_id').order('sucursal_id')
+      .range(desde, desde + PAGINA_SUPABASE - 1)
+    if (error) {
+      if (noExiste(error)) return {}
+      throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar las medidas de los productos. Revisá la señal e intentá de nuevo.')
+    }
+    filas.push(...((data ?? []) as typeof filas))
+    if ((data ?? []).length < PAGINA_SUPABASE) { completo = true; break }
   }
+  if (!completo) throw new Error(`Se superó el tope de ${TOPE_SEGURIDAD} filas trayendo las medidas de los productos.`)
   const salida: MedidasPorProducto<number> = {}
-  for (const f of (data ?? []) as Array<{ producto_id: number | string; medida_id: number | string; unidades_por: number | string }>) {
+  for (const f of filas) {
     const n = Number(f.unidades_por)
     if (!Number.isFinite(n) || n <= 0) continue
     const producto = String(f.producto_id)

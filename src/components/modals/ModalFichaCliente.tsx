@@ -18,7 +18,7 @@ import { formaPagoLabel, esFormaPagoNoDineraria } from '../../constants/formasPa
 import NotasCreditoVentaCliente from './NotasCreditoVentaCliente'
 import CanjesCliente from './CanjesCliente'
 import { lazyWithReload } from '../../utils/lazyWithReload'
-import { esSaldoAFavorAplicado, textoNotaCreditoAplicada, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor'
+import { esSaldoAFavorAplicado, textoNotaCreditoAplicada } from '../../utils/saldoAFavor'
 import { TOLERANCIA_CENTAVOS } from '../../utils/imputacionCredito'
 import type { CreditoAImputar } from './ModalImputarCredito'
 import type { ClienteDB, PedidoDB, PagoDBWithUsuario, ResumenCuenta, EstadisticasCliente, PedidoClienteWithItems } from '../../types'
@@ -415,9 +415,14 @@ export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, o
                       {textoNotaCreditoAplicada(estadisticas?.notaCreditoAplicada ?? 0)}
                     </p>
                   )}
-                  {textoSaldoAFavorAplicado(estadisticas?.saldoAFavorAplicado ?? 0) && (
+                  {(estadisticas?.adelantoSueldo ?? 0) > 0.005 && (
+                    <p className="mt-1 text-xs text-green-700 dark:text-green-400" data-testid="ficha-adelanto-sueldo">
+                      Adelanto de sueldo: {formatCurrency(estadisticas?.adelantoSueldo ?? 0)}
+                    </p>
+                  )}
+                  {(estadisticas?.saldoAFavorAplicado ?? 0) > 0.005 && (
                     <p className="mt-1 text-xs text-green-700 dark:text-green-400" data-testid="ficha-saldo-aplicado">
-                      {textoSaldoAFavorAplicado(estadisticas?.saldoAFavorAplicado ?? 0)}
+                      De eso, {formatCurrency(estadisticas?.saldoAFavorAplicado ?? 0)} se aplicaron desde saldo a favor
                     </p>
                   )}
                 </div>

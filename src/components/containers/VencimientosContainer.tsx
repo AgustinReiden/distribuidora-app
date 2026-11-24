@@ -20,6 +20,7 @@ import { useNotification } from '../../contexts/NotificationContext'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { formatPrecio } from '../../utils/formatters'
+import { PAGINA_SUPABASE } from '../../utils/paginacion'
 
 const VistaVencimientos = lazyWithReload(() => import('../vistas/VistaVencimientos'))
 
@@ -89,7 +90,19 @@ export default function VencimientosContainer() {
     }
   }, [devolver, notify])
 
+  // gestion-B1: PostgREST corta la respuesta en 1.000 filas sin avisar, y la RPC ordena por fecha
+  // (lo más urgente primero), así que lo que se cae es lo que vence más tarde. Con 1.000 lotes
+  // justos, la lista y sus contadores pueden estar cortos: se dice, en vez de mostrarlos como completos.
+  const listaCortada = lotes.length >= PAGINA_SUPABASE
+
   return (
+    <>
+    {listaCortada && (
+      <p role="alert" className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
+        La lista se corta en {PAGINA_SUPABASE.toLocaleString('es-AR')} lotes: se muestran los que vencen primero y
+        puede haber más que vencen después. Los contadores del panel no los cuentan.
+      </p>
+    )}
     <Suspense fallback={<LoadingState />}>
       <VistaVencimientos
         lotes={lotes}
@@ -111,5 +124,6 @@ export default function VencimientosContainer() {
         restanteCompra={restanteCompra}
       />
     </Suspense>
+    </>
   )
 }

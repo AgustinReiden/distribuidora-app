@@ -479,8 +479,9 @@ suelta en `sucursales`.
   boletas que son venta (`src/utils/notasCreditoVentaMetrica.ts`, mismo corte que `_ventas_nc`; la plata es
   `total` de la nota). Las notas las lee por REST sólo admin y encargado (`mt_notas_credito_venta_select`):
   a un preventista la consulta le vuelve vacía y sus cifras siguen brutas hasta que haya una RPC para él.
-  El «Pagado» de la ficha cuenta sólo plata cobrada: la nota de crédito aplicada y el saldo a favor
-  aplicado van aparte, con su rótulo, y un adelanto de sueldo no cuenta (`separarPagosFicha`, frv-B3).
+  El «Pagado» de la ficha cuenta sólo plata cobrada: lo único que va aparte, con su rótulo, es lo que no
+  es plata (la nota de crédito y el adelanto de sueldo); un pago a cuenta que después una boleta absorbe
+  desde saldo a favor sigue en «Pagado» (`separarPagosFicha`, frv-B3).
   **La nota de crédito de venta se imputa al día de su boleta** (B16, #1545; decisión del dueño):
   `notas_credito_venta.fecha` es la de imputación, la de `pedidos.fecha`, y es la que cuenta para los
   reportes y la posición fiscal; cuándo se emitió es `created_at`, y su crédito (los pagos) es plata

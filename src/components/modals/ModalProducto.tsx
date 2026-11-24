@@ -9,6 +9,10 @@ import { useZodValidation } from '../../hooks/useZodValidation';
 import { useMarcasQuery, useCatalogoIIQuery } from '../../hooks/queries';
 import { tasaEfectivaEncuadre, alicuotaVigente, formatearNominal, II_EFECTIVO_MAXIMO } from '../../utils/impuestosInternos';
 import { CANTIDAD_MINIMA_VENTA_MAXIMA, MENSAJE_MINIMO_VENTA_MAXIMO } from '../../utils/minimoVenta';
+import {
+  STOCK_MAXIMO, PRECIO_MAXIMO, CODIGO_LARGO_MAXIMO,
+  MOTIVO_STOCK_MAXIMO, MOTIVO_STOCK_MINIMO_MAXIMO, MOTIVO_PRECIO_MAXIMO, MOTIVO_CODIGO_LARGO,
+} from '../../utils/topesProducto';
 import { fechaLocalISO, formatPrecio } from '../../utils/formatters';
 import {
   calcularCostoFinanciero,
@@ -64,7 +68,7 @@ export const modalProductoSchema = z.object({
     .transform(val => val.trim())
     .refine(val => val.length >= 2, { message: 'El nombre debe tener al menos 2 caracteres' }),
 
-  codigo: z.string().optional(),
+  codigo: z.string().refine(v => v.trim().length <= CODIGO_LARGO_MAXIMO, { message: MOTIVO_CODIGO_LARGO }).optional(),
   categoria: z.string().optional(),
   // Subrubro (mig 270): hijo del rubro elegido; '' / null = sin subrubro.
   subcategoria_id: z.string().optional().nullable(),
@@ -72,13 +76,14 @@ export const modalProductoSchema = z.object({
   stock: z.coerce
     .number({ error: 'El stock debe ser un número' })
     .int({ message: 'El stock debe ser un número entero' })
-    .nonnegative({ message: 'El stock no puede ser negativo' }),
+    .nonnegative({ message: 'El stock no puede ser negativo' })
+    .max(STOCK_MAXIMO, { message: MOTIVO_STOCK_MAXIMO }),
 
   // Vacío (null) usa el mínimo de siempre (10); 0 apaga la alerta (CAT-13). No es
   // lo mismo: vaciar el campo no puede guardar 0 (L3, #1603).
   stock_minimo: z.preprocess(
     v => (v === '' || v === undefined ? null : v),
-    z.coerce.number().int().nonnegative().nullable(),
+    z.coerce.number().int().nonnegative().max(STOCK_MAXIMO, { message: MOTIVO_STOCK_MINIMO_MAXIMO }).nullable(),
   ),
 
   // Mínimo de venta del producto (mig 147). 0 / undefined = sin mínimo; el
@@ -105,7 +110,8 @@ export const modalProductoSchema = z.object({
 
   precio: z.coerce
     .number({ error: 'El precio debe ser un número' })
-    .positive({ message: 'El precio debe ser mayor a 0' }),
+    .positive({ message: 'El precio debe ser mayor a 0' })
+    .max(PRECIO_MAXIMO, { message: MOTIVO_PRECIO_MAXIMO }),
 
   // Cuántas unidades de venta hacen 1 fardo/bulto.
   // Ej: si vendés "medio fardo" como 1 unidad, acá poné 2.
@@ -659,15 +665,18 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
                 const limpio = codigoParaGuardar(e.target.value) ?? ''
                 if (limpio !== e.target.value) handleFieldChange('codigo', limpio)
               }}
-              className="w-full px-3 py-2 border rounded-lg"
+              className={inputClass('codigo')}
               placeholder="SKU o codigo interno"
             />
+            {errores.codigo && <p className="text-red-500 text-xs mt-1">{errores.codigo}</p>}
           </div>
           <div className="col-span-2 sm:col-span-1">
             <label className="block text-sm font-medium mb-1">Stock *</label>
             <NumberInput
               integer
               min={0}
+              max={STOCK_MAXIMO}
+              motivoMax={MOTIVO_STOCK_MAXIMO}
               emptyValue={0}
               value={Number(form.stock) || 0}
               onChange={(n) => handleFieldChange('stock', n)}
@@ -694,6 +703,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
             <NumberInput
               integer
               min={0}
+              max={STOCK_MAXIMO}
+              motivoMax={MOTIVO_STOCK_MINIMO_MAXIMO}
               value={form.stock_minimo}
               onChange={(n) => handleFieldChange('stock_minimo', n)}
               onVaciar={() => handleFieldChange('stock_minimo', null)}
@@ -1089,6 +1100,8 @@ const ModalProducto = memo(function ModalProducto({ producto, categorias, subrub
               <label className="block text-xs font-medium mb-1 text-gray-600">Precio Final (con IVA + Imp.Int.) *</label>
               <NumberInput
                 min={0}
+                max={PRECIO_MAXIMO}
+                motivoMax={MOTIVO_PRECIO_MAXIMO}
                 emptyValue={0}
                 value={parsePrecio(form.precio)}
                 onChange={(n) => handlePrecioChange(String(n))}

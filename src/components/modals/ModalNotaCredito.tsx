@@ -156,8 +156,9 @@ export default function ModalNotaCredito({
     for (const it of itemsConCantidad) {
       porProducto[it.productoId] = (porProducto[it.productoId] || 0) + it.cantidad
     }
-    return calcularIINotaCredito(compra, porProducto)
-  }, [compra, itemsConCantidad])
+    // Con el tope de lo que le queda del II a la compra (CMP-b4): las devoluciones vigentes.
+    return calcularIINotaCredito(compra, porProducto, notasExistentes)
+  }, [compra, itemsConCantidad, notasExistentes])
 
   const ajuste = useMemo(() => totalesAjusteNotaCredito({
     tipoFactura: sinCredito ? 'ZZ' : 'FC',

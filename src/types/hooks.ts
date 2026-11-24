@@ -1413,11 +1413,13 @@ export interface EstadisticasCliente {
   totalPedidos: number;
   totalCompras: number;
   pedidosPagados: number;
-  /** Plata cobrada: sin notas de crédito, saldo a favor aplicado ni adelantos de sueldo (frv-B3). */
+  /** Plata cobrada: sin notas de crédito ni adelantos de sueldo (frv-B3). */
   montoPagado: number;
   /** Notas de crédito aplicadas a boletas, aparte del cobrado (frv-B3). */
   notaCreditoAplicada?: number;
-  /** Saldo a favor aplicado a boletas, aparte del cobrado (frv-B3). */
+  /** Adelantos de sueldo, aparte del cobrado (frv-B3). */
+  adelantoSueldo?: number;
+  /** De lo cobrado, lo que llegó a boletas desde saldo a favor: informativo, ya está en montoPagado (frv-B3). */
   saldoAFavorAplicado?: number;
   pedidosPendientes: number;
   montoPendiente: number;

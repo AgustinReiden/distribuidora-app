@@ -127,8 +127,8 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
         { etiqueta: 'pagos del cliente' },
       )
       if (!vigente()) return
-      // «Pagado» es sólo la plata cobrada (frv-B3, tanda 6): las notas de crédito y el saldo a
-      // favor aplicado van aparte, y un adelanto de sueldo no cuenta.
+      // «Pagado» es sólo la plata cobrada (frv-B3, tanda 6): la nota de crédito y el adelanto de
+      // sueldo no son plata y van aparte; lo cobrado que después se aplicó desde saldo a favor cuenta.
       const pagosFicha = separarPagosFicha(pagosCliente)
       const totalPagosRegistrados = pagosFicha.cobrado
 
@@ -157,6 +157,7 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
         pedidosPagados: venta.pedidosPagados,
         montoPagado: totalPagosRegistrados,
         notaCreditoAplicada: pagosFicha.notaCreditoAplicada,
+        adelantoSueldo: pagosFicha.adelantoSueldo,
         saldoAFavorAplicado: pagosFicha.saldoAFavorAplicado,
         pedidosPendientes: venta.pedidosPendientesEntrega,
         montoPendiente: venta.pendienteEntrega,

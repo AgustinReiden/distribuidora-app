@@ -1,7 +1,7 @@
 /**
  * frv-B3 (tanda 6 de #1603; decisión del dueño del 24/11): el «Pagado» de la ficha del cliente
- * cuenta sólo la plata cobrada. Las notas de crédito y el saldo a favor aplicado se muestran
- * aparte, y un adelanto de sueldo no cuenta.
+ * cuenta sólo la plata cobrada. La nota de crédito y el adelanto de sueldo no son plata y van
+ * aparte; lo cobrado que después se aplicó desde saldo a favor SÍ cuenta.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
@@ -53,15 +53,16 @@ describe('useFichaCliente — «Pagado» (frv-B3)', () => {
     expect(m.selectsPagos[0]).toEqual(expect.stringContaining('de_saldo_a_favor'))
   })
 
-  it('el saldo a favor aplicado y el adelanto de sueldo tampoco son cobro', async () => {
+  it('el pago a cuenta que una boleta absorbió sigue en Pagado; el adelanto de sueldo va aparte', async () => {
     m.pagos = [
-      { monto: 300, forma_pago: 'efectivo', pedido_id: 2 },
-      { monto: 200, forma_pago: 'efectivo', de_saldo_a_favor: true, pedido_id: 2 },
-      { monto: 900, forma_pago: 'adelanto_sueldo', pedido_id: 3 },
+      { monto: 2000, forma_pago: 'efectivo', pedido_id: null },
+      { monto: 8000, forma_pago: 'efectivo', de_saldo_a_favor: true, pedido_id: 2 },
+      { monto: 3000, forma_pago: 'adelanto_sueldo', pedido_id: 3 },
     ]
     const e = await ficha()
-    expect(e.montoPagado).toBe(300)
-    expect(e.saldoAFavorAplicado).toBe(200)
+    expect(e.montoPagado).toBe(10000)
+    expect(e.saldoAFavorAplicado).toBe(8000)
+    expect(e.adelantoSueldo).toBe(3000)
     expect(e.notaCreditoAplicada).toBe(0)
   })
 })

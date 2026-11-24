@@ -192,6 +192,9 @@ export function useAplicarControlStockMutation() {
       // El stock cambió: refrescar productos y el histórico de sesiones.
       queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: controlStockKeys.all(currentSucursalId) })
+      // gestion-B7: el trigger de stock mueve también los contadores de los lotes (como en una
+      // merma, STK-15). Literal, como allá: este módulo no depende del de lotes.
+      queryClient.invalidateQueries({ queryKey: ['lotes', currentSucursalId] })
     },
   })
 }

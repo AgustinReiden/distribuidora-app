@@ -127,11 +127,16 @@ export interface PagoFichaCliente {
 }
 
 export interface PagosFicha {
-  /** Plata cobrada: lo que el cliente pagó. */
+  /** Plata cobrada: lo que el cliente pagó, también lo que después se aplicó desde saldo a favor. */
   cobrado: number
-  /** Notas de crédito aplicadas a una boleta: se muestran aparte («Nota de crédito aplicada»). */
+  /** Notas de crédito aplicadas a una boleta: no es plata, se muestra aparte («Nota de crédito aplicada»). */
   notaCreditoAplicada: number
-  /** Saldo a favor aplicado a una boleta: se muestra aparte («Saldo a favor aplicado»). */
+  /** Adelantos de sueldo: no es plata cobrada, se muestra aparte («Adelanto de sueldo»). */
+  adelantoSueldo: number
+  /**
+   * De lo cobrado, lo que llegó a una boleta desde saldo a favor. Es un dato informativo: YA está
+   * dentro de `cobrado` (era plata que entró antes) y no se resta.
+   */
   saldoAFavorAplicado: number
 }
 
@@ -140,31 +145,35 @@ const aCentavos = (n: number): number => Math.round(n * 100) / 100
 /**
  * El «Pagado» de la ficha cuenta SÓLO la plata cobrada (frv-B3, tanda 6; decisión del dueño del
  * 24/11). Con $ 10.000 en efectivo y una nota de crédito de $ 5.000 la ficha dice «Pagado:
- * $ 10.000»: la nota y el saldo a favor aplicado van aparte, con su rótulo (una NC nunca se
- * rotula «Saldo a favor aplicado»: `saldoAFavor.ts`). Un adelanto de sueldo no es plata cobrada
- * y no se cuenta en ningún lado. El crédito de una nota que quedó suelto (sin boleta) no se
- * aplicó: no es cobro ni se muestra como aplicado.
+ * $ 10.000». Lo único que va aparte es lo que NO es plata: la nota de crédito (`forma_pago =
+ * 'nota_credito'`, también cuando llegó a una boleta como crédito; nunca se rotula «Saldo a favor
+ * aplicado»: `saldoAFavor.ts`) y el adelanto de sueldo. Un pago con `de_saldo_a_favor` y una forma
+ * de pago real SÍ es plata que entró (un pago a cuenta que después una boleta absorbió): cuenta en
+ * «Pagado» y no se mueve cuando se aplica; `saldoAFavorAplicado` sólo informa cuánto de eso fue.
+ * El crédito de una nota que quedó suelto (sin boleta) no se aplicó: no es cobro ni se muestra.
  */
 export function separarPagosFicha(pagos: readonly PagoFichaCliente[]): PagosFicha {
   let cobrado = 0
   let notaCreditoAplicada = 0
+  let adelantoSueldo = 0
   let saldoAFavorAplicado = 0
   for (const p of pagos) {
     const monto = Number(p.monto) || 0
-    if (p.forma_pago === 'adelanto_sueldo') continue
+    if (p.forma_pago === 'adelanto_sueldo') {
+      adelantoSueldo += monto
+      continue
+    }
     if (p.forma_pago === 'nota_credito') {
       if (p.pedido_id != null) notaCreditoAplicada += monto
       continue
     }
-    if (p.de_saldo_a_favor) {
-      saldoAFavorAplicado += monto
-      continue
-    }
     cobrado += monto
+    if (p.de_saldo_a_favor) saldoAFavorAplicado += monto
   }
   return {
     cobrado: aCentavos(cobrado),
     notaCreditoAplicada: aCentavos(notaCreditoAplicada),
+    adelantoSueldo: aCentavos(adelantoSueldo),
     saldoAFavorAplicado: aCentavos(saldoAFavorAplicado),
   }
 }

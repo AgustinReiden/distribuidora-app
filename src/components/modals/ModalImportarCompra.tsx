@@ -127,6 +127,18 @@ export default function ModalImportarCompra({ productos, onImportar, onClose }: 
       erroresTemp.push('No se encontró una columna de costo (por ejemplo "Costo"). Una columna "Precio de venta" no se toma como costo: es lo que se le cobra al cliente, no lo que se le paga al proveedor. Sólo entran las filas con bonificación del 100 %.');
     }
 
+    // gestion-B11: dos columnas que pueden ser el costo («Costo con IVA» y «Costo neto») y se toma
+    // la primera sin avisar: cargaba el costo con IVA como si fuera el neto. Se dice cuál se toma.
+    const columnasDeCosto = [...new Set(datos.flatMap(fila => Object.keys(fila)))].filter(columnaDeCosto);
+    if (columnasDeCosto.length > 1) {
+      let elegida = columnasDeCosto[0];
+      for (const nombre of COLUMNAS.costoUnitario) {
+        const k = columnasDeCosto.find(c => c.toLowerCase().trim().includes(nombre));
+        if (k) { elegida = k; break; }
+      }
+      erroresTemp.push(`Hay más de una columna que parece de costo (${columnasDeCosto.map(c => `"${c}"`).join(', ')}). Se tomó "${elegida}". Si no es la que querés, dejá en el archivo sólo la del costo neto y volvé a subirlo.`);
+    }
+
     datos.forEach((fila, index) => {
       const codigo = encontrarValor(fila, COLUMNAS.codigo);
       if (!codigo) {

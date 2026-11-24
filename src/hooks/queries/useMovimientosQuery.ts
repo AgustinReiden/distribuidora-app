@@ -312,6 +312,8 @@ export function useMovimientoItemsQuery(movimientoId: string | null | undefined)
   })
 }
 
+// gestion-B12: se invalida también cuando la mutación falla (`onSettled`): si el otro lado ya
+// resolvió el envío («ya fue aceptado»), la lista tiene que mostrar el estado de ahora.
 function useInvalidarMovimientos() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
@@ -332,25 +334,25 @@ function useInvalidarMovimientos() {
 
 export function useCrearMovimientoMutation() {
   const invalidar = useInvalidarMovimientos()
-  return useMutation({ mutationFn: crearMovimiento, onSuccess: invalidar })
+  return useMutation({ mutationFn: crearMovimiento, onSettled: invalidar })
 }
 
 export function useAceptarMovimientoMutation() {
   const invalidar = useInvalidarMovimientos()
-  return useMutation({ mutationFn: aceptarMovimiento, onSuccess: invalidar })
+  return useMutation({ mutationFn: aceptarMovimiento, onSettled: invalidar })
 }
 
 export function useDenegarMovimientoMutation() {
   const invalidar = useInvalidarMovimientos()
-  return useMutation({ mutationFn: denegarMovimiento, onSuccess: invalidar })
+  return useMutation({ mutationFn: denegarMovimiento, onSettled: invalidar })
 }
 
 export function useCancelarMovimientoMutation() {
   const invalidar = useInvalidarMovimientos()
-  return useMutation({ mutationFn: cancelarMovimiento, onSuccess: invalidar })
+  return useMutation({ mutationFn: cancelarMovimiento, onSettled: invalidar })
 }
 
 export function useEditarMovimientoMutation() {
   const invalidar = useInvalidarMovimientos()
-  return useMutation({ mutationFn: editarMovimiento, onSuccess: invalidar })
+  return useMutation({ mutationFn: editarMovimiento, onSettled: invalidar })
 }
