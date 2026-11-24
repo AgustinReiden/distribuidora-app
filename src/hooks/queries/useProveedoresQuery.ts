@@ -120,7 +120,9 @@ async function updateProveedor({ id, data: proveedor }: { id: string; data: Prov
       email: proveedor.email || null,
       contacto: proveedor.contacto || null,
       notas: proveedor.notas || null,
-      activo: proveedor.activo !== undefined ? proveedor.activo : true
+      // `activo` no se manda (gestion-B4): lo cambia sólo `toggleProveedorActivo`. El formulario
+      // lo trae de la copia de la lista, y si otro admin desactivó al proveedor mientras se
+      // editaba, guardar lo reactivaba sin que nadie lo pidiera.
     })
     .eq('id', id)
     .select()
@@ -215,10 +217,16 @@ export function useCrearProveedorMutation() {
     mutationFn: (proveedor: ProveedorFormInputExtended) => createProveedor(proveedor, currentSucursalId),
     onSuccess: (newProveedor) => {
       // Actualizar cache de lista
-      queryClient.setQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(currentSucursalId), (old) => {
-        if (!old) return [newProveedor]
-        return [...old, newProveedor].sort((a, b) => a.nombre.localeCompare(b.nombre))
-      })
+      // Sin lista en caché (la consulta había fallado) no se siembra una de una sola fila:
+      // quedaba «fresca» 10 minutos y el selector mostraba un solo proveedor (gestion-B3).
+      if (queryClient.getQueryData(proveedoresKeys.lists(currentSucursalId)) === undefined) {
+        queryClient.invalidateQueries({ queryKey: proveedoresKeys.lists(currentSucursalId) })
+      } else {
+        queryClient.setQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(currentSucursalId), (old) => {
+          if (!old) return old
+          return [...old, newProveedor].sort((a, b) => a.nombre.localeCompare(b.nombre))
+        })
+      }
       // Invalidar activos también
       queryClient.invalidateQueries({ queryKey: proveedoresKeys.activos(currentSucursalId) })
     },
@@ -241,9 +249,11 @@ export function useActualizarProveedorMutation() {
       const previousProveedores = queryClient.getQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(currentSucursalId))
 
       // Aplicar cambios optimistamente
+      // Sin `activo`: el estado no lo cambia esta edición (gestion-B4).
+      const { activo: _activo, ...cambios } = proveedor
       queryClient.setQueryData<ProveedorDBExtended[]>(proveedoresKeys.lists(currentSucursalId), (old) => {
         if (!old) return old
-        return old.map(p => p.id === id ? { ...p, ...proveedor } as ProveedorDBExtended : p)
+        return old.map(p => p.id === id ? { ...p, ...cambios } as ProveedorDBExtended : p)
       })
 
       return { previousProveedores }

@@ -6,7 +6,8 @@
  * `registrar_compra_completa` devuelve `warning_descuadre` (el total calculado
  * no coincide con el informado) y `warning_ii_declarado` (la apertura del
  * impuesto interno por alícuota no cierra contra el total, o declara una tasa
- * que ninguna línea usa). `actualizar_compra_items` devuelve el segundo. La
+ * que ninguna línea usa). `actualizar_compra_items` devuelve los dos (el
+ * descuadre desde CMP-b1, tanda 6 de #1603). La
  * base los redactaba y el cliente los tiraba a la basura: la compra se
  * guardaba, el usuario veía "Compra registrada" y el descuadre no existía para
  * nadie.
@@ -155,16 +156,32 @@ describe('avisos de la base al editar una compra', () => {
     expect(res.warningCostoPromedio).toHaveLength(1)
   })
 
-  it('sin apertura declarada no hay aviso', async () => {
-    // `actualizar_compra_items` no devuelve `warning_descuadre`: no recalcula el
-    // total contra el informado, lo recibe ya hecho.
+  it('sin apertura declarada ni descuadre no hay aviso', async () => {
+    // Un server de antes de CMP-b1 (tanda 6 de #1603) no manda `warning_descuadre`.
     rpc.mockResolvedValue({ data: { success: true, compra_id: '221' }, error: null })
     const { result } = setup(useActualizarCompraMutation)
 
     const res = await result.current.mutateAsync(edicion)
 
     expect(res.warningIiDeclarado).toBeNull()
+    expect(res.warningDescuadre).toBeNull()
     expect(res.warningCostoPromedio).toEqual([])
+  })
+
+  it('sube el descuadre del total tal como lo redactó la RPC, como el alta (CMP-b1)', async () => {
+    // La edición guardaba el total de una FC como llegaba y no avisaba nada:
+    // ahora `actualizar_compra_items` lo compara con lo que suma la cabecera
+    // guardada y lo dice con el mismo texto que el alta.
+    rpc.mockResolvedValue({
+      data: { success: true, compra_id: '221', warning_descuadre: DESCUADRE },
+      error: null,
+    })
+    const { result } = setup(useActualizarCompraMutation)
+
+    const res = await result.current.mutateAsync(edicion)
+
+    expect(res.warningDescuadre).toBe(DESCUADRE)
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
   })
 
   it('sube el motivo de cada aviso de costo promedio (mig 236)', async () => {
