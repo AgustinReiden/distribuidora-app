@@ -7,7 +7,9 @@
 --                     encargado leen todos; el chofer y el depósito, ninguno (regresión).
 --   S2 · catalogo-B1  un CUIT nuevo o cambiado tiene que tener 11 dígitos y el verificador bien (D37 de
 --                     #1561), por guardar_cliente y por REST. Uno que ya estaba mal no traba la edición
---                     del cliente mientras no se toque (regresión); el DNI y el vacío no cambian (regresión).
+--                     del cliente mientras no se toque (regresión); el DNI y el null no cambian (regresión).
+--                     Sin ningún dígito ('', espacios, guiones) queda sin documento (NULL), por la RPC y
+--                     por REST (H3 de la revisión); 'abc' se sigue rechazando.
 --   S3 · catalogo-B2  la latitud va de -90 a 90 y la longitud de -180 a 180 (como pedidos y visitas).
 --   S4 · catalogo-B3  actualizar_precios_masivo redondea al centavo antes de mirar que el precio sea > 0:
 --                     0,004 se rechaza en vez de dejar el producto en $ 0,00.
@@ -211,6 +213,21 @@ BEGIN
   v_r := pg_temp.alta(v_adm, 'T6C Doc 9', '"cuit": "27-12345678-1"');
   IF v_r NOT LIKE '22023 %dígito verificador%' THEN
     v_fallas := v_fallas || ('S2 · el rechazo del verificador malo no lo dice: ' || v_r);
+  END IF;
+  -- H3 de la revisión: vacío o sólo espacios y guiones queda sin documento (antes se guardaba '' como CUIT).
+  -- La lectura va en otra sentencia: una consulta que llama al alta ve la foto de antes de la llamada.
+  FOREACH v_t IN ARRAY ARRAY['""', '"   "', '" - "'] LOOP
+    v_r := pg_temp.alta(v_adm, 'T6C Doc vacío ' || left(md5(v_t), 8), '"cuit": ' || v_t);
+    IF v_r NOT LIKE 'PASA %' THEN
+      v_fallas := v_fallas || format('S2 · alta con cuit %s: %s (esperado sin documento)', v_t, v_r);
+    ELSIF (SELECT c.cuit FROM clientes c WHERE c.id = substr(v_r, 6)::bigint) IS NOT NULL THEN
+      v_fallas := v_fallas || format('S2 · alta con cuit %s: guardó %s (esperado sin documento)', v_t,
+                                     (SELECT quote_literal(c.cuit) FROM clientes c WHERE c.id = substr(v_r, 6)::bigint));
+    END IF;
+  END LOOP;
+  v_r := pg_temp.intenta(v_adm, 1, format($q$UPDATE clientes SET cuit = '' WHERE id = %s RETURNING COALESCE(cuit, 'NULL')$q$, c_ajeno));
+  IF v_r IS DISTINCT FROM 'PASA NULL' THEN
+    v_fallas := v_fallas || ('S2 · el CUIT vacío por REST: ' || v_r || ' (esperado sin documento)');
   END IF;
   -- Por REST, igual que por la RPC.
   v_r := pg_temp.intenta(v_adm, 1,

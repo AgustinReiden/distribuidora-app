@@ -11,14 +11,17 @@
 --       un EXISTS sobre `clientes`, que pasa por su RLS (mt_clientes_select → _cliente_visible, la
 --       «una sola regla» de 1564-b12). El preventista ya no lee los descuentos de un cliente de otro
 --       preventista ni de uno reservado a administración; los de sus clientes, los libres y los de
---       quien le vendió, sí. El admin y el encargado siguen leyendo todos; el chofer y el depósito,
---       ninguno (como hoy: la policy sigue pidiendo es_encargado_o_admin() OR es_preventista()).
+--       quien le vendió, sí. El admin y el encargado siguen leyendo todos, sin pagar el EXISTS (H1 de
+--       la revisión: la RLS de clientes se evalúa por cada fila de descuento); el chofer y el depósito,
+--       ninguno (como hoy: la policy sigue pidiendo es_encargado_o_admin() o es_preventista()).
 --   2 · catalogo-B1 · el dígito verificador del CUIT, en el server (D37 de #1561: «uno inválido se
 --       rechaza»). `clientes_tipo_documento_del_valor` (el trigger del tipo, B17) rechaza un CUIT
 --       nuevo o cambiado que no tenga 11 dígitos o con el verificador mal (módulo 11, como validarCuit
 --       del front y _clientes_documento_grupos). Rige al cambiar el documento: un cliente que ya lo
 --       tiene mal se sigue editando mientras sus dígitos no cambien (como errorDeCuit, que no frena el
---       CUIT con el que se abrió la ficha). Por eso es un trigger y no un CHECK.
+--       CUIT con el que se abrió la ficha). Por eso es un trigger y no un CHECK. Un valor sin ningún
+--       dígito, sólo espacios o guiones ('', ' - '), queda NULL como el relleno de ceros (H3 de la
+--       revisión): no es un documento.
 --   3 · catalogo-B2 · `clientes.latitud` de -90 a 90 y `longitud` de -180 a 180 (dos CHECK, como los de
 --       pedidos y visitas_cliente; también dejan afuera el NaN).
 --   4 · catalogo-B3 · `actualizar_precios_masivo` redondea el neto y el final al centavo ANTES de mirar
@@ -180,11 +183,15 @@ $datos$;
 -- El EXISTS lee `clientes` con la RLS de quien consulta (mt_clientes_select → _cliente_visible):
 -- la regla es una sola, la de la tabla de clientes. cliente_de_sucursal_activa y el rol quedan como
 -- estaban (el gate de la rama admin mira que la rama nombre la sucursal).
+-- Admin y encargado ven todos los clientes de la sucursal (_cliente_visible): no pagan el EXISTS (H1 de la
+-- revisión de la tarjeta). Los helpers de rol van en (SELECT …): un InitPlan por consulta, no una llamada
+-- por fila (sin eso, al quedar en un OR con columnas dejaban de ser el filtro de una vez que eran antes).
 ALTER POLICY cdc_select ON public.cliente_descuentos_categoria
   USING (
     public.cliente_de_sucursal_activa(cliente_id)
-    AND (public.es_encargado_o_admin() OR public.es_preventista())
-    AND EXISTS (SELECT 1 FROM public.clientes c WHERE c.id = cliente_descuentos_categoria.cliente_id)
+    AND ((SELECT public.es_encargado_o_admin())
+         OR ((SELECT public.es_preventista())
+             AND EXISTS (SELECT 1 FROM public.clientes c WHERE c.id = cliente_descuentos_categoria.cliente_id)))
   );
 
 COMMENT ON POLICY cdc_select ON public.cliente_descuentos_categoria IS
@@ -307,6 +314,13 @@ CREATE TEMP TABLE t6c_tramos (ord int PRIMARY KEY, fn text, que text, ancla text
 
 INSERT INTO t6c_tramos VALUES
 -- 2 · catalogo-B1
+(0, 'public.clientes_tipo_documento_del_valor()', 'vacío o sólo espacios y guiones: sin documento',
+$a$  IF v_d ~ '^0+$' THEN
+$a$,
+$r$  -- catalogo-B1, H3 de la revisión (tanda 6 de #1603): vacío o sólo espacios y guiones tampoco es un
+  -- documento (antes se guardaba '' como un CUIT).
+  IF v_d ~ '^0+$' OR btrim(NEW.cuit, E' \t-') = '' THEN
+$r$),
 (1, 'public.clientes_tipo_documento_del_valor()', 'declaraciones',
 $a$DECLARE
   v_d text;
@@ -435,7 +449,7 @@ BEGIN
      '4e291fa6c77c1406bad58400b493d70b', 'd106be0a778ce9ffdb563d7030343871',
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', false),
     ('public.clientes_tipo_documento_del_valor()',
-     '3eb8190498b7c8f7243e80fbf4526325', '79e75478f367a4abb24f4b7bbdf6e055',
+     '625dd902868502ffc50686c3537373a0', '79e75478f367a4abb24f4b7bbdf6e055',
      '{postgres=X/postgres,service_role=X/postgres}', false),
     ('public._anular_gasto(bigint,text,boolean)',
      'af021b07fcf5741ccbed34890a0004ab', '2be7627924c78a13671cb1ad025147f6',
@@ -478,9 +492,9 @@ BEGIN
   SELECT qual INTO v FROM pg_policies
    WHERE schemaname = 'public' AND tablename = 'cliente_descuentos_categoria' AND policyname = 'cdc_select'
      AND cmd = 'SELECT' AND roles = '{authenticated}';
-  IF v IS DISTINCT FROM '(cliente_de_sucursal_activa(cliente_id) AND (es_encargado_o_admin() OR es_preventista()) AND (EXISTS ( SELECT 1
+  IF v IS DISTINCT FROM '(cliente_de_sucursal_activa(cliente_id) AND (( SELECT es_encargado_o_admin() AS es_encargado_o_admin) OR (( SELECT es_preventista() AS es_preventista) AND (EXISTS ( SELECT 1
    FROM clientes c
-  WHERE (c.id = cliente_descuentos_categoria.cliente_id))))' THEN
+  WHERE (c.id = cliente_descuentos_categoria.cliente_id))))))' THEN
     RAISE EXCEPTION 'mig NNN · poscondición: cdc_select quedó %', v;
   END IF;
 
