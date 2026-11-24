@@ -283,9 +283,13 @@ BEGIN
     r  := pg_temp.prod('[]', 50);
     k1 := pg_temp.prod('[]', 50, 600);
     k2 := pg_temp.prod('[]', 1, 600);
+    -- Tanda 6 de #1603 (promos-B3, H6 de su lente), cambió de regla: la edición de una promo con ajuste
+    -- automático pide, como el alta, la descripción del regalo: la promo del ensayo la trae.
     INSERT INTO promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id,
-                             ajuste_automatico, ajuste_producto_id, unidades_por_bloque, stock_por_bloque)
-    VALUES ('ZZ ensayo C2 fraccion', 'bonificacion', public._tablero_hoy() - 1, v_suc, false, r, true, k1, 12, 1)
+                             ajuste_automatico, ajuste_producto_id, unidades_por_bloque, stock_por_bloque,
+                             descripcion_regalo)
+    VALUES ('ZZ ensayo C2 fraccion', 'bonificacion', public._tablero_hoy() - 1, v_suc, false, r, true, k1, 12, 1,
+            '1 botella de ensayo')
     RETURNING id INTO v_promo;
     INSERT INTO promocion_reglas (promocion_id, clave, valor, sucursal_id)
     VALUES (v_promo, 'cantidad_compra', 10, v_suc), (v_promo, 'cantidad_bonificacion', 4, v_suc);
@@ -334,7 +338,8 @@ BEGIN
       'nombre', 'ZZ ensayo C2 fraccion', 'tipo', 'bonificacion', 'fecha_inicio', public._tablero_hoy() - 1,
       'fecha_fin', NULL, 'limite_usos', NULL, 'prioridad', 0, 'regalo_mueve_stock', false,
       'modo_exclusion', 'acumulable', 'unidades_por_bloque', 2, 'stock_por_bloque', 1,
-      'descripcion_regalo', NULL, 'producto_ids', jsonb_build_array(vv),
+      -- Tanda 6 de #1603 (promos-B3, H6 de su lente): con la descripción del regalo, que la edición de una de fracción exige como el alta.
+      'descripcion_regalo', '1 botella de ensayo', 'producto_ids', jsonb_build_array(vv),
       'reglas', jsonb_build_array(jsonb_build_object('clave', 'cantidad_compra', 'valor', 10),
                                   jsonb_build_object('clave', 'cantidad_bonificacion', 'valor', 4))));
     PERFORM pg_temp.limpiar();

@@ -1,14 +1,16 @@
 -- =========================================================================
 -- NNN · PROMOS: EL CAMBIO DE TIPO CON BLOQUES CERRADOS, EL SUSTITUTO DEL MISMO
 --       RUBRO SIN SU BULTO Y LA EDICIÓN QUE VALIDA COMO EL ALTA
---       (tanda 6 del plan #1603, tarjeta B: PRM-1, promos-B1 y promos-B3 de la
+--       (tanda 6 del plan #1603, tarjeta B: PRM-1 y promos-B1, B2, B3 y B6 de la
 --        reauditoría del 24/11)
 --
--- Crea una función de trigger y su trigger sobre `promociones`, y parcha por
--- ancla, con premisa de md5 sobre los cuerpos vivos (ledger en la 540), tres
--- funciones: `sustituir_regalo_pedido`, `dividir_regalo_pedido` y
--- `cambiar_regalo_promocion`. No cambia firmas ni permisos de lo que existe.
--- Las tres siguen SECURITY DEFINER con `search_path = public, pg_temp`.
+-- Crea una función de trigger y su trigger sobre `promociones` (PRM-1) y la RPC
+-- `regalo_referencia_de_linea` (B2), y parcha por ancla, con premisa de md5 sobre
+-- los cuerpos vivos (los mismos en la 540 y la 541), cinco funciones:
+-- `sustituir_regalo_pedido` y `dividir_regalo_pedido` (B1), `cambiar_regalo_promocion`
+-- (B3), `regalo_fuera_de_promo` (B6) y `_regalo_de_la_promo` (B2). No cambia firmas ni
+-- permisos de lo que existe: las tres primeras siguen SECURITY DEFINER y las dos
+-- últimas INVOKER, todas con `search_path = public, pg_temp`.
 -- Ensayo: scripts/test-promos-tanda6-1603.sql. Se aplica en LF.
 --
 -- -------------------------------------------------------------------------
@@ -58,13 +60,31 @@
 -- -------------------------------------------------------------------------
 -- `cambiar_regalo_promocion` con `p_datos` (lo que manda el front) no pedía lo
 -- que sí pide `crear_promocion`: con `reglas: []` borraba las reglas, con
--- `producto_ids: []` borraba los productos, y con ajuste automático aceptaba una
--- promo sin contenedor o sin unidades por bloque. Ahora lo rechaza con los
--- mensajes del alta, antes de escribir. Sin `p_datos` (un bundle de antes de la
--- 472) no cambia nada.
+-- `producto_ids: []` borraba los productos, con ajuste automático aceptaba una
+-- promo sin contenedor, sin unidades por bloque o sin descripción del regalo, y sin
+-- él una sin producto de regalo. Ahora lo rechaza con los mensajes del alta, antes
+-- de escribir. Sin `p_datos` (un bundle de antes de la 472) no cambia nada.
 --
--- Revertir: volver las tres funciones a los cuerpos de la premisa, y borrar el
--- trigger y su función.
+-- -------------------------------------------------------------------------
+-- 4 · promos-B6: el regalo de una promo que ya no rige se conserva pero no crece
+-- -------------------------------------------------------------------------
+-- Decisión del dueño (24/11): V×10 + R×4 con la promo apagada, editado a V×20,
+-- sigue con R×4; bajar la venta lo recorta como siempre. `regalo_fuera_de_promo`
+-- (paso 4, en la edición) topea en lo que el pedido ya tenía, en cortes. Espejo
+-- en el front: `regaloQueNoCrece`. El admin no pasa por esa regla.
+--
+-- -------------------------------------------------------------------------
+-- 5 · promos-B2: el tope del sustituto, contra el regalo del pedido
+-- -------------------------------------------------------------------------
+-- Decisión del dueño (24/11): el tope se mide contra el regalo que daba la promo y
+-- lo que valía cuando nació el pedido, no contra el de hoy (un caramelo de $ 5
+-- cambiado después por un perfume de $ 500 deja el pedido de antes topeado en $ 5).
+-- `_regalo_de_la_promo` lo reconstruye por `audit_logs` desde `pedidos.created_at`
+-- (que una edición no mueve), clave por clave. La pantalla lo lee con la RPC nueva
+-- `regalo_referencia_de_linea` (admin y encargado, de su sucursal).
+--
+-- Revertir: volver las cinco funciones a los cuerpos de la premisa, y borrar el
+-- trigger, su función y `regalo_referencia_de_linea`.
 -- =========================================================================
 
 BEGIN;
@@ -264,9 +284,18 @@ $r$        RETURN jsonb_build_object('success', false, 'error', 'Una regla de la
         RETURN jsonb_build_object('success', false, 'error', 'La promoción necesita la cantidad de compra y la de bonificación');
       END IF;
     END IF;
-    -- promos-B3: con ajuste automático (fracción), el contenedor y las unidades por bloque,
-    -- como en el alta: las que manda el formulario o, si no las manda, las que tiene.
+    -- promos-B3: con ajuste automático (fracción), la descripción del regalo, el contenedor y
+    -- las unidades por bloque; sin él (unidad entera), el producto de regalo. Como en el alta:
+    -- lo que manda el formulario o, si no lo manda, lo que la promo tiene.
+    IF NOT v_ajuste AND p_producto_regalo_id IS NULL THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Elegí el producto de regalo');
+    END IF;
     IF v_ajuste THEN
+      IF (CASE WHEN p_datos ? 'descripcion_regalo' THEN NULLIF(btrim(COALESCE(p_datos->>'descripcion_regalo', '')), '')
+               ELSE (SELECT NULLIF(btrim(COALESCE(pr.descripcion_regalo, '')), '') FROM promociones pr
+                      WHERE pr.id = p_promocion_id AND pr.sucursal_id = v_sucursal) END) IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Escribí una descripción del regalo (ej: "1 botella Manaos Naranja 600cc")');
+      END IF;
       IF p_ajuste_producto_id IS NULL THEN
         RETURN jsonb_build_object('success', false, 'error', 'Elegí el producto del que se descuenta el stock (el contenedor)');
       END IF;
@@ -309,65 +338,79 @@ $r$    v_tope := public.regalo_tope_promo(v_cant, r.productos, r.compra, r.bonif
     END IF;
     IF v_suma > v_tope THEN
 $r$),
--- 5 · promos-B2: el regalo de referencia del tope es el de la foto del pedido
+-- 5 · promos-B2: el regalo de referencia del tope es el que daba la promo cuando nació el pedido
 (6, 'public._regalo_de_la_promo(bigint,bigint,bigint,uuid,bigint,numeric)', 'las declaraciones',
 $a$BEGIN
   por_linea := COALESCE(public._regalo_modo_del_pedido(p_pedido_id, p_promocion_id, p_sucursal_id), true);
 $a$,
 $r$DECLARE
-  -- promos-B2 (tanda 6 de #1603): cuándo se tomó la foto de la promo en el pedido.
-  v_foto_at timestamptz;
-  v_foto_id bigint;
-  v_foto_pr numeric;
+  -- promos-B2 (tanda 6 de #1603): cuándo nació el pedido, y el regalo y el contenedor de la
+  -- promo en ese momento.
+  v_nacio   timestamptz;
+  v_regalo  bigint;
+  v_cont    bigint;
+  v_viejo   bigint;
+  v_precio  numeric;
 BEGIN
   por_linea := COALESCE(public._regalo_modo_del_pedido(p_pedido_id, p_promocion_id, p_sucursal_id), true);
 $r$),
-(7, 'public._regalo_de_la_promo(bigint,bigint,bigint,uuid,bigint,numeric)', 'el regalo de la foto',
+(7, 'public._regalo_de_la_promo(bigint,bigint,bigint,uuid,bigint,numeric)', 'el regalo de cuando nació el pedido',
 $a$  SELECT COALESCE(p.producto_regalo_id, p.ajuste_producto_id) INTO producto_id
     FROM promociones p WHERE p.id = p_promocion_id AND p.sucursal_id = p_sucursal_id;
 $a$,
 $r$  SELECT COALESCE(p.producto_regalo_id, p.ajuste_producto_id) INTO producto_id
     FROM promociones p WHERE p.id = p_promocion_id AND p.sucursal_id = p_sucursal_id;
   -- promos-B2 (tanda 6 de #1603), decisión del dueño (24/11): el tope se mide contra el
-  -- regalo DEL PEDIDO, lo que daba la promo y lo que valía cuando se armó (su foto), no
-  -- contra el de hoy. Si el admin cambió el regalo de la promo (un caramelo de $ 5 por un
-  -- perfume de $ 500) después de la foto, el primer cambio que siguió trae en old_data el de
-  -- la foto; sin cambios, es el de hoy. Lo mismo con el precio de lista, abajo. «>=»: la
-  -- fila de audit_logs lleva el now() de su transacción, y el alta no cambia ni la promo ni
-  -- el precio de lista.
-  SELECT f.tomada_at INTO v_foto_at
-    FROM pedido_promo_reglas f
-   WHERE f.pedido_id = p_pedido_id AND f.promocion_id = p_promocion_id AND f.sucursal_id = p_sucursal_id;
-  IF v_foto_at IS NOT NULL THEN
-    SELECT COALESCE(NULLIF(a.old_data->>'producto_regalo_id', '')::bigint,
-                    NULLIF(a.old_data->>'ajuste_producto_id', '')::bigint)
-      INTO v_foto_id
+  -- regalo DEL PEDIDO, lo que daba la promo y lo que valía cuando el pedido nació, no
+  -- contra el de hoy: si el admin cambió el regalo de la promo (un caramelo de $ 5 por un
+  -- perfume de $ 500), el pedido de antes sigue topeado en $ 5. La hora es la del alta
+  -- (`pedidos.created_at`), no la de la foto: cada edición reinserta las líneas y renueva
+  -- `pedido_promo_reglas.tomada_at` (H1 de la lente de la tanda 6). `audit_logs.old_data`
+  -- trae sólo las columnas que cambiaron (H2): cada una sale del primer cambio posterior que
+  -- la trae, y la que ningún cambio trae, de la fila de hoy. Lo mismo con el precio de lista,
+  -- abajo. «>=»: la fila de audit_logs lleva el now() de su transacción, y el alta no cambia
+  -- ni la promo ni el precio de lista. Un pedido rehecho por un cambio de cliente nace de
+  -- nuevo en ese momento.
+  SELECT pe.created_at INTO v_nacio
+    FROM pedidos pe WHERE pe.id = p_pedido_id AND pe.sucursal_id = p_sucursal_id;
+  IF v_nacio IS NOT NULL THEN
+    SELECT p.producto_regalo_id, p.ajuste_producto_id INTO v_regalo, v_cont
+      FROM promociones p WHERE p.id = p_promocion_id AND p.sucursal_id = p_sucursal_id;
+    SELECT NULLIF(a.old_data->>'producto_regalo_id', '')::bigint INTO v_viejo
       FROM audit_logs a
      WHERE a.tabla = 'promociones' AND a.registro_id = p_promocion_id::text AND a.accion = 'UPDATE'
-       AND a.campos_modificados && ARRAY['producto_regalo_id', 'ajuste_producto_id']
-       AND a.created_at >= v_foto_at
+       AND a.old_data ? 'producto_regalo_id' AND a.created_at >= v_nacio
      ORDER BY a.created_at, a.id
      LIMIT 1;
     IF FOUND THEN
-      producto_id := v_foto_id;
+      v_regalo := v_viejo;
     END IF;
+    SELECT NULLIF(a.old_data->>'ajuste_producto_id', '')::bigint INTO v_viejo
+      FROM audit_logs a
+     WHERE a.tabla = 'promociones' AND a.registro_id = p_promocion_id::text AND a.accion = 'UPDATE'
+       AND a.old_data ? 'ajuste_producto_id' AND a.created_at >= v_nacio
+     ORDER BY a.created_at, a.id
+     LIMIT 1;
+    IF FOUND THEN
+      v_cont := v_viejo;
+    END IF;
+    producto_id := COALESCE(v_regalo, v_cont);
   END IF;
 $r$),
-(8, 'public._regalo_de_la_promo(bigint,bigint,bigint,uuid,bigint,numeric)', 'el precio de la foto',
+(8, 'public._regalo_de_la_promo(bigint,bigint,bigint,uuid,bigint,numeric)', 'el precio de cuando nació el pedido',
 $a$  SELECT pr.precio INTO precio FROM productos pr WHERE pr.id = producto_id AND pr.sucursal_id = p_sucursal_id;
 $a$,
 $r$  SELECT pr.precio INTO precio FROM productos pr WHERE pr.id = producto_id AND pr.sucursal_id = p_sucursal_id;
-  -- promos-B2: lo que valía el regalo cuando se armó el pedido.
-  IF v_foto_at IS NOT NULL AND producto_id IS NOT NULL THEN
-    SELECT NULLIF(a.old_data->>'precio', '')::numeric INTO v_foto_pr
+  -- promos-B2: lo que valía el regalo cuando nació el pedido.
+  IF v_nacio IS NOT NULL AND producto_id IS NOT NULL THEN
+    SELECT NULLIF(a.old_data->>'precio', '')::numeric INTO v_precio
       FROM audit_logs a
      WHERE a.tabla = 'productos' AND a.registro_id = producto_id::text AND a.accion = 'UPDATE'
-       AND 'precio' = ANY (a.campos_modificados)
-       AND a.created_at >= v_foto_at
+       AND a.old_data ? 'precio' AND a.created_at >= v_nacio
      ORDER BY a.created_at, a.id
      LIMIT 1;
     IF FOUND THEN
-      precio := v_foto_pr;
+      precio := v_precio;
     END IF;
   END IF;
 $r$);
@@ -462,13 +505,13 @@ BEGIN
      '6153913e3e7f63f2d7d3fce5791b7979', '8b084f84c9847ffb8960585b30407ed5',
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', true),
     ('public.cambiar_regalo_promocion(bigint,bigint,bigint,boolean,jsonb)',
-     'ae43fe7380d9b92e06521c911972833c', '500ca25bc79a22ac9355feaca0e20733',
+     '6c2eac9df3f7375aad69fbbc7c9ef341', '500ca25bc79a22ac9355feaca0e20733',
      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', true),
     ('public.regalo_fuera_de_promo(jsonb,jsonb,bigint,bigint,date)',
      '7a5d67c746a4d5bb67b8d313d13584be', '29f0aa33fd68e34746cb959550f6212f',
      '{postgres=X/postgres,service_role=X/postgres}', false),
     ('public._regalo_de_la_promo(bigint,bigint,bigint,uuid,bigint,numeric)',
-     '70de35b82986a5771a0c60ce17925fd1', 'bd3354c71bc4b681173f97dd1b009b69',
+     '0ed07e72b5d047e60695d13bfae3d312', 'bd3354c71bc4b681173f97dd1b009b69',
      '{postgres=X/postgres,service_role=X/postgres}', false)
   ) AS v(fn, h, h_antes, acl, def) LOOP
     SELECT prosrc, md5(prosrc) AS h, proacl::text AS a, prosecdef AS def, proconfig::text AS cfg INTO x

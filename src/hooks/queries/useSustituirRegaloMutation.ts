@@ -92,7 +92,7 @@ export interface RegaloReferencia {
 /**
  * promos-B2 (tanda 6 de #1603), decisión del dueño (24/11): el tope del sustituto se mide
  * contra el regalo DEL PEDIDO (lo que daba la promo y lo que valía cuando se armó), no
- * contra el regalo de hoy de la promo. Ese regalo sale de la foto del pedido por
+ * contra el regalo de hoy de la promo. Ese regalo sale de la hora del alta del pedido y de
  * audit_logs, que la pantalla no lee: lo da la RPC `regalo_referencia_de_linea` (admin y
  * encargado). Si falla o no hay, null, y la pantalla cae al regalo de la promo (el server
  * sigue topeando con el del pedido).

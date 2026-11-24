@@ -193,6 +193,11 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   proporción, desde la foto del alta y con este arrastre. Desde ahí esa compra pesa lo que le
   queda: el arrastre la recorre con `cantidad × (total − devuelto) / total` (#1542), no con la
   cantidad de la factura. Un camino nuevo que recorra la cadena de un producto hace lo mismo.
+  Dentro de una compra, sólo la foto del **primer** renglón de cada producto es base: el arrastre
+  deriva los siguientes de la cadena (entre dos renglones de una factura no hay ventas) y sus fotos
+  quedan informativas (CMP-1, tanda 6 de #1603: la que se escribía con una NC vigente sobrevivía a
+  la anulación de la NC y corría el promedio). Un camino nuevo que lea fotos de renglones lee la
+  del primero, como `_cpp_foto_compra`.
   Un producto **con stock y sin promedio** no tiene de dónde partir: `_cpp_linea` le da a todo su
   stock el costo del primer renglón pagado, y el regalo de la misma factura entra después y diluye
   (#1603, B2): 10 u. en stock sin promedio, 10 de regalo y 10 a 100 dan 66,67, no 100 ni 50.
@@ -246,6 +251,11 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   los propios (229); `cambiar_proveedor_compra` los reapunta al clon antes de cancelar (236,
   #566). Reapuntar y no clonar-y-borrar: `producto_lotes.compra_id` apunta a la compra, no a la
   línea, y así se conserva `cantidad_restante` sin duplicar la suma ni por un instante.
+  La huella de lo que ya se vendió de esos lotes no se pierde con ellos (STK-1, tanda 6 de #1603):
+  la bajada de la anulación le carga esas unidades a otros lotes por FEFO, y `anular_compra_atomica`
+  les pasa esa huella (`pedido_item_lotes`) en el orden en que los consumió y hasta lo que sacó de
+  cada uno; lo que salió de la bolsa no lleva huella. Si no, cancelar la venta devolvía a la bolsa lo
+  que era del lote. Un camino nuevo que cancele una compra con ventas de sus lotes hace lo mismo.
   Y **corregir una compra a la baja le achica los lotes antes de bajar el stock** (482, STK-2):
   `sincronizar_lotes_compra` conserva lo consumido de cada lote (cantidad − restante), así que
   lo que la bajada del trigger consumiera FEFO lo contaría como vendido (100 corregida a 80
@@ -287,8 +297,8 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   **El sustituto de un regalo tiene tope para quien no es admin** (#1592 PRM-1, decisión del dueño
   del 16/11): entra si es del mismo rubro que el regalo con igual o menor cantidad, o si no vale
   más a precio de lista (por unidad de la línea, para abajo). Siempre contra el regalo que daba la
-  promo al armarse el pedido, con lo que valía entonces (`_regalo_de_la_promo`: la foto, por
-  `audit_logs`; promos-B2, decisión del dueño del 24/11: si el admin cambia el regalo de la promo de
+  promo al armarse el pedido, con lo que valía entonces (`_regalo_de_la_promo`: desde `pedidos.created_at`, que una edición no mueve, por
+  `audit_logs` clave por clave; promos-B2, decisión del dueño del 24/11: si el admin cambia el regalo de la promo de
   un caramelo de $ 5 a un perfume de $ 500, el pedido de antes sigue topeado en $ 5), con el corte
   de la línea, nunca contra la línea de hoy ni el producto con que se cargó: ni sustituir dos
   veces, ni cargar otro sabor, ni repartir suben el techo. La pantalla lee ese regalo con

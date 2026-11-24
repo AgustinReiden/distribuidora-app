@@ -28,10 +28,14 @@
 --       C3 · con ajuste automático y sin contenedor, se rechaza.
 --       C4 · con ajuste automático y sin unidades por bloque, se rechaza.
 --       C5 · el guardado completo, sin cambios, anda.
+--       C6 · unidad entera sin producto de regalo, y fracción sin descripción del regalo, se
+--            rechazan (H6 de la lente).
 --   D · promos-B2 (decisión del dueño del 24/11): el tope del sustituto se mide contra el
 --       regalo DEL PEDIDO (lo que daba la promo y lo que valía cuando se armó), no contra el
 --       regalo de hoy de la promo. D1 · pasarse se rechaza; D2 · lo justo anda; D3 · la RPC
---       de la pantalla (regalo_referencia_de_linea) da ese regalo.
+--       de la pantalla (regalo_referencia_de_linea) da ese regalo. D4 · una edición sin
+--       cambios no lo mueve (H1 de la lente); D5 · un cambio sólo del contenedor tampoco
+--       (H2: old_data trae sólo lo que cambió).
 --   E · promos-B6 (decisión del dueño del 24/11): el regalo de una promo apagada se conserva
 --       pero no crece. E1 · V×20 + R×8 se rechaza; E2 · V×20 + R×4 anda; E3 · bajar la venta
 --       lo sigue recortando.
@@ -43,7 +47,7 @@
 --
 --   tr -d '\r' < scripts/test-promos-tanda6-1603.sql | docker exec -i <contenedor> psql -U postgres -d postgres -q
 --
--- Sin la migración falla en A1, A2, B1, B4, C1, C2, C3, C4, D1, D3 (la RPC no existe) y E1.
+-- Sin la migración falla en A1, A2, B1, B4, C1, C2, C3, C4, C6, D1, D3, D4, D5 (la RPC no existe) y E1.
 
 SET client_min_messages = warning;
 
@@ -495,6 +499,94 @@ BEGIN
   SELECT COALESCE(sum(cantidad), 0) INTO v_n FROM public.pedido_items WHERE pedido_id = p1 AND es_bonificacion;
   IF v_n <> 4 THEN
     v_fallas := v_fallas || format('E: el pedido quedó con %s de regalo (esperaba 4)', v_n);
+  END IF;
+
+  -- =====================================================================
+  -- D4 · promos-B2, H1 de la lente: una edición sin cambios (reinserta las líneas y renueva
+  --      la foto) no cambia la referencia. Mismo armado que D; el encargado guarda el pedido
+  --      tal cual y después pone W×9 (se rechaza) y W×8 (anda).
+  -- =====================================================================
+  V := pg_temp.t6b_prod(v_suc, 'D4 V', 'ZZ t6b venta', 100, 500);
+  R := pg_temp.t6b_prod(v_suc, 'D4 R', 'ZZ t6b rubro D4', 100, 500);
+  X := pg_temp.t6b_prod(v_suc, 'D4 P', 'ZZ t6b perfumes', 10000, 500);
+  Y := pg_temp.t6b_prod(v_suc, 'D4 W', 'ZZ t6b rubro D4', 50, 500);
+  p := pg_temp.t6b_promo(v_suc, V, R, 5, 2, true);
+  p1 := pg_temp.t6b_alta(v_cli, v_enc, v_suc, pg_temp.t6b_items(V, 10, R, 4, p));
+  j := pg_temp.t6b_guardar(v_adm, v_suc, p, format('{"producto_regalo_id": %s}', X)::jsonb);
+  IF NOT COALESCE((j->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'D4 · preparación: no se pudo cambiar el regalo de la promo (%)', j;
+  END IF;
+  j := pg_temp.t6b_editar(v_enc, v_suc, p1, pg_temp.t6b_items(V, 10, R, 4, p));
+  IF NOT COALESCE((j->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'D4 · preparación: la edición sin cambios no anduvo (%)', j;
+  END IF;
+  it := (SELECT id FROM public.pedido_items WHERE pedido_id = p1 AND es_bonificacion);
+  j := pg_temp.t6b_sust(v_enc, v_suc, it, Y, 9);
+  IF COALESCE((j->>'success')::boolean, false) OR COALESCE(j->>'codigo', '') <> 'regalo_sustituto_sobre_tope' THEN
+    v_fallas := v_fallas || format('D4: después de una edición sin cambios, W×9 tenía que rechazarse igual (%s)', j);
+  END IF;
+  j := pg_temp.t6b_sust(v_enc, v_suc, it, Y, 8);
+  IF NOT COALESCE((j->>'success')::boolean, false) THEN
+    v_fallas := v_fallas || format('D4: W×8 tenía que andar (%s)', j);
+  END IF;
+
+  -- =====================================================================
+  -- D5 · promos-B2, H2 de la lente: el admin cambia SÓLO el contenedor (old_data trae sólo
+  --      esa columna). Promo de unidad entera con contenedor «10 V dan 4 R», R a $ 100; W del
+  --      rubro de R a $ 50. La referencia sigue siendo R: W×40 se rechaza, W×8 anda, y la
+  --      RPC de la pantalla da R.
+  -- =====================================================================
+  V := pg_temp.t6b_prod(v_suc, 'D5 V', 'ZZ t6b venta', 100, 500);
+  R := pg_temp.t6b_prod(v_suc, 'D5 R', 'ZZ t6b rubro D5', 100, 500);
+  C := pg_temp.t6b_prod(v_suc, 'D5 Cont', 'ZZ t6b rubro D5', 600, 100);
+  X := pg_temp.t6b_prod(v_suc, 'D5 Cont2', 'ZZ t6b rubro D5', 600, 100);
+  Y := pg_temp.t6b_prod(v_suc, 'D5 W', 'ZZ t6b rubro D5', 50, 500);
+  p := pg_temp.t6b_promo(v_suc, V, R, 10, 4, true, C, 6);
+  p1 := pg_temp.t6b_alta(v_cli, v_enc, v_suc, pg_temp.t6b_items(V, 10, R, 4, p));
+  it := (SELECT id FROM public.pedido_items WHERE pedido_id = p1 AND es_bonificacion);
+  j := pg_temp.t6b_guardar(v_adm, v_suc, p, format('{"ajuste_producto_id": %s}', X)::jsonb);
+  IF NOT COALESCE((j->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'D5 · preparación: no se pudo cambiar el contenedor de la promo (%)', j;
+  END IF;
+  BEGIN
+    PERFORM pg_temp.t6b_claims(v_enc, v_suc);
+    SET LOCAL ROLE authenticated;
+    EXECUTE 'SELECT public.regalo_referencia_de_linea($1)' INTO j USING it;
+    RESET ROLE;
+  EXCEPTION WHEN OTHERS THEN
+    RESET ROLE;
+    j := jsonb_build_object('excepcion', SQLERRM);
+  END;
+  IF (j->>'producto_id')::bigint IS DISTINCT FROM R THEN
+    v_fallas := v_fallas || format('D5: con sólo el contenedor cambiado, la referencia tenía que seguir siendo R (%s)', j);
+  END IF;
+  j := pg_temp.t6b_sust(v_enc, v_suc, it, Y, 40);
+  IF COALESCE((j->>'success')::boolean, false) OR COALESCE(j->>'codigo', '') <> 'regalo_sustituto_sobre_tope' THEN
+    v_fallas := v_fallas || format('D5: W×40 vale más que el regalo y tenía que rechazarse (%s)', j);
+  END IF;
+  j := pg_temp.t6b_sust(v_enc, v_suc, it, Y, 8);
+  IF NOT COALESCE((j->>'success')::boolean, false) THEN
+    v_fallas := v_fallas || format('D5: W×8 tenía que andar (%s)', j);
+  END IF;
+
+  -- =====================================================================
+  -- C6 · promos-B3, H6 de la lente: una de unidad entera sin producto de regalo y una de
+  --      fracción sin descripción del regalo se rechazan, como en el alta.
+  -- =====================================================================
+  V := pg_temp.t6b_prod(v_suc, 'C6 V', 'ZZ t6b venta', 100, 500);
+  R := pg_temp.t6b_prod(v_suc, 'C6 R', 'ZZ t6b regalo', 10, 500);
+  C := pg_temp.t6b_prod(v_suc, 'C6 Cont', 'ZZ t6b cont', 600, 100);
+  p := pg_temp.t6b_promo(v_suc, V, R, 10, 2, true);
+  j := pg_temp.t6b_guardar(v_adm, v_suc, p, '{"producto_regalo_id": null}');
+  IF COALESCE((j->>'success')::boolean, false) OR COALESCE(j->>'error', '') NOT LIKE '%producto de regalo%'
+     OR (SELECT producto_regalo_id IS DISTINCT FROM R FROM public.promociones WHERE id = p) THEN
+    v_fallas := v_fallas || format('C6: unidad entera sin producto de regalo tenía que rechazarse (%s)', j);
+  END IF;
+  p := pg_temp.t6b_promo(v_suc, V, R, 10, 6, false, C, 6);
+  j := pg_temp.t6b_guardar(v_adm, v_suc, p, '{"descripcion_regalo": null}');
+  IF COALESCE((j->>'success')::boolean, false) OR COALESCE(j->>'error', '') NOT LIKE '%descripción del regalo%'
+     OR (SELECT descripcion_regalo IS NULL FROM public.promociones WHERE id = p) THEN
+    v_fallas := v_fallas || format('C6: fracción sin descripción del regalo tenía que rechazarse (%s)', j);
   END IF;
 
   IF cardinality(v_fallas) > 0 THEN

@@ -108,7 +108,8 @@ BEGIN
   v_datos := jsonb_build_object(
     'nombre', 'ZZ ensayo 1501 cambiada', 'tipo', 'bonificacion', 'fecha_inicio', v_hoy - 1, 'fecha_fin', NULL,
     'limite_usos', NULL, 'prioridad', 0, 'regalo_mueve_stock', false, 'modo_exclusion', 'acumulable',
-    'unidades_por_bloque', 1, 'stock_por_bloque', 1, 'descripcion_regalo', NULL,
+    -- Tanda 6 de #1603 (promos-B3, H6 de su lente): con la descripción del regalo, que la edición de una de fracción exige como el alta.
+    'unidades_por_bloque', 1, 'stock_por_bloque', 1, 'descripcion_regalo', '1 botella de ensayo',
     'producto_ids', jsonb_build_array(v_a),
     'reglas', jsonb_build_array(jsonb_build_object('clave', 'cantidad_compra', 'valor', 10),
                                 jsonb_build_object('clave', 'cantidad_bonificacion', 'valor', 2)));
@@ -190,7 +191,7 @@ BEGIN
          '{postgres=X/postgres,service_role=X/postgres}'),
         -- C4b (ola 2 de #1603): el cuerpo con el control de versión (updated_at_esperado y la versión por las hijas).
         -- Tanda 6 de #1603 (promos-B3): y lo que valida el alta.
-        ('public.cambiar_regalo_promocion(bigint,bigint,bigint,boolean,jsonb)', 'ae43fe7380d9b92e06521c911972833c',
+        ('public.cambiar_regalo_promocion(bigint,bigint,bigint,boolean,jsonb)', '6c2eac9df3f7375aad69fbbc7c9ef341',
          '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
         ('public._rendicion_pagos(bigint,date,date,bigint)', '25f0aebcefe469fdc1a6e5205ea83efa',
          '{postgres=X/postgres,service_role=X/postgres}'),

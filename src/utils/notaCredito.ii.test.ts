@@ -65,6 +65,29 @@ describe('calcularIINotaCredito', () => {
     }
     expect(calcularIINotaCredito(str, { A: 4 })).toBe(42)
   })
+
+  // CMP-b4 (tanda 6 de #1603): el espejo del tope de `ii_nota_credito_compra`. FC A de
+  // 3 u. con II 200 en la cabecera: cada nota de 1 da 66,67, y la tercera no puede
+  // pasar lo que le queda a la compra (200 − 133,34 = 66,66).
+  describe('tope en lo que le queda del II a la compra', () => {
+    const tres = { impuestos_internos: 200, items: [{ producto_id: 'A', cantidad: 3, subtotal: 300, impuestos_internos: 0 }] }
+    const dev = (ii: number | string, extra: object = {}) => ({ tipo: 'devolucion', impuestos_internos: ii, anulada: false, ...extra })
+
+    it('la tercera devolución de 1 acredita 66,66 y la suma da 200', () => {
+      expect(calcularIINotaCredito(tres, { A: 1 }, [])).toBe(66.67)
+      expect(calcularIINotaCredito(tres, { A: 1 }, [dev(66.67)])).toBe(66.67)
+      expect(calcularIINotaCredito(tres, { A: 1 }, [dev(66.67), dev('66.67')])).toBe(66.66)
+    })
+
+    it('una nota anulada y un ajuste no cuentan', () => {
+      const notas = [dev(66.67), dev(66.67, { anulada: true }), { tipo: 'ajuste', impuestos_internos: 100, anulada: false }]
+      expect(calcularIINotaCredito(tres, { A: 1 }, notas)).toBe(66.67)
+    })
+
+    it('con todo el II ya acreditado no acredita nada (piso 0)', () => {
+      expect(calcularIINotaCredito(tres, { A: 1 }, [dev(150), dev(60)])).toBe(0)
+    })
+  })
 })
 
 describe('costoEfectivoCompra', () => {

@@ -341,6 +341,12 @@ BEGIN
   IF NOT COALESCE((v_r->>'success')::boolean, false) THEN RAISE EXCEPTION 'c6_setup cobro: %', v_r; END IF;
   SELECT min(id), max(id) INTO v_p1, v_p2 FROM public.pagos WHERE pedido_id = v_ped;
   IF p_tocar THEN UPDATE public.pagos SET notas = trim(COALESCE(notas, '') || ' tocado') WHERE id = v_p1; END IF;
+  -- Desde la 504 (#1547 REN-2) confirmar_rendicion rechaza un día sin nada que rendir de ese chofer ("No hay nada que
+  -- rendir"): los pagos de arriba son del admin que los cargó (la boleta no tiene chofer), y los de la rendición de tr no
+  -- existían. Un cobro de 1 (un crédito de OTRO cliente) de tr ese día le da algo que rendir en cualquier orden, también
+  -- cuando la operación (cambiar el cliente, cancelar) llega antes y deja la boleta sin pagos. No toca lo que se mide: los
+  -- locks de la foto son los de TODOS los pagos de la sucursal con esa fecha, y el estado se mide sobre `cli`.
+  PERFORM conc.t10_credito(v_suc, conc.nuevo_cliente(v_suc, 'CONC-cli-c6'), 1, v_fecha, v_tr);
   RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'tr', v_tr, 'cli', v_cli, 'cli2', v_cli2, 'pedido', v_ped, 'fecha', v_fecha,
                             'relleno', conc.f('relleno_' || v_suc)::bigint, 'p1', v_p1, 'p2', v_p2);
 END
@@ -368,8 +374,10 @@ BEGIN
   IF v_fecha > conc.hoy() - 1500 THEN RAISE EXCEPTION 'c6e_setup: se agotó el tramo de días'; END IF;
   v_ped := conc.pedido_de(v_adm, v_suc, v_cli, 100, v_fecha);
   UPDATE public.pedidos SET transportista_id = v_tr WHERE id = v_ped;
+  -- El crédito lo carga tr (antes, el admin): desde #1492 un pago que llega a la boleta desde un crédito sigue siendo de quien
+  -- lo cargó, así que con el admin la foto de tr quedaba sin R ni Y (y sin nada que rendir, 504). Con tr, R y Y están en su foto.
   INSERT INTO public.pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, notas)
-  VALUES (v_cli, NULL, 140, 'efectivo', v_fecha, v_adm, v_suc, 'conc') RETURNING id INTO v_r;
+  VALUES (v_cli, NULL, 140, 'efectivo', v_fecha, v_tr, v_suc, 'conc') RETURNING id INTO v_r;
   PERFORM public.aplicar_credito_cliente(v_cli, v_suc);
   SELECT id INTO v_y FROM public.pagos WHERE pedido_id = v_ped AND pago_origen_id = v_r AND monto = 100;
   IF v_y IS NULL THEN RAISE EXCEPTION 'c6e_setup: el crédito no se partió en 100 para la boleta'; END IF;
@@ -455,21 +463,36 @@ BEGIN
 END
 $$;
 -- GO
--- C9 (#1342): dos pedidos X e Y de la sucursal A, sin entregar, de tr_a2 (C7 usa tr_a1: así lo
--- entregado de un día es sólo lo de la ronda). El día crece con la ronda, desde hoy - p_base:
--- una rendición confirmada cierra la caja de la sucursal hasta su día, y la variante con cobro
--- necesita que la ronda siguiente caiga después.
+-- C9 (#1342): dos pedidos X e Y sin entregar de un chofer, y el día de su rendición. Cada ronda arma su PROPIA sucursal
+-- (con sus admin, encargado, chofer y producto de relleno) y usa el día de ayer. Antes las rondas usaban días distintos de
+-- la sucursal A, hasta 3000 hacia atrás: una rendición confirmada cierra la caja de su sucursal hasta ese día y no se
+-- reabre, así que cada ronda tenía que caer después de la anterior. Desde la 505 (#1597) una entrega no puede ser anterior
+-- a 60 días para el admin ni a 7 para el encargado o el chofer, así que ese tramo ya no existe, y la sucursal propia le da a
+-- cada ronda la caja abierta que necesita (la variante con cobro paga con la fecha de la rendición). `p_ronda` y `p_base`
+-- quedan en la firma (el guion los pasa) y ya no se usan.
+-- Desde la 504 (#1547 REN-2) confirmar_rendicion rechaza un día sin nada que rendir de ese chofer, y la confirmación que
+-- llega antes que la entrega no ve ninguna: un cobro de 1 (un crédito de otro cliente) de tr ese día le da algo que rendir.
 CREATE OR REPLACE FUNCTION conc.c9_setup(p_ronda int, p_base int) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE
-  v_suc bigint := conc.f('suc_a')::bigint;
-  v_adm uuid := conc.f('admin_a')::uuid;
-  v_tr uuid := conc.f('tr_a2')::uuid;
-  v_fecha date := conc.hoy() - p_base + p_ronda;
+  v_tag text := replace(gen_random_uuid()::text, '-', '');
+  v_suc bigint;
+  v_adm uuid; v_adm2 uuid; v_enc uuid; v_tr uuid;
+  v_prod bigint;
+  v_fecha date := conc.hoy() - 1;
+  v_items jsonb;
   v_x bigint; v_y bigint;
 BEGIN
-  v_x := conc.pedido_de(v_adm, v_suc, conc.nuevo_cliente(v_suc), 50, v_fecha);
-  v_y := conc.pedido_de(v_adm, v_suc, conc.nuevo_cliente(v_suc), 50, v_fecha);
-  RETURN jsonb_build_object('suc', v_suc, 'adm', v_adm, 'adm2', conc.f('admin_a2')::uuid, 'enc', conc.f('enc_a')::uuid,
+  INSERT INTO public.sucursales (nombre, activa) VALUES ('CONC-c9-' || v_tag, true) RETURNING id INTO v_suc;
+  v_adm := conc.alta_usuario('c9-adm-' || v_tag || '@conc.test', 'admin', v_suc);
+  v_adm2 := conc.alta_usuario('c9-adm2-' || v_tag || '@conc.test', 'admin', v_suc);
+  v_enc := conc.alta_usuario('c9-enc-' || v_tag || '@conc.test', 'encargado', v_suc);
+  v_tr := conc.alta_usuario('c9-tr-' || v_tag || '@conc.test', 'transportista', v_suc);
+  v_prod := conc.nuevo_producto(v_suc, 1000, 1, '[]', 'CONC-relleno');
+  v_items := jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 50, 'precio_unitario', 1));
+  v_x := conc.venta(v_adm, v_suc, conc.nuevo_cliente(v_suc), v_items, v_fecha);
+  v_y := conc.venta(v_adm, v_suc, conc.nuevo_cliente(v_suc), v_items, v_fecha);
+  PERFORM conc.t10_credito(v_suc, conc.nuevo_cliente(v_suc, 'CONC-cli-c9'), 1, v_fecha, v_tr);
+  RETURN jsonb_build_object('suc', v_suc, 'adm', v_adm, 'adm2', v_adm2, 'enc', v_enc,
                             'tr', v_tr, 'x', v_x, 'y', v_y, 'fecha', v_fecha);
 END
 $$;
@@ -764,6 +787,9 @@ BEGIN
     VALUES (v_cli, NULL, 20, 'nota_credito', v_d, v_adm, v_suc, 'conc NC', v_nc) RETURNING id INTO v_p2;
   ELSIF p_tipo = 'aplicar' THEN
     v_p1 := conc.t10_credito(v_suc, v_cli, 30, v_d, v_tr);
+    -- Desde la 504 confirmar_rendicion rechaza un día sin entregas, cobros ni gastos del chofer ("No hay nada que
+    -- rendir"): el de D - 1 lleva un cobro (un crédito de 1) de OTRO cliente, para no tocar lo que el FIFO aplica.
+    PERFORM conc.t10_credito(v_suc, conc.nuevo_cliente(v_suc, 'CONC-cli-t10j'), 1, v_d - 1, v_tr);
     PERFORM conc.como(v_adm, v_suc);
     v_r := public.confirmar_rendicion(v_d - 1, v_tr, 'confirmada', '{}'::jsonb, 'conc');
     RESET ROLE;
@@ -862,6 +888,25 @@ BEGIN
                             'xi', (SELECT min(id) FROM public.pedido_items WHERE pedido_id = v_x),
                             'c', conc.t10_credito(v_suc, v_cli, p_credito, conc.hoy(), v_adm),
                             'relleno', conc.f('relleno_' || v_suc)::bigint);
+END
+$$;
+-- GO
+-- Una boleta que ya salió: desde D23 (#1595 b5) registrar_salvedad rechaza un pedido pendiente o en preparación
+-- (`pedido_sin_salir`). Se la deja entregada con retiro en el depósito (como t14_setup con p_entregado), sin pasar por
+-- una ruta: ni gasta días ni arma rendiciones. Se llama como postgres, en el setup, después de los cobros.
+CREATE OR REPLACE FUNCTION conc.sacar_a_reparto(p_ped bigint) RETURNS void LANGUAGE sql AS $$
+  UPDATE public.pedidos SET estado = 'entregado', retiro_deposito = true, fecha_entrega = now() WHERE id = p_ped
+$$;
+-- GO
+-- t13_setup con X entregada (T13d y T13j, que registran una salvedad sobre X).
+CREATE OR REPLACE FUNCTION conc.t13_salvedad_setup(p_x_cobrada boolean DEFAULT false, p_credito numeric DEFAULT 30,
+                                                   p_y_menor boolean DEFAULT false) RETURNS jsonb
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_c jsonb := conc.t13_setup(p_x_cobrada, p_credito, p_y_menor);
+BEGIN
+  PERFORM conc.sacar_a_reparto((v_c->>'x')::bigint);
+  RETURN v_c;
 END
 $$;
 -- GO
@@ -1095,6 +1140,16 @@ BEGIN
   RETURN jsonb_build_object('suc', v_suc, 'admin', v_adm, 'c1', v_c1, 'c2', v_c2, 'w', v_w, 'y', v_y, 'x', v_x,
                             'yi', (SELECT min(id) FROM public.pedido_items WHERE pedido_id = v_y),
                             'relleno', conc.f('relleno_' || v_suc)::bigint);
+END
+$$;
+-- GO
+-- t15_cambio_setup con Y entregada (T15b: la salvedad de Y; desde D23 no se registra sobre un pedido que no salió).
+CREATE OR REPLACE FUNCTION conc.t15_salvedad_setup() RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_c jsonb := conc.t15_cambio_setup();
+BEGIN
+  PERFORM conc.sacar_a_reparto((v_c->>'y')::bigint);
+  RETURN v_c;
 END
 $$;
 -- GO
@@ -1496,6 +1551,8 @@ BEGIN
   PERFORM set_config('app.stock_ref_id', '', true);
   PERFORM set_config('app.stock_user_id', '', true);
   PERFORM set_config('app.stock_pedido_item_id', '', true);
+  -- Desde D23 (#1595 b5) una salvedad va sólo sobre un pedido en camino o entregado (`pedido_sin_salir`).
+  PERFORM conc.sacar_a_reparto(v_ped);
   PERFORM conc.como(v_adm, v_suc);
   v_r := public.registrar_salvedad(v_ped, v_item, 1, 'cliente_rechaza', 'conc s1', NULL, true, v_k);
   RESET ROLE;

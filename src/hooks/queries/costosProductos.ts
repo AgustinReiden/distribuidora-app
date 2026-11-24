@@ -27,22 +27,35 @@ export type CostosProducto = Record<ColumnaCosto, number | null>
  */
 const TANDA = 500
 
+/**
+ * Tandas en vuelo a la vez (gestion-B10). En serie, 30.000 productos eran 60 viajes seguidos en
+ * cada carga fría del catálogo; de a 4 son 15 rondas. Cada tanda es independiente: si una falla,
+ * falla todo, igual que antes.
+ */
+const TANDAS_EN_PARALELO = 4
+
 /** Mapa id (como string) → costos de esos productos. */
 export async function fetchCostosProductos(
   ids: ReadonlyArray<string | number>,
 ): Promise<Map<string, CostosProducto>> {
   const unicos = [...new Set(ids.map(Number))]
   const mapa = new Map<string, CostosProducto>()
-  for (let i = 0; i < unicos.length; i += TANDA) {
-    const { data, error } = await supabase.rpc('costos_productos', { p_ids: unicos.slice(i, i + TANDA) })
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los costos de los productos. Revisá la señal e intentá de nuevo.')
-    for (const fila of (data as Array<{ id: string | number } & CostosProducto> | null) || []) {
-      mapa.set(String(fila.id), {
-        costo_real: fila.costo_real,
-        costo_promedio: fila.costo_promedio,
-        costo_sin_iva: fila.costo_sin_iva,
-        costo_con_iva: fila.costo_con_iva,
-      })
+  const tandas: number[][] = []
+  for (let i = 0; i < unicos.length; i += TANDA) tandas.push(unicos.slice(i, i + TANDA))
+  for (let i = 0; i < tandas.length; i += TANDAS_EN_PARALELO) {
+    const respuestas = await Promise.all(
+      tandas.slice(i, i + TANDAS_EN_PARALELO).map(p_ids => supabase.rpc('costos_productos', { p_ids })),
+    )
+    for (const { data, error } of respuestas) {
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los costos de los productos. Revisá la señal e intentá de nuevo.')
+      for (const fila of (data as Array<{ id: string | number } & CostosProducto> | null) || []) {
+        mapa.set(String(fila.id), {
+          costo_real: fila.costo_real,
+          costo_promedio: fila.costo_promedio,
+          costo_sin_iva: fila.costo_sin_iva,
+          costo_con_iva: fila.costo_con_iva,
+        })
+      }
     }
   }
   return mapa

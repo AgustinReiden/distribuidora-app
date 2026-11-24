@@ -253,9 +253,13 @@ BEGIN
   CREATE FUNCTION pg_temp.promo_barra(a bigint, s bigint, c bigint) RETURNS bigint LANGUAGE plpgsql AS $f$
   DECLARE v bigint; v_s bigint := current_setting('e1603b3.suc')::bigint;
   BEGIN
+    -- Tanda 6 de #1603 (promos-B3, H6 de su lente), cambió de regla: la edición de una promo con ajuste
+    -- automático pide, como el alta, la descripción del regalo: la promo del ensayo la trae.
     INSERT INTO promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id,
-                             ajuste_automatico, ajuste_producto_id, unidades_por_bloque, stock_por_bloque)
-    VALUES ('ZZ ensayo B3 barra', 'bonificacion', public._tablero_hoy() - 1, v_s, false, s, true, c, 2, 1)
+                             ajuste_automatico, ajuste_producto_id, unidades_por_bloque, stock_por_bloque,
+                             descripcion_regalo)
+    VALUES ('ZZ ensayo B3 barra', 'bonificacion', public._tablero_hoy() - 1, v_s, false, s, true, c, 2, 1,
+            '1 botella de ensayo')
     RETURNING id INTO v;
     INSERT INTO promocion_reglas (promocion_id, clave, valor, sucursal_id)
     VALUES (v, 'cantidad_compra', 10, v_s), (v, 'cantidad_bonificacion', 2, v_s);
@@ -268,8 +272,10 @@ BEGIN
   DECLARE v bigint; v_s bigint := current_setting('e1603b3.suc')::bigint;
   BEGIN
     INSERT INTO promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id,
-                             ajuste_automatico, ajuste_producto_id, unidades_por_bloque, stock_por_bloque)
-    VALUES ('ZZ ensayo B3 fraccion', 'bonificacion', public._tablero_hoy() - 1, v_s, false, r, true, c, 6, 1)
+                             ajuste_automatico, ajuste_producto_id, unidades_por_bloque, stock_por_bloque,
+                             descripcion_regalo)
+    VALUES ('ZZ ensayo B3 fraccion', 'bonificacion', public._tablero_hoy() - 1, v_s, false, r, true, c, 6, 1,
+            '1 botella de ensayo')
     RETURNING id INTO v;
     INSERT INTO promocion_reglas (promocion_id, clave, valor, sucursal_id)
     VALUES (v, 'cantidad_compra', 10, v_s), (v, 'cantidad_bonificacion', 4, v_s);
