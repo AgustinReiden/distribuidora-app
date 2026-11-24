@@ -20,6 +20,7 @@ import { useNotification } from '../../contexts/NotificationContext'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
+import { useDiaArgentino } from '../../hooks/useDiaArgentino'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { getErrorMessage } from '../../utils/errorHandling'
 import type { Empleado, GuardarEmpleadoPayload } from '../../types/personal'
@@ -36,10 +37,6 @@ function LoadingState() {
     </div>
   )
 }
-
-/** Hoy en Tucumán, no en UTC: a la noche el día UTC ya es el de mañana. */
-const hoyArgentino = (): string =>
-  new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Tucuman' })
 
 export default function PersonalContainer(): React.ReactElement {
   const notify = useNotification()
@@ -149,7 +146,8 @@ export default function PersonalContainer(): React.ReactElement {
     setEditando({ empleado: e })
   }, [])
 
-  const hoy = hoyArgentino()
+  // gestion-B13: el día sigue al reloj aunque no haya otro motivo para volver a dibujar la pantalla.
+  const hoy = useDiaArgentino()
 
   return (
     <>

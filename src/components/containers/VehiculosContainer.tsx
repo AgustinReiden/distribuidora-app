@@ -17,6 +17,7 @@ import {
 import { useNotification } from '../../contexts/NotificationContext'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
+import { useDiaArgentino } from '../../hooks/useDiaArgentino'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { cuotaDelMes, mesDe } from '../../utils/gastos'
 import type { GuardarVehiculoInput } from '../../hooks/queries/useVehiculosQuery'
@@ -33,10 +34,6 @@ function LoadingState() {
     </div>
   )
 }
-
-/** El mes de hoy en Tucumán, no en UTC. */
-const mesActual = (): string =>
-  mesDe(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Tucuman' }))
 
 /** La ficha pide sus datos recién cuando se abre: un componente propio cuida los hooks. */
 function FichaVehiculo({ vehiculo, mes, onClose }: { vehiculo: Vehiculo; mes: string; onClose: () => void }) {
@@ -74,7 +71,8 @@ function FichaVehiculo({ vehiculo, mes, onClose }: { vehiculo: Vehiculo; mes: st
 export default function VehiculosContainer(): React.ReactElement {
   const notify = useNotification()
   const { currentSucursalId, currentSucursalNombre } = useSucursal()
-  const mes = useMemo(() => mesActual(), [])
+  // gestion-B13: el mes sigue al reloj; con `useMemo(..., [])` quedaba en el de cuando se abrió la pantalla.
+  const mes = mesDe(useDiaArgentino())
 
   const [modalAbierto, setModalAbierto] = useState(false)
   const [vehiculoEditando, setVehiculoEditando] = useState<Vehiculo | null>(null)

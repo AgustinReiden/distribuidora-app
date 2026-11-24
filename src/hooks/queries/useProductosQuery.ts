@@ -351,10 +351,17 @@ export function useCrearProductoMutation() {
     mutationFn: (producto: ProductoFormInput) => createProducto(producto, currentSucursalId),
     onSuccess: (newProducto) => {
       // Actualizar cache de lista
-      queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(currentSucursalId), (old) => {
-        if (!old) return [newProducto]
-        return [...old, newProducto].sort((a, b) => a.nombre.localeCompare(b.nombre))
-      })
+      // Sin lista en caché (la consulta había fallado) no se siembra una de una sola fila:
+      // quedaba «fresca» 10 minutos y el selector de la compra mostraba un solo producto
+      // (gestion-B3): se invalida y se vuelve a leer entera.
+      if (queryClient.getQueryData(productosKeys.lists(currentSucursalId)) === undefined) {
+        queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
+      } else {
+        queryClient.setQueryData<ProductoDB[]>(productosKeys.lists(currentSucursalId), (old) => {
+          if (!old) return old
+          return [...old, newProducto].sort((a, b) => a.nombre.localeCompare(b.nombre))
+        })
+      }
       // Invalidar queries relacionadas
       queryClient.invalidateQueries({ queryKey: productosKeys.minimosVenta(currentSucursalId) })
     },

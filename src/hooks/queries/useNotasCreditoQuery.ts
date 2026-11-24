@@ -203,6 +203,10 @@ export function useRegistrarNotaCreditoMutation() {
       queryClient.invalidateQueries({ queryKey: notasCreditoKeys.all(currentSucursalId) })
       // #1079: la devolución con ítems sale de los lotes de la compra.
       queryClient.invalidateQueries({ queryKey: lotesKeys.all(currentSucursalId) })
+      // gestion-B8: «Compras del período» es neta de las notas de crédito (#1557): la nota nueva
+      // la cambia, como al anularla. Sin importar el módulo pesado de reportes.
+      queryClient.invalidateQueries({ queryKey: ['reporte-gerencial'] })
+      queryClient.invalidateQueries({ queryKey: ['posicion-fiscal'] })
     },
   })
 }
