@@ -370,7 +370,10 @@ export default function ComprasContainer(): React.ReactElement {
       notify.success('Compra actualizada')
       // Editar los items puede dejar el II declarado sin cuadrar (una línea que
       // se fue se lleva su alícuota). La RPC avisa; acá se muestra.
-      avisosDeLaBase(notify, null, res.warningIiDeclarado, res.warningLotes, res.warningConceptos, res.warningMedidas)
+      // El descuadre del total (`warning_descuadre`, tarjeta A de la tanda 6) se lee como opcional:
+      // el hook que lo sube es de otra rama y, sin él, el campo no existe y no hay aviso.
+      const warningDescuadre = (res as { warningDescuadre?: string | null }).warningDescuadre ?? null
+      avisosDeLaBase(notify, warningDescuadre, res.warningIiDeclarado, res.warningLotes, res.warningConceptos, res.warningMedidas)
       // Dos avisos de costo que se dicen distinto (mig 236). Van en dos y no en
       // uno porque el motivo no es el mismo, y "no es la última" mandado sobre
       // una compra que SÍ es la última manda a buscar donde no hay nada. Desde
