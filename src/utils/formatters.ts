@@ -79,14 +79,24 @@ export function diaArgentino(timestamp: string): string {
 }
 
 /**
+ * Suma N días de calendario a una fecha 'YYYY-MM-DD' (negativo = resta), sin pasar por el
+ * huso del dispositivo: la cuenta es de calendario puro, en UTC (el rollover entre meses y años
+ * lo hace Date.UTC). 11 de mayo - 30 días = 11 de abril.
+ */
+export function sumarDiasAFechaISO(fechaISO: string, dias: number): string {
+  const [y, m, d] = fechaISO.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + dias)).toISOString().slice(0, 10)
+}
+
+/**
  * Restar N dias a la fecha base (default hoy) y devolver YYYY-MM-DD en
- * TZ Argentina. Usa setDate del Date local, que normaliza correctamente
- * el rollover entre meses (ej. 11 mayo - 30 dias = 11 abril).
+ * TZ Argentina. Parte del DÍA argentino de la base y resta de calendario:
+ * con `setDate` sobre el Date local, un dispositivo con otro huso (o con
+ * cambio de horario en el medio) corría una hora y, cerca de la medianoche
+ * argentina, caía un día de más o de menos (infra-INF-2, tanda 6).
  */
 export function fechaHaceDias(dias: number, base: Date = new Date()): string {
-  const d = new Date(base)
-  d.setDate(d.getDate() - dias)
-  return fechaLocalISO(d)
+  return sumarDiasAFechaISO(fechaLocalISO(base), -dias)
 }
 
 /**

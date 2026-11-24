@@ -16,11 +16,17 @@ const filasPorTabla: Record<string, unknown[]> = {}
 
 vi.mock('../supabase/base', () => ({
   supabase: {
-    from: (tabla: string) => ({
-      select: () => ({
-        eq: () => Promise.resolve({ data: filasPorTabla[tabla] ?? [], error: null }),
-      }),
-    }),
+    // Cambió de regla (frv-B5, tanda 6): el conteo se pagina con `traerTodo` (`.order('id')` y
+    // `.range()`), así que el builder entrega la tabla por rangos como PostgREST.
+    from: (tabla: string) => {
+      const b: Record<string, unknown> = {}
+      b.select = () => b
+      b.eq = () => b
+      b.order = () => b
+      b.range = (desde: number, hasta: number) =>
+        Promise.resolve({ data: (filasPorTabla[tabla] ?? []).slice(desde, hasta + 1), error: null })
+      return b
+    },
     rpc: vi.fn(),
   },
 }))
@@ -57,5 +63,13 @@ describe('contarReferenciasDeCliente', () => {
     expect(r.pedidos).toEqual({ cantidad: 2, total: 1250.5 })
     expect(r.pagos).toBe(1)
     expect(r.bloqueanBorrado).toBe(true)
+  })
+
+  it('con más de 1.000 pedidos cuenta todos y suma todo el monto (frv-B5)', async () => {
+    filasPorTabla.pedidos = Array.from({ length: 2500 }, () => ({ total: 10 }))
+    filasPorTabla.pagos = Array.from({ length: 1200 }, (_, i) => ({ id: i }))
+    const r = await contarReferenciasDeCliente('7')
+    expect(r.pedidos).toEqual({ cantidad: 2500, total: 25000 })
+    expect(r.pagos).toBe(1200)
   })
 })

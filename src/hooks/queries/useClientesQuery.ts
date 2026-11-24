@@ -257,6 +257,9 @@ async function createCliente(cliente: ClienteCreateInput, sucursalId: number | n
       horarios_atencion: clienteFields.horarios_atencion || null,
       dias_atencion: clienteFields.dias_atencion || null,
       horario_entrega: clienteFields.horario_entrega || null,
+      // "No atiende con horario fijo" (mig 157): sin esto el cliente nacía con el horario
+      // exigido aunque se hubiera tildado (FRV-1, tanda 6).
+      sin_horario_fijo: clienteFields.sin_horario_fijo ?? false,
       rubro: clienteFields.rubro || null,
       notas: clienteFields.notas || null,
       tipo_factura_default: clienteFields.tipo_factura_default ?? 'ZZ',
@@ -499,22 +502,31 @@ export interface ReferenciasCliente {
 export async function contarReferenciasDeCliente(
   clienteId: string
 ): Promise<ReferenciasCliente> {
-  const [pedidosRes, cambiosRes, recorridoRes, pagosRes] = await Promise.all([
-    supabase.from('pedidos').select('total').eq('cliente_id', clienteId),
-    supabase.from('cambios_productos').select('id').eq('cliente_id', clienteId),
-    supabase.from('recorrido_cambios').select('id').eq('cliente_id', clienteId),
-    supabase.from('pagos').select('id').eq('cliente_id', clienteId),
+  // frv-B5 (tanda 6): paginado. PostgREST corta en 1.000 filas sin avisar, y con más de 1.000
+  // pedidos o pagos el aviso «tiene N pedidos por $X» salía cortado. Un cliente con tantas filas es
+  // justo el que más importa contar bien. `traerTodo` exige un orden estable: por `id`.
+  const [filas, cambios, recorrido, pagosFilas] = await Promise.all([
+    traerTodo<{ total: number | string | null }>(
+      () => supabase.from('pedidos').select('total').eq('cliente_id', clienteId).order('id'),
+      { etiqueta: 'pedidos del cliente' },
+    ),
+    traerTodo<{ id: number }>(
+      () => supabase.from('cambios_productos').select('id').eq('cliente_id', clienteId).order('id'),
+      { etiqueta: 'cambios del cliente' },
+    ),
+    traerTodo<{ id: number }>(
+      () => supabase.from('recorrido_cambios').select('id').eq('cliente_id', clienteId).order('id'),
+      { etiqueta: 'cambios en ruta del cliente' },
+    ),
+    traerTodo<{ id: number }>(
+      () => supabase.from('pagos').select('id').eq('cliente_id', clienteId).order('id'),
+      { etiqueta: 'pagos del cliente' },
+    ),
   ])
 
-  if (pedidosRes.error) throw errorDeSupabase(pedidosRes.error, 'Sin conexión: no se pudo cargar las referencias del cliente. Revisá la señal e intentá de nuevo.')
-  if (cambiosRes.error) throw errorDeSupabase(cambiosRes.error, 'Sin conexión: no se pudo cargar las referencias del cliente. Revisá la señal e intentá de nuevo.')
-  if (recorridoRes.error) throw errorDeSupabase(recorridoRes.error, 'Sin conexión: no se pudo cargar las referencias del cliente. Revisá la señal e intentá de nuevo.')
-  if (pagosRes.error) throw errorDeSupabase(pagosRes.error, 'Sin conexión: no se pudo cargar las referencias del cliente. Revisá la señal e intentá de nuevo.')
-
-  const filas = pedidosRes.data || []
-  const cambiosProductos = (cambiosRes.data || []).length
-  const recorridoCambios = (recorridoRes.data || []).length
-  const pagos = (pagosRes.data || []).length
+  const cambiosProductos = cambios.length
+  const recorridoCambios = recorrido.length
+  const pagos = pagosFilas.length
 
   return {
     pedidos: {
