@@ -2,7 +2,7 @@
 -- no queden bundles viejos (1601-b5, 1564-b6 parte 2, 1595-b6 residual). La RPC de emails la
 -- prueba scripts/test-linaje-pagos-metas-y-emails-ola2-1603.sql; las facturas,
 -- scripts/test-facturas-sucursal-activa-ola2-1603.sql.
--- Migración: NNN_cierres_de_permisos_sin_bundles_viejos.
+-- Migración: 540_cierres_de_permisos_sin_bundles_viejos.
 --
 -- Un único DO con datos propios que termina SIEMPRE en una excepción: no deja rastro (salvo
 -- valores de secuencia). Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ' con la lista. Cada caso corre
