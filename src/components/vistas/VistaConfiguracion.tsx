@@ -1191,6 +1191,14 @@ export default function VistaConfiguracion({
             </p>
           )}
 
+          {/* catalogo-B6: con el mínimo en 0 el modo «cobrar envío» no tiene umbral: el cargo nunca se cobra. */}
+          {modo === 'cargo' && valido && parseado === 0 && Number.isFinite(parseadoCargo) && parseadoCargo > 0 && (
+            <p role="status" className="text-amber-700 dark:text-amber-300 text-xs mt-2">
+              Con la compra mínima en 0 este modo nunca cobra el cargo de envío: no hay un monto bajo el cual cobrarlo.
+              Poné un mínimo mayor que 0, o elegí otro modo.
+            </p>
+          )}
+
           {(error || !valido) && (
             <p id="monto-minimo-error" role="alert" className="text-rose-600 text-xs mt-2">
               {error ?? 'Ingresá un monto válido, de 0 a $ 99.999.999.'}

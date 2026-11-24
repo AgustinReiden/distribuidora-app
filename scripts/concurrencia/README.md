@@ -132,7 +132,9 @@ schema vivo y se verifica con la huella.
 una rendición confirmada cierra la caja de su sucursal hasta ese día y todos los anteriores, sin
 reabrirse: una segunda tanda cae en `42501 La caja de la sucursal esta cerrada` desde el setup. Las
 variantes usan tramos de días crecientes, **en el orden en que corren**: en `CONC-B`, C6, C6b, C6c y
-C6d (ventana de 900 días); en `CONC-C`, C6g y C6h (ventana de 1500); en `CONC-A`, la C6e de #1418 y la C9 de #1412 confirman rendiciones en sus propios tramos de días, y C7 queda fuera de ellos (ver el comentario de `c7()`). Por eso `c6` y `c7`
+C6d (ventana de 900 días); en `CONC-C`, C6g y C6h (ventana de 1500); en `CONC-A`, la C6e de #1418 confirma rendiciones en su
+propio tramo de días, y C7 queda fuera de él (ver el comentario de `c7()`). La C9 de #1412 ya no gasta días: cada ronda arma su
+propia sucursal (ver «Lo que cambió con las reglas de la reauditoría» más abajo). Por eso `c6` y `c7`
 corren enteros y en ese orden (`todos` ya lo hace). Las de `t10` (tarjeta 10 de #1378) que confirman
 rendiciones eligen solas su día en `CONC-A`, del 5000 al 4602 hacia atrás de hoy, y las de rutas no
 gastan días (choferes nuevos en cada ronda): `t10` corre antes que C6e y C9, o sobre una base nueva.
@@ -200,9 +202,46 @@ esperable que choque igual. No se probó.)
   equivalencias y el stock en 10 más lo que entró. El alta que llega segunda la rechaza la FK (`23503`, esperado). Con la
   migración, 100/100, 100/100 y 200/200 sin `40P01`; con `eliminar_proveedor` de la 490 y el trigger apagado (control
   negativo), 0/20 en las tres, también sin `40P01`: las compras quedan sin id y sin nombre.
+- **T6k a T6n** (#1491, con la D2 de #1592): guardar la promo entera (`cambiar_regalo_promocion` con `p_datos`, que baja el
+  factor 2 → 1) contra una venta. Desde D2 el factor de una promo no cambia mientras haya pedidos sin entregar que la usan, así
+  que el cruce tiene dos desenlaces correctos, y el `verify` acepta los dos: la venta primero y el guardado rechazado entero
+  (P0001 «No se puede cambiar las unidades por bloque…», la promo como estaba), o el guardado primero y la venta contra la promo
+  nueva. Lo que no puede pasar es un 40P01 ni una promo a medias. Las forzadas T6k, T6l y T6n dejan a la venta primero (el
+  guardado se rechaza siempre) y T6k2, T6l2 y T6n2 al guardado primero (se guarda y la venta entra); T6m, sin forzar, da los dos
+  órdenes (antes de D2 sólo 22 de 200 rondas pasaban: las que ganaba el guardado). Los gemelos van al final de `t6`, después de T6p: T6o fija sus tiempos (250 y 450 ms) y cada ronda de las `a14_setup` suma promos y productos a la sucursal A, que el trigger de sentencia de los contenedores recorre; con 300 rondas más antes, T6o pasó de 100/100 a 94/100, y repetida sobre esa misma base a 69 y a 51 (la venta le gana al guardado y D2 lo rechaza). Una base nueva por corrida de `t6` evita ese corrimiento.
 - **C8** es un dato para diseñar el fork, sin un mínimo fijado: ventas por segundo, latencias,
   esperas por relación y las tablas que más escriben. En Docker depende de la PC (anotarla
   junto a los números) y **no es la capacidad de prod**.
+
+## Lo que cambió con las reglas de la reauditoría del 24/11 (tarjeta G de la tanda 6, #1603)
+
+Las reglas nuevas del núcleo rechazan casos que los guiones armaban a propósito, y esas rondas no probaban nada (fallaban en el
+`setup`). Se pusieron al día sin tocar lo que cada variante verifica:
+
+- **D23 (#1595 b5): una salvedad va sólo sobre un pedido en camino o entregado** (`pedido_sin_salir`). T13d, T13j, T15b, S1 y S1b
+  arman antes el pedido entregado con retiro en el depósito (`conc.sacar_a_reparto`, como `t14_setup` con `p_entregado`): sin
+  ruta, sin rendición, sin gastar días. Lo hacen `conc.t13_salvedad_setup`, `conc.t15_salvedad_setup` y `conc.s1_setup`; el resto de
+  T13 y T15 sigue con su setup de siempre.
+- **Mig 504 (#1547 REN-2): `confirmar_rendicion` rechaza un día sin nada que rendir** de ese chofer. Los pagos de las variantes de
+  rendiciones los cargaba el admin y la boleta no tiene chofer, así que la rendición de `tr` no tenía nada (antes se cerraba vacía).
+  C6 a C6h y T10j suman un cobro de 1 (un crédito de OTRO cliente) cargado por `tr` ese día: le da algo que rendir en cualquier
+  orden, también cuando la operación (cambiar el cliente, cancelar) llega antes y deja la boleta sin pagos, y no toca lo que se mide.
+  La C6e carga el crédito con `tr` (antes, el admin): desde #1492 el pago que llega a una boleta desde un crédito sigue siendo de
+  quien lo cargó, y con el admin la foto de `tr` quedaba sin R ni Y.
+- **Mig 505 (#1597): la fecha de una entrega tiene piso** (60 días el admin, 7 el encargado y el chofer). C7 entrega sueltas por
+  REST con la fecha de hoy (el recorrido se arma con el pedido, no con el día), y C9 arma una sucursal propia por ronda (admin, otro
+  admin, encargado, chofer y producto de relleno) con el día de ayer: ya no hay un tramo de días de 3000 hacia atrás, y una rendición
+  confirmada sólo cierra la caja de esa sucursal descartable. Un día de ayer en la sucursal A la dejaría cerrada para todo lo demás.
+- **Mig 540: `pedidos.updated_at` no está en el `GRANT UPDATE`** (la versión la pone el server). La entrega suelta por REST de C7 y
+  C9 ya no lo nombra en el `SET`.
+- **D2 (#1592 PRM-2)**: ver T6k a T6n más arriba.
+
+Controles negativos medidos el 24/11 sobre la base de la 540 (40 rondas por variante; huella igual a la de prod después de restaurar):
+T13j y T13g con M10, 40 de 40 con 40P01; T6k, T6k2, T6n, T6n2 y T6g con M62, 40 de 40 con 40P01; T15b y T15a con M11/M12, 40 de 40
+con 40P01. Dos hallazgos: el DO de `controles-negativos-t15.sql` exigía seis pre-bloqueos de `cambiar_cliente_pedido` y la 540 tiene siete
+(sin mutar nada, sin avisar), y se corrigió; y M9 de `controles-negativos-t13.sql` ya no muerde ni a T13c ni a T13d (0 40P01 en las dos,
+con la mutación puesta), así que lo que dice su encabezado sobre ellas está viejo, y no se tocó. T10j, S1, C6, C7 y C9 no tienen control
+negativo propio.
 
 ## Controles negativos
 
