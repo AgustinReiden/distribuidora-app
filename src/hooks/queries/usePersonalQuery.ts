@@ -12,6 +12,8 @@ import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { gastosKeys } from './useGastosQuery'
+import { useRequestIdEstable } from '../useRequestIdEstable'
+import { huellaDeAlta } from '../../utils/huellaDeAlta'
 import type {
   Empleado,
   CuentaEmpleado,
@@ -142,10 +144,18 @@ export function useClienteAdmiteAdelantoQuery(clienteId: number | string | null)
 export function useGuardarEmpleadoMutation() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
+  // reportes-R3 (tanda 6 de #1603): el alta lleva una clave estable por contenido. Si la
+  // respuesta se perdió y se reintenta lo mismo, el server devuelve el empleado del primer
+  // intento en vez de darlo de alta otra vez. La edición no la lleva.
+  const claveAlta = useRequestIdEstable()
   return useMutation({
     mutationFn: async (payload: GuardarEmpleadoPayload): Promise<number> => {
-      const { data, error } = await supabase.rpc('guardar_empleado', { p_empleado: payload })
+      const huella = huellaDeAlta(currentSucursalId, payload)
+      const enviado = huella ? { ...payload, clave: payload.clave ?? claveAlta(huella) } : payload
+      const { data, error } = await supabase.rpc('guardar_empleado', { p_empleado: enviado })
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo guardar el empleado. Revisá la lista del personal antes de reintentar, puede haber quedado registrado.')
+      // Salió bien: la próxima alta igual es otra, con otra clave.
+      if (huella) claveAlta.olvidar([huella])
       return data as unknown as number
     },
     onSuccess: () => {

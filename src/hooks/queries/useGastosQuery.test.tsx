@@ -80,6 +80,8 @@ function makeWrapper(qc: QueryClient) {
   }
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function nuevoCliente() {
   return new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
 }
@@ -105,14 +107,56 @@ beforeEach(() => {
 })
 
 describe('useGuardarGastoMutation', () => {
-  it('manda el payload tal cual a guardar_gasto y devuelve el id', async () => {
+  // reportes-R3 (tanda 6 de #1603): cambió de regla. El alta ya no va «tal cual»: lleva la clave
+  // del alta (un uuid), y el resto del payload sin tocar.
+  it('manda el payload a guardar_gasto con la clave del alta y devuelve el id', async () => {
     const { result } = renderHook(() => useGuardarGastoMutation(), { wrapper: makeWrapper(nuevoCliente()) })
 
     const id = await result.current.mutateAsync(PAYLOAD)
 
     expect(id).toBe(41)
-    expect(rpcCalls).toEqual([{ fn: 'guardar_gasto', args: { p_gasto: PAYLOAD } }])
+    expect(rpcCalls).toEqual([{ fn: 'guardar_gasto', args: { p_gasto: { ...PAYLOAD, clave: expect.stringMatching(UUID) } } }])
     expect(fromCalls).toEqual([])
+  })
+
+  // reportes-R3 (tanda 6 de #1603): un reintento del mismo alta no duplica el gasto.
+  it('el reintento del mismo alta después de un error manda la misma clave', async () => {
+    rpcResult = { data: null, error: { message: 'TypeError: Failed to fetch', code: '' } }
+    const { result } = renderHook(() => useGuardarGastoMutation(), { wrapper: makeWrapper(nuevoCliente()) })
+
+    await result.current.mutateAsync(PAYLOAD).catch(() => undefined)
+    rpcResult = { data: 41, error: null }
+    await result.current.mutateAsync({ ...PAYLOAD })
+
+    const claves = rpcCalls.map(c => (c.args.p_gasto as { clave?: string }).clave)
+    expect(claves[0]).toMatch(UUID)
+    expect(claves[1]).toBe(claves[0])
+  })
+
+  it('después de un alta que salió bien, otra igual lleva otra clave (dos tickets iguales son dos gastos)', async () => {
+    const { result } = renderHook(() => useGuardarGastoMutation(), { wrapper: makeWrapper(nuevoCliente()) })
+
+    await result.current.mutateAsync(PAYLOAD)
+    await result.current.mutateAsync(PAYLOAD)
+
+    const claves = rpcCalls.map(c => (c.args.p_gasto as { clave?: string }).clave)
+    expect(claves[0]).toMatch(UUID)
+    expect(claves[1]).toMatch(UUID)
+    expect(claves[1]).not.toBe(claves[0])
+  })
+
+  it('un alta distinta lleva otra clave, y la edición no lleva clave', async () => {
+    rpcResult = { data: null, error: { message: 'TypeError: Failed to fetch', code: '' } }
+    const { result } = renderHook(() => useGuardarGastoMutation(), { wrapper: makeWrapper(nuevoCliente()) })
+
+    await result.current.mutateAsync(PAYLOAD).catch(() => undefined)
+    await result.current.mutateAsync({ ...PAYLOAD, monto_total: 9000 }).catch(() => undefined)
+    await result.current.mutateAsync({ ...PAYLOAD, id: 41 }).catch(() => undefined)
+
+    const claves = rpcCalls.map(c => (c.args.p_gasto as { clave?: string }).clave)
+    expect(claves[1]).toMatch(UUID)
+    expect(claves[1]).not.toBe(claves[0])
+    expect(rpcCalls[2].args.p_gasto).not.toHaveProperty('clave')
   })
 
   it('un error plano de supabase termina en un Error con el mensaje del server', async () => {

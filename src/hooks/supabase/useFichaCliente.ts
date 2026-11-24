@@ -11,7 +11,8 @@ import type {
 } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
 import { fechaLocalISO } from '../../utils/formatters'
-import { calcularVentaCliente, calcularRitmoCompra } from '../../utils/ventaCliente'
+import { calcularVentaCliente, calcularRitmoCompra, separarPagosFicha, type PagoFichaCliente } from '../../utils/ventaCliente'
+import { NOTAS_VENTA_METRICA_SELECT, type NotaCreditoVentaMetricaRow } from '../../utils/notasCreditoVentaMetrica'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
 
@@ -77,6 +78,21 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       )
       if (!vigente()) return
 
+      // Notas de crédito de venta vigentes del cliente: el «Total comprado» es neto de ellas
+      // (REP-1, tanda 6). La RLS las deja ver a admin y encargado; para un preventista vuelve
+      // vacía, sin error, y su total queda bruto.
+      const notasCliente = await traerTodo<NotaCreditoVentaMetricaRow>(
+        // El tipo inferido del embed es un arreglo; PostgREST devuelve la boleta como objeto (FK a uno).
+        () => supabase
+          .from('notas_credito_venta')
+          .select(NOTAS_VENTA_METRICA_SELECT)
+          .eq('cliente_id', clienteId)
+          .eq('anulada', false)
+          .order('id') as never,
+        { etiqueta: 'notas de crédito del cliente' },
+      )
+      if (!vigente()) return
+
       // Query pesada: últimos 50 pedidos con items (para UI + productos favoritos)
       const { data: pedidos, error: errorPedidos } = await supabase
         .from('pedidos')
@@ -98,20 +114,23 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       // (utils/ventaCliente): la venta es entregado, sin canje, sin vale blanco (VB,
       // consumo interno, va aparte). Lo tomado y no entregado va como "pendiente de
       // entrega", igual que el "en curso" del Dashboard. La deuda se ve en "Saldo".
-      const venta = calcularVentaCliente(pedidosLivianos)
+      const venta = calcularVentaCliente(pedidosLivianos, notasCliente)
       const totalCompras = venta.totalComprado
 
       // Fetch pagos from the pagos table (source of truth for payments)
-      const pagosCliente = await traerTodo<{ monto: number }>(
+      const pagosCliente = await traerTodo<PagoFichaCliente>(
         () => supabase
           .from('pagos')
-          .select('monto')
+          .select('monto, forma_pago, de_saldo_a_favor, pedido_id')
           .eq('cliente_id', clienteId)
           .order('id'),
         { etiqueta: 'pagos del cliente' },
       )
       if (!vigente()) return
-      const totalPagosRegistrados = pagosCliente.reduce((s: number, p: { monto: number }) => s + (p.monto || 0), 0)
+      // «Pagado» es sólo la plata cobrada (frv-B3, tanda 6): la nota de crédito y el adelanto de
+      // sueldo no son plata y van aparte; lo cobrado que después se aplicó desde saldo a favor cuenta.
+      const pagosFicha = separarPagosFicha(pagosCliente)
+      const totalPagosRegistrados = pagosFicha.cobrado
 
       // Productos favoritos se calculan sobre los últimos 50 pedidos (limitación aceptada)
       const productosFrecuencia: ProductosFrecuenciaMap = {}
@@ -137,6 +156,9 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
         totalCompras,
         pedidosPagados: venta.pedidosPagados,
         montoPagado: totalPagosRegistrados,
+        notaCreditoAplicada: pagosFicha.notaCreditoAplicada,
+        adelantoSueldo: pagosFicha.adelantoSueldo,
+        saldoAFavorAplicado: pagosFicha.saldoAFavorAplicado,
         pedidosPendientes: venta.pedidosPendientesEntrega,
         montoPendiente: venta.pendienteEntrega,
         ticketPromedio,

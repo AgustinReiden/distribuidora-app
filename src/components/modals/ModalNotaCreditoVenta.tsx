@@ -82,6 +82,7 @@ import type { CrearNotaCreditoVentaResult } from '../../hooks/queries/useNotasCr
 import type { PedidoDB } from '../../types'
 import { RegistroIlegiblesContext, useRegistroIlegibles } from '../../hooks/useRegistroIlegibles'
 import { AvisoCamposEnRojo } from '../ui/AvisoCamposEnRojo'
+import QueryErrorState from '../layout/QueryErrorState'
 
 const ModalImputarCredito = lazyWithReload(() => import('./ModalImputarCredito'))
 
@@ -142,7 +143,9 @@ export interface ModalNotaCreditoVentaProps {
 
 export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCreditoVentaProps) {
   const notify = useNotification()
-  const { data: notasPedido = [], isLoading } = useNotasCreditoVentaPedidoQuery(pedido.id)
+  // frv-B4 (tanda 6): si la consulta de las notas del pedido falla, no se sabe qué ya está
+  // acreditado. Con `[]` el modal ofrecía todo como acreditable; ahora dice que no pudo cargar.
+  const { data: notasPedido = [], isLoading, isError: errorNotas, refetch: reintentarNotas } = useNotasCreditoVentaPedidoQuery(pedido.id)
   const crear = useCrearNotaCreditoVentaMutation()
   const { requestId, olvidar } = useRequestIdPersistente()
   // B20: los campos de número en rojo frenan el guardado.
@@ -355,6 +358,11 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
           <div className="flex justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-teal-600" />
           </div>
+        ) : errorNotas ? (
+          <QueryErrorState
+            motivo="Sin las notas de crédito que ya tiene este pedido no se puede saber qué falta acreditar."
+            onRetry={() => { void reintentarNotas() }}
+          />
         ) : nada ? (
           <div className="flex items-center gap-2 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
             <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -519,7 +527,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
           </div>
         )}
 
-        {motivo && !nada && !isLoading && (
+        {motivo && !nada && !isLoading && !errorNotas && (
           <p role="status" className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
             {resumenMercaderiaNC(motivo, unidades)}
           </p>
@@ -558,7 +566,7 @@ export default function ModalNotaCreditoVenta({ pedido, onClose }: ModalNotaCred
             <Button variant="secondary" onClick={onClose} disabled={crear.isPending}>Cancelar</Button>
             <Button
               onClick={() => { void handleConfirmar() }}
-              disabled={crear.isPending || nada || !motivo || total <= 0 || ilegibles.hay}
+              disabled={crear.isPending || errorNotas || nada || !motivo || total <= 0 || ilegibles.hay}
               className="gap-1"
             >
               {crear.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}

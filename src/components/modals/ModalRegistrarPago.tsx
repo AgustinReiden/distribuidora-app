@@ -167,6 +167,12 @@ export interface ModalRegistrarPagoProps {
    */
   permitirAdelantoSueldo?: boolean;
   /**
+   * Sólo un admin elige otra fecha que hoy (cobros-B3, tanda 6): el server rechaza la fecha de
+   * otro día de un encargado («Encargado solo puede registrar pagos con fecha de hoy»), igual que
+   * la del chofer. Sin esto el campo se ofrece a todos. Es el gemelo de `ModalPagoPedido`.
+   */
+  isAdmin?: boolean;
+  /**
    * ¿El cliente es la ficha de un empleado? Sólo se mira con `permitirAdelantoSueldo`
    * y el adelanto elegido: `false` lo bloquea (no hay a quién descontárselo),
    * `null`/`undefined` es «todavía comprobando» y también bloquea.
@@ -279,6 +285,7 @@ export default function ModalRegistrarPago({
   onEntregarSinCobrar,
   pedidoIdFijo,
   permitirAdelantoSueldo = false,
+  isAdmin = false,
   clienteEsEmpleado
 }: ModalRegistrarPagoProps): React.ReactElement | null {
   // B20: los campos de número en rojo frenan el guardado.
@@ -335,7 +342,9 @@ export default function ModalRegistrarPago({
   const [pagoRegistrado, setPagoRegistrado] = useState<PagoRegistrado | null>(null)
   const [resultadoFIFO, setResultadoFIFO] = useState<RegistrarPagoFifoResult | null>(null)
   const [error, setError] = useState<string>('')
-  const [fecha, setFecha] = useState<string>(fechaLocalISO())
+  const [fechaElegida, setFecha] = useState<string>(fechaLocalISO())
+  // Quien no es admin cobra con la fecha de hoy (cobros-B3): es lo que se ve y lo que se manda.
+  const fecha = isAdmin ? fechaElegida : fechaLocalISO()
   // Fecha minima: dia siguiente al ultimo cierre de caja de la sucursal (mig 134).
   const fechaMinima = useFechaMinimaPago()
 
@@ -796,14 +805,15 @@ export default function ModalRegistrarPago({
           <input
             type="date"
             value={fecha}
-            min={fechaMinima}
+            min={isAdmin ? fechaMinima : fechaLocalISO()}
             max={fechaLocalISO()}
+            disabled={!isAdmin}
             onChange={(e: ChangeEvent<HTMLInputElement>) => setFecha(e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
           />
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             Se imputa a la rendición de esa fecha. Por defecto hoy; otra fecha la carga solo un admin.
-            {fechaMinima && ' No se permiten fechas con la caja ya cerrada.'}
+            {isAdmin && fechaMinima && ' No se permiten fechas con la caja ya cerrada.'}
           </p>
         </div>
 

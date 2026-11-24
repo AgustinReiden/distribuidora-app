@@ -342,7 +342,8 @@ suelta en `sucursales`.
   **La línea que la salvedad borró vuelve con su foto** (VTA-1, #1595): al borrarla,
   `registrar_salvedad` guarda su costo, su lista, su origen, su descuento y su escala en
   `salvedad_linea_foto` (sólo de server: lleva el costo), y `anular_salvedad` la reinserta con
-  eso. Sin foto (las anteriores), el costo de hoy. Un camino nuevo que borre la línea de una
+  eso. Sin foto (las anteriores), el costo de hoy. Vuelve aunque hoy el producto no tenga lista:
+  es la misma línea, no una venta nueva (la marca de la edición, D20; venta-B3). Un camino nuevo que borre la línea de una
   salvedad guarda la foto igual (como `_combo_trasladar` al fusionar las dos líneas de un
   combo), y uno que repunte escalas repunta también la de la foto.
   Anular una salvedad que devuelve el derecho a un regalo se rechaza si **cualquier** salvedad
@@ -408,10 +409,12 @@ suelta en `sucursales`.
   era obligatorio se inventaba un número corto, y el campo lo rellenaba con ceros
   (`00-00000123-4`): no hagas obligatorio un dato que el cliente no siempre tiene. Un DNI de 7 u 8
   cifras se guarda en `clientes.cuit` como `00-XXXXXXXX-0` con `tipo_documento = 'DNI'`, y ningún
-  CUIT empieza con 00. Lo pone `trg_clientes_tipo_documento_del_valor` (sólo ceros queda NULL) y lo
+  CUIT empieza con 00. Lo pone `trg_clientes_tipo_documento_del_valor` (sólo ceros, o sin ningún dígito, queda NULL) y lo
   cierra el CHECK `clientes_documento_con_su_tipo`, que rechaza un número corto rellenado; espejo en
   `documentoParaGuardar` (`src/utils/documentoCliente.ts`). Un camino nuevo que escriba el
-  documento no manda el tipo.
+  documento no manda el tipo. Un CUIT nuevo o cambiado tiene 11 dígitos y el verificador bien (D37):
+  lo rechaza el mismo trigger, también por REST; uno que ya estaba mal no traba la edición mientras
+  sus dígitos no cambien, como `errorDeCuit` (catalogo-B1, tanda 6 de #1603).
 - **Una promo con uso no se borra: se desactiva** (1556-b1, decisión del dueño). Sus FKs no son
   RESTRICT (el regalo de un pedido quedaba sin promo y no volvía al stock al cancelarlo), así que
   lo frena `trg_promocion_no_se_borra_con_uso`: líneas de pedido de cualquier estado, ajustes de
@@ -474,6 +477,14 @@ suelta en `sucursales`.
   y Rentabilidad siguen por boleta. Lo que le toca al VENDEDOR resta sólo las notas cuyo motivo le
   descuenta (ver «Los motivos de una nota de crédito de venta»): la comisión, las metas y Rendimiento,
   cada uno con su foto. Un ranking nuevo de venta resta `_ventas_nc` igual.
+  **El Dashboard y la ficha del cliente también son netos** (REP-1, tanda 6; decisión del dueño del
+  24/11): «Venta entregada», los clientes más activos y el «Total comprado» restan las notas vigentes de
+  boletas que son venta (`src/utils/notasCreditoVentaMetrica.ts`, mismo corte que `_ventas_nc`; la plata es
+  `total` de la nota). Las notas las lee por REST sólo admin y encargado (`mt_notas_credito_venta_select`):
+  a un preventista la consulta le vuelve vacía y sus cifras siguen brutas hasta que haya una RPC para él.
+  El «Pagado» de la ficha cuenta sólo plata cobrada: lo único que va aparte, con su rótulo, es lo que no
+  es plata (la nota de crédito y el adelanto de sueldo); un pago a cuenta que después una boleta absorbe
+  desde saldo a favor sigue en «Pagado» (`separarPagosFicha`, frv-B3).
   **La nota de crédito de venta se imputa al día de su boleta** (B16, #1545; decisión del dueño):
   `notas_credito_venta.fecha` es la de imputación, la de `pedidos.fecha`, y es la que cuenta para los
   reportes y la posición fiscal; cuándo se emitió es `created_at`, y su crédito (los pagos) es plata
@@ -584,6 +595,10 @@ suelta en `sucursales`.
   un centavo por renglón de la factura (`gastos.renglones_factura`, de 1 a 99; decisión del dueño).
   `_rubro_es_sueldo` frena «sac» y «vacaciones» como palabra en cualquier parte del nombre, y
   «comisiones» salvo la de un medio de cobro (decisión del dueño).
+  El alta de un gasto y la de un empleado llevan `clave` en el JSON (`altas_por_clave`, la pone el
+  hook con `useRequestIdEstable` por contenido): la misma clave con lo mismo devuelve el del primer
+  intento; sin clave (un PWA de antes), como siempre (reportes-R3). La edición de un empleado
+  conserva lo que el JSON no trae, y un null explícito lo borra (reportes-R2).
 - **Un vale blanco está saldado por naturaleza** (migs 317/318): `tipo_factura = 'VB'` ⇒
   `monto_pagado = total`, `estado_pago = 'pagado'` y **cero** filas en `pagos` (lo fuerza
   `actualizar_estado_pago_pedido` y el CHECK `pedidos_vb_coherente`). No es deuda, no se
@@ -601,7 +616,9 @@ suelta en `sucursales`.
   ni descuentos (sólo bajan el precio). Para el replay valen, en los dos, sólo el precio
   inmediatamente anterior, > 0, vigente al menos 15 minutos y dentro de
   `politicas_comerciales.ventana_precio_anterior_horas`; en la edición, el piso conserva el
-  precio guardado si ningún grupo se achica, y el techo conserva siempre el máximo guardado.
+  precio guardado si ningún grupo se achica ni un producto con mínimo por producto en una
+  escala del grupo baja y queda por debajo de ese mínimo (venta-B1), y el techo conserva siempre
+  el máximo guardado.
   La ventana la edita **sólo el admin**, desde /configuracion
   (`actualizar_ventana_precio_anterior`, mig 368): afloja el piso y el techo del encargado, y
   la puede usar también quien está online (tras una suba, el precio viejo más barato; tras una
@@ -715,7 +732,9 @@ suelta en `sucursales`.
   hereda nada. `verificar_duplicado_cliente` queda afuera a propósito (avisa de un duplicado entre
   todos), y el bot va aparte. Una lectura nueva de clientes con permisos de server usa esa función,
   como `EXISTS (SELECT 1 FROM _cliente_visible(...))`: es `SETOF` para que la policy la inlinee (una
-  función SQL escalar con subconsultas se llama fila por fila). Todo
+  función SQL escalar con subconsultas se llama fila por fila). Una tabla hija de clientes que
+  lee el preventista (los descuentos por rubro, `cdc_select`) suma un `EXISTS` sobre `clientes`, que
+  pasa por esa RLS: no repite la regla (SEG-1, tanda 6 de #1603). Todo
   camino nuevo que ofrezca clientes *para operar* lo excluye; todo camino de *historial* lo
   sigue mostrando.
   Desde la 358 esa excepción de historial vale para **cualquier** cliente, no sólo el
@@ -724,6 +743,8 @@ suelta en `sucursales`.
   listado, selector o contador nuevo usa `useClientesOperativosQuery` (o
   `esClienteOperable`); `useClientesQuery` queda para resolver por id.
   Ver no es editar: `mt_clientes_update` le pide al preventista la misma rama de operar.
+  **El cliente que da de alta un preventista queda asignado a él**, por /clientes y por el alta rápida del
+  pedido (FRV-2, tanda 6; decisión del dueño): la regla es una, `preventistaIdsDelAlta`.
   Desde la 378 (#1182/#1183), el que reparte un pedido (sin VB) ve su cliente sin poder
   operarlo, y sólo quien actúa como preventista en la sucursal (`_actua_como_preventista`) puede
   tener clientes asignados: el trigger de `cliente_preventistas` frena al transportista y al
