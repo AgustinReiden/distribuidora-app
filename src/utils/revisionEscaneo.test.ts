@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   bonificacionDelPie, construirLineasRevision, controlConBonificacionDelPie, conversionOfrecida,
-  duplicadosPorProducto, estadoDeRevision, iiDelPiePorTasa, ordenRevision, prellenarCampos,
+  duplicadosPorProducto, estadoDeRevision, iiDelPiePorTasa, ordenConPendientesPrimero, ordenRevision, prellenarCampos,
   seSumanEnUnRenglon, siguientePendiente, soltarDelEscaneo, sugerenciaEsLaDelPie, textoCantidad, UMBRAL_ACEPTAR_TODAS,
 } from './revisionEscaneo'
 import type { LineaImpresa, LineaRevision, ResolucionLinea } from './revisionEscaneo'
@@ -117,6 +117,11 @@ describe('duplicados: dos renglones al mismo producto se muestran juntos', () =>
   it('el orden pone el segundo debajo del primero, sin perder ninguno', () => {
     expect(ordenRevision(lineas)).toEqual([0, 3, 1, 2])
     expect(ordenRevision([linea(PENDIENTE), linea(PENDIENTE)])).toEqual([0, 1])
+  })
+  it('en la tabla, lo pendiente va arriba y lo resuelto u omitido debajo, con sus duplicados juntos', () => {
+    expect(ordenConPendientesPrimero(lineas)).toEqual([2, 0, 3, 1])
+    expect(ordenConPendientesPrimero([linea(OMITIDA), linea(PENDIENTE), linea(conProducto('b')), linea(PENDIENTE)]))
+      .toEqual([1, 3, 0, 2])
   })
 })
 

@@ -32,7 +32,7 @@ import type { CatalogoPreparado } from '../../utils/matchEscaneo'
 import { CANDIDATOS_VACIOS, useCandidatosEscaneoQuery } from '../../hooks/queries/useEscaneoQuery'
 import {
   UMBRAL_ACEPTAR_TODAS, conversionOfrecida, duplicadosPorProducto, estadoDeRevision, factorDeLinea, seSumanEnUnRenglon,
-  ordenRevision, siguientePendiente, textoCantidad, tieneSugerencia,
+  ordenConPendientesPrimero, siguientePendiente, textoCantidad, tieneSugerencia,
 } from '../../utils/revisionEscaneo'
 import type { LineaRevision, RevisionEscaneo } from '../../utils/revisionEscaneo'
 import type { ProductoDB } from '../../types'
@@ -72,12 +72,14 @@ function ChipEstado({ linea }: { linea: LineaRevision }) {
 }
 
 /** El buscador de la fila: alternativas primero, después el matcher. */
-function SelectorProductoLinea({ index, linea, productos, porId, preparado, ultimoCosto, onElegir }: {
+function SelectorProductoLinea({ index, linea, productos, porId, preparado, alfabetico, ultimoCosto, onElegir }: {
   index: number;
   linea: LineaRevision;
   productos: ProductoDB[];
   porId: Map<string, ProductoDB>;
   preparado: CatalogoPreparado;
+  /** Ids del catálogo activo por nombre: lo que se ofrece sin tipear, después de lo sugerido. */
+  alfabetico: string[];
   /** producto_id → último costo unitario comprado a este proveedor (mig 292). */
   ultimoCosto: Map<string, number | null>;
   onElegir: (producto: ProductoDB) => void;
@@ -89,8 +91,11 @@ function SelectorProductoLinea({ index, linea, productos, porId, preparado, ulti
   const filtrar = useCallback((_: ProductoDB[], consulta: string): ProductoDB[] => {
     const ids = consulta.trim()
       ? buscarEnCatalogo(preparado, consulta).map(r => r.productoId)
-      // Sin tipear: lo que propuso el matcher y después el ranking del texto impreso.
-      : [...sugeridos, ...buscarEnCatalogo(preparado, linea.impresa.descripcion).map(r => r.productoId)]
+      // Sin tipear: lo que propuso el matcher, el ranking del texto impreso y
+      // después el resto del catálogo por nombre. Sin el resto, un renglón que
+      // no se parece a nada («✗ sin coincidencia») abría la lista vacía y no se
+      // podía elegir sin adivinar qué tipear.
+      : [...sugeridos, ...buscarEnCatalogo(preparado, linea.impresa.descripcion).map(r => r.productoId), ...alfabetico]
     const vistos = new Set<string>()
     const salida: ProductoDB[] = []
     for (const id of ids) {
@@ -98,7 +103,7 @@ function SelectorProductoLinea({ index, linea, productos, porId, preparado, ulti
       if (p && !vistos.has(id)) { vistos.add(id); salida.push(p) }
     }
     return salida
-  }, [preparado, sugeridos, porId, linea.impresa.descripcion])
+  }, [preparado, sugeridos, porId, linea.impresa.descripcion, alfabetico])
 
   const r = linea.resolucion
   const sugerido = linea.match.productoId ? porId.get(linea.match.productoId) : undefined
@@ -226,7 +231,14 @@ export default function RevisionEscaneoTabla({
   const porId = useMemo(() => new Map(productos.map(p => [String(p.id), p])), [productos])
   const ultimoCosto = useMemo(() => new Map(comprados.map(c => [c.productoId, c.ultimoCosto])), [comprados])
   const preparado = useMemo(() => prepararCatalogo(productos, { proveedorId, comprados }), [productos, proveedorId, comprados])
-  const orden = useMemo(() => ordenRevision(lineas), [lineas])
+  // El catálogo activo (el de `prepararCatalogo`) por nombre, para el buscador sin tipear.
+  const alfabetico = useMemo(
+    () => preparado.candidatos.map(c => c.producto)
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' }))
+      .map(p => String(p.id)),
+    [preparado],
+  )
+  const orden = useMemo(() => ordenConPendientesPrimero(lineas), [lineas])
   const estado = useMemo(() => estadoDeRevision(lineas), [lineas])
   const duplicados = useMemo(() => duplicadosPorProducto(lineas), [lineas])
   const [crearEn, setCrearEn] = useState<number | null>(null)
@@ -317,6 +329,7 @@ export default function RevisionEscaneoTabla({
   }
 
   const pendientes = estado.pendientes.length
+  const primeraResuelta = orden.find(i => lineas[i].resolucion.tipo !== 'pendiente')
   const tabla = (
     <div className="overflow-x-auto rounded-lg border dark:border-gray-700">
       <table className="w-full text-sm" aria-label="Líneas de la factura">
@@ -348,6 +361,16 @@ export default function RevisionEscaneoTabla({
             const aparte = otras.filter(j => !sumadas.includes(j))
             const totalGrupo = [index, ...sumadas].reduce((acc, j) => acc + lineas[j].impresa.cantidad * factorDeLinea(lineas[j]), 0)
             return [
+              // Lo ya agregado u omitido va debajo de lo que falta, con su rótulo:
+              // así se ve qué entró a la compra y no estorba para seguir.
+              index === primeraResuelta ? (
+                <tr key="ya-resueltas" className="bg-green-50 dark:bg-green-900/20">
+                  <th scope="row" colSpan={8} className="px-2 py-1.5 text-left text-xs font-medium text-green-800 dark:text-green-200">
+                    Ya agregadas a la compra ({estado.resueltas})
+                    {estado.omitidas > 0 && ` · ${estado.omitidas} ${estado.omitidas === 1 ? 'omitida' : 'omitidas'}`}
+                  </th>
+                </tr>
+              ) : null,
               <tr
                 key={index}
                 ref={el => { if (el) filas.current.set(index, el); else filas.current.delete(index) }}
@@ -391,7 +414,7 @@ export default function RevisionEscaneoTabla({
                   {resolucion.tipo === 'omitida'
                     ? <span className="flex flex-wrap items-center gap-2"><ChipEstado linea={linea} /><span className="text-xs text-gray-500">No se carga</span></span>
                     : <SelectorProductoLinea index={index} linea={linea} productos={productos} porId={porId}
-                                             preparado={preparado} ultimoCosto={ultimoCosto} onElegir={p => resolver(index, p)} />}
+                                             preparado={preparado} alfabetico={alfabetico} ultimoCosto={ultimoCosto} onElegir={p => resolver(index, p)} />}
                 </td>
                 <td className="px-2 py-2 whitespace-nowrap">
                   <span className="tabular-nums">{textoCantidad(linea)}</span>
