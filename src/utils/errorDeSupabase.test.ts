@@ -415,6 +415,19 @@ describe('errorDeSupabase — CHECK violado (23514)', () => {
     expect(e.message).not.toContain('clientes_documento_con_su_tipo')
   })
 
+  // Tanda 6 de #1603: las coordenadas del cliente (catalogo-B2), el neto y el largo del nombre del
+  // producto (catalogo-B5) dicen qué dato es, sin el nombre técnico.
+  it.each([
+    ['clientes_latitud_rango', /latitud va de -90 a 90/],
+    ['clientes_longitud_rango', /longitud de -180 a 180/],
+    ['productos_precios_venta_neto_hasta_final', /neto \(sin IVA\) no puede ser mayor que el precio final/],
+    ['productos_nombre_largo', /hasta 200 caracteres/],
+  ])('el CHECK %s dice qué dato es', (restriccion, texto) => {
+    const e = errorDeSupabase(check(restriccion), SIN_CONEXION)
+    expect(e.message).toMatch(texto)
+    expect(e.message).not.toContain(restriccion)
+  })
+
   // Hay RAISE EXCEPTION ... USING ERRCODE = 'check_violation' con un motivo de negocio en castellano:
   // el motivo tiene que llegar intacto, no el genérico (compra mínima, precio 0, sin chofer, cancelar
   // con motivo, bot apagado, subrubros...).
