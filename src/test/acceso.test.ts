@@ -504,8 +504,11 @@ describe('scripts/rpcs-definer-permitidas.json', () => {
 })
 
 describe('hallazgosStorage', () => {
-  // El texto como lo devuelve pg_policies después de la mig de #1474.
-  const MIS_SUCURSALES =
+  // El texto como lo devuelve pg_policies después de 539_facturas_por_sucursal_activa (tarjeta C6
+  // de #1603, 1564-b7, D51): el path contra la sucursal activa.
+  const MIS_SUCURSALES = '((storage.foldername(name))[1] = (current_sucursal_id())::text)'
+  // Y como quedó después de la mig de #1474: contra todas las sucursales del usuario.
+  const TODAS_LAS_MIAS =
     "((storage.foldername(name))[1] IN ( SELECT (us.sucursal_id)::text AS sucursal_id FROM usuario_sucursales us WHERE (us.usuario_id = auth.uid())))"
   const select = {
     policy: 'facturas_select_encargado_o_admin',
@@ -526,6 +529,13 @@ describe('hallazgosStorage', () => {
 
   it('las policies de facturas que miran la sucursal del path pasan', () => {
     expect(hallazgosStorage({ politicas: [select, insert], buckets: privado })).toEqual({ hallazgos: [], sobrantes: [] })
+  })
+
+  it('la policy de la 463, que compara el path con todas las sucursales del usuario, es roja (D51)', () => {
+    const p = { ...select, using: `((bucket_id = 'facturas'::text) AND es_encargado_o_admin() AND ${TODAS_LAS_MIAS})` }
+    const { hallazgos } = hallazgosStorage({ politicas: [p], buckets: privado })
+    expect(hallazgos).toHaveLength(1)
+    expect(hallazgos[0].motivos[0]).toMatch(/no con la activa/)
   })
 
   it('la policy de la 239, que mira sólo el rol, es roja', () => {
