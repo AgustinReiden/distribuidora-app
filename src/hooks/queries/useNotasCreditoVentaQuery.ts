@@ -174,6 +174,9 @@ function useInvalidarTrasNC() {
     queryClient.invalidateQueries({ queryKey: ['notas_credito_venta'] })
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
+    // REP-1 (tanda 6): el Dashboard es neto de notas: «Venta entregada» y los clientes más activos
+    // quedaban viejos hasta el staleTime (2 minutos). La ficha del cliente se relee al abrirla.
+    queryClient.invalidateQueries({ queryKey: ['metricas'] })
     // B22: según el motivo, la nota (o su anulación) mueve el stock, los lotes y las mermas.
     queryClient.invalidateQueries({ queryKey: ['productos'] })
     queryClient.invalidateQueries({ queryKey: ['lotes'] })
