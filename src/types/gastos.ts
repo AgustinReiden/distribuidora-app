@@ -128,6 +128,11 @@ export interface GuardarGastoPayload {
    * el server rechaza («Este gasto cambió desde que lo abriste…»). Sin la clave no compara.
    */
   updated_at_esperado?: string
+  /**
+   * reportes-R3 (tanda 6 de #1603): la clave del alta (un uuid). El mismo alta reintentada con la
+   * misma clave devuelve el gasto del primer intento. La pone `useGuardarGastoMutation`.
+   */
+  clave?: string
 }
 
 /** Un elemento de `obtener_gastos_rendiciones`: siempre trae rubro y vehículo, los km del tablero y `updated_at`. */

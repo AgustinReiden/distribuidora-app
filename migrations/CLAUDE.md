@@ -121,8 +121,9 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
     la ficha y STK-D no la vería.
     El ledger también tiene lo que el trigger de UPDATE no ve (ola 2 de #1603): el alta de un
     producto con stock deja `0 → stock` ('alta_producto', `registrar_alta_stock`), y un camino que
-    pasa unidades entre un lote y la bolsa sin mover el stock (`ajustar_lote`) deja su fila con
-    anterior = nuevo y el lote de referencia.
+    pasa unidades entre un lote y la bolsa sin mover el stock (`ajustar_lote`, y `crear_lote_manual`
+    al etiquetar la bolsa: 'lote_manual', tanda 6) deja su fila con anterior = nuevo y el lote de
+    referencia.
   - **El orden de locks es producto antes que lote, y productos por id ascendente** (#1255): es el
     de la venta, que bloquea los productos y deja que el trigger baje después a sus lotes. Una
     función que toca un lote lee su `producto_id` sin lock, bloquea el producto `FOR UPDATE` y

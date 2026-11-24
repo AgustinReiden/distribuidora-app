@@ -244,6 +244,11 @@ export interface GuardarEmpleadoPayload {
   arreglo?: GuardarArregloPayload
   /** Sólo en el alta; + a su favor, − debe. */
   saldo_inicial?: number | null
+  /**
+   * reportes-R3 (tanda 6 de #1603): la clave del alta (un uuid). El mismo alta reintentada con la
+   * misma clave devuelve el empleado del primer intento. La pone `useGuardarEmpleadoMutation`.
+   */
+  clave?: string
 }
 
 /**

@@ -342,7 +342,8 @@ suelta en `sucursales`.
   **La línea que la salvedad borró vuelve con su foto** (VTA-1, #1595): al borrarla,
   `registrar_salvedad` guarda su costo, su lista, su origen, su descuento y su escala en
   `salvedad_linea_foto` (sólo de server: lleva el costo), y `anular_salvedad` la reinserta con
-  eso. Sin foto (las anteriores), el costo de hoy. Un camino nuevo que borre la línea de una
+  eso. Sin foto (las anteriores), el costo de hoy. Vuelve aunque hoy el producto no tenga lista:
+  es la misma línea, no una venta nueva (la marca de la edición, D20; venta-B3). Un camino nuevo que borre la línea de una
   salvedad guarda la foto igual (como `_combo_trasladar` al fusionar las dos líneas de un
   combo), y uno que repunte escalas repunta también la de la foto.
   Anular una salvedad que devuelve el derecho a un regalo se rechaza si **cualquier** salvedad
@@ -594,6 +595,10 @@ suelta en `sucursales`.
   un centavo por renglón de la factura (`gastos.renglones_factura`, de 1 a 99; decisión del dueño).
   `_rubro_es_sueldo` frena «sac» y «vacaciones» como palabra en cualquier parte del nombre, y
   «comisiones» salvo la de un medio de cobro (decisión del dueño).
+  El alta de un gasto y la de un empleado llevan `clave` en el JSON (`altas_por_clave`, la pone el
+  hook con `useRequestIdEstable` por contenido): la misma clave con lo mismo devuelve el del primer
+  intento; sin clave (un PWA de antes), como siempre (reportes-R3). La edición de un empleado
+  conserva lo que el JSON no trae, y un null explícito lo borra (reportes-R2).
 - **Un vale blanco está saldado por naturaleza** (migs 317/318): `tipo_factura = 'VB'` ⇒
   `monto_pagado = total`, `estado_pago = 'pagado'` y **cero** filas en `pagos` (lo fuerza
   `actualizar_estado_pago_pedido` y el CHECK `pedidos_vb_coherente`). No es deuda, no se
@@ -611,7 +616,9 @@ suelta en `sucursales`.
   ni descuentos (sólo bajan el precio). Para el replay valen, en los dos, sólo el precio
   inmediatamente anterior, > 0, vigente al menos 15 minutos y dentro de
   `politicas_comerciales.ventana_precio_anterior_horas`; en la edición, el piso conserva el
-  precio guardado si ningún grupo se achica, y el techo conserva siempre el máximo guardado.
+  precio guardado si ningún grupo se achica ni un producto con mínimo por producto en una
+  escala del grupo baja y queda por debajo de ese mínimo (venta-B1), y el techo conserva siempre
+  el máximo guardado.
   La ventana la edita **sólo el admin**, desde /configuracion
   (`actualizar_ventana_precio_anterior`, mig 368): afloja el piso y el techo del encargado, y
   la puede usar también quien está online (tras una suba, el precio viejo más barato; tras una
