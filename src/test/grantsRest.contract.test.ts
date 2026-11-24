@@ -171,6 +171,9 @@ const nombreTabla = (t: string) => t.trim().replace(/"/g, '').replace(/^public\.
 interface Sentencia {
   tipo: 'GRANT' | 'REVOKE'
   privilegios: string[] // INSERT, UPDATE, DELETE, ALL, SELECT, ...
+  // Sólo en un REVOKE: los privilegios que se revocan por columna (`REVOKE UPDATE (col)`). No
+  // sacan el privilegio de la tabla: el JSON lleva sus columnas aparte (1595-b6, cierres de C6).
+  porColumna?: string[]
   objetos: string[] | 'ALL TABLES' | null // null: no es de tablas (función, secuencia, esquema)
   secuencias: string[] | 'ALL SEQUENCES' | null // null: no es de secuencias
   roles: string[]
@@ -185,8 +188,12 @@ function sentenciasDePermisos(sql: string): Sentencia[] {
   for (const m of limpio.matchAll(re)) {
     const porDefecto = Boolean(m[1])
     const tipo = m[2].toUpperCase() as 'GRANT' | 'REVOKE'
-    const privilegios = partirPorComas(m[3].replace(/^GRANT\s+OPTION\s+FOR\s+/i, ''))
+    const crudos = partirPorComas(m[3].replace(/^GRANT\s+OPTION\s+FOR\s+/i, ''))
+    const privilegios = crudos
       .map((p) => p.replace(/\(.*\)/s, '').trim().toUpperCase().replace(/\s+PRIVILEGES$/, ''))
+    const porColumna = tipo === 'REVOKE'
+      ? crudos.filter((p) => /\(/.test(p)).map((p) => p.replace(/\(.*\)/s, '').trim().toUpperCase())
+      : []
     const destino = m[4].trim()
     let objetos: Sentencia['objetos'] = null
     let secuencias: Sentencia['secuencias'] = null
@@ -205,7 +212,7 @@ function sentenciasDePermisos(sql: string): Sentencia[] {
     }
     const roles = partirPorComas(m[6].replace(/\s+(CASCADE|RESTRICT|WITH\s+GRANT\s+OPTION)\s*$/i, ''))
       .map((r) => r.trim().replace(/"/g, '').toLowerCase())
-    res.push({ tipo, privilegios, objetos, secuencias, roles, porDefecto })
+    res.push({ tipo, privilegios, objetos, secuencias, roles, porDefecto, ...(porColumna.length ? { porColumna } : {}) })
   }
   return res
 }
@@ -247,7 +254,8 @@ function concedidoPorMigraciones(): { concedido: Set<string>; problemas: string[
         continue
       }
       if (s.objetos === null || !s.roles.includes('authenticated')) continue
-      const privs = s.privilegios.includes('ALL') ? PRIVS_ESCRITURA : s.privilegios.filter((p): p is Privilegio => PRIVS_ESCRITURA.includes(p as Privilegio))
+      const privs = (s.privilegios.includes('ALL') ? PRIVS_ESCRITURA : s.privilegios.filter((p): p is Privilegio => PRIVS_ESCRITURA.includes(p as Privilegio)))
+        .filter((p) => !s.porColumna?.includes(p))
       if (privs.length === 0) continue
       if (s.objetos === 'ALL TABLES') {
         if (s.tipo === 'GRANT') {

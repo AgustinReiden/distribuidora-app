@@ -232,20 +232,20 @@ BEGIN
   -- ------------------------------------------------------------------- F4 ---
   UPDATE pedidos SET transportista_id = v_tra, estado = 'asignado' WHERE id = ANY (v_p[11:14]);
   v_t := pg_temp.intenta(v_tra, format(
-    'UPDATE public.pedidos SET estado = ''entregado'', fecha_entrega = %L, updated_at = now() WHERE id = %s',
+    'UPDATE public.pedidos SET estado = ''entregado'', fecha_entrega = %L WHERE id = %s',
     (v_hoy - 2)::text || 'T12:00:00-03:00', v_p[11]));
   IF v_t <> 'PASA' OR pg_temp.dia(v_p[11]) <> format('entregado %s', v_hoy - 2) THEN
     v_fallas := v_fallas || format('F4 · chofer, PATCH con hoy-2: %s (%s)', v_t, pg_temp.dia(v_p[11]));
   END IF;
   v_t := pg_temp.intenta(v_tra, format(
-    'UPDATE public.pedidos SET estado = ''entregado'', fecha_entrega = %L, updated_at = now() WHERE id = %s',
+    'UPDATE public.pedidos SET estado = ''entregado'', fecha_entrega = %L WHERE id = %s',
     (v_hoy - 6)::text || 'T12:00:00-03:00', v_p[12]));
   IF left(v_t, 5) <> '22023' OR pg_temp.dia(v_p[12]) <> 'asignado -' THEN
     v_fallas := v_fallas || format('F4 · chofer, PATCH con hoy-6: %s (%s)', v_t, pg_temp.dia(v_p[12]));
   END IF;
   v_notas := v_notas || format('F4 chofer hoy-6: %s', left(v_t, 160));
   v_t := pg_temp.intenta(v_tra, format(
-    'UPDATE public.pedidos SET estado = ''entregado'', fecha_entrega = %L, updated_at = now() WHERE id = %s',
+    'UPDATE public.pedidos SET estado = ''entregado'', fecha_entrega = %L WHERE id = %s',
     (v_hoy + 1)::text || 'T12:00:00-03:00', v_p[13]));
   IF left(v_t, 5) <> '22023' THEN
     v_fallas := v_fallas || format('F4 · chofer, PATCH con mañana: %s (%s)', v_t, pg_temp.dia(v_p[13]));
