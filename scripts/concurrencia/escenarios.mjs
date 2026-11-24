@@ -381,8 +381,12 @@ function c7() {
   const reordenarXY = w("reordenar [X,Y]", "{{c.enc2}}", "{{c.suc}}",
     [`select public.aplicar_orden_ruta('{{c.tr}}'::uuid, jsonb_build_array(jsonb_build_object('pedido_id', {{c.x}}, 'orden_entrega', 1), jsonb_build_object('pedido_id', {{c.y}}, 'orden_entrega', 2)), null, null, null, '{{c.fecha}}'::date) as r`],
     { jitter_ms: 12 });
+  // Sin `updated_at` en el SET: desde la 540 la versión del pedido la pone el server y la columna no está en el GRANT UPDATE.
+  // Y con la fecha de entrega de hoy (now()), no la de la ruta: desde la 505 (#1597) un transportista entrega con fecha de
+  // hoy hasta 7 días atrás (`_fecha_entrega_fuera_de_rango`), y el día de la ruta de cada ronda baja hasta 4600 días. Ninguna
+  // de las que entregan por acá mira la fecha de entrega: el recorrido se arma con el pedido, no con el día.
   const entregar = (ped, l) => w(l, "{{c.tr}}", "{{c.suc}}",
-    [`update public.pedidos set estado = 'entregado', fecha_entrega = ('{{c.fecha}}' || 'T12:00:00-03:00')::timestamptz, transportista_id = '{{c.tr}}'::uuid, updated_at = now() where id = {{c.${ped}}}::bigint returning id as entregado`],
+    [`update public.pedidos set estado = 'entregado', fecha_entrega = now(), transportista_id = '{{c.tr}}'::uuid where id = {{c.${ped}}}::bigint returning id as entregado`],
     { jitter_ms: 12 });
   const ver = `select (select count(*) from public.pedidos where id in ({{c.x}}, {{c.y}}) and estado = 'entregado') >= 0 as ok,
                       'entregados=' || (select count(*) from public.pedidos where id in ({{c.x}}, {{c.y}}) and estado = 'entregado') as msg`;
@@ -409,9 +413,9 @@ function c7() {
   const quitarX = (extra) => w("quitar X de la ruta", "{{c.enc2}}", "{{c.suc}}", ["select public.quitar_pedido_de_recorridos_activos({{c.x}}::bigint) as r"], extra);
   const retieneRuta = w("retiene la ruta", null, null,
     ["select id as retenido from public.recorridos where id = {{c.recorrido}}::bigint for no key update", dormir(0.25)]);
-  // Tramos de días de la sucursal A (hacia atrás de hoy; `base` + 1 … `base` + rondas), que comparten C7, el C6e de #1418 y la C9
-  // de #1412. Cada uno confirma rendiciones de un chofer (una confirmada no se reabre y cierra la caja de A hasta su día):
-  // C6e 1500–2000 (tr_a1), C9a 2851–3000, C9b 2601–2700, C9c 2251–2400 y C9d 251–400 (tr_a2). Los de C7 quedan fuera de todos:
+  // Tramos de días de la sucursal A (hacia atrás de hoy; `base` + 1 … `base` + rondas), que comparten C7 y el C6e de #1418.
+  // C6e confirma rendiciones de un chofer (una confirmada no se reabre y cierra la caja de A hasta su día): 1500–2000 (tr_a1).
+  // (La C9 de #1412 ya no usa días de A: cada ronda arma su propia sucursal, ver conc.c9_setup.) Los de C7 quedan fuera:
   // C7a–c 1–250, C7d2 421–570, C7e 581–730, C7f 741–890, C7g 1001–1300, C7j 2001–2200, C7k 2401–2600, C7d 2701–2850,
   // C7h 3101–3300, C7i 3401–3600, C7k2 3701–3900, C7j2 4001–4200, C7l 4201–4400, C7j3 4401–4500 y C7l2 4501–4600. Si se suma
   // uno, se elige un hueco: no se solapa con ninguno de esos.
@@ -624,7 +628,7 @@ function c9() {
   const masivoPago = w("entrega y pago masivo [X,Y]", "{{c.adm2}}", SA,
     [`select public.marcar_entrega_y_pago_masivo(array[{{c.x}}, {{c.y}}]::bigint[], '{{c.tr}}'::uuid, 'efectivo', '{{c.fecha}}'::date, null) as r`], { jitter_ms: 12 });
   const suelta = w("entrega suelta de X por REST (encargado)", "{{c.enc}}", SA,
-    [`update public.pedidos set estado = 'entregado', fecha_entrega = ('{{c.fecha}}' || 'T12:00:00-03:00')::timestamptz, transportista_id = '{{c.tr}}'::uuid, updated_at = now() where id = {{c.x}}::bigint returning id as entregado`],
+    [`update public.pedidos set estado = 'entregado', fecha_entrega = ('{{c.fecha}}' || 'T12:00:00-03:00')::timestamptz, transportista_id = '{{c.tr}}'::uuid where id = {{c.x}}::bigint returning id as entregado`],
     { jitter_ms: 12 });
   // Retiene X entre el chequeo de la masiva y su UPDATE: la masiva lo pide después de mirar el
   // control (antes de la migración) y la confirmación no lo necesita.
@@ -1009,8 +1013,9 @@ function t13() {
       "select conc.t13_setup(false) as c", [editar("x", 120), cobrar], cierra(120)),
     forzada("T13c · imputar C a Y contra bajar X cobrada (desafectar recorta antes de aplicar), el cliente retenido",
       "select conc.t13_setup(true) as c", [editar("x", 80), imputar], cierra(80)),
+    // Desde D23 (#1595 b5) la salvedad va sólo sobre un pedido que ya salió: t13_salvedad_setup deja X entregada.
     forzada("T13d · el cobro suelto de Y contra una salvedad de X cobrada, el cliente retenido",
-      "select conc.t13_setup(true) as c", [salvedad, cobrar], cierra(80)),
+      "select conc.t13_salvedad_setup(true) as c", [salvedad, cobrar], cierra(80)),
     {
       nombre: "T13e · imputar C a Y contra subir X, sin forzar (arrancan juntas)", rondas: 100, esperado: deNegocio,
       spec: { modo: "rondas", setup: ["select conc.t13_setup(false) as c"], sample_ms: 3, verify: cierra(120),
@@ -1028,7 +1033,7 @@ function t13() {
     porProducto("T13i · imputar C a Y contra subir X, con Y < X, el producto retenido",
       "select conc.t13_setup(false, 30, true) as c", [editar("x", 120), imputar], cierra(120)),
     porProducto("T13j · el FIFO de 150 contra una salvedad de X, con Y < X, el producto retenido",
-      "select conc.t13_setup(false, 30, true) as c", [salvedad, fifo], cierra(80)),
+      "select conc.t13_salvedad_setup(false, 30, true) as c", [salvedad, fifo], cierra(80)),
     // Pasar a vale blanco (cambiar_tipo_factura_pedido) también cambia el total: lo lleva a costo. T13k, contra el
     // cliente; T13l, Y < X contra el FIFO, con la línea de X retenida.
     forzada("T13k · imputar C a Y contra pasar X a vale blanco, el cliente retenido",
@@ -1310,11 +1315,32 @@ function t6() {
                         from (select stock from public.productos where id = {{c.pc}}) c,
                              (select coalesce(sum(unidades_ajustadas), 0) as u from public.promo_ajustes
                                where promocion_id = {{c.promo}} and producto_id = {{c.pc}}) a`;
-  const guardada = `select (nombre = 'CONC a14 guardada' and unidades_por_bloque = 1) as ok,
-                           'promo=' || nombre || ' ' || unidades_por_bloque as msg from public.promociones where id = {{c.promo}}::bigint`;
-  const conB = `select exists (select 1 from public.promocion_productos where promocion_id = {{c.promo}}::bigint and producto_id = {{c.pb}}) as ok,
-                       'B en la promo' as msg`;
-  const ver14 = (ps) => [ventas("cli", 1), ...ps.map(stock), contenedor, guardada];
+  // D2 (#1592 PRM-2, decisión del dueño del 15/11): el factor de una promo (unidades_por_bloque) no cambia con pedidos sin
+  // entregar que la usan. La venta y el guardado entero (que baja el factor 2 → 1) tienen desde entonces DOS desenlaces
+  // seriales, y los dos son correctos:
+  //   V antes de G: el pedido de la venta ya existe cuando G llega al UPDATE de la promo, así que G se rechaza entero
+  //                 («No se puede cambiar las unidades por bloque…», un P0001 sin escribir nada): la promo queda como estaba.
+  //   G antes de V: la promo queda guardada (no había pedidos que la frenen) y la venta entra contra la promo nueva.
+  // Lo que vigila #1491 es lo mismo que antes: que no haya 40P01 entre los pre-bloqueos de G (productos y contenedores por
+  // id, después la promo) y los de la venta, y que la promo no quede a medias (guardada sin el factor, o con el regalo de
+  // una versión y los productos de la otra). Antes de D2 G ganaba siempre y el verify exigía la promo guardada: con la venta
+  // primero, G se rechazaba en las 100 rondas de T6k, T6l y T6n, y T6m (sin forzar) pasaba sólo 22 de 200: las que ganaba G.
+  const rechazoFactor = (err) => err.code === "P0001" && /No se puede cambiar las unidades por bloque de la promo/.test(err.message);
+  const productosDe = (prods) => `(select coalesce(array_agg(pp.producto_id order by pp.producto_id), '{}') from public.promocion_productos pp where pp.promocion_id = pr.id)
+         = (select array_agg(x order by x) from unnest(array[${prods.map((x) => `{{c.${x}}}`).join(", ")}]::bigint[]) x)`;
+  // Entera guardada (nombre, factor, regalo y productos de G) o entera como estaba (factor 2, regalo S, producto A).
+  const promoGuardada = (regalo, prods) => `(pr.nombre = 'CONC a14 guardada' and pr.unidades_por_bloque = 1 and pr.producto_regalo_id = {{c.${regalo}}} and ${productosDe(prods)})`;
+  const promoIntacta = `(pr.nombre = 'CONC a14' and pr.unidades_por_bloque = 2 and pr.producto_regalo_id = {{c.ps}} and ${productosDe(["pa"])})`;
+  // En los dos desenlaces queda la venta (un pedido vivo de cli): G rechazada es que la venta confirmó antes.
+  const ver14 = (ps, regalo, prods) => [
+    `select (case when ${promoIntacta} then n.n = 1 when ${promoGuardada(regalo, prods)} then n.n = 1 else false end) as ok,
+            'promo=' || pr.nombre || ' factor ' || pr.unidades_por_bloque || ' (' || (case when ${promoIntacta} then 'intacta' when ${promoGuardada(regalo, prods)} then 'guardada' else 'A MEDIAS' end)
+            || '), pedidos vivos de cli=' || n.n as msg
+       from public.promociones pr,
+            (select count(*) as n from public.pedidos where cliente_id = {{c.cli}}::bigint and estado <> 'cancelado') n
+      where pr.id = {{c.promo}}::bigint`,
+    ...ps.map(stock), contenedor];
+  const esperado14 = rechazoFactor;
 
   return [
     variante("T6a · ADV-1: editar Y (de C2, con un crédito K) contra pasar X a C2, P retenido",
@@ -1338,15 +1364,16 @@ function t6() {
     variante("T6j · ADV-3: precios masivos [B, A] con A trabado 9 s: B cambia y A se saltea y se nombra",
       "select conc.t14p_setup() as c", [reteniendoA, { ...masivo, delay_ms: 100, jitter_ms: 0 }], [verPrecios],
       { rondas: 5, extra: { statement_timeout_ms: 8000 } }),
-    variante("T6k · #1491: una venta con Q contra guardar la promo entera (regalo a Q y factor), Q retenido",
+    // Con la venta primero (retenida la fila que las dos piden): G se rechaza por D2, y no hay 40P01.
+    variante("T6k · #1491: una venta con Q contra guardar la promo entera (regalo a Q y factor), Q retenido (G se rechaza: D2)",
       "select conc.a14_setup() as c", [retiene("pq"), primero(ventaQ14), segundo(guardarQ)],
-      [...ver14(["pa", "pq"]), regalo("producto_regalo_id", "pq")]),
-    variante("T6l · #1491: una venta de A con el regalo contra guardar la promo entera (el factor), C retenido",
-      "select conc.a14_setup() as c", [retiene("pc"), primero(ventaA), segundo(guardarFactor)], ver14(["pa"])),
-    variante("T6m · #1491: lo mismo, sin forzar (arrancan juntas)",
-      "select conc.a14_setup() as c", [juntos(ventaA), juntos(guardarFactor)], ver14(["pa"]), { rondas: 200 }),
-    variante("T6n · #1491: una venta con B contra guardar la promo sumándole B, B retenido",
-      "select conc.a14_setup() as c", [retiene("pb"), primero(ventaB14), segundo(guardarB)], [...ver14(["pa", "pb"]), conB]),
+      ver14(["pa", "pq"], "pq", ["pa"]), { esperado: esperado14 }),
+    variante("T6l · #1491: una venta de A con el regalo contra guardar la promo entera (el factor), C retenido (G se rechaza: D2)",
+      "select conc.a14_setup() as c", [retiene("pc"), primero(ventaA), segundo(guardarFactor)], ver14(["pa"], "ps", ["pa"]), { esperado: esperado14 }),
+    variante("T6m · #1491: lo mismo, sin forzar (arrancan juntas: gana la venta y G se rechaza, o gana G y la venta se arma con la promo nueva)",
+      "select conc.a14_setup() as c", [juntos(ventaA), juntos(guardarFactor)], ver14(["pa"], "ps", ["pa"]), { rondas: 200, esperado: esperado14 }),
+    variante("T6n · #1491: una venta con B contra guardar la promo sumándole B, B retenido (G se rechaza: D2)",
+      "select conc.a14_setup() as c", [retiene("pb"), primero(ventaB14), segundo(guardarB)], ver14(["pa", "pb"], "ps", ["pa", "pb"]), { esperado: esperado14 }),
     // #1501 punto 1 (472): la lista de contenedores de la RPC se lee sin lock antes de la promo, y el trigger de sentencia la
     // vuelve a leer después. Casos en conc.t6o_setup. RPC2 (0 ms) le pone a P2 el contenedor nuevo CN y retiene lo que tomó
     // 250 ms antes de confirmar; RPC1 (30 ms) guarda P1, lee la lista sin CN y queda en cola en el primer contenedor; la
@@ -1377,6 +1404,19 @@ function t6() {
         "select (ajuste_producto_id = {{c.pcn}}) as ok, 'contenedor de P2=' || coalesce(ajuste_producto_id::text, 'null') as msg from public.promociones where id = {{c.p2}}::bigint",
       ]),
     ...t6p(),
+    // Al final y no al lado de T6k a T6n: T6o fija sus tiempos (250 y 450 ms) y cada ronda de las `a14_setup` suma promos y
+    // productos a la sucursal A, que el trigger de sentencia de los contenedores recorre. Con estas 300 rondas antes, T6o
+    // pasó de 100/100 a 94/100 y después a 69/100 (la venta le ganaba al guardado, que D2 rechaza). Así corre con lo mismo que
+    // antes de sumarlas.
+    // Con G primero: G toma sus locks antes que la venta, se guarda (no hay pedidos que la frenen) y la venta llega después,
+    // con lo tomado por G a su alrededor. Es la parte del guardado entero que D2 dejó de ejercitar en las de arriba.
+    variante("T6k2 · #1491: guardar la promo entera (regalo a Q y factor) contra una venta con Q, Q retenido (G primero)",
+      "select conc.a14_setup() as c", [retiene("pq"), primero(guardarQ), segundo(ventaQ14)],
+      ver14(["pa", "pq"], "pq", ["pa"]), { esperado: esperado14 }),
+    variante("T6l2 · #1491: guardar la promo entera (el factor) contra una venta de A con el regalo, C retenido (G primero)",
+      "select conc.a14_setup() as c", [retiene("pc"), primero(guardarFactor), segundo(ventaA)], ver14(["pa"], "ps", ["pa"]), { esperado: esperado14 }),
+    variante("T6n2 · #1491: guardar la promo sumándole B contra una venta con B, B retenido (G primero)",
+      "select conc.a14_setup() as c", [retiene("pb"), primero(guardarB), segundo(ventaB14)], ver14(["pa", "pb"], "ps", ["pa", "pb"]), { esperado: esperado14 }),
   ];
 }
 
@@ -1479,8 +1519,9 @@ function t15() {
   return [
     variante("T15a · C1: editar Y (cobrada, de C2) contra pasar X a C2 con excedente, W retenida",
       "select conc.t15_cambio_setup() as c", [retiene("pedidos", "w"), primero(editar("y", 120)), segundo(cambiar)], verC1(120)),
+    // Desde D23 (#1595 b5) la salvedad va sólo sobre un pedido que ya salió: t15_salvedad_setup deja Y entregada.
     variante("T15b · C1: una salvedad de Y contra pasar X a C2 con excedente, W retenida",
-      "select conc.t15_cambio_setup() as c", [retiene("pedidos", "w"), primero(salvedadY), segundo(cambiar)], verC1(80)),
+      "select conc.t15_salvedad_setup() as c", [retiene("pedidos", "w"), primero(salvedadY), segundo(cambiar)], verC1(80)),
     variante("T15c · C1: editar Y contra pasar X a C2 con excedente, sin forzar (arrancan juntas)",
       "select conc.t15_cambio_setup() as c", [juntos(editar("y", 120)), juntos(cambiar)], verC1(120)),
     variante("T15d · C6: editar X contra el DELETE REST de un pago de Y (misma ruta y cliente), la ruta retenida",

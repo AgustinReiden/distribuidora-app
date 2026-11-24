@@ -26,6 +26,7 @@ import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
 import { useQueryClient } from '@tanstack/react-query'
 import { invalidarMora } from '../../hooks/queries/invalidacionesDeuda'
 import { puedeRegistrarPagoCliente, puedeDesactivarCliente, puedeEliminarCliente } from '../../lib/permisos'
+import { preventistaIdsDelAlta } from '../../utils/asignacionClienteAlAlta'
 import type { ClienteDB } from '../../types'
 import type { ClienteSaveData } from '../modals/ModalCliente'
 import { cambiaIdentidadDuplicado, SIN_DUPLICADO_RPC } from '../../utils/duplicadoCliente'
@@ -447,19 +448,12 @@ export default function ClientesContainer(): React.ReactElement {
     // editando un cliente NO debe tocar la tabla N-a-N (RLS lo rechazaria y
     // ademas no vio el selector). La unica excepcion: al crear, el preventista
     // se auto-asigna para que el cliente quede visible solo para el y admins.
-    const willTouchAssignments =
-      isAdmin || (isCreating && isPreventista && !isAdmin && !!user?.id)
-
-    let ids: string[] | undefined
-    if (willTouchAssignments) {
-      const baseIds = data.preventista_ids || []
-      // Reservado: sin asignaciones, y sin la auto-asignacion del que lo crea.
-      ids = reservadoAdmin
-        ? []
-        : isCreating && isPreventista && !isAdmin && user?.id
-          ? Array.from(new Set([...baseIds, user.id]))
-          : baseIds
-    }
+    // La regla es una, la misma del alta rápida del pedido (FRV-2, tanda 6): `preventistaIdsDelAlta`.
+    const ids: string[] | undefined = (isAdmin || isCreating)
+      ? preventistaIdsDelAlta({
+        isAdmin, isPreventista, userId: user?.id, baseIds: data.preventista_ids, reservadoAdmin,
+      })
+      : undefined
 
     // Preventista editando: patch acotado a los campos que puede tocar.
     // CUIT, nombre fantasía, zona, crédito, descuentos y asignaciones quedan
@@ -691,6 +685,7 @@ export default function ClientesContainer(): React.ReactElement {
             onConfirmarFIFO={handleConfirmarPagoFIFO}
             onConfirmarCombinadoFIFO={handleConfirmarPagoCombinadoFIFO}
             permitirAdelantoSueldo
+            isAdmin={isAdmin}
             clienteEsEmpleado={clienteEsEmpleado ?? null}
           />
         </Suspense>

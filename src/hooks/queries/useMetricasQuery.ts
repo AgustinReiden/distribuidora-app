@@ -16,6 +16,12 @@ import {
   ventanaPeriodoDashboard,
   type PedidoMetricaRow,
 } from '../../utils/metricasDashboard'
+import {
+  NOTAS_VENTA_METRICA_SELECT,
+  notasDelVendedor,
+  notasEnVentana,
+  type NotaCreditoVentaMetricaRow,
+} from '../../utils/notasCreditoVentaMetrica'
 import { contarRechazosTotales, type PedidoCanceladoRow } from '../../utils/tasaEntrega'
 import type {
   DashboardMetricasExtended,
@@ -71,6 +77,8 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
   const { periodo, fechaDesde, fechaHasta, usuarioId } = params
 
   const hoyISO = fechaLocalISO()
+  // Primer día de los 7 del gráfico (hoy incluido).
+  const serieDesde = addDiasISO(hoyISO, -6)
   // Ventana [desde, hasta] sobre `pedidos.fecha` (fecha de entrega, editable):
   // filtrar por fecha server-side incluye los pedidos re-fechados (patrón del
   // fix de rutas PR #414) y elimina el viejo hack de +1 día sobre created_at
@@ -160,7 +168,7 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
         .neq('estado', 'cancelado')
         .neq('canal', CANAL_CANJE)
         .or(SIN_VALE_BLANCO)
-        .gte('fecha', addDiasISO(hoyISO, -6))
+        .gte('fecha', serieDesde)
         .lte('fecha', hoyISO)
       if (usuarioId) query = query.eq('usuario_id', usuarioId)
       return query.order('id')
@@ -168,21 +176,48 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
     { etiqueta: 'pedidos del gráfico' },
   )
 
-  const [pedidos, pedidosAnterior, filasSerie, cancelados] = await Promise.all([
+  // -- Notas de crédito de venta vigentes (REP-1, tanda 6): la venta del Dashboard es neta de
+  //    ellas, como la de los reportes. Una sola consulta para las tres ventanas (período,
+  //    período anterior y los 7 días del gráfico): desde la más vieja, sin tope arriba (la
+  //    nota lleva la fecha de su boleta, y una boleta puede estar re-fechada a futuro). Son
+  //    pocas, y se recortan por ventana acá. La RLS las deja ver a admin y encargado; para un
+  //    preventista vuelve vacía (sin error) y sus cifras quedan brutas.
+  const notasDesde = ventana.desde ? [ventana.desde, prev?.desde ?? ventana.desde, serieDesde].sort()[0] : null
+  const notasPromise = traerTodo<NotaCreditoVentaMetricaRow>(
+    () => {
+      let query = supabase
+        .from('notas_credito_venta')
+        .select(NOTAS_VENTA_METRICA_SELECT)
+        .eq('anulada', false)
+      if (notasDesde) query = query.gte('fecha', notasDesde)
+      // El tipo inferido del embed es un arreglo; PostgREST devuelve la boleta como objeto (FK a uno).
+      return query.order('id') as never
+    },
+    { etiqueta: 'notas de crédito del dashboard' },
+  )
+
+  const [pedidos, pedidosAnterior, filasSerie, cancelados, notas] = await Promise.all([
     principalPromise,
     anteriorPromise,
     seriePromise,
     canceladosPromise,
+    notasPromise,
   ])
 
-  const resumenAnterior = pedidosAnterior ? resumenPeriodoAnterior(pedidosAnterior) : null
+  // El filtro por vendedor del Dashboard (el preventista ve lo suyo) es el de la boleta de la nota.
+  const notasVisibles = usuarioId ? notasDelVendedor(notas, usuarioId) : notas
+  const notasPeriodo = notasEnVentana(notasVisibles, ventana.desde, ventana.hasta)
+  const notasAnterior = prev ? notasEnVentana(notasVisibles, prev.desde, prev.hasta) : []
+  const notasSerie = notasEnVentana(notasVisibles, serieDesde, hoyISO)
+
+  const resumenAnterior = pedidosAnterior ? resumenPeriodoAnterior(pedidosAnterior, notasAnterior) : null
 
   return {
-    ...agregarMetricasPeriodo(pedidos),
+    ...agregarMetricasPeriodo(pedidos, notasPeriodo),
     pedidosRechazados: contarRechazosTotales(cancelados),
     ventasPeriodoAnterior: resumenAnterior ? resumenAnterior.ventas : null,
     pedidosPeriodoAnterior: resumenAnterior ? resumenAnterior.pedidos : null,
-    ventasPorDia: serieVentas7Dias(filasSerie, hoyISO),
+    ventasPorDia: serieVentas7Dias(filasSerie, hoyISO, notasSerie),
   }
 }
 

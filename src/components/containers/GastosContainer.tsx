@@ -23,6 +23,7 @@ import { usePropsModalGasto } from '../../hooks/usePropsModalGasto'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useResetOnSucursalChange } from '../../hooks/useResetOnSucursalChange'
+import { useDiaArgentino } from '../../hooks/useDiaArgentino'
 import { lazyWithReload } from '../../utils/lazyWithReload'
 import { getErrorMessage } from '../../utils/errorHandling'
 import { exportarGastosDelMes } from '../../utils/exportGastos'
@@ -43,15 +44,16 @@ function LoadingState() {
   )
 }
 
-/** El mes de hoy en Tucumán, no en UTC: a la noche el día UTC ya es el de mañana. */
-const mesActual = (): string =>
-  mesDe(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Tucuman' }))
-
 export default function GastosContainer(): React.ReactElement {
   const { isAdmin, user } = useAuthData()
   const notify = useNotification()
 
-  const [mes, setMes] = useState<string>(mesActual)
+  // gestion-B13: el mes de hoy sigue al reloj (cruza la medianoche del 1.º sin recargar). Sólo
+  // queda fijo el mes que el usuario eligió a mano, mientras no sea el de hoy.
+  const mesDeHoy = mesDe(useDiaArgentino())
+  const [mesElegido, setMesElegido] = useState<string | null>(null)
+  const mes = mesElegido ?? mesDeHoy
+  const setMes = useCallback((m: string) => setMesElegido(m === mesDeHoy ? null : m), [mesDeHoy])
   const [modalGastoAbierto, setModalGastoAbierto] = useState(false)
   const [gastoEditando, setGastoEditando] = useState<Gasto | null>(null)
   const [gastoAnulando, setGastoAnulando] = useState<Gasto | null>(null)

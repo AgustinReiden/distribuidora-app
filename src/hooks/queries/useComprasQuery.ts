@@ -998,6 +998,8 @@ async function actualizarCompraItems(
   warningCostoPromedio: WarningCostoPromedio[]
   /** La reposición que se fue con una línea y no tiene otra compra que la fije (mig 407). */
   warningCostoCompra: WarningCostoCompra[]
+  /** El total que llegó no es lo que suma la cabecera guardada (como el alta; CMP-b1, tanda 6 de #1603). */
+  warningDescuadre: string | null
   warningIiDeclarado: string | null
   /** Lo que el server tuvo que recortar de los vencimientos (no entraban en el stock). */
   warningLotes: string | null
@@ -1018,6 +1020,7 @@ async function actualizarCompraItems(
     error?: string
     warning_costo_promedio?: WarningCostoPromedio[] | null
     warnings?: WarningCostoCompra[] | null
+    warning_descuadre?: string | null
     warning_ii_declarado?: string | null
     warning_clamp?: RecorteDeLotes[] | null
   }
@@ -1026,10 +1029,10 @@ async function actualizarCompraItems(
   if (!result.success) {
     throw new Error(result.error || 'Error al actualizar compra')
   }
-  // `actualizar_compra_items` NO devuelve `warning_descuadre`: no compara el
-  // total contra el informado. En una FC lo recibe ya hecho; en una ZZ lo
-  // calcula el server (#1603). Devuelve el aviso del II declarado y, de los
-  // vencimientos que sincronizó, lo que tuvo que recortar.
+  // Los avisos blandos de `actualizar_compra_items`: el descuadre del total contra
+  // lo que suma la cabecera guardada (como el alta, desde CMP-b1 de la tanda 6 de
+  // #1603; un server de antes no lo manda y queda en null), el del II declarado y,
+  // de los vencimientos que sincronizó, lo que tuvo que recortar.
   const warningLotes = avisoDeRecorte(result.warning_clamp)
   const warningMedidas = await guardarMedidasDeFicha(input.medidasFicha)
 
@@ -1037,6 +1040,7 @@ async function actualizarCompraItems(
     compraId: result.compra_id,
     warningCostoPromedio: result.warning_costo_promedio ?? [],
     warningCostoCompra: result.warnings ?? [],
+    warningDescuadre: result.warning_descuadre ?? null,
     warningIiDeclarado: result.warning_ii_declarado ?? null,
     warningLotes,
     warningConceptos: conceptos.warning,

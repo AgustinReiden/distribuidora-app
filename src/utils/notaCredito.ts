@@ -175,14 +175,35 @@ export interface CompraParaIINC {
  * cada renglón), y devolver todo devuelve la cabecera exacta. Si ninguna línea
  * tiene tasa pero la cabecera tiene II (compras viejas), reparte por neto.
  *
+ * Con tope en lo que le queda del II a la compra: su cabecera menos lo que ya
+ * acreditaron sus devoluciones vigentes, con piso 0 (CMP-b4, tanda 6 de #1603).
+ * Cada nota redondea por su cuenta: II 200 sobre 3 u. y tres notas de 1 daban
+ * 66,67 × 3 = 200,01; la tercera acredita 66,66. Los ajustes no cuentan (su II
+ * lo declara quien los carga), y una nota anulada tampoco.
+ *
  * @param devueltoPorProducto - `producto_id` → unidades devueltas.
+ * @param notas - las notas de la compra (con `tipo`, `impuestos_internos` y
+ *   `anulada`); sin ellas no hay tope, como antes.
  */
 export function calcularIINotaCredito(
   compra: CompraParaIINC,
   devueltoPorProducto: Record<string, number>,
+  notas: ReadonlyArray<{ tipo?: string | null; impuestos_internos?: unknown; anulada?: boolean | null }> = [],
 ): number {
   const cabecera = num(compra.impuestos_internos);
   if (cabecera <= 0) return 0;
+  const queda = Math.max(0, redondear(cabecera - notasVigentes(notas)
+    .filter(n => n.tipo === 'devolucion')
+    .reduce((s, n) => s + num(n.impuestos_internos), 0)));
+  return Math.min(iiProporcional(compra, cabecera, devueltoPorProducto), queda);
+}
+
+/** El II proporcional de lo devuelto, sin el tope (la cuenta de la mig 280). */
+function iiProporcional(
+  compra: CompraParaIINC,
+  cabecera: number,
+  devueltoPorProducto: Record<string, number>,
+): number {
 
   const porProducto = new Map<string, { comprado: number; teorico: number; neto: number }>();
   for (const it of compra.items) {

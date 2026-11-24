@@ -6,7 +6,7 @@
  */
 import React, { useState } from 'react'
 import { Database, Download, Loader2, CheckCircle2, AlertCircle, FileSpreadsheet, Info } from 'lucide-react'
-import { fechaLocalISO } from '../../utils/formatters'
+import { rangoPresetAnalytics, type PresetAnalyticsId } from '../../utils/rangoPresetAnalytics'
 import { Button } from '../ui/Button'
 import { PeriodPicker } from '../ui/PeriodPicker'
 
@@ -17,29 +17,9 @@ export interface VistaAnalyticsProps {
   exito: boolean
 }
 
-type PresetId = 'ultimo_mes' | 'ultimos_3_meses' | 'este_ano' | 'personalizado'
+type PresetId = PresetAnalyticsId
 
-function getPresetDates(preset: PresetId): { desde: string; hasta: string } {
-  const now = new Date()
-  const hasta = fechaLocalISO(now)
-  let desde: Date
-
-  switch (preset) {
-    case 'ultimo_mes':
-      desde = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate())
-      break
-    case 'ultimos_3_meses':
-      desde = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate())
-      break
-    case 'este_ano':
-      desde = new Date(now.getFullYear(), 0, 1)
-      break
-    default:
-      desde = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate())
-  }
-
-  return { desde: fechaLocalISO(desde), hasta }
-}
+const getPresetDates = rangoPresetAnalytics
 
 const datasets = [
   {

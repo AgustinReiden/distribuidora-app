@@ -46,6 +46,8 @@ import { useMetricasQuery } from './useMetricasQuery'
 
 /** Una consulta observada: qué columnas pidió, cómo ordenó, qué rangos trajo. */
 interface Consulta {
+  /** La tabla de la consulta (`from(tabla)`). */
+  tabla: string
   select: string
   orders: string[]
   /** Filtros `.or()` que llegaron (los de "sin vale blanco"). */
@@ -67,10 +69,10 @@ interface Consulta {
  */
 let consultas = new Map<string, Consulta>()
 
-function registrar(select: string): Consulta {
+function registrar(select: string, tabla: string): Consulta {
   const yaVista = consultas.get(select)
   if (yaVista) return yaVista
-  const nueva: Consulta = { select, orders: [], ors: [], neqs: [], eqs: [], rangos: [], awaitDirecto: false }
+  const nueva: Consulta = { tabla, select, orders: [], ors: [], neqs: [], eqs: [], rangos: [], awaitDirecto: false }
   consultas.set(select, nueva)
   return nueva
 }
@@ -84,16 +86,16 @@ function registrar(select: string): Consulta {
  * una sola pagina, que es el caso que importa. El `.then` esta para detectar el
  * caso viejo —una consulta que se await-ea sin paginar—.
  */
-function armarBuilder() {
+function armarBuilder(tabla: string) {
   // Se registra recién en `.select()`: registrar antes dejaría una consulta
   // fantasma, sin rangos ni orders, que hace fallar a las aserciones "las tres".
-  let consulta: Consulta = { select: '(sin select)', orders: [], ors: [], neqs: [], eqs: [], rangos: [], awaitDirecto: false }
+  let consulta: Consulta = { tabla, select: '(sin select)', orders: [], ors: [], neqs: [], eqs: [], rangos: [], awaitDirecto: false }
 
   const fila = { id: 1, total: 100, estado: 'entregado', fecha: '2026-09-01', items: [] }
   const builder: Record<string, unknown> = {}
   const encadenable = () => builder
 
-  builder.select = (cols: string) => { consulta = registrar(cols); return builder }
+  builder.select = (cols: string) => { consulta = registrar(cols, tabla); return builder }
   builder.order = (col: string) => {
     // Los `order` se anotan una sola vez: se repiten en cada pagina.
     if (consulta.rangos.length === 0 && !consulta.orders.includes(col)) consulta.orders.push(col)
@@ -139,16 +141,24 @@ function nuevoQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
-/** Corre el hook con período "mes", que es el que dispara el período anterior. */
-async function correrDashboard(): Promise<Consulta[]> {
+/** Corre el hook con período "mes", que es el que dispara el período anterior. Todas las consultas. */
+async function correrDashboardTodo(): Promise<Consulta[]> {
   consultas = new Map()
-  from.mockImplementation(() => armarBuilder())
+  from.mockImplementation((tabla: string) => armarBuilder(tabla))
   const qc = nuevoQueryClient()
   const { result } = renderHook(() => useMetricasQuery('mes'), {
     wrapper: makeWrapper(qc),
   })
   await waitFor(() => expect(result.current.isSuccess).toBe(true))
   return [...consultas.values()]
+}
+
+/**
+ * Las consultas de `pedidos` del dashboard. Las notas de crédito de venta (REP-1, tanda 6) son
+ * una quinta consulta, de otra tabla: sus reglas se prueban aparte, más abajo.
+ */
+async function correrDashboard(): Promise<Consulta[]> {
+  return (await correrDashboardTodo()).filter(c => c.tabla === 'pedidos')
 }
 
 const SELECT_CANCELADOS = 'estado, canal, motivo_cancelacion_tipo'
@@ -251,6 +261,25 @@ describe('useMetricasQuery — truncado silencioso', () => {
       const consultas = await correrDashboard()
       const principal = consultas.find(c => c.select.includes('items:pedido_items'))
       expect(principal?.orders).toEqual(['created_at', 'id'])
+    })
+  })
+
+  describe('la venta es neta de notas de crédito de venta (REP-1, tanda 6)', () => {
+    const SELECT_NOTAS = 'notas_credito_venta'
+
+    it('trae las notas vigentes con su boleta, paginadas y con orden estable', async () => {
+      const todas = await correrDashboardTodo()
+      const notas = todas.filter(c => c.tabla === SELECT_NOTAS)
+      expect(notas).toHaveLength(1)
+      expect(notas[0].eqs).toContain('anulada:false')
+      expect(notas[0].select).toContain('pedido:pedidos!notas_credito_venta_pedido_id_fkey(')
+      expect(notas[0].rangos.length).toBeGreaterThan(0)
+      expect(notas[0].orders[notas[0].orders.length - 1]).toBe('id')
+      expect(notas[0].awaitDirecto).toBe(false)
+    })
+
+    it('las consultas de pedidos siguen siendo las cuatro de siempre', async () => {
+      expect(await correrDashboard()).toHaveLength(4)
     })
   })
 })

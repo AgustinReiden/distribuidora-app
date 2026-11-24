@@ -97,7 +97,7 @@ export default function RutaActivaTransportista({
   onEntregarSinCobrar,
   onVolver,
 }: RutaActivaTransportistaProps): React.ReactElement {
-  const { isOnline } = useAuthData();
+  const { isOnline, isAdmin } = useAuthData();
   const deposito = useDepositoCoords();
   // Guía giro-a-giro in-app: convive con el mapa y el sheet (no es overlay).
   const [guiando, setGuiando] = useState(false);
@@ -593,6 +593,8 @@ export default function RutaActivaTransportista({
           onConfirmar={entrega.confirmarPago}
           onConfirmarDividido={onRegistrarPagoDividido ? entrega.confirmarPagoDividido : undefined}
           onEntregarSinCobrar={onEntregarSinCobrar ? entrega.entregarSinCobrar : undefined}
+          // cobros-B3: sólo un admin elige otra fecha que hoy en el cobro.
+          isAdmin={isAdmin}
         />
       )}
     </div>

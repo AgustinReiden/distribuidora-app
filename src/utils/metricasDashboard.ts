@@ -15,6 +15,7 @@ import type {
 } from '../types'
 import { esPedidoDeBaja } from './pedidoDeBaja'
 import { ventaDePedido } from './montoMinimo'
+import { montoDeNota, notasQueRestan, totalNotasQueRestan, type NotaCreditoVentaMetricaRow } from './notasCreditoVentaMetrica'
 
 export interface VentanaPeriodo {
   desde: string | null
@@ -127,8 +128,15 @@ const ventaDe = (p: { total: number | null; cargo_envio?: number | null }): numb
  * ni pedidosPeriodo/Entregados/EnCurso, ni ventas, ni los tops de clientes y
  * productos (mig 241, decisión del dueño en #1059: "sin canjes en todo").
  * Eso incluye las unidades del canje en el top de productos.
+ *
+ * La venta es NETA de notas de crédito de venta (REP-1, tanda 6): `notas` son las del período
+ * (y del vendedor, si el Dashboard filtra por uno); cada una le resta su plata a `ventasPeriodo`
+ * y al cliente de la nota. No resta pedidos ni clientes. Sin `notas`, da lo de siempre.
  */
-export function agregarMetricasPeriodo(pedidos: PedidoMetricaRow[]): MetricasPeriodo {
+export function agregarMetricasPeriodo(
+  pedidos: PedidoMetricaRow[],
+  notas: readonly NotaCreditoVentaMetricaRow[] = [],
+): MetricasPeriodo {
   // La query ya excluye los cancelados y los canjes
   // server-side; los filtros quedan como defensa.
   const activos = pedidos.filter(p => !esPedidoDeBaja(p.estado) && !esCanje(p))
@@ -186,8 +194,15 @@ export function agregarMetricasPeriodo(pedidos: PedidoMetricaRow[]): MetricasPer
     clientesActivos[clienteId].pedidos += 1
   }
 
+  // Las notas se restan antes de ordenar: el ranking de clientes sale de lo neto.
+  const restan = notasQueRestan(notas)
+  for (const n of restan) {
+    const cliente = clientesActivos[String(n.cliente_id)]
+    if (cliente) cliente.total -= montoDeNota(n)
+  }
+
   return {
-    ventasPeriodo,
+    ventasPeriodo: ventasPeriodo - totalNotasQueRestan(restan),
     ventasEnCurso,
     pedidosPeriodo: activos.length,
     pedidosEntregados,
@@ -207,14 +222,16 @@ export function agregarMetricasPeriodo(pedidos: PedidoMetricaRow[]): MetricasPer
  * ventas = suma de entregados, pedidos = cantidad no cancelada. Sin canjes
  * (mig 241, #1059), igual que el período actual: la comparación tiene que ser
  * entre universos iguales. La query ya excluye cancelados; no se refiltran acá
- * porque `estado` sólo hace falta para separar los entregados.
+ * porque `estado` sólo hace falta para separar los entregados. Neto de las notas de crédito
+ * de venta del período anterior, como el actual (REP-1): la comparación es entre universos iguales.
  */
 export function resumenPeriodoAnterior(
   rows: Array<{ total: number | null; cargo_envio?: number | null; estado: string; canal?: string | null }>,
+  notas: readonly NotaCreditoVentaMetricaRow[] = [],
 ): { ventas: number; pedidos: number } {
   const ventas = rows.filter(p => !esCanje(p))
   return {
-    ventas: ventas.filter(p => p.estado === 'entregado').reduce((s, p) => s + ventaDe(p), 0),
+    ventas: ventas.filter(p => p.estado === 'entregado').reduce((s, p) => s + ventaDe(p), 0) - totalNotasQueRestan(notas),
     pedidos: ventas.length,
   }
 }
@@ -223,10 +240,12 @@ export function resumenPeriodoAnterior(
  * Serie fija de los últimos 7 días calendario terminando en hoyISO, con los
  * días sin ventas en 0. Independiente del período elegido en el filtro.
  * Los canjes (canal 'cambio') no cuentan como pedidos del día (mig 241, #1059).
+ * Cada día resta las notas de crédito de venta imputadas a él (REP-1): sólo plata, no pedidos.
  */
 export function serieVentas7Dias(
   rows: Array<{ fecha?: string | null; total: number | null; cargo_envio?: number | null; canal?: string | null }>,
   hoyISO: string,
+  notas: readonly NotaCreditoVentaMetricaRow[] = [],
 ): VentaPorDia[] {
   const porFecha = new Map<string, { ventas: number; pedidos: number }>()
   for (const r of rows) {
@@ -235,6 +254,12 @@ export function serieVentas7Dias(
     acc.ventas += ventaDe(r)
     acc.pedidos += 1
     porFecha.set(r.fecha, acc)
+  }
+  for (const n of notasQueRestan(notas)) {
+    if (!n.fecha) continue
+    const acc = porFecha.get(n.fecha) ?? { ventas: 0, pedidos: 0 }
+    acc.ventas -= montoDeNota(n)
+    porFecha.set(n.fecha, acc)
   }
 
   const serie: VentaPorDia[] = []
