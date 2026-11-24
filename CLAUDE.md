@@ -606,8 +606,9 @@ suelta en `sucursales`.
   ni descuentos (sólo bajan el precio). Para el replay valen, en los dos, sólo el precio
   inmediatamente anterior, > 0, vigente al menos 15 minutos y dentro de
   `politicas_comerciales.ventana_precio_anterior_horas`; en la edición, el piso conserva el
-  precio guardado si ningún grupo se achica ni baja un producto con mínimo por producto en una
-  escala del grupo (venta-B1), y el techo conserva siempre el máximo guardado.
+  precio guardado si ningún grupo se achica ni un producto con mínimo por producto en una
+  escala del grupo baja y queda por debajo de ese mínimo (venta-B1), y el techo conserva siempre
+  el máximo guardado.
   La ventana la edita **sólo el admin**, desde /configuracion
   (`actualizar_ventana_precio_anterior`, mig 368): afloja el piso y el techo del encargado, y
   la puede usar también quien está online (tras una suba, el precio viejo más barato; tras una

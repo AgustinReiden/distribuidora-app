@@ -13,8 +13,9 @@
 --     monótonas»). Con un mínimo por producto (grupo_precio_escala_minimos)
 --     no lo son: A×10 + B×10 a $80 (escala de 20 u., 2 distintos y 10 de cada
 --     uno) se editaba a A×19 + B×1 a $80, que en un alta se rechaza. Ahora
---     tampoco se conserva si baja la cantidad de un producto que tiene mínimo
---     en alguna escala del grupo. precio_fuera_de_politica va por ancla, sin
+--     tampoco se conserva si un producto que tiene mínimo en alguna escala del
+--     grupo baja y queda por debajo de ese mínimo (B 13 → 11 con mínimo 10 lo
+--     sigue cumpliendo y conserva). precio_fuera_de_politica va por ancla, sin
 --     md5 (la tarjeta B puede tocarla en otro tramo, promos-B4).
 -- 2 · venta-B3: anular una salvedad que borró la línea entera de un producto
 --     que hoy no tiene precio de lista fallaba en validar_precio_item_pedido
@@ -161,19 +162,24 @@ $a$              AND (nv.total_nuevo < gv.total_guardado OR nv.distintos_nuevo <
 $a$              AND (nv.total_nuevo < gv.total_guardado OR nv.distintos_nuevo < gv.distintos_guardado
                    -- venta-B1 (tanda 6 de #1603): con un mínimo por producto la regla no es
                    -- monótona (A×10 + B×10 → A×19 + B×1 no achica el total ni los distintos, y
-                   -- B ya no cumple su mínimo). Tampoco se conserva si baja la cantidad de un
-                   -- producto que tiene mínimo en alguna escala del grupo, esté activa o no (la
-                   -- que justificó el precio guardado puede ser una que hoy no aplica).
+                   -- B ya no cumple su mínimo). Tampoco se conserva si un producto que tiene
+                   -- mínimo en alguna escala del grupo, esté activa o no (la que justificó el
+                   -- precio guardado puede ser una que hoy no aplica), baja y queda por debajo
+                   -- de ese mínimo. Uno que baja y lo sigue cumpliendo (B 13 → 11 con mínimo 10)
+                   -- conserva el precio.
                    OR EXISTS (
                      SELECT 1
                        FROM grupo_precio_escalas es
                        JOIN grupo_precio_escala_minimos m ON m.escala_id = es.id
+                      CROSS JOIN LATERAL (
+                        SELECT COALESCE(SUM(COALESCE(NULLIF(e->>'cantidad', '')::numeric, 0)), 0) AS cantidad
+                          FROM jsonb_array_elements(v_items_escala) e
+                         WHERE NOT COALESCE((e->>'es_bonificacion')::boolean, false)
+                           AND NULLIF(e->>'producto_id', '')::bigint = m.producto_id) mn
                       WHERE es.grupo_precio_id = g.id AND es.sucursal_id = p_sucursal
                         AND m.cantidad_minima_por_item > 0
-                        AND (SELECT COALESCE(SUM(COALESCE(NULLIF(e->>'cantidad', '')::numeric, 0)), 0)
-                               FROM jsonb_array_elements(v_items_escala) e
-                              WHERE NOT COALESCE((e->>'es_bonificacion')::boolean, false)
-                                AND NULLIF(e->>'producto_id', '')::bigint = m.producto_id)
+                        AND mn.cantidad < m.cantidad_minima_por_item
+                        AND mn.cantidad
                           < (SELECT COALESCE(SUM(pi.cantidad), 0)
                                FROM pedido_items pi
                               WHERE pi.pedido_id = p_pedido_id AND pi.sucursal_id = p_sucursal

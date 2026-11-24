@@ -6,12 +6,17 @@
 -- G4; después, dar 'ENSAYO OK'. Corre en una base local con la semilla mínima (un admin activo de
 -- las dos sucursales) o en una copia de prod. Usa el día argentino (_tablero_hoy()).
 --
--- venta-B1 · la edición no conserva el precio de escala si un producto con mínimo por producto baja.
+-- venta-B1 · la edición no conserva el precio de escala si un producto con mínimo por producto baja
+--   y queda por debajo de ese mínimo.
 --   V1 · escala de 20 u. con 2 distintos y 10 de cada uno, a $80 (lista $100). El preventista da de
 --        alta A×10 + B×10 a $80 (entra). Editar a A×19 + B×1 a $80 no entra («por debajo»: el total
 --        y los distintos no se achican, pero B dejó de cumplir su mínimo); a A×11 + B×10 a $80 entra.
 --        Con la escala desactivada, editar a A×12 + B×10 a $80 sigue entrando (el precio guardado se
 --        conserva: nadie bajó).
+--   E3 (control de la lente) · escala de 20 u. con B ≥ 10, a $80; alta A×10 + B×13; la escala pasa a
+--        $90; editar a A×12 + B×11 a $80 ENTRA (B baja pero sigue cumpliendo su mínimo).
+--   E8 (control de la lente) · el mínimo (F ≥ 5) está sólo en una escala apagada; la activa (20 u.,
+--        sin mínimo) pasa de $80 a $90; alta E×10 + F×10; editar a E×11 + F×9 a $80 ENTRA.
 -- venta-B3 · anular una salvedad que borró la línea entera de un producto que hoy no tiene lista.
 --   V3 · A×4 + B×1 entregado; salvedad de A×4 (borra la línea); A queda con lista 0; anular la
 --        salvedad entra y A vuelve ×4 a su precio. Después, la marca de la edición queda vacía.
@@ -196,6 +201,39 @@ BEGIN
   v_j := pg_temp.edit(v_pre, v_ped, jsonb_build_array(pg_temp.it(v_a, 12, 80), pg_temp.it(v_b, 10, 80)));
   v_fallas := v_fallas || pg_temp.chk(pg_temp.ok(v_j),
                                       'V1 · con la escala apagada, A×12 + B×10 a $80 conserva el precio guardado: ' || v_j::text);
+
+  -- E3 (lente): B baja de 13 a 11 y sigue cumpliendo su mínimo de 10: conserva los $80.
+  v_a := pg_temp.prod(100, 1000);
+  v_b := pg_temp.prod(100, 1000);
+  INSERT INTO grupos_precio (nombre, sucursal_id, activo) VALUES ('ZZ t6d grupo E3', 1, true) RETURNING id INTO v_g;
+  INSERT INTO grupo_precio_productos (grupo_precio_id, producto_id, sucursal_id) VALUES (v_g, v_a, 1), (v_g, v_b, 1);
+  INSERT INTO grupo_precio_escalas (grupo_precio_id, cantidad_minima, precio_unitario, activo, sucursal_id, min_productos_distintos)
+  VALUES (v_g, 20, 80, true, 1, 2) RETURNING id INTO v_esc;
+  INSERT INTO grupo_precio_escala_minimos (escala_id, producto_id, cantidad_minima_por_item, sucursal_id)
+  VALUES (v_esc, v_b, 10, 1);
+  v_ped := pg_temp.alta(v_pre, v_cli, jsonb_build_array(pg_temp.it(v_a, 10, 80), pg_temp.it(v_b, 13, 80)));
+  -- La escala sube a $90: sólo la conservación deja los $80.
+  UPDATE grupo_precio_escalas SET precio_unitario = 90 WHERE id = v_esc;
+  v_j := pg_temp.edit(v_pre, v_ped, jsonb_build_array(pg_temp.it(v_a, 12, 80), pg_temp.it(v_b, 11, 80)));
+  v_fallas := v_fallas || pg_temp.chk(pg_temp.ok(v_j),
+                                      'V1/E3 · B 13 → 11 sigue cumpliendo su mínimo: A×12 + B×11 a $80 tenía que entrar: ' || v_j::text);
+
+  -- E8 (lente): el mínimo (F ≥ 5) está sólo en una escala apagada; F baja de 10 a 9 y lo sigue cumpliendo.
+  v_a := pg_temp.prod(100, 1000);
+  v_b := pg_temp.prod(100, 1000);
+  INSERT INTO grupos_precio (nombre, sucursal_id, activo) VALUES ('ZZ t6d grupo E8', 1, true) RETURNING id INTO v_g;
+  INSERT INTO grupo_precio_productos (grupo_precio_id, producto_id, sucursal_id) VALUES (v_g, v_a, 1), (v_g, v_b, 1);
+  INSERT INTO grupo_precio_escalas (grupo_precio_id, cantidad_minima, precio_unitario, activo, sucursal_id, min_productos_distintos)
+  VALUES (v_g, 50, 70, false, 1, 1) RETURNING id INTO v_esc;
+  INSERT INTO grupo_precio_escala_minimos (escala_id, producto_id, cantidad_minima_por_item, sucursal_id)
+  VALUES (v_esc, v_b, 5, 1);
+  INSERT INTO grupo_precio_escalas (grupo_precio_id, cantidad_minima, precio_unitario, activo, sucursal_id, min_productos_distintos)
+  VALUES (v_g, 20, 80, true, 1, 1) RETURNING id INTO v_esc;
+  v_ped := pg_temp.alta(v_pre, v_cli, jsonb_build_array(pg_temp.it(v_a, 10, 80), pg_temp.it(v_b, 10, 80)));
+  UPDATE grupo_precio_escalas SET precio_unitario = 90 WHERE id = v_esc;
+  v_j := pg_temp.edit(v_pre, v_ped, jsonb_build_array(pg_temp.it(v_a, 11, 80), pg_temp.it(v_b, 9, 80)));
+  v_fallas := v_fallas || pg_temp.chk(pg_temp.ok(v_j),
+                                      'V1/E8 · mínimo sólo en una escala apagada y F 10 → 9 lo sigue cumpliendo: tenía que entrar: ' || v_j::text);
 
   -- ======================================================= V3 · venta-B3 ===
   v_a := pg_temp.prod(100, 1000);
