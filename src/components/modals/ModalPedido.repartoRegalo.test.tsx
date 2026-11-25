@@ -79,6 +79,7 @@ const { cupoMock } = vi.hoisted(() => ({
 
 vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
   usePromoCuposQuery: () => ({ data: cupoMock.cupos }),
+  usePromoAcumuladoresMapQuery: () => ({ data: new Map() }),
   usePromoMapQuery: (fecha?: string) => usePromoMapQueryMock(fecha),
 }))
 vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({
@@ -98,7 +99,7 @@ import type { ClienteDB, ProductoDB } from '../../types'
 const PRODUCTOS: ProductoDB[] = [
   { id: '1', nombre: 'Manaos Naranja 3L', precio: 1000, stock: 200, categoria: 'Bebidas', categoria_id: 'cat-beb', subcategoria_id: 'sub-3l' },
   { id: '2', nombre: 'Manaos Manzana 3L', precio: 1000, stock: 200, categoria: 'Bebidas', categoria_id: 'cat-beb', subcategoria_id: 'sub-3l' },
-  { id: '3', nombre: 'Manaos Pomelo 3L', precio: 1000, stock: 200, categoria: 'Bebidas', categoria_id: 'cat-beb', subcategoria_id: 'sub-3l' },
+  { id: '3', nombre: 'Manaos Pomelo 3L', precio: 1000, stock: 200, categoria: 'Bebidas', categoria_id: 'cat-beb', subcategoria_id: 'sub-3l', unidades_por_bulto: 6 },
   // Misma categoría y subcategoría pero desactivado: no se puede regalar.
   { id: '4', nombre: 'Manaos Uva 3L', precio: 1000, stock: 200, categoria: 'Bebidas', categoria_id: 'cat-beb', subcategoria_id: 'sub-3l', activo: false },
   // Misma categoría y subcategoría, fuera de `productoIds` de la promo: la regla
@@ -380,5 +381,34 @@ describe('ModalPedido — fecha con la que se piden las promos (#1152)', () => {
   it('con la fecha de hoy no avisa nada de promos', () => {
     montar(false)
     expect(screen.queryByText(/No se pudieron cargar las promociones/)).not.toBeInTheDocument()
+  })
+})
+
+describe('ModalPedido — promos-B1 (tanda 6 bis de #1603): el sabor de regalo sin su bulto', () => {
+  // La misma promo, de fracción: el regalo (Naranja) es su propio contenedor, 6 por bloque.
+  const fraccion: PromoMap = new Map([...promoMap].map(([id, promos]) => [id, promos.map(p => ({
+    ...p, regaloMueveStock: false, unidadesPorBloque: 6, ajusteProductoId: '1',
+  }))]))
+  beforeEach(() => {
+    vi.clearAllMocks()
+    usePromoMapQueryMock.mockImplementation(() => ({ data: fraccion, isLoading: false }))
+  })
+
+  it('elegir un sabor sin «unidades por bulto» lo dice con el texto del server y no deja confirmar', () => {
+    const { onGuardarSpy } = montar()
+    expect(botonConfirmar()).toBeEnabled()
+    elegir(screen.getByRole('combobox', { name: 'Cambiar el producto del regalo' }), 'Manaos Manzana 3L')
+    const texto = 'Para regalar Manaos Manzana 3L hay que cargar en su ficha cuántas unidades sueltas trae cada unidad de stock (unidades por bulto).'
+    expect(screen.getAllByText(texto).length).toBeGreaterThan(0)
+    expect(botonConfirmar()).toBeDisabled()
+    fireEvent.click(botonConfirmar())
+    expect(onGuardarSpy).not.toHaveBeenCalled()
+  })
+
+  it('un sabor con su bulto, o el regalo de la promo, sí', () => {
+    montar()
+    elegir(screen.getByRole('combobox', { name: 'Cambiar el producto del regalo' }), 'Manaos Pomelo 3L')
+    expect(screen.queryByText(/hay que cargar en su ficha/)).toBeNull()
+    expect(botonConfirmar()).toBeEnabled()
   })
 })
