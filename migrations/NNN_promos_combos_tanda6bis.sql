@@ -3,8 +3,7 @@
 --       COMBO CON UN COMPONENTE SIN LISTA, EL COMBO QUE CAMBIÓ DE PRECIO NO CRECE
 --       Y EL REGALO DEL PEDIDO EN LA EDICIÓN Y EN EL CAMBIO DE CLIENTE
 --       (tanda 6 bis del plan #1603, tarjeta I: promos-B1, B4 y B5 de la
---        reauditoría del 24/11, las notas N1 y N2 de la segunda lente de promos y
---        F5 de la lente de esta tarjeta)
+--        reauditoría del 24/11 y las notas N1 y N2 de la segunda lente de promos)
 --
 -- Crea `_regalo_sin_bulto` y parcha por ancla, con premisa de md5 sobre los cuerpos
 -- vivos de la 545, `regalo_fuera_de_promo`, `_regalo_de_la_promo`,
@@ -58,19 +57,13 @@
 -- arma y lo avisa con el mismo texto.
 --
 -- -------------------------------------------------------------------------
--- 4 · N1, N2 y F5: el regalo del pedido
+-- 4 · N1 y N2: el regalo del pedido
 -- -------------------------------------------------------------------------
 -- N1 · Decisión del dueño: el regalo del pedido es el que la promo daba cuando nació. La
 -- edición que vuelve a ese regalo (un reparto que ya no cierra, en la pantalla) mandaba
 -- el regalo de hoy; ahora manda el del pedido, y `regalo_fuera_de_promo` (paso 3) lo
 -- acepta en una promo que el pedido ya tenía: el regalo de referencia
 -- (`_regalo_de_la_promo`) o uno de su rubro, además del de hoy como siempre.
--- F5 · Y también un producto que el pedido ya tenía como regalo de esa promo, en una
--- línea o al principio de una cadena: la pantalla vuelve a la raíz de sus líneas, que
--- puede ser el regalo de otro rubro que eligió un admin. Pero lo que entra sólo por ese
--- camino se conserva y no crece (G1 de la segunda lente; decisión del dueño): no pasa de lo
--- que el pedido ya tenía de ese producto (si es el principio de una cadena de la promo, de
--- todo el regalo de la promo, en cortes). El admin, como siempre.
 -- N2 · El pedido rehecho por un cambio de cliente nace de nuevo, pero su regalo es el del
 -- original: `_regalo_de_la_promo` sigue el `pedido_historial` del cambio de cliente
 -- («(cambio de cliente desde pedido #N)», que escribe cambiar_cliente_pedido) hasta el
@@ -197,8 +190,6 @@ $r$  v_conservado int;
   v_ref        bigint;
   -- promos-B1 (tanda 6 bis de #1603): el motivo de _regalo_sin_bulto.
   v_sin_bulto  text;
-  -- G1 (tanda 6 bis de #1603): un producto que entra sólo por F5.
-  v_f5         record;
 $r$),
 (2, 'public.regalo_fuera_de_promo(jsonb,jsonb,bigint,bigint,date)', 'el regalo de referencia',
 $a$         AND COALESCE(pi.es_bonificacion, false) AND pi.promocion_id = v_promo.id;
@@ -226,76 +217,8 @@ $r$               OR (p_pedido_id IS NOT NULL AND v_n_lineas = 1
                    AND v_prod_unica = NULLIF(e->>'producto_id', '')::bigint)
                OR (v_ref IS NOT NULL
                    AND (v_ref = NULLIF(e->>'producto_id', '')::bigint
-                        OR public.regalo_misma_categoria(v_ref, NULLIF(e->>'producto_id', '')::bigint, p_sucursal)))
-               -- F5 (tanda 6 bis de #1603): un producto que el pedido ya tenía como regalo de esta
-               -- promo, en una línea o al principio de una cadena (la raíz a la que vuelve la
-               -- pantalla), aunque sea de otro rubro porque lo eligió un admin.
-               OR (v_n_lineas > 0
-                   AND (EXISTS (SELECT 1 FROM pedido_items pi
-                                 WHERE pi.pedido_id = p_pedido_id AND pi.sucursal_id = p_sucursal
-                                   AND COALESCE(pi.es_bonificacion, false) AND pi.promocion_id = v_promo.id
-                                   AND pi.producto_id = NULLIF(e->>'producto_id', '')::bigint)
-                        OR EXISTS (SELECT 1 FROM pedido_item_sustituciones s
-                                    WHERE s.pedido_id = p_pedido_id AND s.sucursal_id = p_sucursal
-                                      AND s.promocion_id = v_promo.id
-                                      AND s.producto_original_id = NULLIF(e->>'producto_id', '')::bigint))),
+                        OR public.regalo_misma_categoria(v_ref, NULLIF(e->>'producto_id', '')::bigint, p_sucursal))),
                false)) THEN
-$r$),
-(18, 'public.regalo_fuera_de_promo(jsonb,jsonb,bigint,bigint,date)', 'lo que entra por F5 no crece',
-$a$    -- 4. Cantidad, sobre lo que mando el llamador.
-$a$,
-$r$    -- 3b. G1 de la lente (tanda 6 bis de #1603), decisión del dueño («se conserva pero no
-    --     crece»): un producto que entra SÓLO por F5 (lo que el pedido ya tenía como regalo de
-    --     esta promo, de otro rubro porque lo eligió un admin) no pasa de lo que el pedido ya
-    --     tenía de él. Si es el principio de una cadena de la promo (la raíz a la que vuelve la
-    --     pantalla), lo que ya tenía es todo el regalo de la promo, en cortes.
-    IF p_pedido_id IS NOT NULL AND v_n_lineas > 0 THEN
-        FOR v_f5 IN
-          SELECT x.producto, x.cant,
-                 GREATEST(
-                   COALESCE((SELECT SUM(pi.cantidad) FROM pedido_items pi
-                              WHERE pi.pedido_id = p_pedido_id AND pi.sucursal_id = p_sucursal
-                                AND COALESCE(pi.es_bonificacion, false) AND pi.promocion_id = v_promo.id
-                                AND pi.producto_id = x.producto), 0),
-                   CASE WHEN EXISTS (SELECT 1 FROM pedido_item_sustituciones s
-                                      WHERE s.pedido_id = p_pedido_id AND s.sucursal_id = p_sucursal
-                                        AND s.promocion_id = v_promo.id AND s.producto_original_id = x.producto)
-                        THEN COALESCE((SELECT SUM(COALESCE(pi.regalo_corte, pi.cantidad)) FROM pedido_items pi
-                                        WHERE pi.pedido_id = p_pedido_id AND pi.sucursal_id = p_sucursal
-                                          AND COALESCE(pi.es_bonificacion, false)
-                                          AND pi.promocion_id = v_promo.id), 0)
-                        ELSE 0 END) AS tenia,
-                 pr.nombre
-            FROM (SELECT NULLIF(e->>'producto_id', '')::bigint AS producto,
-                         SUM(COALESCE(NULLIF(e->>'cantidad', '')::numeric, 0)) AS cant
-                    FROM jsonb_array_elements(v_cant) e
-                   WHERE COALESCE((e->>'es_bonificacion')::boolean, false)
-                     AND NULLIF(e->>'promocion_id', '')::bigint = v_promo.id
-                   GROUP BY 1) x
-            LEFT JOIN productos pr ON pr.id = x.producto AND pr.sucursal_id = p_sucursal
-           WHERE NOT COALESCE(
-                   (v_def IS NOT NULL AND public.regalo_misma_categoria(v_def, x.producto, p_sucursal))
-                OR (v_def IS NULL AND EXISTS (SELECT 1 FROM promocion_productos pp
-                                               WHERE pp.promocion_id = v_promo.id AND pp.sucursal_id = p_sucursal
-                                                 AND pp.producto_id = x.producto))
-                OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_prod) e2
-                            WHERE COALESCE((e2->>'es_bonificacion')::boolean, false)
-                              AND NULLIF(e2->>'promocion_id', '')::bigint = v_promo.id
-                              AND NULLIF(e2->>'producto_id', '')::bigint = x.producto
-                              AND e2->>'_cadena' IS NOT NULL)
-                OR (v_n_lineas = 1 AND v_prod_unica = x.producto)
-                OR (v_ref IS NOT NULL AND (v_ref = x.producto
-                                           OR public.regalo_misma_categoria(v_ref, x.producto, p_sucursal))), false)
-           ORDER BY x.producto
-        LOOP
-          IF v_f5.cant > v_f5.tenia THEN
-            RETURN format('El regalo de la promo "%s" conserva %s de %s, que eligió un admin, pero no puede crecer (vinieron %s). Dejalo como estaba o bajalo; para dar más, lo tiene que cambiar un admin.',
-                          r.nombre, v_f5.tenia, COALESCE(v_f5.nombre, 'el producto ID ' || v_f5.producto), v_f5.cant);
-          END IF;
-        END LOOP;
-    END IF;
-
-    -- 4. Cantidad, sobre lo que mando el llamador.
 $r$),
 (4, 'public.regalo_fuera_de_promo(jsonb,jsonb,bigint,bigint,date)', 'el bulto del regalo',
 $a$  -- 5. Exclusion (#1136): una sola promo con regalo por grupo excluyente.
@@ -572,7 +495,7 @@ DECLARE
 BEGIN
   FOR r IN SELECT * FROM (VALUES
     ('public.regalo_fuera_de_promo(jsonb,jsonb,bigint,bigint,date)',
-     '7fa700db22e3708ad1e7ca6569bc1aab', '7a5d67c746a4d5bb67b8d313d13584be',
+     '59ed33b778a9fac3e74a80935f6edf5b', '7a5d67c746a4d5bb67b8d313d13584be',
      '{postgres=X/postgres,service_role=X/postgres}', false),
     ('public._regalo_de_la_promo(bigint,bigint,bigint,uuid,bigint,numeric)',
      '3aa97e8704a400fc675ac77ec4073b74', '0ed07e72b5d047e60695d13bfae3d312',
