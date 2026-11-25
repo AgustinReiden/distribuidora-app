@@ -18,7 +18,7 @@
 import { resolverPreciosMayorista, type ItemPedido, type PricingMap } from './precioMayorista'
 import { aplicarDescuentoClienteItems, type ClienteConDescuentos, type ProductoConCategoria } from './descuentoCliente'
 import type { ItemResuelto } from './orquestacionPrecios'
-import { armarCombos, redondear2, type ComboAplicado, type ComboVigente, type OraculoPrecios } from './combos'
+import { armarCombos, redondear2, tramosDelCombo, type ComboAplicado, type ComboVigente, type OraculoPrecios } from './combos'
 
 /** Línea del pedido con, si es de un combo, su combo y su precio sin combo. */
 export interface LineaConCombo extends ItemResuelto {
@@ -201,7 +201,8 @@ export function aplicarCombosAlPedido(e: EntradaCombosPedido): ResultadoCombosPe
 /**
  * Los combos de una edición: los vigentes y, encima, la foto de los que el
  * pedido ya tiene (pedido_combos). Un combo que ya tiene se mide contra su foto
- * (precio, lugares, escalas), como lo valida el server. Si ya no está vigente
+ * (sus tramos de precio, lugares, escalas), como lo valida el server; lo que se le
+ * suma va al precio de hoy. Si ya no está vigente
  * se conserva, pero no crece: su tope es la cantidad que el pedido ya tenía.
  */
 export function combinarCombosConFotos(
@@ -220,6 +221,11 @@ export function combinarCombosConFotos(
       componentes: f.componentes,
       prioridad: vigente?.prioridad ?? f.prioridad,
       topeRestante: vigente ? vigente.topeRestante : f.cantidadCombos,
+      // promos-B5 (tanda 6 bis de #1603), decisión del dueño del 24/11: lo que el pedido ya
+      // tiene vale lo de sus tramos (los primeros que entraron, hasta los combos de hoy); lo
+      // que se suma, el precio de hoy del combo. Como combo_fuera_de_regla.
+      tramos: tramosDelCombo(f.tramos ?? [{ cantidad: f.cantidadCombos, precio: f.precio }], f.cantidadCombos, null),
+      precioNuevo: vigente?.precio ?? f.precio,
     })
   }
   return out

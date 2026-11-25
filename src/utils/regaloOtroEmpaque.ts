@@ -231,3 +231,34 @@ export function evaluarCambioRegalo(args: {
         }),
   }
 }
+
+/**
+ * promos-B1 en el alta y la edición (tanda 6 bis de #1603): ¿este producto, puesto como
+ * regalo de la promo, necesita su bulto y no lo tiene? Espejo de `_regalo_sin_bulto` en
+ * el server para lo que la pantalla sabe: en una promo de fracción con unidades por
+ * bloque, un producto que no es el regalo ni el contenedor de la promo cuenta en su
+ * propia barra, con su `unidades_por_bulto`; sin el dato contaría con el N de la promo,
+ * que es el empaque del regalo. (Un producto con su barra apuntada a otro contenedor lo
+ * decide el server.) Sin bulto no se puede regalar: el alta lo rechaza, también al admin.
+ */
+export function regaloSinBulto(args: {
+  promo: {
+    regaloMueveStock?: boolean | null
+    unidadesPorBloque?: number | null
+    ajusteProductoId?: string | number | null
+    productoRegaloId?: string | number | null
+  }
+  producto: { id: string | number; unidades_por_bulto?: number | null }
+}): boolean {
+  const { promo, producto } = args
+  if (promo.regaloMueveStock) return false
+  if (positivo(promo.unidadesPorBloque) === null) return false
+  const mismo = (b: string | number | null | undefined) => b != null && String(producto.id) === String(b)
+  if (mismo(promo.productoRegaloId) || mismo(promo.ajusteProductoId)) return false
+  return positivo(producto.unidades_por_bulto) === null
+}
+
+/** El texto del rechazo, el mismo que da el server (`_regalo_sin_bulto`). */
+export function textoRegaloSinBulto(nombre: string): string {
+  return `Para regalar ${nombre} hay que cargar en su ficha cuántas unidades sueltas trae cada unidad de stock (unidades por bulto).`
+}

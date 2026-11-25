@@ -35,6 +35,7 @@ import { tienePrecioDeVenta } from '../../utils/precioVenta';
 import SugerenciasCombo from '../pedidos/SugerenciasCombo';
 import type { SugerenciaCombo } from '../../utils/comboSugerencia';
 import { filtrarRegalosCompatibles, TEXTO_REGALO_MISMA_CATEGORIA } from '../../utils/regaloCompatible';
+import { regaloSinBulto, textoRegaloSinBulto } from '../../utils/regaloOtroEmpaque';
 import GeolocationGate from '../GeolocationGate';
 import NumberInput from '../ui/NumberInput';
 import { Combobox } from '../ui/Combobox';
@@ -824,6 +825,27 @@ const ModalPedido = memo(function ModalPedido({
     return v.ok ? [] : [{ promoNombre: grupo.promoNombre, errores: v.errores }];
   });
 
+  // promos-B1 (tanda 6 bis de #1603): un sabor elegido como regalo cuya barra no es la del
+  // contenedor de la promo necesita su bulto (el server lo rechaza, también al admin, y un
+  // pedido encolado fallaría al sincronizar). Bloquea el confirmar, con el texto del server.
+  const promoDeGrupo = (grupo: GrupoBonificacion) => {
+    if (!promoMap || !grupo.promoId) return undefined;
+    for (const promos of promoMap.values()) {
+      const promo = promos.find(pr => String(pr.id) === grupo.promoId);
+      if (promo) return promo;
+    }
+    return undefined;
+  };
+  const regalosSinBultoDeGrupo = (grupo: GrupoBonificacion): string[] => {
+    const promo = promoDeGrupo(grupo);
+    if (!promo) return [];
+    return partesDeGrupo(grupo).flatMap(parte => {
+      const prod = productos.find(p => String(p.id) === String(parte.productoId));
+      return prod && regaloSinBulto({ promo, producto: prod }) ? [textoRegaloSinBulto(prod.nombre)] : [];
+    });
+  };
+  const regalosSinBulto = gruposBonif.flatMap(regalosSinBultoDeGrupo);
+
   const totalItemsCarrito = nuevoPedido.items.reduce((t, i) => t + i.cantidad, 0);
   // #1191: con combos, el total es el de las líneas partidas (el que se guarda).
   const totalParaMostrar = hayDescuentoTotal || hayCombos ? totalConCombos : calcularTotal();
@@ -1352,6 +1374,16 @@ const ModalPedido = memo(function ModalPedido({
                 </div>
               )}
 
+              {/* promos-B1: un sabor de regalo sin su bulto (bloquea confirmar) */}
+              {regalosSinBulto.length > 0 && (
+                <div role="alert" className="p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-900 dark:bg-amber-900/30 dark:border-amber-600 dark:text-amber-200">
+                  <strong>No se puede confirmar:</strong>
+                  <ul className="list-disc ml-5 mt-1">
+                    {regalosSinBulto.map(t => <li key={t}>{t}</li>)}
+                  </ul>
+                </div>
+              )}
+
               {/* Compra mínima del pedido (bloquea confirmar) */}
               {motivoMinimo && (
                 <div role="alert" className="p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-900 dark:bg-amber-900/30 dark:border-amber-600 dark:text-amber-200">
@@ -1718,6 +1750,9 @@ const ModalPedido = memo(function ModalPedido({
                                 <p className="text-xs text-green-700 dark:text-green-400">
                                   {TEXTO_REGALO_MISMA_CATEGORIA}
                                 </p>
+                                {regalosSinBultoDeGrupo(grupo).map(t => (
+                                  <p key={t} role="alert" className="text-xs text-red-700 dark:text-red-400">{t}</p>
+                                ))}
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   {opciones.length > 1 && (
                                     <button
@@ -2123,7 +2158,7 @@ const ModalPedido = memo(function ModalPedido({
             // habilitado y sólo lo frenaba un aviso del container. Se mira el
             // id y no `clienteSeleccionado`: un cliente recién creado por el
             // alta rápida tiene id antes de que la lista de clientes refetchee.
-            disabled={guardando || ilegibles.hay || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0 || vbNoHabilitado || motivoDatosPrecio !== null || fechaFueraDeRango !== null}
+            disabled={guardando || ilegibles.hay || !nuevoPedido.clienteId || violacionesMOQ.length > 0 || violacionesStock.length > 0 || !hayItems || debeElegirPreventista || faltaHorarioCliente || motivoMinimo !== null || repartosRegaloInvalidos.length > 0 || regalosSinBulto.length > 0 || vbNoHabilitado || motivoDatosPrecio !== null || fechaFueraDeRango !== null}
             loading={guardando}
             variant="success"
             size="lg"

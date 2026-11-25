@@ -5,6 +5,8 @@ import {
   evaluarCambioRegalo,
   topePorValor,
   topeSustitutoRegalo,
+  regaloSinBulto,
+  textoRegaloSinBulto,
   type ProductoConEmpaque,
 } from './regaloOtroEmpaque'
 
@@ -184,5 +186,27 @@ describe('evaluarCambioRegalo con el regalo de la promo como referencia (#1592)'
     })
     expect(r.tipo).toBe('por_valor')
     if (r.tipo === 'por_valor') expect(r.sugerencia?.cantidad).toBe(12) // 6 × 1850 / 900 = 12,33
+  })
+})
+
+describe('regaloSinBulto · promos-B1 en el alta y la edición (tanda 6 bis de #1603)', () => {
+  // Promo de fracción «5 V dan 2 R», R es su propio contenedor (6 R = 1 R).
+  const promo = { regaloMueveStock: false, unidadesPorBloque: 6, ajusteProductoId: 'R', productoRegaloId: 'R' }
+
+  it('otro sabor sin bulto: no se puede regalar', () => {
+    expect(regaloSinBulto({ promo, producto: { id: 'X', unidades_por_bulto: null } })).toBe(true)
+    expect(textoRegaloSinBulto('Manaos Naranja')).toBe(
+      'Para regalar Manaos Naranja hay que cargar en su ficha cuántas unidades sueltas trae cada unidad de stock (unidades por bulto).')
+  })
+
+  it('con su bulto, el regalo o el contenedor de la promo, sí', () => {
+    expect(regaloSinBulto({ promo, producto: { id: 'X1', unidades_por_bulto: 1 } })).toBe(false)
+    expect(regaloSinBulto({ promo, producto: { id: 'R', unidades_por_bulto: null } })).toBe(false)
+    expect(regaloSinBulto({ promo: { ...promo, productoRegaloId: 'C', ajusteProductoId: 'K' }, producto: { id: 'K' } })).toBe(false)
+  })
+
+  it('una promo que mueve stock o sin unidades por bloque no lo pide', () => {
+    expect(regaloSinBulto({ promo: { ...promo, regaloMueveStock: true }, producto: { id: 'X' } })).toBe(false)
+    expect(regaloSinBulto({ promo: { ...promo, unidadesPorBloque: null }, producto: { id: 'X' } })).toBe(false)
   })
 })

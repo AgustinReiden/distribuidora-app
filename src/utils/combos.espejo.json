@@ -1,5 +1,5 @@
 {
-  "_comentario": "Paridad de los combos (#1191). El TS (combos.espejo.test.ts) corre prorratearTotal, totalDelCombo y cantidadDeCombos; el SQL (scripts/espejo-combos.mjs) corre _combo_prorrateo, _combo_total y _combo_cantidad sobre los mismos casos y exige 'esperado' exacto. El server recalcula estas tres para validar lo que manda el front: si difieren, rechaza pedidos honestos. Si cambiás una, cambiá la otra y sumá el caso.",
+  "_comentario": "Paridad de los combos (#1191). El TS (combos.espejo.test.ts) corre prorratearTotal, totalDelCombo, tramosDelCombo y cantidadDeCombos; el SQL (scripts/espejo-combos.mjs) corre _combo_prorrateo, _combo_total, _combo_tramos_para y _combo_cantidad sobre los mismos casos y exige 'esperado' exacto. El server recalcula estas tres para validar lo que manda el front: si difieren, rechaza pedidos honestos. Si cambiás una, cambiá la otra y sumá el caso.",
   "prorrateo": [
     {
       "caso": "1 + 1 a $11.000",
@@ -355,6 +355,66 @@
         }
       ],
       "esperado": 1921.26
+    },
+    {
+      "caso": "tramos (promos-B5): 1 a $1.000 y 1 a $1.200",
+      "precio": 1000,
+      "k": 2,
+      "tramos": [{ "cantidad": 1, "precio": 1000 }, { "cantidad": 1, "precio": 1200 }],
+      "lineas": [
+        { "producto_id": 1, "cantidad": 2, "ref": 800 },
+        { "producto_id": 2, "cantidad": 2, "ref": 400 }
+      ],
+      "esperado": 2200
+    },
+    {
+      "caso": "tramos (promos-B5) acumulable: menos lo que bajó la escala",
+      "precio": 11000,
+      "k": 2,
+      "tramos": [{ "cantidad": 1, "precio": 11000 }, { "cantidad": 1, "precio": 11500.5 }],
+      "lineas": [
+        { "producto_id": 1, "cantidad": 2, "ref": 10000, "sin_escala": 10000 },
+        { "producto_id": 2, "cantidad": 2, "ref": 2000, "sin_escala": 2500 }
+      ],
+      "esperado": 21500.5
+    }
+  ],
+  "tramos": [
+    {
+      "caso": "sin cambiar la cantidad",
+      "tramos": [{ "cantidad": 1, "precio": 1000 }, { "cantidad": 1, "precio": 1200 }],
+      "k": 2, "precio_nuevo": 1500,
+      "esperado": [{ "cantidad": 1, "precio": 1000 }, { "cantidad": 1, "precio": 1200 }]
+    },
+    {
+      "caso": "bajar: se van primero los últimos",
+      "tramos": [{ "cantidad": 1, "precio": 1000 }, { "cantidad": 2, "precio": 1200 }],
+      "k": 2, "precio_nuevo": 1500,
+      "esperado": [{ "cantidad": 1, "precio": 1000 }, { "cantidad": 1, "precio": 1200 }]
+    },
+    {
+      "caso": "subir: lo que falta, al precio nuevo",
+      "tramos": [{ "cantidad": 1, "precio": 1000 }],
+      "k": 3, "precio_nuevo": 1150,
+      "esperado": [{ "cantidad": 1, "precio": 1000 }, { "cantidad": 2, "precio": 1150 }]
+    },
+    {
+      "caso": "subir al mismo precio que el último: un solo tramo",
+      "tramos": [{ "cantidad": 2, "precio": 1000 }],
+      "k": 3, "precio_nuevo": 1000,
+      "esperado": [{ "cantidad": 3, "precio": 1000 }]
+    },
+    {
+      "caso": "desde cero",
+      "tramos": [],
+      "k": 2, "precio_nuevo": 900,
+      "esperado": [{ "cantidad": 2, "precio": 900 }]
+    },
+    {
+      "caso": "a cero",
+      "tramos": [{ "cantidad": 2, "precio": 1000 }],
+      "k": 0, "precio_nuevo": 900,
+      "esperado": []
     }
   ],
   "cantidad": [

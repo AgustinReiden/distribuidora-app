@@ -19,6 +19,7 @@ import { promosSinRegaloEnElPedido } from '../../utils/promosSinRegalo';
 import { entradaDeConsulta, motivoDatosDePrecio, resumirDatosDePrecio, sePuedeReintentarDatos } from '../../utils/datosDePrecio';
 import { cadenaDelRegalo, cantidadBaseDeLinea, conservarRepartos, regaloParaEditar } from '../../utils/repartoRegalo';
 import { regaloQueNoCrece } from '../../utils/regaloPromoApagada';
+import { regaloDelPedidoParaPromo } from '../../utils/regaloDelPedido';
 import { avisosDeCupo, promosConRegalo } from '../../utils/cupoPromo';
 import { AvisoCupoPromo } from '../ui/AvisoCupoPromo';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
@@ -931,7 +932,18 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
       // #1090: el reparto se compara contra la promo en cortes, como el server.
       linea => cantidadBaseDeLinea(sustituciones, linea.promocion_id, linea.regalo_cadena_id, Number(linea.cantidad)),
     );
-    return { bonificacionesCalculadas: bonificaciones, repartosPerdidos: perdidos };
+    // N1 (tanda 6 bis de #1603), decisión del dueño: el regalo del pedido es el que la promo
+    // daba cuando nació. Un reparto que ya no cierra vuelve a ESE regalo (la raíz de sus
+    // líneas), no al que la promo da hoy: si el admin cambió el regalo de la promo (R por P),
+    // la edición pasaba R a P sin que nadie lo pidiera.
+    const conRegaloDelPedido = bonificaciones.map(b => {
+      if (b.promocionId == null || !perdidos.includes(String(b.promocionId))) return b;
+      const pid = regaloDelPedidoParaPromo(pedido?.items ?? [], sustituciones, b.promocionId);
+      if (!pid || pid === String(b.productoId)) return b;
+      const producto = productos.find(p => String(p.id) === pid);
+      return { ...b, productoId: pid, productoIdEnvio: pid, nombre: producto?.nombre || b.nombre, esSustituido: false };
+    });
+    return { bonificacionesCalculadas: conRegaloDelPedido, repartosPerdidos: perdidos };
   }, [itemsFinales, productos, sustituciones, pedido, regalosAlOriginal, isAdmin, promoInfoMap, cortesGuardados, promociones]);
 
   // H1: lo que el aviso tiene que decir, antes de tocar Guardar (con lo que el modal sabe) o

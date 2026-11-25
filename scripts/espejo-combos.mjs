@@ -3,8 +3,8 @@
  * PARIDAD DE LOS COMBOS (#1191), lado SQL.
  *
  * El front arma los combos (`src/utils/combos.ts`) y el server los valida en
- * `combo_fuera_de_regla` recalculando tres puras: `_combo_total`,
- * `_combo_prorrateo` y `_combo_cantidad`. Tienen que dar lo mismo que
+ * `combo_fuera_de_regla` recalculando cuatro puras: `_combo_total`,
+ * `_combo_prorrateo`, `_combo_tramos_para` y `_combo_cantidad`. Tienen que dar lo mismo que
  * `totalDelCombo`, `prorratearTotal` y `cantidadDeCombos` al centavo: si no, el
  * server rechaza pedidos honestos.
  *
@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURE = path.join(RAIZ, 'src', 'utils', 'combos.espejo.json');
-const { prorrateo, total, cantidad } = JSON.parse(readFileSync(FIXTURE, 'utf8'));
+const { prorrateo, total, tramos, cantidad } = JSON.parse(readFileSync(FIXTURE, 'utf8'));
 
 const literal = (s) => `'${String(s).replace(/'/g, "''")}'`;
 const json = (v) => `${literal(JSON.stringify(v))}::jsonb`;
@@ -37,7 +37,9 @@ if (process.argv.includes('--sql')) {
     ...prorrateo.map((c) =>
       `(${literal('prorrateo: ' + c.caso)}, public._combo_prorrateo(${Number(c.total)}::numeric, ${json(c.lineas)}), ${c.esperado == null ? "'null'::jsonb" : json(c.esperado)})`),
     ...total.map((c) =>
-      `(${literal('total: ' + c.caso)}, to_jsonb(public._combo_total(${Number(c.precio)}::numeric, ${Number(c.k)}, ${json(c.lineas)})), ${json(c.esperado)})`),
+      `(${literal('total: ' + c.caso)}, to_jsonb(public._combo_total(${Number(c.precio)}::numeric, ${Number(c.k)}, ${json(c.lineas)}, ${c.tramos ? json(c.tramos) : 'NULL'})), ${json(c.esperado)})`),
+    ...tramos.map((c) =>
+      `(${literal('tramos: ' + c.caso)}, public._combo_tramos_para(${json(c.tramos)}, ${Number(c.k)}, ${Number(c.precio_nuevo)}::numeric), ${json(c.esperado)})`),
     ...cantidad.map((c) =>
       `(${literal('cantidad: ' + c.caso)}, to_jsonb(public._combo_cantidad(${json(c.componentes)}, ${json(c.lineas)})), ${c.esperado == null ? "'null'::jsonb" : json(c.esperado)})`),
   ];
@@ -86,8 +88,16 @@ for (const c of prorrateo) {
   anotar(`prorrateo: ${c.caso}`, ok, sql, c.esperado);
 }
 for (const c of total) {
-  const sql = await rpc('_combo_total', { p_precio: c.precio, p_k: c.k, p_lineas: c.lineas }, c.caso);
+  const sql = await rpc('_combo_total', { p_precio: c.precio, p_k: c.k, p_lineas: c.lineas, p_tramos: c.tramos ?? null }, c.caso);
   anotar(`total: ${c.caso}`, sql != null && Number(sql) === Number(c.esperado), sql, c.esperado);
+}
+// promos-B5 (tanda 6 bis de #1603): los numeric llegan como número; se comparan por valor.
+const igualTramos = (a, b) =>
+  Array.isArray(a) && a.length === b.length
+  && a.every((t, i) => Number(t.cantidad) === Number(b[i].cantidad) && Number(t.precio) === Number(b[i].precio));
+for (const c of tramos) {
+  const sql = await rpc('_combo_tramos_para', { p_tramos: c.tramos, p_k: c.k, p_precio_nuevo: c.precio_nuevo }, c.caso);
+  anotar(`tramos: ${c.caso}`, igualTramos(sql, c.esperado), sql, c.esperado);
 }
 for (const c of cantidad) {
   const sql = await rpc('_combo_cantidad', { p_componentes: c.componentes, p_lineas: c.lineas }, c.caso);
