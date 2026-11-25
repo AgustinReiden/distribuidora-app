@@ -22,7 +22,7 @@ stock justo, cancelaciones, rendiciones, rutas y una carga de "cajas". Todo lo a
 | `fixtures.sql` | Sucursales `CONC-A`/`CONC-B`/`CONC-C`, usuarios `@conc.test`, productos y clientes. Todo en el schema `conc` y filas `CONC-*`. |
 | `controles-negativos.sql`, `controles-negativos-orden.sql`, `controles-negativos-contenedores.sql`, `controles-negativos-promos.sql` | Rompen a propósito locks de la copia local (en cuatro grupos) para comprobar que el arnés se pone rojo (ver "Controles negativos"). |
 | `controles-negativos-t10.sql` | Saca dos partes del arreglo de la tarjeta 10 de #1378 (#1439) para ver que cada una hace falta (ver su encabezado). |
-| `controles-negativos-t13.sql` | Saca de a una las tres partes del arreglo de la tarjeta 13 de #1378 (#1446): el pre-bloqueo de los llamadores, el del trigger y su orden (ver su encabezado). |
+| `controles-negativos-t13.sql` | Saca de a una dos partes del arreglo de la tarjeta 13 de #1378 (#1446): el pre-bloqueo de los llamadores (M10) y el orden del trigger (M8) (ver su encabezado). El grupo M9 se sacó el 25/11 (#1690, T15): ya no ponía en rojo a T13c ni a T13d. |
 | `controles-negativos-t14.sql` | Saca a la vez los seis pre-bloqueos de la tarjeta 14 de #1378 (#1460), uno por función: cada variante de `t14` cruza una sola contra la venta (ver su encabezado). |
 | `controles-negativos-t15.sql` | Saca los dos pre-bloqueos de la tarjeta 15 de #1378 (#1460): el de `cambiar_cliente_pedido` (C1) y el de las rutas en `imputar_credito_a_pedido_impl` (C7) (ver su encabezado). |
 | `controles-negativos-t6.sql`, `controles-negativos-t6b.sql` | Sacan, en dos grupos que no se corren juntos, las partes del arreglo de la tarjeta 6 de #1477 (#1473): los productos de los ítems nuevos en el pre-bloqueo del cambio de cliente (ADV-5), el de la RPC del regalo de una promo con el UPDATE REST de vuelta (ADV-2) y la espera acotada de los precios en masa (ADV-3); y el pre-bloqueo de productos entero del cambio de cliente (ADV-1) (ver sus encabezados). |
@@ -208,7 +208,7 @@ esperable que choque igual. No se probó.)
   (P0001 «No se puede cambiar las unidades por bloque…», la promo como estaba), o el guardado primero y la venta contra la promo
   nueva. Lo que no puede pasar es un 40P01 ni una promo a medias. Las forzadas T6k, T6l y T6n dejan a la venta primero (el
   guardado se rechaza siempre) y T6k2, T6l2 y T6n2 al guardado primero (se guarda y la venta entra); T6m, sin forzar, da los dos
-  órdenes (antes de D2 sólo 22 de 200 rondas pasaban: las que ganaba el guardado). Los gemelos van al final de `t6`, después de T6p: T6o fija sus tiempos (250 y 450 ms) y cada ronda de las `a14_setup` suma promos y productos a la sucursal A, que el trigger de sentencia de los contenedores recorre; con 300 rondas más antes, T6o pasó de 100/100 a 94/100, y repetida sobre esa misma base a 69 y a 51 (la venta le gana al guardado y D2 lo rechaza). Una base nueva por corrida de `t6` evita ese corrimiento.
+  órdenes (antes de D2 sólo 22 de 200 rondas pasaban: las que ganaba el guardado). Los gemelos van al final de `t6`, después de T6p: T6o fija sus tiempos (250 y 450 ms) y cada ronda de las `a14_setup` suma promos y productos a la sucursal A, que el trigger de sentencia de los contenedores recorre; con 300 rondas más antes, T6o pasó de 100/100 a 94/100, y repetida sobre esa misma base a 69 y a 51 (la venta le gana al guardado y D2 lo rechaza). Una base nueva por corrida de `t6` evita ese corrimiento. `run.mjs` lo comprueba (#1690, T15): si va a correr T6o y la base ya tiene promos `CONC a14` de otra corrida de `t6`, se niega con el motivo y dice cómo armar la base; `--aunque-este-usada` lo salta.
 - **C8** es un dato para diseñar el fork, sin un mínimo fijado: ventas por segundo, latencias,
   esperas por relación y las tablas que más escriben. En Docker depende de la PC (anotarla
   junto a los números) y **no es la capacidad de prod**.
@@ -239,8 +239,7 @@ Las reglas nuevas del núcleo rechazan casos que los guiones armaban a propósit
 Controles negativos medidos el 24/11 sobre la base de la 540 (40 rondas por variante; huella igual a la de prod después de restaurar):
 T13j y T13g con M10, 40 de 40 con 40P01; T6k, T6k2, T6n, T6n2 y T6g con M62, 40 de 40 con 40P01; T15b y T15a con M11/M12, 40 de 40
 con 40P01. Dos hallazgos: el DO de `controles-negativos-t15.sql` exigía seis pre-bloqueos de `cambiar_cliente_pedido` y la 540 tiene siete
-(sin mutar nada, sin avisar), y se corrigió; y M9 de `controles-negativos-t13.sql` ya no muerde ni a T13c ni a T13d (0 40P01 en las dos,
-con la mutación puesta), así que lo que dice su encabezado sobre ellas está viejo, y no se tocó. T10j, S1, C6, C7 y C9 no tienen control
+(sin mutar nada, sin avisar), y se corrigió; y M9 de `controles-negativos-t13.sql` ya no mordía ni a T13c ni a T13d (0 40P01 en las dos, con la mutación puesta; tampoco sacando además el pre-bloqueo de `_aplicar_credito_pagos`): se sacó el 25/11 (#1690, T15) y el encabezado del archivo lo dice. T13c y T13d quedan sin control negativo propio. T10j, S1, C6, C7 y C9 no tienen control
 negativo propio.
 
 ## Controles negativos
