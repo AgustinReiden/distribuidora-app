@@ -11,7 +11,7 @@ import type {
 } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
 import { fechaLocalISO } from '../../utils/formatters'
-import { calcularVentaCliente, calcularRitmoCompra, separarPagosFicha, type PagoFichaCliente } from '../../utils/ventaCliente'
+import { calcularVentaCliente, calcularRitmoCompra, pedidosDelVendedor, separarPagosFicha, type PagoFichaCliente } from '../../utils/ventaCliente'
 import {
   NOTAS_VENTA_METRICA_SELECT,
   RPC_NOTAS_DEL_VENDEDOR,
@@ -42,7 +42,11 @@ interface ProductosFrecuenciaMap {
 
 const SIN_PEDIDOS: PedidoClienteWithItems[] = []
 
-export function useFichaCliente(clienteId: string | null | undefined): UseFichaClienteReturn {
+/**
+ * `vendedorId`: el del preventista que mira la ficha (como el filtro del Dashboard). Su «Total
+ * comprado» cuenta sólo las boletas que él vendió (tanda 6 bis, H-4); admin y encargado, sin él.
+ */
+export function useFichaCliente(clienteId: string | null | undefined, vendedorId?: string | null): UseFichaClienteReturn {
   const [pedidosCliente, setPedidosCliente] = useState<PedidoClienteWithItems[]>([])
   const [estadisticas, setEstadisticas] = useState<EstadisticasCliente | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
@@ -73,10 +77,10 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       // bug de #521 —`totalCompras` saldría de los 1.000 pedidos más recientes y
       // `montoPagado` de 1.000 pagos cualesquiera, o sea dos universos
       // distintos—. La correctitud de hoy es coincidencia de volumen, no diseño.
-      const todosLiviano = await traerTodo<Pick<PedidoDB, 'id' | 'cliente_id' | 'total' | 'cargo_envio' | 'estado' | 'estado_pago' | 'created_at' | 'canal' | 'fecha' | 'tipo_factura'>>(
+      const todosLiviano = await traerTodo<Pick<PedidoDB, 'id' | 'cliente_id' | 'total' | 'cargo_envio' | 'estado' | 'estado_pago' | 'created_at' | 'canal' | 'fecha' | 'tipo_factura' | 'usuario_id'>>(
         () => supabase
           .from('pedidos')
-          .select('id, cliente_id, total, cargo_envio, estado, estado_pago, created_at, canal, fecha, tipo_factura')
+          .select('id, cliente_id, total, cargo_envio, estado, estado_pago, created_at, canal, fecha, tipo_factura, usuario_id')
           .eq('cliente_id', clienteId)
           .order('created_at', { ascending: false })
           .order('id'),
@@ -98,10 +102,10 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
         { etiqueta: 'notas de crédito del cliente' },
       )
       if (!vigente()) return
-      // El preventista (tanda 6 bis; decisión del dueño del 24/11) ve por RLS sólo los pedidos que
-      // ÉL le vendió al cliente, así que su «Total comprado» es lo que le vendió, neto de las notas
-      // de esas boletas: se las da la RPC (fecha, cliente y total). A admin y encargado no les da
-      // nada (las leyeron arriba): las dos fuentes se suman sin repetir.
+      // El «Total comprado» del preventista (tanda 6 bis; decisión del dueño del 24/11) es lo que
+      // ÉL le vendió al cliente (abajo, `vendedorId`), neto de las notas de esas boletas: se las da
+      // la RPC (fecha, cliente y total). A admin y encargado no les da nada (las leyeron arriba):
+      // las dos fuentes se suman sin repetir.
       const notasPropias = await traerTodo<NotaDelVendedorRow>(
         () => supabase.rpc(RPC_NOTAS_DEL_VENDEDOR, { p_desde: null, p_hasta: null, p_cliente_id: clienteId }),
         { etiqueta: 'notas de crédito del vendedor' },
@@ -122,7 +126,7 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       const pedidosTyped = (pedidos || []) as PedidoWithItems[]
       setPedidosCliente(pedidosTyped as unknown as PedidoClienteWithItems[])
 
-      const pedidosLivianos = (todosLiviano || []) as Array<Pick<PedidoDB, 'id' | 'cliente_id' | 'total' | 'cargo_envio' | 'estado' | 'estado_pago' | 'created_at' | 'canal' | 'fecha' | 'tipo_factura'>>
+      const pedidosLivianos = (todosLiviano || []) as Array<Pick<PedidoDB, 'id' | 'cliente_id' | 'total' | 'cargo_envio' | 'estado' | 'estado_pago' | 'created_at' | 'canal' | 'fecha' | 'tipo_factura' | 'usuario_id'>>
       // Sin filtrar nada (canjes y vales blancos incluidos): es lo que la query pesada
       // recorta con `.limit(50)`, así que el aviso de "lista cortada" dice la verdad.
       setPedidosTotales(pedidosLivianos.length)
@@ -130,7 +134,9 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
       // (utils/ventaCliente): la venta es entregado, sin canje, sin vale blanco (VB,
       // consumo interno, va aparte). Lo tomado y no entregado va como "pendiente de
       // entrega", igual que el "en curso" del Dashboard. La deuda se ve en "Saldo".
-      const venta = calcularVentaCliente(pedidosLivianos, notasCliente)
+      // El preventista: sólo las boletas que él vendió (la RLS le muestra también las que reparte
+      // con el extra de chofer, y sus notas no le llegan: ese pedazo quedaba bruto; H-4, tanda 6 bis).
+      const venta = calcularVentaCliente(pedidosDelVendedor(pedidosLivianos, vendedorId), notasCliente)
       const totalCompras = venta.totalComprado
 
       // Fetch pagos from the pagos table (source of truth for payments)
@@ -199,7 +205,7 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
     // eslint-disable-next-line react-hooks/exhaustive-deps -- es un contador, no un nodo del DOM
     return () => { peticionRef.current++ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clienteId])
+  }, [clienteId, vendedorId])
 
   // Sólo se devuelve lo que es del cliente de ahora.
   const esDelCliente = Boolean(clienteId) && datosDe === String(clienteId)

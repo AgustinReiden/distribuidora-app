@@ -484,7 +484,8 @@ suelta en `sucursales`.
   el preventista, por `notas_credito_venta_del_vendedor` (tanda 6 bis; decisión del dueño del 24/11: «que
   vea $ 700, neto»), que le da sólo la fecha, el cliente y el total de las notas que restan de boletas que
   ÉL vendió, en la sucursal activa, y a admin y encargado nada: el front suma las dos fuentes sin repetir.
-  Su «Total comprado» resta sólo esas notas, porque la RLS de `pedidos` le muestra sólo lo que él vendió.
+  Su «Total comprado» cuenta sólo las boletas que él vendió (`pedidos.usuario_id`, `pedidosDelVendedor`) y resta
+  sólo esas notas: la RLS de `pedidos` le muestra además las que reparte con el extra de chofer (H-4, tanda 6 bis).
   El «Pagado» de la ficha cuenta sólo plata cobrada: lo único que va aparte, con su rótulo, es lo que no
   es plata (la nota de crédito y el adelanto de sueldo); un pago a cuenta que después una boleta absorbe
   desde saldo a favor sigue en «Pagado» (`separarPagosFicha`, frv-B3).

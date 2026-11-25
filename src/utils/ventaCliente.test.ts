@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcularVentaCliente, calcularRitmoCompra, type PedidoVentaCliente } from './ventaCliente'
+import { calcularVentaCliente, calcularRitmoCompra, pedidosDelVendedor, type PedidoVentaCliente } from './ventaCliente'
 
 const pedido = (p: Partial<PedidoVentaCliente> & { id: string }): PedidoVentaCliente => ({
   cliente_id: '1',
@@ -254,5 +254,25 @@ describe('calcularRitmoCompra (días sin comprar y frecuencia: sólo ventas, por
       pedido({ id: 'b', fecha: '2026-07-01' }),
     ]
     expect(calcularRitmoCompra(filas, HOY)).toEqual(calcularRitmoCompra([...filas].reverse(), HOY))
+  })
+})
+
+// H-4 de la lente de H (tanda 6 bis de #1603): el preventista con el extra de chofer ve también las
+// boletas que reparte; su «Total comprado» cuenta sólo las que él vendió.
+describe('pedidosDelVendedor', () => {
+  const filas = [
+    pedido({ id: 'a', usuario_id: 'pre-1', total: 600 }),
+    pedido({ id: 'b', usuario_id: 'pre-2', total: 500 }),
+    pedido({ id: 'c', usuario_id: null, total: 100 }),
+  ]
+
+  it('con vendedor, sólo sus boletas', () => {
+    expect(pedidosDelVendedor(filas, 'pre-1').map(p => p.id)).toEqual(['a'])
+    expect(calcularVentaCliente(pedidosDelVendedor(filas, 'pre-1')).totalComprado).toBe(600)
+  })
+
+  it('sin vendedor, todas (admin y encargado)', () => {
+    expect(pedidosDelVendedor(filas, null).map(p => p.id)).toEqual(['a', 'b', 'c'])
+    expect(pedidosDelVendedor(filas, undefined)).toHaveLength(3)
   })
 })
