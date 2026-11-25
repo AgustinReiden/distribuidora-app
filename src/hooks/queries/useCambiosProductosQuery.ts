@@ -13,6 +13,7 @@ import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { productosKeys } from './useProductosQuery'
 import { clientesKeys } from './useClientesQuery'
+import { useRequestIdEstable } from '../useRequestIdEstable'
 
 export const cambiosProductosKeys = {
   all: (sucursalId: number | null) => ['cambios_productos', sucursalId] as const,
@@ -82,7 +83,7 @@ export interface RegistrarCambioInput {
   motivo?: 'vencimiento' | 'rotura' | 'mal_estado' | 'erroneo' | 'otro'
 }
 
-async function registrarCambio(input: RegistrarCambioInput): Promise<number> {
+async function registrarCambio(input: RegistrarCambioInput, clave: string): Promise<number> {
   const { data, error } = await supabase.rpc('registrar_cambio_producto', {
     p_cliente_id: Number(input.clienteId),
     p_producto_devuelto_id: Number(input.productoDevueltoId),
@@ -91,6 +92,7 @@ async function registrarCambio(input: RegistrarCambioInput): Promise<number> {
     p_cantidad_entregada: input.cantidadEntregada,
     p_observaciones: input.observaciones || null,
     p_motivo: input.motivo || 'erroneo',
+    p_clave: clave,
   })
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de productos. Revisá el stock antes de reintentar.')
@@ -104,9 +106,22 @@ async function registrarCambio(input: RegistrarCambioInput): Promise<number> {
 export function useRegistrarCambioProductoMutation() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
+  // Rut-B8 (ola 3, T3 de #1677): el canje lleva una clave estable por contenido
+  // (altas_por_clave en el server). Un doble toque, o reintentar lo mismo tras perder la
+  // respuesta, devuelve el canje del primer intento en vez de mover el stock otra vez.
+  const claveCanje = useRequestIdEstable()
 
   return useMutation({
-    mutationFn: registrarCambio,
+    mutationFn: async (input: RegistrarCambioInput): Promise<number> => {
+      // La sucursal entra en la huella: la clave del server es de la sucursal del canje.
+      const huella = `${currentSucursalId ?? ''}|${JSON.stringify(input)}`
+      const id = await registrarCambio(input, claveCanje(huella))
+      // Salió bien: el próximo canje igual (el mismo cliente que vuelve a devolver lo mismo
+      // otro día) es otro canje, con otra clave. Tras un error la clave sobrevive para el
+      // reintento.
+      claveCanje.olvidar([huella])
+      return id
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: productosKeys.lists(currentSucursalId) })
       queryClient.invalidateQueries({ queryKey: clientesKeys.listsPrefix(currentSucursalId) })

@@ -16,7 +16,8 @@
 //   - GOOGLE_API_KEY (secret) — key de Maps Platform (fallback computeRoutes)
 //   - APP_ORIGIN     (secret) — origen exacto del front (p.ej.
 //     "https://app.midistribuidora.com"), para Access-Control-Allow-Origin.
-//     Sin setear, cae a "*" (soportado pero desaconsejado en prod).
+//     Obligatorio (Rut-B14, ola 3): sin él, o con "*", la función falla cerrada
+//     (500, sin CORS para nadie, sin tocar Google) y lo dice en el log (cors.ts).
 //   - SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY
 //     (auto-inyectadas) — auth.ts usa URL y anon key para resolver al caller y
 //     preguntarle sus permisos a la base con su propia sesión.
@@ -25,8 +26,9 @@
 // con verify_jwt = true (Supabase exige un JWT firmado por el proyecto —
 // la anon key pública lo cumple). Eso NO alcanza: cada tramo optimizado es
 // una llamada facturable a Google, así que además exigimos rol transportista,
-// encargado o admin (ver auth.ts) y un tope de tamaño de request (ver
-// limites.ts), ambos ANTES de tocar Google.
+// encargado o admin (ver auth.ts), un tope de tamaño de request (ver
+// limites.ts) y un cupo de llamadas por usuario por minuto y por día (ver
+// cupo.ts, Rut-B14), todo ANTES de tocar Google.
 
 import { serve } from "std/http/server.ts";
 import {
@@ -50,15 +52,15 @@ import {
   type PedidoRutaZona,
 } from "./route-optimization.ts";
 import { navegarTramo } from "./navegar-tramo.ts";
-import { autorizarCaller, crearDepsAutorizacion } from "./auth.ts";
+import { autorizarCaller, crearDepsAutorizacion, crearLlamarCupo } from "./auth.ts";
 import { validarLimites } from "./limites.ts";
+import { configCors } from "./cors.ts";
+import { consumirCupoRuta, mensajeCupoRutaAgotado } from "./cupo.ts";
 
-const CORS_HEADERS: Record<string, string> = {
-  "Access-Control-Allow-Origin": Deno.env.get("APP_ORIGIN") ?? "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-sucursal-id",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+// Rut-B14 (ola 3): sin APP_ORIGIN (o con "*") no hay CORS para nadie: falla cerrado.
+const CORS = configCors(Deno.env.get("APP_ORIGIN"));
+if (!CORS.ok) console.error(`[optimizar-ruta] ${CORS.motivo}`);
+const CORS_HEADERS: Record<string, string> = CORS.headers;
 
 interface RequestBody {
   /** "navegar_tramo" → guía giro-a-giro de un tramo; ausente → optimizar ruta. */
@@ -231,6 +233,12 @@ async function viaComputeRoutesPorBarridas(
 }
 
 serve(async (req: Request) => {
+  // Rut-B14 (ola 3): sin el origen del front configurado no se contesta nada útil, ni el
+  // preflight: la respuesta va sin Access-Control-Allow-Origin y el navegador la rechaza.
+  if (!CORS.ok) {
+    console.error(`[optimizar-ruta] ${CORS.motivo}`);
+    return jsonResponse({ success: false, error: "CORS no configurado", mensaje: CORS.motivo }, 500);
+  }
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
@@ -243,6 +251,15 @@ serve(async (req: Request) => {
   const auth = await autorizarCaller(req, crearDepsAutorizacion());
   if (!auth.ok) {
     return jsonResponse({ success: false, error: auth.error, mensaje: auth.mensaje }, auth.status);
+  }
+
+  // Rut-B14 (ola 3): el cupo por usuario, con su sesión y su sucursal activa (el header ya
+  // lo validó autorizarCaller), antes de tocar Google.
+  const cupo = await consumirCupoRuta(
+    crearLlamarCupo(req.headers.get("Authorization") ?? "", req.headers.get("X-Sucursal-ID")?.trim() || null),
+  );
+  if (!cupo.ok) {
+    return jsonResponse({ success: false, error: "Demasiadas consultas", mensaje: mensajeCupoRutaAgotado(cupo.motivo) }, 429);
   }
 
   const saKey = Deno.env.get("GOOGLE_SA_KEY") ?? "";

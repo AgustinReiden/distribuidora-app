@@ -1,0 +1,355 @@
+-- Ensayo de la migración NNN_ola3_rutas_paradas_canjes (tarjeta T3 de la ola 3, #1677;
+-- puntos Rut-B3, B4, B5, B6, B8, B10, B11, B13 y B14 de #1554, y permisos-B1 = 1564-b9).
+--
+-- Un único DO que arma sus propios datos (gente, un cliente, productos y pedidos nuevos en la
+-- sucursal 1, y un encargado de la 2) y termina SIEMPRE en una excepción (ENSAYO OK / ENSAYO
+-- FALLÓ): no deja rastro. Corre sobre la base de CI sin datos. Sin la migración falla; con
+-- ella, ENSAYO OK. Usa el día argentino (`_tablero_hoy()`), nunca CURRENT_DATE.
+--
+-- Gente: E (encargado de la 1), E2 (encargado de la 2), choferes A, B, C y D de la 1, y PV
+-- (preventista de la 1, sin el extra de chofer).
+--
+--   B13 · El canje K que E crea para la ruta (crear_pedido_cambio_en_ruta) nace con
+--         creado_por = E, como todo pedido.
+--   B4  · K sale en la ruta de B; A tiene una parada vieja de K (una ruta cerrada de ayer,
+--         'reasignado'). A no puede aplicar el cambio («No autorizado», sin mover el stock); B sí.
+--   B5  · P1, P2 y P3 salen en la ruta de A. Una masiva de E a nombre de B entrega P1: la parada
+--         de A queda 'reasignado' (no 'entregado') y la ruta de A no la cuenta. La masiva a
+--         nombre de A de P2 sí marca su parada (control).
+--   B11 · P3 (1000) se cobra 700 en efectivo y 300 con saldo a favor aplicado, y A lo entrega:
+--         lo cobrado de la ruta de A es 700 (la plata), no 1000 (monto_pagado), en la función y
+--         en la columna de la ruta.
+--   B6  · aplicar_orden_ruta con la fecha de hace 400 días o de dentro de 61 se rechaza
+--         (22023, la regla de la entrega programada: de hoy a 60 días); mañana pasa.
+--   P1  · permisos-B1: E2, parado en la 2, no recalcula la ruta de A (de la 1): 42501. E sí.
+--   B3  · cerrar_recorridos_vencidos cierra la ruta de ayer de C a las 23:59 de Argentina
+--         (02:59 UTC del día siguiente), con la sesión en UTC como en prod.
+--   B8  · registrar_cambio_producto con la misma clave dos veces: un solo canje, el mismo id,
+--         el stock movido una vez; la misma clave con otro contenido, 22023. Sin clave (un PWA
+--         viejo, los siete parámetros por nombre) anda como antes: dos llamadas, dos canjes.
+--         Queda UNA sola firma (sin dos sobrecargas: PGRST203).
+--   B10 · crear_recorrido ya no existe.
+--   B14 · optimizar_ruta_consumir_cupo: sin EXECUTE para anon, con EXECUTE para authenticated;
+--         con tope 2 por minuto, la tercera llamada de A dice por_minuto; PV (sin rol de chofer
+--         ni de encargado) se rechaza (42501). Su tabla no tiene grants ni para authenticated.
+--   AUD · RUTA-A y RUTA-B de auditoria_integridad() quedan en 0 después de todo lo anterior.
+
+DO $ensayo$
+DECLARE
+  v_hoy    date := public._tablero_hoy();
+  v_tag    text := 'T3 ' || left(gen_random_uuid()::text, 8);
+  v_enc    uuid := gen_random_uuid();
+  v_enc2   uuid := gen_random_uuid();
+  v_a      uuid := gen_random_uuid();
+  v_b      uuid := gen_random_uuid();
+  v_c      uuid := gen_random_uuid();
+  v_d      uuid := gen_random_uuid();
+  v_pv     uuid := gen_random_uuid();
+  v_cli    bigint;
+  v_dev    bigint;
+  v_ent    bigint;
+  v_k      bigint;
+  v_p1     bigint;
+  v_p2     bigint;
+  v_p3     bigint;
+  v_p4     bigint;
+  v_ra     bigint;
+  v_rb     bigint;
+  v_rold   bigint;
+  v_rc     bigint;
+  v_pago   bigint;
+  v_txt    text;
+  v_n      bigint;
+  v_num    numeric;
+  v_ts     timestamptz;
+  v_tz     text;
+  v_j      jsonb;
+  v_clave  uuid := gen_random_uuid();
+  v_id1    bigint;
+  v_id2    bigint;
+  v_st0    integer;
+  v_st1    integer;
+  v_fallas text[] := '{}';
+BEGIN
+ BEGIN
+  -- ------------------------------------------------------------- personas ---
+  INSERT INTO auth.users (id, instance_id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+  SELECT u.id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+         't3-' || u.id || '@ensayo.invalid',
+         jsonb_build_object('rol', u.rol, 'sucursal_id', u.suc),
+         jsonb_build_object('nombre', v_tag || ' ' || u.que), now(), now()
+    FROM (VALUES (v_enc, 'encargado', 1, 'E'), (v_enc2, 'encargado', 2, 'E2'),
+                 (v_a, 'transportista', 1, 'A'), (v_b, 'transportista', 1, 'B'),
+                 (v_c, 'transportista', 1, 'C'), (v_d, 'transportista', 1, 'D'),
+                 (v_pv, 'preventista', 1, 'PV')) AS u(id, rol, suc, que);
+
+  INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
+  VALUES (v_tag, v_tag, 'Calle T3 1', 1) RETURNING id INTO v_cli;
+  INSERT INTO productos (nombre, precio, stock, costo_promedio, sucursal_id)
+  VALUES (v_tag || ' devuelto', 100, 1000, 60, 1) RETURNING id INTO v_dev;
+  INSERT INTO productos (nombre, precio, stock, costo_promedio, sucursal_id)
+  VALUES (v_tag || ' entregado', 100, 1000, 60, 1) RETURNING id INTO v_ent;
+
+  INSERT INTO pedidos (cliente_id, fecha, estado, total, monto_pagado, estado_pago, canal, usuario_id, creado_por, sucursal_id)
+  VALUES (v_cli, v_hoy, 'pendiente', 1000, 0, 'pendiente', 'app', v_enc, v_enc, 1) RETURNING id INTO v_p1;
+  INSERT INTO pedidos (cliente_id, fecha, estado, total, monto_pagado, estado_pago, canal, usuario_id, creado_por, sucursal_id)
+  VALUES (v_cli, v_hoy, 'pendiente', 1000, 0, 'pendiente', 'app', v_enc, v_enc, 1) RETURNING id INTO v_p2;
+  INSERT INTO pedidos (cliente_id, fecha, estado, total, monto_pagado, estado_pago, canal, usuario_id, creado_por, sucursal_id)
+  VALUES (v_cli, v_hoy, 'pendiente', 1000, 0, 'pendiente', 'app', v_enc, v_enc, 1) RETURNING id INTO v_p3;
+  INSERT INTO pedidos (cliente_id, fecha, estado, total, monto_pagado, estado_pago, canal, usuario_id, creado_por, sucursal_id)
+  VALUES (v_cli, v_hoy, 'pendiente', 1000, 0, 'pendiente', 'app', v_enc, v_enc, 1) RETURNING id INTO v_p4;
+
+  -- ---------------------------------------------------------------- helpers -
+  CREATE OR REPLACE FUNCTION pg_temp.como(p_uid uuid, p_suc bigint) RETURNS void LANGUAGE plpgsql AS $f$
+  BEGIN
+    PERFORM set_config('request.jwt.claims',
+                       CASE WHEN p_uid IS NULL THEN ''
+                            ELSE json_build_object('sub', p_uid, 'role', 'authenticated')::text END, true);
+    PERFORM set_config('request.jwt.claim.sub', COALESCE(p_uid::text, ''), true);
+    PERFORM set_config('request.headers',
+                       CASE WHEN p_suc IS NULL THEN '' ELSE json_build_object('x-sucursal-id', p_suc::text)::text END, true);
+    IF p_uid IS NULL THEN
+      EXECUTE 'RESET ROLE';
+    ELSE
+      EXECUTE 'SET LOCAL ROLE authenticated';
+    END IF;
+  END $f$;
+  -- Corre p_sql como p_uid parado en p_suc: 'PASA' o el SQLSTATE y el mensaje.
+  CREATE OR REPLACE FUNCTION pg_temp.r(p_uid uuid, p_suc bigint, p_sql text) RETURNS text LANGUAGE plpgsql AS $f$
+  DECLARE v text;
+  BEGIN
+    PERFORM pg_temp.como(p_uid, p_suc);
+    BEGIN
+      EXECUTE p_sql;
+      v := 'PASA';
+    EXCEPTION WHEN OTHERS THEN
+      v := SQLSTATE || ' ' || SQLERRM;
+    END;
+    PERFORM pg_temp.como(NULL, NULL);
+    RETURN v;
+  END $f$;
+  -- El valor de p_sql como p_uid parado en p_suc (sin atajar errores).
+  CREATE OR REPLACE FUNCTION pg_temp.v(p_uid uuid, p_suc bigint, p_sql text) RETURNS text LANGUAGE plpgsql AS $f$
+  DECLARE r text;
+  BEGIN
+    PERFORM pg_temp.como(p_uid, p_suc);
+    EXECUTE p_sql INTO r;
+    PERFORM pg_temp.como(NULL, NULL);
+    RETURN r;
+  END $f$;
+  CREATE OR REPLACE FUNCTION pg_temp.ruta(p_chofer uuid, p_pedidos bigint[], p_f date) RETURNS text LANGUAGE sql AS $f$
+    SELECT format('SELECT public.aplicar_orden_ruta(%L::uuid, %L::jsonb, NULL, NULL, NULL, %L::date)',
+                  p_chofer,
+                  (SELECT jsonb_agg(jsonb_build_object('pedido_id', x.id, 'orden_entrega', x.n) ORDER BY x.n)
+                     FROM unnest(p_pedidos) WITH ORDINALITY AS x(id, n)),
+                  p_f);
+  $f$;
+  CREATE OR REPLACE FUNCTION pg_temp.parada(p_ruta bigint, p_pedido bigint) RETURNS text LANGUAGE sql AS $f$
+    SELECT COALESCE((SELECT estado_entrega::text FROM public.recorrido_pedidos
+                      WHERE recorrido_id = p_ruta AND pedido_id = p_pedido), '-');
+  $f$;
+  CREATE OR REPLACE FUNCTION pg_temp.canje(p_clave uuid, p_cant int, p_obs text) RETURNS text LANGUAGE sql AS $f$
+    SELECT format('SELECT public.registrar_cambio_producto(p_cliente_id => %s, p_producto_devuelto_id => %s, '
+                  'p_cantidad_devuelta => %s, p_producto_entregado_id => %s, p_cantidad_entregada => %s, '
+                  'p_observaciones => %L, p_motivo => %L%s)::text',
+                  current_setting('et3.cli'), current_setting('et3.dev'), p_cant, current_setting('et3.ent'), p_cant,
+                  p_obs, 'erroneo',
+                  CASE WHEN p_clave IS NULL THEN '' ELSE format(', p_clave => %L::uuid', p_clave) END);
+  $f$;
+  PERFORM set_config('et3.cli', v_cli::text, true);
+  PERFORM set_config('et3.dev', v_dev::text, true);
+  PERFORM set_config('et3.ent', v_ent::text, true);
+
+  -- ------------------------------------------------------------------ B13 ---
+  v_k := pg_temp.v(v_enc, 1, format('SELECT public.crear_pedido_cambio_en_ruta(%s, %s, 2, %s, 2, %L, %L)::text',
+                                    v_cli, v_dev, v_ent, v_tag || ' parada', 'erroneo'))::bigint;
+  IF (SELECT creado_por FROM pedidos WHERE id = v_k) IS DISTINCT FROM v_enc THEN
+    v_fallas := v_fallas || format('B13 · el canje #%s nació con creado_por %s (se esperaba E)',
+                                   v_k, COALESCE((SELECT creado_por::text FROM pedidos WHERE id = v_k), 'NULL'));
+  END IF;
+
+  -- ------------------------------------------------------------------- B4 ---
+  v_rb := pg_temp.v(v_enc, 1, pg_temp.ruta(v_b, ARRAY[v_k], v_hoy))::bigint;
+  v_ra := pg_temp.v(v_enc, 1, pg_temp.ruta(v_a, ARRAY[v_p1, v_p2, v_p3], v_hoy))::bigint;
+  -- La ruta vieja de A, cerrada, con la parada de K que pasó a B.
+  INSERT INTO recorridos (transportista_id, fecha, estado, sucursal_id, completed_at)
+  VALUES (v_a, v_hoy - 1, 'completado', 1, now() - interval '1 day') RETURNING id INTO v_rold;
+  INSERT INTO recorrido_pedidos (recorrido_id, pedido_id, orden_entrega, estado_entrega, sucursal_id)
+  VALUES (v_rold, v_k, 1, 'reasignado', 1);
+
+  SELECT stock INTO v_st0 FROM productos WHERE id = v_ent;
+  v_txt := pg_temp.r(v_a, 1, format('SELECT public.aplicar_cambio_de_parada(%s, NULL, NULL)', v_k));
+  SELECT stock INTO v_st1 FROM productos WHERE id = v_ent;
+  IF v_txt !~ 'No autorizado para aplicar el cambio' OR (SELECT aplicado_at FROM recorrido_cambios WHERE pedido_id = v_k) IS NOT NULL
+     OR v_st1 IS DISTINCT FROM v_st0 THEN
+    v_fallas := v_fallas || format('B4 · A (parada vieja del canje) aplicó el cambio o no se rechazó: %s (stock %s → %s)',
+                                   v_txt, v_st0, v_st1);
+  END IF;
+  v_txt := pg_temp.r(v_b, 1, format('SELECT public.aplicar_cambio_de_parada(%s, NULL, NULL)', v_k));
+  IF v_txt <> 'PASA' OR (SELECT aplicado_at FROM recorrido_cambios WHERE pedido_id = v_k) IS NULL THEN
+    v_fallas := v_fallas || ('B4 · B (su parada viva) no pudo aplicar el cambio: ' || v_txt);
+  END IF;
+
+  -- ------------------------------------------------------------------- B5 ---
+  v_txt := pg_temp.r(v_enc, 1, format('SELECT public.marcar_entregas_masivo(ARRAY[%s]::bigint[], %L::uuid, %L::date)',
+                                      v_p1, v_b, v_hoy));
+  IF v_txt <> 'PASA' OR (SELECT estado FROM pedidos WHERE id = v_p1) <> 'entregado' THEN
+    v_fallas := v_fallas || ('B5 · la masiva a nombre de B no entregó P1: ' || v_txt);
+  ELSIF pg_temp.parada(v_ra, v_p1) <> 'reasignado'
+        OR (SELECT pedidos_entregados FROM recorridos WHERE id = v_ra) <> 0
+        OR (SELECT total_pedidos FROM recorridos WHERE id = v_ra) <> 2 THEN
+    v_fallas := v_fallas || format('B5 · P1, entregado por B, dejó la parada de A en %s (se esperaba reasignado) y la ruta de A en %s entregados de %s',
+                                   pg_temp.parada(v_ra, v_p1),
+                                   (SELECT pedidos_entregados FROM recorridos WHERE id = v_ra),
+                                   (SELECT total_pedidos FROM recorridos WHERE id = v_ra));
+  END IF;
+  v_txt := pg_temp.r(v_enc, 1, format('SELECT public.marcar_entregas_masivo(ARRAY[%s]::bigint[], %L::uuid, %L::date)',
+                                      v_p2, v_a, v_hoy));
+  IF v_txt <> 'PASA' OR pg_temp.parada(v_ra, v_p2) <> 'entregado' THEN
+    v_fallas := v_fallas || format('B5 · control: P2 entregado por A dejó su parada en %s: %s', pg_temp.parada(v_ra, v_p2), v_txt);
+  END IF;
+
+  -- ------------------------------------------------------------------ B11 ---
+  -- 700 en efectivo, y 300 de un crédito suelto que se aplica a la boleta (de_saldo_a_favor lo
+  -- pone el trigger al pasar el pago de suelto a la boleta).
+  INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, sucursal_id, usuario_id)
+  VALUES (v_cli, v_p3, 700, 'efectivo', v_hoy, 1, v_enc);
+  INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, sucursal_id, usuario_id)
+  VALUES (v_cli, NULL, 300, 'efectivo', v_hoy, 1, v_enc) RETURNING id INTO v_pago;
+  UPDATE pagos SET pedido_id = v_p3 WHERE id = v_pago;
+  IF NOT (SELECT de_saldo_a_favor FROM pagos WHERE id = v_pago) THEN
+    v_fallas := v_fallas || 'B11 · el crédito aplicado no quedó marcado de_saldo_a_favor: el caso no prueba nada'::text;
+  END IF;
+  v_txt := pg_temp.r(v_enc, 1, format('SELECT public.marcar_entregas_masivo(ARRAY[%s]::bigint[], %L::uuid, %L::date)',
+                                      v_p3, v_a, v_hoy));
+  SELECT total_cobrado INTO v_num FROM public._recorrido_contadores(v_ra);
+  IF v_txt <> 'PASA' OR v_num IS DISTINCT FROM 700::numeric
+     OR (SELECT total_cobrado FROM recorridos WHERE id = v_ra) IS DISTINCT FROM 700::numeric THEN
+    v_fallas := v_fallas || format('B11 · lo cobrado de la ruta de A es %s (columna %s), se esperaba 700: el saldo a favor no es plata del chofer (%s)',
+                                   v_num, (SELECT total_cobrado FROM recorridos WHERE id = v_ra), v_txt);
+  END IF;
+
+  -- ------------------------------------------------------------------- B6 ---
+  v_txt := pg_temp.r(v_enc, 1, pg_temp.ruta(v_d, ARRAY[v_p4], v_hoy - 400));
+  IF v_txt !~ '^22023 .*no puede ser anterior' THEN
+    v_fallas := v_fallas || ('B6 · una ruta de hace 400 días no se rechazó: ' || v_txt);
+  END IF;
+  v_txt := pg_temp.r(v_enc, 1, pg_temp.ruta(v_d, ARRAY[v_p4], v_hoy + 61));
+  IF v_txt !~ '^22023 .*no puede ser posterior' THEN
+    v_fallas := v_fallas || ('B6 · una ruta de dentro de 61 días no se rechazó: ' || v_txt);
+  END IF;
+  v_txt := pg_temp.r(v_enc, 1, pg_temp.ruta(v_d, ARRAY[v_p4], v_hoy + 1));
+  IF v_txt <> 'PASA' THEN
+    v_fallas := v_fallas || ('B6 · control: la ruta de mañana no pasó: ' || v_txt);
+  END IF;
+
+  -- ------------------------------------------------------------------- P1 ---
+  v_txt := pg_temp.r(v_enc2, 2, format('SELECT public.recalcular_recorrido(%s)', v_ra));
+  IF v_txt !~ '^42501 ' THEN
+    v_fallas := v_fallas || ('P1 · un encargado de la sucursal 2 recalculó una ruta de la 1: ' || v_txt);
+  END IF;
+  v_txt := pg_temp.r(v_enc, 1, format('SELECT public.recalcular_recorrido(%s)', v_ra));
+  IF v_txt <> 'PASA' THEN
+    v_fallas := v_fallas || ('P1 · control: E no pudo recalcular su ruta: ' || v_txt);
+  END IF;
+
+  -- ------------------------------------------------------------------- B3 ---
+  INSERT INTO recorridos (transportista_id, fecha, estado, sucursal_id)
+  VALUES (v_c, v_hoy - 1, 'en_curso', 1) RETURNING id INTO v_rc;
+  v_tz := current_setting('TimeZone');
+  PERFORM set_config('TimeZone', 'UTC', true);
+  PERFORM public.cerrar_recorridos_vencidos(1);
+  PERFORM set_config('TimeZone', v_tz, true);
+  SELECT completed_at INTO v_ts FROM recorridos WHERE id = v_rc;
+  IF (SELECT estado FROM recorridos WHERE id = v_rc) <> 'completado'
+     OR v_ts IS DISTINCT FROM (((v_hoy - 1) + TIME '23:59') AT TIME ZONE 'America/Argentina/Buenos_Aires') THEN
+    v_fallas := v_fallas || format('B3 · la ruta de ayer de C se cerró a las %s UTC (se esperaba %s UTC, las 23:59 de Argentina)',
+                                   to_char(v_ts AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI'),
+                                   to_char((((v_hoy - 1) + TIME '23:59') AT TIME ZONE 'America/Argentina/Buenos_Aires') AT TIME ZONE 'UTC',
+                                           'YYYY-MM-DD HH24:MI'));
+  END IF;
+
+  -- ------------------------------------------------------------------- B8 ---
+  SELECT count(*) INTO v_n FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'registrar_cambio_producto';
+  IF v_n <> 1 OR to_regprocedure('public.registrar_cambio_producto(integer,bigint,integer,bigint,integer,text,text,uuid)') IS NULL THEN
+    v_fallas := v_fallas || format('B8 · registrar_cambio_producto tiene %s firma(s) y no la de la clave', v_n);
+  ELSE
+    SELECT stock INTO v_st0 FROM productos WHERE id = v_ent;
+    BEGIN
+      v_id1 := pg_temp.v(v_enc, 1, pg_temp.canje(v_clave, 2, v_tag || ' b8'))::bigint;
+      v_id2 := pg_temp.v(v_enc, 1, pg_temp.canje(v_clave, 2, v_tag || ' b8'))::bigint;
+    EXCEPTION WHEN OTHERS THEN
+      PERFORM pg_temp.como(NULL, NULL);
+      v_fallas := v_fallas || ('B8 · el canje con clave falló: ' || SQLERRM);
+    END;
+    SELECT stock INTO v_st1 FROM productos WHERE id = v_ent;
+    SELECT count(*) INTO v_n FROM cambios_productos WHERE cliente_id = v_cli AND observaciones = v_tag || ' b8';
+    IF v_id1 IS NULL OR v_id1 IS DISTINCT FROM v_id2 OR v_n <> 1 OR v_st1 IS DISTINCT FROM v_st0 - 2 THEN
+      v_fallas := v_fallas || format('B8 · dos toques con la misma clave: ids %s y %s, %s canje(s), stock entregado %s → %s (se esperaba uno, −2)',
+                                     v_id1, v_id2, v_n, v_st0, v_st1);
+    END IF;
+    v_txt := pg_temp.r(v_enc, 1, pg_temp.canje(v_clave, 3, v_tag || ' b8'));
+    IF v_txt !~ '^22023 ' THEN
+      v_fallas := v_fallas || ('B8 · la misma clave con otra cantidad no se rechazó: ' || v_txt);
+    END IF;
+    v_txt := pg_temp.r(v_enc, 1, pg_temp.canje(NULL, 1, v_tag || ' b8 sin clave'));
+    v_txt := v_txt || ' / ' || pg_temp.r(v_enc, 1, pg_temp.canje(NULL, 1, v_tag || ' b8 sin clave'));
+    SELECT count(*) INTO v_n FROM cambios_productos WHERE cliente_id = v_cli AND observaciones = v_tag || ' b8 sin clave';
+    IF v_txt <> 'PASA / PASA' OR v_n <> 2 THEN
+      v_fallas := v_fallas || format('B8 · sin clave (un PWA viejo) tenía que andar como antes: %s, %s canje(s)', v_txt, v_n);
+    END IF;
+    IF has_function_privilege('anon', 'public.registrar_cambio_producto(integer,bigint,integer,bigint,integer,text,text,uuid)', 'EXECUTE')
+       OR NOT has_function_privilege('authenticated', 'public.registrar_cambio_producto(integer,bigint,integer,bigint,integer,text,text,uuid)', 'EXECUTE') THEN
+      v_fallas := v_fallas || 'B8 · los permisos de registrar_cambio_producto no son los de antes (authenticated sí, anon no)'::text;
+    END IF;
+  END IF;
+
+  -- ------------------------------------------------------------------ B10 ---
+  IF to_regproc('public.crear_recorrido') IS NOT NULL THEN
+    v_fallas := v_fallas || 'B10 · crear_recorrido sigue existiendo (código muerto, sin validación de rol)'::text;
+  END IF;
+
+  -- ------------------------------------------------------------------ B14 ---
+  IF to_regprocedure('public.optimizar_ruta_consumir_cupo(integer,integer)') IS NULL THEN
+    v_fallas := v_fallas || 'B14 · no existe optimizar_ruta_consumir_cupo (el cupo por usuario de optimizar-ruta)'::text;
+  ELSE
+    IF has_function_privilege('anon', 'public.optimizar_ruta_consumir_cupo(integer,integer)', 'EXECUTE')
+       OR NOT has_function_privilege('authenticated', 'public.optimizar_ruta_consumir_cupo(integer,integer)', 'EXECUTE') THEN
+      v_fallas := v_fallas || 'B14 · optimizar_ruta_consumir_cupo: anon no y authenticated sí'::text;
+    END IF;
+    IF has_table_privilege('authenticated', 'public.optimizar_ruta_cupo_uso', 'SELECT')
+       OR has_table_privilege('authenticated', 'public.optimizar_ruta_cupo_uso', 'INSERT')
+       OR has_table_privilege('anon', 'public.optimizar_ruta_cupo_uso', 'SELECT') THEN
+      v_fallas := v_fallas || 'B14 · optimizar_ruta_cupo_uso tiene grants para la API'::text;
+    END IF;
+    v_j := NULL;
+    FOR v_n IN 1..3 LOOP
+      v_j := pg_temp.v(v_a, 1, 'SELECT public.optimizar_ruta_consumir_cupo(2, 100)::text')::jsonb;
+    END LOOP;
+    IF COALESCE((v_j->>'ok')::boolean, true) OR v_j->>'motivo' IS DISTINCT FROM 'por_minuto' THEN
+      v_fallas := v_fallas || ('B14 · la tercera llamada con tope 2 por minuto no se frenó: ' || COALESCE(v_j::text, 'NULL'));
+    END IF;
+    v_txt := pg_temp.r(v_pv, 1, 'SELECT public.optimizar_ruta_consumir_cupo(2, 100)');
+    IF v_txt !~ '^42501 ' THEN
+      v_fallas := v_fallas || ('B14 · un preventista sin rol de chofer consumió cupo de optimizar-ruta: ' || v_txt);
+    END IF;
+  END IF;
+
+  -- ------------------------------------------------------------------ AUD ---
+  SELECT string_agg(format('%s=%s', e->>'id', e->>'violaciones'), ', ')
+    INTO v_txt
+    FROM jsonb_array_elements(public.auditoria_integridad()->'checks') e
+   WHERE e->>'id' IN ('RUTA-A', 'RUTA-B') AND (e->>'violaciones')::bigint <> 0;
+  IF v_txt IS NOT NULL THEN
+    v_fallas := v_fallas || ('AUD · ' || v_txt);
+  END IF;
+
+  IF cardinality(v_fallas) > 0 THEN
+    RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = 'ENSAYO FALLÓ · ' || array_to_string(v_fallas, ' | ');
+  END IF;
+  RAISE EXCEPTION USING ERRCODE = 'ZZ0OK',
+    MESSAGE = format('ENSAYO OK · B13 B4 B5 B11 B6 P1 B3 B8 B10 B14 AUD (hoy %s; canje %s, rutas A %s, B %s, C %s)',
+                     v_hoy, v_k, v_ra, v_rb, v_rc);
+ END;
+END
+$ensayo$;
