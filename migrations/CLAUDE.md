@@ -101,7 +101,11 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
     cada barra por `_barra_mover_neto`, que llama al motor una vez por promo y producto con la
     diferencia (primero lo que baja) y, si un fardo se abre en una barra y se cierra en otra del
     mismo contenedor, el bloque nuevo hereda su lote (el molde M3-1). La edición que no cambia el
-    regalo no toca la barra, los bloques ni el contenedor (B19, ola 2 de #1603). Un camino nuevo que
+    regalo no toca la barra, los bloques ni el contenedor (B19, ola 2 de #1603). Si lo único que le
+    falta al pre-chequeo de la edición es stock del contenedor de una barra con bloques vivos que el
+    pedido tiene, las bajadas de las líneas van después de mover la barra, cada una con su línea, y si
+    aun así no alcanza se rechaza con el mismo motivo (STK-2, tanda 6 bis): A×20 + S×4 deja C en 0, y
+    A×10 + S×2 + C×1 entra. Lo que pasa el pre-chequeo sigue en el orden de siempre. Un camino nuevo que
     en la misma operación baje una barra y suba otra pasa por ese helper; los que sólo suben (el
     alta, el bot) o sólo bajan (la cancelación, la eliminación, la salvedad) llaman al motor directo.
   - El gate es el check **STK-F** de `auditoria_integridad()`: falla si una función de `public`

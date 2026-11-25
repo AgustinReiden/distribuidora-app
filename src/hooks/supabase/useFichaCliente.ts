@@ -12,7 +12,13 @@ import type {
 import { traerTodo } from '../../utils/paginacion'
 import { fechaLocalISO } from '../../utils/formatters'
 import { calcularVentaCliente, calcularRitmoCompra, separarPagosFicha, type PagoFichaCliente } from '../../utils/ventaCliente'
-import { NOTAS_VENTA_METRICA_SELECT, type NotaCreditoVentaMetricaRow } from '../../utils/notasCreditoVentaMetrica'
+import {
+  NOTAS_VENTA_METRICA_SELECT,
+  RPC_NOTAS_DEL_VENDEDOR,
+  notaDelVendedorComoMetrica,
+  type NotaCreditoVentaMetricaRow,
+  type NotaDelVendedorRow,
+} from '../../utils/notasCreditoVentaMetrica'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
 
@@ -80,8 +86,8 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
 
       // Notas de crédito de venta vigentes del cliente: el «Total comprado» es neto de ellas
       // (REP-1, tanda 6). La RLS las deja ver a admin y encargado; para un preventista vuelve
-      // vacía, sin error, y su total queda bruto.
-      const notasCliente = await traerTodo<NotaCreditoVentaMetricaRow>(
+      // vacía, sin error.
+      const notasRest = await traerTodo<NotaCreditoVentaMetricaRow>(
         // El tipo inferido del embed es un arreglo; PostgREST devuelve la boleta como objeto (FK a uno).
         () => supabase
           .from('notas_credito_venta')
@@ -92,6 +98,16 @@ export function useFichaCliente(clienteId: string | null | undefined): UseFichaC
         { etiqueta: 'notas de crédito del cliente' },
       )
       if (!vigente()) return
+      // El preventista (tanda 6 bis; decisión del dueño del 24/11) ve por RLS sólo los pedidos que
+      // ÉL le vendió al cliente, así que su «Total comprado» es lo que le vendió, neto de las notas
+      // de esas boletas: se las da la RPC (fecha, cliente y total). A admin y encargado no les da
+      // nada (las leyeron arriba): las dos fuentes se suman sin repetir.
+      const notasPropias = await traerTodo<NotaDelVendedorRow>(
+        () => supabase.rpc(RPC_NOTAS_DEL_VENDEDOR, { p_desde: null, p_hasta: null, p_cliente_id: clienteId }),
+        { etiqueta: 'notas de crédito del vendedor' },
+      )
+      if (!vigente()) return
+      const notasCliente = [...notasRest, ...notasPropias.map(n => notaDelVendedorComoMetrica(n, null))]
 
       // Query pesada: últimos 50 pedidos con items (para UI + productos favoritos)
       const { data: pedidos, error: errorPedidos } = await supabase

@@ -480,8 +480,11 @@ suelta en `sucursales`.
   **El Dashboard y la ficha del cliente también son netos** (REP-1, tanda 6; decisión del dueño del
   24/11): «Venta entregada», los clientes más activos y el «Total comprado» restan las notas vigentes de
   boletas que son venta (`src/utils/notasCreditoVentaMetrica.ts`, mismo corte que `_ventas_nc`; la plata es
-  `total` de la nota). Las notas las lee por REST sólo admin y encargado (`mt_notas_credito_venta_select`):
-  a un preventista la consulta le vuelve vacía y sus cifras siguen brutas hasta que haya una RPC para él.
+  `total` de la nota). Las notas las lee por REST sólo admin y encargado (`mt_notas_credito_venta_select`);
+  el preventista, por `notas_credito_venta_del_vendedor` (tanda 6 bis; decisión del dueño del 24/11: «que
+  vea $ 700, neto»), que le da sólo la fecha, el cliente y el total de las notas que restan de boletas que
+  ÉL vendió, en la sucursal activa, y a admin y encargado nada: el front suma las dos fuentes sin repetir.
+  Su «Total comprado» resta sólo esas notas, porque la RLS de `pedidos` le muestra sólo lo que él vendió.
   El «Pagado» de la ficha cuenta sólo plata cobrada: lo único que va aparte, con su rótulo, es lo que no
   es plata (la nota de crédito y el adelanto de sueldo); un pago a cuenta que después una boleta absorbe
   desde saldo a favor sigue en «Pagado» (`separarPagosFicha`, frv-B3).

@@ -11,12 +11,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fechaLocalISO } from '../../utils/formatters'
-import { ventanaAnterior, ventanaPeriodoDashboard } from '../../utils/metricasDashboard'
+import { addDiasISO, ventanaAnterior, ventanaPeriodoDashboard } from '../../utils/metricasDashboard'
 
 const m = vi.hoisted(() => ({
   pedidos: [] as Array<Record<string, unknown>>,
   notas: [] as Array<Record<string, unknown>>,
   anterior: [] as Array<Record<string, unknown>>,
+  // La RPC de las notas del preventista (tanda 6 bis): lo que devuelve y con qué se la llamó.
+  delVendedor: [] as Array<Record<string, unknown>>,
+  llamadasRpc: [] as Array<{ nombre: string; args: Record<string, unknown> }>,
 }))
 
 vi.mock('../supabase/base', () => {
@@ -39,7 +42,11 @@ vi.mock('../supabase/base', () => {
     }
     return b
   }
-  return { supabase: { from: (tabla: string) => armar(tabla), rpc: vi.fn() } }
+  const rpc = (nombre: string, args: Record<string, unknown>) => {
+    m.llamadasRpc.push({ nombre, args })
+    return { range: () => Promise.resolve({ data: m.delVendedor, error: null }) }
+  }
+  return { supabase: { from: (tabla: string) => armar(tabla), rpc } }
 })
 vi.mock('../../contexts/SucursalContext', () => ({ useSucursal: () => ({ currentSucursalId: 1 }) }))
 
@@ -75,6 +82,8 @@ beforeEach(() => {
   // 350 en notas: 300 al cliente 1, 50 al 3.
   m.notas = [nota(1, 1, 100), nota(2, 1, 100), nota(3, 1, 100), nota(4, 3, 50)]
   m.anterior = []
+  m.delVendedor = []
+  m.llamadasRpc = []
 })
 
 describe('el Dashboard es neto de notas de crédito de venta (REP-1)', () => {
@@ -127,9 +136,47 @@ describe('el Dashboard es neto de notas de crédito de venta (REP-1)', () => {
     expect(d.ventasPeriodo).toBe(1050 - 150)
   })
 
-  it('un preventista (la RLS le devuelve cero notas) ve lo suyo, en bruto y sin error', async () => {
+  it('un preventista sin notas (la RLS no le da ninguna y la RPC tampoco) ve lo suyo, en bruto y sin error', async () => {
     m.notas = []
     const d = await correr('prev-1')
     expect(d.ventasPeriodo).toBe(1050)
+  })
+})
+
+// Tanda 6 bis (decisión del dueño del 24/11: «que vea $ 700, neto»): al preventista la RLS no le
+// deja leer las notas por REST; las de SUS boletas le llegan por notas_credito_venta_del_vendedor.
+describe('el Dashboard del preventista también es neto (RPC de sus notas)', () => {
+  it('vendió $ 1.050 y tiene una nota de $ 350: ve $ 700', async () => {
+    m.notas = []
+    m.delVendedor = [{ fecha: hoy, cliente_id: 1, total: 350 }]
+    const d = await correr('prev-1')
+    expect(d.ventasPeriodo).toBe(700)
+    expect(d.ventasPorDia[d.ventasPorDia.length - 1].ventas).toBe(700)
+    expect(d.clientesMasActivos.map(c => [c.nombre, c.total])).toEqual([['Cliente 1', 550], ['Cliente 3', 150]])
+  })
+
+  it('le pide a la RPC desde la ventana más vieja (período, anterior o gráfico), sin tope arriba', async () => {
+    const mes = ventanaPeriodoDashboard('mes', hoy)
+    const prev = ventanaAnterior(mes.desde!, hoy)
+    await correr('prev-1')
+    expect(m.llamadasRpc).toEqual([
+      { nombre: 'notas_credito_venta_del_vendedor', args: { p_desde: [mes.desde!, prev.desde, addDiasISO(hoy, -6)].sort()[0], p_hasta: null, p_cliente_id: null } },
+    ])
+  })
+
+  it('el período anterior del preventista también es neto', async () => {
+    const mes = ventanaPeriodoDashboard('mes', hoy)
+    const prev = ventanaAnterior(mes.desde!, hoy)
+    m.anterior = [{ total: 500, cargo_envio: 0, estado: 'entregado', canal: 'app' }]
+    m.notas = []
+    m.delVendedor = [{ fecha: prev.hasta, cliente_id: 1, total: 120 }]
+    const d = await correr('prev-1')
+    expect(d.ventasPeriodoAnterior).toBe(380)
+    expect(d.ventasPeriodo).toBe(1050)
+  })
+
+  it('el Dashboard de admin y encargado (sin vendedor) no llama a la RPC: lee las notas por REST', async () => {
+    await correr()
+    expect(m.llamadasRpc).toEqual([])
   })
 })
