@@ -1391,7 +1391,6 @@ export interface UseRecorridosReturnExtended {
   error: boolean;
   fetchRecorridosHoy: () => Promise<RecorridoDBExtended[]>;
   fetchRecorridosPorFecha: (fecha: string) => Promise<RecorridoDBExtended[]>;
-  completarRecorrido: (recorridoId: string) => Promise<void>;
   getEstadisticasRecorridos: (fechaDesde: string, fechaHasta: string) => Promise<EstadisticasRecorridos>;
 }
 
@@ -1604,6 +1603,8 @@ export interface ControlRendicionInfo {
 export interface UseRendicionesReturn {
   resumenes: ResumenRendicionDiaria[];
   loading: boolean;
+  /** La última carga falló: la lista vacía no significa «no hay rendiciones en el rango». */
+  error: boolean;
   fetchResumen: (
     fechaDesde: string,
     fechaHasta: string,
