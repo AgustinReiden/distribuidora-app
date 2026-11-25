@@ -145,7 +145,10 @@ export function sugerirCantidadPorValor(args: {
 export type CambioRegalo =
   /** Mismo rubro y mismo factor: la cantidad sigue siendo la original (como siempre). */
   | { tipo: 'mismo_empaque'; factorSustituto: number }
-  /** Otro rubro sin el dato del empaque: no se puede convertir. Hay que cargarlo. */
+  /**
+   * Sin el dato del empaque y sin descontar del contenedor de la promo (otro rubro, o el
+   * mismo rubro desde promos-B1): no se puede convertir. Hay que cargarlo.
+   */
   | { tipo: 'falta_bulto'; productoACargar: ProductoConEmpaque }
   /** Otro rubro u otro empaque: la cantidad se sugiere por valor. */
   | { tipo: 'por_valor'; factorSustituto: number; mismaCategoria: boolean; sugerencia: SugerenciaPorValor | null }
@@ -173,6 +176,13 @@ export function evaluarCambioRegalo(args: {
    * server), y no contra la línea de hoy.
    */
   referencia?: { regalo: ProductoConEmpaque; factor: number; corte: number } | null
+  /**
+   * promos-B1 (tanda 6 de #1603): el contenedor de la promo (`ajuste_producto_id`) y su
+   * regalo. Un sustituto que descuenta de ese contenedor (o que es el regalo de la promo)
+   * cuenta con el N de la promo aunque no tenga su bulto; cualquier otro, no.
+   */
+  contenedorPromoId?: string | number | null
+  regaloPromoId?: string | number | null
 }): CambioRegalo {
   const mismaCategoria = esRegaloCompatible(args.original, args.sustituto)
   const contenedor = args.contenedorSustituto ?? args.sustituto
@@ -182,9 +192,15 @@ export function evaluarCambioRegalo(args: {
     factorSustituto = 1
   } else {
     const bulto = positivo(contenedor.unidades_por_bulto)
-    // Sin el dato, la barra contaría con el N de la promo, que es el empaque del
-    // ORIGINAL: vale para el mismo rubro (como hasta ahora), no para otro.
-    factorSustituto = bulto ?? (mismaCategoria ? unidadesDeLaBarra(null, args.unidadesPorBloquePromo) ?? 1 : null)
+    const factorPromo = positivo(args.unidadesPorBloquePromo)
+    const mismo = (a: unknown, b: string | number | null | undefined) => b != null && String(a) === String(b)
+    const delContenedorDeLaPromo = mismo(contenedor.id, args.contenedorPromoId)
+      || mismo(args.sustituto.id, args.regaloPromoId)
+    // Sin el dato, la barra contaría con el N de la promo, que es el empaque del regalo
+    // (#950): vale para el mismo rubro sólo si descuenta del contenedor de la promo, o si la
+    // promo no tiene N (cuenta de a una). Igual que sustituir_regalo_pedido (promos-B1).
+    factorSustituto = bulto
+      ?? (mismaCategoria && (factorPromo === null || delContenedorDeLaPromo) ? (factorPromo ?? 1) : null)
   }
   if (factorSustituto === null) {
     return { tipo: 'falta_bulto', productoACargar: contenedor }

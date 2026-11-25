@@ -815,7 +815,11 @@ suelta en `sucursales`.
   `versionTrasCambioPropio`).
 - **El límite de usos de una promo cuenta el corte, no la línea, y lo hace cumplir un trigger**
   (`trg_limite_usos_promo`, #1300) → `migrations/CLAUDE.md`. Al editar o cambiar el cliente, el
-  regalo de una promo que se apagó se conserva (`promosConRegalo`): la política rige el alta.
+  regalo de una promo que se apagó se conserva (`promosConRegalo`): la política rige el alta. Se
+  conserva pero NO CRECE (promos-B6, decisión del dueño del 24/11): V×10 + R×4 con la promo apagada,
+  editado a V×20, sigue con R×4; bajar la venta lo recorta como siempre. Lo mide
+  `regalo_fuera_de_promo` en cortes, con espejo en `regaloQueNoCrece` (`src/utils/regaloPromoApagada.ts`);
+  el admin no tiene ese tope.
 - **El día es el argentino, no el del servidor** (#1250). La base corre en UTC: entre las 21 y
   las 24 de Argentina `CURRENT_DATE` ya es mañana, y la mora, las alertas y las metas corrían un
   día de noche sin que fallara nada. En una función va `_tablero_hoy()`; en un default de

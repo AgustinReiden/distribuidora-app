@@ -442,7 +442,10 @@ BEGIN
   v := pg_temp.er_prod(p_suc, p_adm, 'v', 500, 50);
   r := pg_temp.er_prod(p_suc, p_adm, 'r', 100, 50);
   v_promo := pg_temp.er_promo(p_suc, r, v, false);
-  v_items := jsonb_build_array(pg_temp.er_v(v, 10), pg_temp.er_r(r, 2, v_promo));
+  -- Tanda 6 de #1603 (PRM-1, decisión del dueño del 24/11), cambió de regla: con un bloque
+  -- cerrado en la barra (3 × R×2 = 6 = un fardo) el cambio de tipo se rechaza. Cada pedido
+  -- lleva R×1 (3 < 6): la barra no cierra bloques y el caso es el de siempre.
+  v_items := jsonb_build_array(pg_temp.er_v(v, 10), pg_temp.er_r(r, 1, v_promo));
   p_a := pg_temp.er_alta(p_cli, p_adm, v_items);
   p_b := pg_temp.er_alta(p_cli, p_adm, v_items);
   p_c := pg_temp.er_alta(p_cli, p_adm, v_items);
@@ -455,13 +458,13 @@ BEGIN
                      format('salvedad: %s, esperado que no devuelva', v_res));
   -- LV-1 de #1565 (decisión del dueño del 13/11): a este regalo ya no se le suma, así que
   -- la edición toca la venta y deja el regalo; subirlo se rechaza y no cambia nada.
-  v_res := pg_temp.er_editar(p_c, p_adm, jsonb_build_array(pg_temp.er_v(v, 12), pg_temp.er_r(r, 2, v_promo)));
+  v_res := pg_temp.er_editar(p_c, p_adm, jsonb_build_array(pg_temp.er_v(v, 12), pg_temp.er_r(r, 1, v_promo)));
   f := pg_temp.er_si(f, pg_temp.er_ok(v_res), format('edicion: %s', v_res));
   f := pg_temp.er_si(f, pg_temp.er_stock(r) = v_antes,
                      format('cancelar, la salvedad y editar movieron %s, esperado 0', pg_temp.er_stock(r) - v_antes));
   v_res := pg_temp.er_editar(p_c, p_adm, jsonb_build_array(pg_temp.er_v(v, 20), pg_temp.er_r(r, 4, v_promo)));
   f := pg_temp.er_si(f, NOT pg_temp.er_ok(v_res) AND v_res->>'codigo' = 'regalo_de_tramo_anterior'
-                        AND pg_temp.er_cant(p_c, r) = 2 AND pg_temp.er_stock(r) = v_antes,
+                        AND pg_temp.er_cant(p_c, r) = 1 AND pg_temp.er_stock(r) = v_antes,
                      format('subirle el regalo dio %s, esperado el rechazo sin cambios', v_res));
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END

@@ -54,12 +54,14 @@ RETURNS bigint LANGUAGE plpgsql AS $fn$
 DECLARE
   v_id bigint;
 BEGIN
+  -- Tanda 6 de #1603 (promos-B3, H6 de su lente), cambió de regla: la edición de una promo con ajuste
+  -- automático pide, como el alta, la descripción del regalo: la promo del ensayo la trae.
   INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock, producto_regalo_id,
                                   ajuste_automatico, ajuste_producto_id, unidades_por_bloque, stock_por_bloque,
-                                  usos_pendientes)
+                                  usos_pendientes, descripcion_regalo)
   VALUES (p_nombre, 'bonificacion', public._tablero_hoy() - 1, p_suc, p_mueve, p_regalo,
           p_cont IS NOT NULL, p_cont, CASE WHEN p_cont IS NOT NULL THEN 6 END, CASE WHEN p_cont IS NOT NULL THEN 1 END,
-          p_usos)
+          p_usos, CASE WHEN p_cont IS NOT NULL THEN 'una Q' END)
   RETURNING id INTO v_id;
   INSERT INTO public.promocion_reglas (promocion_id, clave, valor, sucursal_id)
   VALUES (v_id, 'cantidad_compra', 10, p_suc), (v_id, 'cantidad_bonificacion', 2, p_suc);
@@ -146,10 +148,12 @@ BEGIN
   v_c := pg_temp.t_producto(v_suc, 'ZZ ensayo 1491 C', 2);
 
   -- Lo que manda el modal al cambiar el regalo a Q y el factor a 1 (#1491: el escenario del issue).
+  -- Tanda 6 de #1603 (promos-B3, H6 de su lente): con la descripción del regalo, que el modal pide
+  -- para una de fracción y la edición exige, como el alta.
   v_datos := jsonb_build_object(
     'nombre', 'ZZ ensayo 1491 cambiada', 'tipo', 'bonificacion', 'fecha_inicio', v_hoy - 1, 'fecha_fin', NULL,
     'limite_usos', NULL, 'prioridad', 0, 'regalo_mueve_stock', false, 'modo_exclusion', 'acumulable',
-    'unidades_por_bloque', 1, 'stock_por_bloque', 1, 'descripcion_regalo', NULL,
+    'unidades_por_bloque', 1, 'stock_por_bloque', 1, 'descripcion_regalo', 'una Q',
     'producto_ids', jsonb_build_array(v_a),
     'reglas', jsonb_build_array(jsonb_build_object('clave', 'cantidad_compra', 'valor', 10),
                                 jsonb_build_object('clave', 'cantidad_bonificacion', 'valor', 2)));

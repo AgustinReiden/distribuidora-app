@@ -146,11 +146,13 @@ RETURNS bigint LANGUAGE plpgsql AS $fn$
 DECLARE
   v_promo bigint;
 BEGIN
+  -- Tanda 6 de #1603 (promos-B3, H6 de su lente), cambió de regla: la edición de una promo con ajuste
+  -- automático pide, como el alta, la descripción del regalo: la promo del ensayo la trae.
   INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock,
                                   producto_regalo_id, ajuste_automatico, ajuste_producto_id,
-                                  unidades_por_bloque, stock_por_bloque)
+                                  unidades_por_bloque, stock_por_bloque, descripcion_regalo)
   VALUES ('ZZ ensayo 1565 promo', 'bonificacion', public._tablero_hoy() - 1, p_suc, false, p_regalo,
-          true, p_cont, 6, 1)
+          true, p_cont, 6, 1, '1 botella de ensayo')
   RETURNING id INTO v_promo;
   INSERT INTO public.promocion_reglas (promocion_id, clave, valor, sucursal_id)
   VALUES (v_promo, 'cantidad_compra', 10, p_suc), (v_promo, 'cantidad_bonificacion', 4, p_suc);

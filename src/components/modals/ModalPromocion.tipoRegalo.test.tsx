@@ -1,7 +1,8 @@
 /**
  * #1324 (decisión del dueño, 2026-10-29): el tipo de regalo de una promo se puede
  * cambiar con pedidos abiertos. La pantalla avisa cuántos son y deja seguir: esos
- * pedidos leen su foto y no cambian.
+ * pedidos leen su foto y no cambian. De fracción a unidad entera con bloques cerrados, el
+ * server lo rechaza (PRM-1, tanda 6 de #1603), y el aviso lo dice.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
@@ -70,6 +71,21 @@ describe('ModalPromocion · aviso de pedidos abiertos al cambiar el tipo de rega
     render(<ModalPromocion promocion={PROMO} productos={PRODUCTOS} onSave={vi.fn()} onClose={vi.fn()} />)
     await userEvent.click(screen.getByText('Fracción de unidad'))
     expect(aviso()).toBeNull()
+  })
+
+  // PRM-1 (tanda 6 de #1603, decisión del dueño del 24/11): de fracción a unidad entera con
+  // bloques ya cerrados en la barra, el server rechaza. La pantalla ya no dice que «no cambian».
+  it('de fracción a unidad entera avisa que con bloques cerrados no se puede', async () => {
+    const fraccion = {
+      ...PROMO, regalo_mueve_stock: false, ajuste_automatico: true, ajuste_producto_id: '1',
+      unidades_por_bloque: 6, stock_por_bloque: 1, descripcion_regalo: '1 botella',
+    } as unknown as PromocionConDetalles
+    render(<ModalPromocion promocion={fraccion} productos={PRODUCTOS} onSave={vi.fn()} onClose={vi.fn()} />)
+    await userEvent.click(screen.getByText('Unidad entera'))
+    expect(abiertos).toHaveBeenLastCalledWith('7', true)
+    expect(aviso()).toHaveTextContent('3 pedidos abiertos')
+    expect(aviso()).toHaveTextContent('no se puede pasar a unidad entera hasta que esos pedidos se entreguen o se cancelen')
+    expect(aviso()).not.toHaveTextContent('el cambio vale para los pedidos nuevos')
   })
 
   it('una promo nueva no tiene pedidos que contar', async () => {
