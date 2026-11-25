@@ -32,7 +32,8 @@ vi.mock('./base', () => {
     builder.limit = () => Promise.resolve({ data: [], error: null })
     return builder
   }
-  return { supabase: { from: (n: string) => tabla(n) }, notifyError: m.notifyError }
+  // La RPC de las notas del preventista (tanda 6 bis): sin notas.
+  return { supabase: { from: (n: string) => tabla(n), rpc: () => tabla('rpc') }, notifyError: m.notifyError }
 })
 
 import { useFichaCliente } from './useFichaCliente'

@@ -18,9 +18,12 @@ import {
 } from '../../utils/metricasDashboard'
 import {
   NOTAS_VENTA_METRICA_SELECT,
+  RPC_NOTAS_DEL_VENDEDOR,
+  notaDelVendedorComoMetrica,
   notasDelVendedor,
   notasEnVentana,
   type NotaCreditoVentaMetricaRow,
+  type NotaDelVendedorRow,
 } from '../../utils/notasCreditoVentaMetrica'
 import { contarRechazosTotales, type PedidoCanceladoRow } from '../../utils/tasaEntrega'
 import type {
@@ -181,7 +184,7 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
   //    período anterior y los 7 días del gráfico): desde la más vieja, sin tope arriba (la
   //    nota lleva la fecha de su boleta, y una boleta puede estar re-fechada a futuro). Son
   //    pocas, y se recortan por ventana acá. La RLS las deja ver a admin y encargado; para un
-  //    preventista vuelve vacía (sin error) y sus cifras quedan brutas.
+  //    preventista vuelve vacía (sin error), y las suyas llegan por la RPC de abajo.
   const notasDesde = ventana.desde ? [ventana.desde, prev?.desde ?? ventana.desde, serieDesde].sort()[0] : null
   const notasPromise = traerTodo<NotaCreditoVentaMetricaRow>(
     () => {
@@ -196,13 +199,28 @@ async function calcularMetricas(params: MetricasParams): Promise<DashboardMetric
     { etiqueta: 'notas de crédito del dashboard' },
   )
 
-  const [pedidos, pedidosAnterior, filasSerie, cancelados, notas] = await Promise.all([
+  // -- El Dashboard de un preventista (`usuarioId`) es neto de las notas de SUS boletas (tanda 6
+  //    bis; decisión del dueño del 24/11: «que vea $ 700, neto»). La RLS no le deja leerlas por
+  //    REST: la RPC le da la fecha, el cliente y el total de cada una, desde la misma fecha. A
+  //    admin y encargado la RPC no les da nada (las leen arriba), así que no se repite ninguna.
+  const notasDelVendedorPromise = (async () => {
+    if (!usuarioId) return [] as NotaCreditoVentaMetricaRow[]
+    const filas = await traerTodo<NotaDelVendedorRow>(
+      () => supabase.rpc(RPC_NOTAS_DEL_VENDEDOR, { p_desde: notasDesde, p_hasta: null, p_cliente_id: null }),
+      { etiqueta: 'notas de crédito del vendedor' },
+    )
+    return filas.map(n => notaDelVendedorComoMetrica(n, usuarioId))
+  })()
+
+  const [pedidos, pedidosAnterior, filasSerie, cancelados, notasRest, notasPropias] = await Promise.all([
     principalPromise,
     anteriorPromise,
     seriePromise,
     canceladosPromise,
     notasPromise,
+    notasDelVendedorPromise,
   ])
+  const notas = [...notasRest, ...notasPropias]
 
   // El filtro por vendedor del Dashboard (el preventista ve lo suyo) es el de la boleta de la nota.
   const notasVisibles = usuarioId ? notasDelVendedor(notas, usuarioId) : notas

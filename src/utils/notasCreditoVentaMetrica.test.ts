@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  notaDelVendedorComoMetrica,
   notaRestaDeLaVenta,
   notasDelVendedor,
   notasEnVentana,
@@ -83,5 +84,25 @@ describe('las cifras netas (REP-1)', () => {
     )
     expect(v.totalComprado).toBe(700)
     expect(v.cantidadCompras).toBe(1)
+  })
+})
+
+// Tanda 6 bis: la fila de la RPC del preventista (fecha, cliente y total) entra en las mismas cuentas.
+describe('una nota de la RPC del preventista (notas_credito_venta_del_vendedor)', () => {
+  const fila = { fecha: '2026-11-10', cliente_id: 1, total: '350.00' }
+
+  it('resta de la venta: la RPC ya filtró las vigentes de boletas que son venta', () => {
+    expect(notaRestaDeLaVenta(notaDelVendedorComoMetrica(fila, 'u1'))).toBe(true)
+    expect(totalNotasQueRestan([notaDelVendedorComoMetrica(fila, 'u1')])).toBe(350)
+  })
+
+  it('es del vendedor que la pidió: el filtro del Dashboard del preventista la conserva', () => {
+    expect(notasDelVendedor([notaDelVendedorComoMetrica(fila, 'u1')], 'u1')).toHaveLength(1)
+  })
+
+  it('con $ 1.050 vendidos, la nota de $ 350 deja el Dashboard en $ 700 (el ejemplo del dueño)', () => {
+    const boleta = { id: 1, cliente_id: 1, estado: 'entregado', canal: 'app', tipo_factura: 'ZZ', total: 1050, cargo_envio: 0,
+      fecha: '2026-11-10', usuario_id: 'u1', cliente: { nombre_fantasia: 'Cliente 1' }, items: [] }
+    expect(agregarMetricasPeriodo([boleta] as never, [notaDelVendedorComoMetrica(fila, 'u1')]).ventasPeriodo).toBe(700)
   })
 })

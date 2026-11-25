@@ -12,6 +12,9 @@ const m = vi.hoisted(() => ({
   livianos: [] as Array<Record<string, unknown>>,
   notas: [] as Array<Record<string, unknown>>,
   consultasNotas: [] as Array<{ select: string; eqs: string[] }>,
+  // Lo que devuelve la RPC de las notas del preventista (tanda 6 bis) y con qué se la llamó.
+  delVendedor: [] as Array<Record<string, unknown>>,
+  llamadasRpc: [] as Array<{ nombre: string; args: Record<string, unknown> }>,
 }))
 
 vi.mock('./base', () => {
@@ -29,7 +32,13 @@ vi.mock('./base', () => {
     builder.limit = () => Promise.resolve({ data: [], error: null })
     return builder
   }
-  return { supabase: { from: (n: string) => tabla(n) }, notifyError: vi.fn() }
+  const rpc = (nombre: string, args: Record<string, unknown>) => {
+    m.llamadasRpc.push({ nombre, args })
+    const builder: Record<string, unknown> = {}
+    builder.range = () => Promise.resolve({ data: m.delVendedor, error: null })
+    return builder
+  }
+  return { supabase: { from: (n: string) => tabla(n), rpc }, notifyError: vi.fn() }
 })
 
 import { useFichaCliente } from './useFichaCliente'
@@ -56,6 +65,8 @@ beforeEach(() => {
   // 1.050 entregados en cuatro boletas.
   m.livianos = [ped({ id: '1', total: 200 }), ped({ id: '2', total: 300 }), ped({ id: '3', total: 400 }), ped({ id: '4', total: 150 })]
   m.notas = []
+  m.delVendedor = []
+  m.llamadasRpc = []
 })
 
 describe('useFichaCliente — «Total comprado» neto de notas de crédito (REP-1)', () => {
@@ -86,5 +97,30 @@ describe('useFichaCliente — «Total comprado» neto de notas de crédito (REP-
       nota(4, 50, { estado: 'asignado' }),
     ]
     expect((await ficha()).totalCompras).toBe(1050)
+  })
+})
+
+// Tanda 6 bis (decisión del dueño del 24/11: «que vea $ 700, neto»). El preventista ve por RLS sólo
+// los pedidos que ÉL le vendió al cliente y la consulta REST de las notas le vuelve vacía: las notas
+// de esas boletas le llegan por la RPC notas_credito_venta_del_vendedor (fecha, cliente y total).
+describe('useFichaCliente — el «Total comprado» del preventista también es neto', () => {
+  it('pide a la RPC las notas del cliente, sin rango de fechas', async () => {
+    await ficha()
+    expect(m.llamadasRpc).toEqual([
+      { nombre: 'notas_credito_venta_del_vendedor', args: { p_desde: null, p_hasta: null, p_cliente_id: '440' } },
+    ])
+  })
+
+  it('con la REST vacía y una nota de $ 350 por la RPC, 1.050 vendidos dan 700', async () => {
+    m.delVendedor = [{ fecha: '2026-10-01', cliente_id: 440, total: 350 }]
+    const e = await ficha()
+    expect(e.totalCompras).toBe(700)
+    expect(e.totalPedidos).toBe(4)
+  })
+
+  it('las dos fuentes se suman: la RPC no le da nada a admin ni a encargado, así que no se repite ninguna', async () => {
+    m.notas = [nota(1, 100)]
+    m.delVendedor = []
+    expect((await ficha()).totalCompras).toBe(950)
   })
 })
