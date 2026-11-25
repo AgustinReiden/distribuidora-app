@@ -63,10 +63,12 @@ interface TabItem {
 export default function ModalFichaCliente({ cliente, onClose, onRegistrarPago, onVerPedido, onCambioEnRuta }: ModalFichaClienteProps) {
   // `error` y `pedidosTotales` pueden faltar (un mock viejo del hook): sin error y sin
   // total, la ficha se comporta como siempre.
-  const { pedidosCliente, estadisticas, loading, error: errorFicha = false, pedidosTotales = 0, refetch: refetchFicha } = useFichaCliente(cliente?.id)
+  const { perfil } = useAuthData()
+  // El preventista ve en «Total comprado» sólo lo que él le vendió (tanda 6 bis, H-4), como su Dashboard.
+  const vendedorFicha = perfil?.rol === 'preventista' ? perfil.id : null
+  const { pedidosCliente, estadisticas, loading, error: errorFicha = false, pedidosTotales = 0, refetch: refetchFicha } = useFichaCliente(cliente?.id, vendedorFicha)
   // `errorPagos` puede faltar (un mock viejo del hook): sin él, la ficha se comporta como siempre.
   const { pagos, loading: loadingPagos, errorPagos = false, fetchPagosCliente, obtenerResumenCuenta, eliminarPago, desimputarPago } = usePagos()
-  const { perfil } = useAuthData()
   const notify = useNotification()
   const queryClient = useQueryClient()
   const rol = perfil?.rol

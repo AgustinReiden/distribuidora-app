@@ -37,6 +37,23 @@ export interface PedidoVentaCliente {
   cargo_envio?: number | null
   fecha?: string | null
   created_at?: string | null
+  /** Quién vendió la boleta (`pedidos.usuario_id`). */
+  usuario_id?: string | null
+}
+
+/**
+ * Las boletas de un vendedor (tanda 6 bis, H-4 de la lente de H). El «Total comprado» de la ficha
+ * de un preventista cuenta sólo lo que ÉL le vendió al cliente: es lo que le resta la RPC
+ * `notas_credito_venta_del_vendedor`. La RLS de `pedidos` le muestra además las boletas que
+ * reparte con el extra de chofer, que no vendió: sin este corte, ese pedazo quedaba bruto (sus
+ * notas no le llegan). Sin vendedor (admin y encargado), todas.
+ */
+export function pedidosDelVendedor<T extends { usuario_id?: string | null }>(
+  pedidos: readonly T[],
+  vendedorId: string | null | undefined,
+): T[] {
+  if (!vendedorId) return [...pedidos]
+  return pedidos.filter(p => p.usuario_id === vendedorId)
 }
 
 export interface VentaCliente {
