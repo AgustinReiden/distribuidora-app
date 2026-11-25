@@ -1,5 +1,5 @@
 -- Ensayo de la tarjeta I de la tanda 6 bis del plan #1603:
--- migrations/NNN_promos_combos_tanda6bis.sql.
+-- migrations/546_promos_combos_tanda6bis.sql.
 --
 --   A · promos-B1 en el alta y la edición. Promo de fracción «5 V dan 2 R», R es su propio
 --       contenedor (6 R = 1 R). X es del rubro de R sin «unidades por bulto»; X1, del
