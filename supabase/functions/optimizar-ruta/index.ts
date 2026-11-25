@@ -57,10 +57,11 @@ import { validarLimites } from "./limites.ts";
 import { configCors } from "./cors.ts";
 import { consumirCupoRuta, mensajeCupoRutaAgotado } from "./cupo.ts";
 
-// Rut-B14 (ola 3): sin APP_ORIGIN (o con "*") no hay CORS para nadie: falla cerrado.
+// Rut-B14 (ola 3): sin APP_ORIGIN (o con "*") no hay CORS para nadie: falla cerrado. Con
+// él, uno o varios orígenes separados por coma, como escanear-factura (_shared/cors.ts). Los
+// headers dependen del Origin de cada request: los pone el wrapper de serve() al final.
 const CORS = configCors(Deno.env.get("APP_ORIGIN"));
 if (!CORS.ok) console.error(`[optimizar-ruta] ${CORS.motivo}`);
-const CORS_HEADERS: Record<string, string> = CORS.headers;
 
 interface RequestBody {
   /** "navegar_tramo" → guía giro-a-giro de un tramo; ausente → optimizar ruta. */
@@ -106,7 +107,7 @@ interface RequestBody {
 function jsonResponse(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
   });
 }
 
@@ -232,7 +233,14 @@ async function viaComputeRoutesPorBarridas(
   };
 }
 
+// Rut-B14 (ola 3): los headers de CORS van en toda respuesta, según el Origin del request.
 serve(async (req: Request) => {
+  const res = await atender(req);
+  for (const [k, v] of Object.entries(CORS.headers(req))) res.headers.set(k, v);
+  return res;
+});
+
+async function atender(req: Request): Promise<Response> {
   // Rut-B14 (ola 3): sin el origen del front configurado no se contesta nada útil, ni el
   // preflight: la respuesta va sin Access-Control-Allow-Origin y el navegador la rechaza.
   if (!CORS.ok) {
@@ -240,7 +248,7 @@ serve(async (req: Request) => {
     return jsonResponse({ success: false, error: "CORS no configurado", mensaje: CORS.motivo }, 500);
   }
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return new Response(null, { status: 204 });
   }
   if (req.method !== "POST") {
     return jsonResponse({ success: false, error: "Método no permitido" }, 405);
@@ -545,4 +553,4 @@ serve(async (req: Request) => {
     barridas_aplicadas: usarBarridas,
     composicion,
   });
-});
+}

@@ -16,8 +16,12 @@
 --     reasignar) y ser el chofer del canje. Admin y encargado, como antes.
 -- 3 · Rut-B5: actualizar_recorrido_entrega (el trigger de la entrega) marcaba
 --     entregada la parada de A cuando una masiva entregaba el pedido a nombre
---     de B. Ahora marca la parada de una ruta del que entrega; la de otro chofer
---     queda 'reasignado' y deja de contar en esa ruta.
+--     de B. Decisión del dueño (#1554): la entrega se mueve SÓLO si B tiene una
+--     ruta en curso el día de la entrega; entonces cuenta en la de B (su parada,
+--     o una nueva) y la de A queda 'reasignado'. Si B no tiene ruta, la de A
+--     queda entregada, como en la 547. Revertir una entrega que no dejó parada
+--     viva vuelve a 'pendiente' la 'reasignado' de la ruta en curso, y el ON
+--     CONFLICT de aplicar_orden_ruta reabre una 'reasignado' de la misma ruta.
 -- 4 · Rut-B6: aplicar_orden_ruta aceptaba cualquier fecha. Ahora la de la
 --     entrega programada: de hoy a 60 días adelante (1559-b6, D21).
 -- 5 · Rut-B8: registrar_cambio_producto recibe p_clave (uuid, DEFAULT NULL) con
@@ -324,7 +328,27 @@ DECLARE
   v_recorrido_id BIGINT;
   v_estado_rp    TEXT;
   v_rid          BIGINT;
+  v_ruta_chofer  BIGINT;  -- mig NNN (Rut-B5)
+  v_mueve        BOOLEAN := false;  -- mig NNN (Rut-B5)
+  v_estado_otra  TEXT;  -- mig NNN (Rut-B5)
 BEGIN
+  -- mig NNN (Rut-B5, T3 de la ola 3; decisión del dueño, escrita en #1554): una entrega a
+  -- nombre de un chofer B mueve la parada SÓLO si B tiene una ruta en curso el día de la
+  -- entrega. Ésa es v_ruta_chofer, y se busca antes de los locks para tomarla junto con las
+  -- rutas del pedido, por id (si no, tomarla después invertiría el orden de la 439).
+  IF NEW.estado = 'entregado' AND OLD.estado IS DISTINCT FROM 'entregado'
+     AND NEW.transportista_id IS NOT NULL THEN
+    SELECT r.id INTO v_ruta_chofer
+      FROM recorridos r
+     WHERE r.transportista_id = NEW.transportista_id
+       AND r.sucursal_id = NEW.sucursal_id
+       AND r.estado = 'en_curso'
+       AND r.fecha = COALESCE((NEW.fecha_entrega AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,
+                              public._tablero_hoy())
+     ORDER BY r.created_at DESC, r.id DESC
+     LIMIT 1;
+  END IF;
+
   -- Las rutas del pedido se bloquean primero, todas juntas y por id, antes de
   -- leer y tocar su parada: el orden de la 439, el pedido (lo tiene el UPDATE
   -- que disparo el trigger), sus rutas, y recien despues las paradas. #1406:
@@ -343,6 +367,7 @@ BEGIN
     WHERE r.id IN (SELECT rp.recorrido_id
                      FROM recorrido_pedidos rp
                     WHERE rp.pedido_id = NEW.id)
+       OR r.id = v_ruta_chofer
     ORDER BY r.id
       FOR NO KEY UPDATE;
 
@@ -361,33 +386,46 @@ BEGIN
   LIMIT 1;
 
   IF NEW.estado = 'entregado' AND OLD.estado IS DISTINCT FROM 'entregado' THEN
-    -- mig NNN (Rut-B5, T3 de la ola 3): la parada que se marca es la de una ruta de QUIEN
-    -- ENTREGA (NEW.transportista_id). Una masiva a nombre de B de un pedido que vivía en la
-    -- ruta de A marcaba entregada la parada de A, que A no hizo, y se la contaba a A. Ahora esa
-    -- parada sale de la ruta de A como 'reasignado' (historia: el pedido se entregó en otra
-    -- ruta, como lo entienden _recorrido_contadores y RUTA-A) y se busca la del que entrega.
-    -- Las rutas ya están tomadas (arriba): las paradas se escriben con ellas quietas. Un
-    -- entregado sin chofer no pasa (pedidos_entrega_con_chofer); si pasara, como antes.
-    IF NEW.transportista_id IS NOT NULL THEN
+    -- mig NNN (Rut-B5): quién se queda con la entrega.
+    --   1 · Si la parada viva es de una ruta de quien entrega, esa (como siempre).
+    --   2 · Si no, quien entrega tiene ruta en curso ese día (v_ruta_chofer) y el pedido está
+    --       en alguna ruta: su parada de esa ruta, la que haya (no entregada o reasignada
+    --       antes) o una nueva, y las paradas pendientes del pedido en otras rutas pasan a
+    --       'reasignado' (historia: se entregó en otra ruta, como lo entienden
+    --       _recorrido_contadores y RUTA-A). Pedro con ruta entrega un pedido de la ruta de
+    --       Juan: cuenta en la de Pedro y Juan queda 9 de 9. Un pedido que no está en ninguna
+    --       ruta no entra a la de Pedro, como antes.
+    --   3 · Si no tiene ruta ese día, como en la 547: la parada viva (sea de quien sea) queda
+    --       entregada. Pedro sin ruta entrega un pedido de la ruta de Juan: Juan, 10 de 10.
+    IF v_ruta_chofer IS NOT NULL
+       AND NOT (v_parada IS NOT NULL
+                AND (SELECT r.transportista_id FROM recorridos r WHERE r.id = v_recorrido_id)
+                    IS NOT DISTINCT FROM NEW.transportista_id) THEN
+      v_mueve := EXISTS (SELECT 1 FROM recorrido_pedidos rp WHERE rp.pedido_id = NEW.id);
+    END IF;
+
+    IF v_mueve THEN
       UPDATE recorrido_pedidos rp
          SET estado_entrega = 'reasignado'
-        FROM recorridos r
-       WHERE r.id = rp.recorrido_id
-         AND rp.pedido_id = NEW.id
-         AND rp.estado_entrega = 'pendiente'
-         AND r.transportista_id IS DISTINCT FROM NEW.transportista_id;
+       WHERE rp.pedido_id = NEW.id
+         AND rp.recorrido_id <> v_ruta_chofer
+         AND rp.estado_entrega = 'pendiente';
 
       v_parada := NULL;
-      v_recorrido_id := NULL;
-      SELECT rp.id, rp.recorrido_id
-        INTO v_parada, v_recorrido_id
-      FROM recorrido_pedidos rp
-      JOIN recorridos r ON r.id = rp.recorrido_id
-      WHERE rp.pedido_id = NEW.id
-        AND rp.estado_entrega IN ('pendiente', 'entregado')
-        AND r.transportista_id = NEW.transportista_id
-      ORDER BY (r.estado = 'en_curso') DESC, r.fecha DESC, r.created_at DESC, r.id DESC
-      LIMIT 1;
+      v_recorrido_id := v_ruta_chofer;
+      SELECT rp.id, rp.estado_entrega INTO v_parada, v_estado_otra
+        FROM recorrido_pedidos rp
+       WHERE rp.recorrido_id = v_ruta_chofer AND rp.pedido_id = NEW.id;
+      IF v_parada IS NULL THEN
+        INSERT INTO recorrido_pedidos (recorrido_id, pedido_id, orden_entrega, sucursal_id)
+        VALUES (v_ruta_chofer, NEW.id,
+                (SELECT COALESCE(max(x.orden_entrega), 0) + 1 FROM recorrido_pedidos x
+                  WHERE x.recorrido_id = v_ruta_chofer),
+                NEW.sucursal_id)
+        RETURNING id INTO v_parada;
+      ELSIF v_estado_otra = 'no_entregado' THEN
+        PERFORM public._no_entregas_al_historial(ARRAY[v_parada]);
+      END IF;
     END IF;
 
     -- Sin parada viva: el chofer lo marcó no entregado y igual se entregó sin
@@ -401,8 +439,6 @@ BEGIN
       WHERE rp.pedido_id = NEW.id
         AND rp.estado_entrega = 'no_entregado'
         AND r.estado = 'en_curso'
-        -- mig NNN (Rut-B5): también acá, sólo una ruta del que entrega.
-        AND (NEW.transportista_id IS NULL OR r.transportista_id = NEW.transportista_id)
       ORDER BY r.fecha DESC, r.created_at DESC, r.id DESC
       LIMIT 1;
       IF v_parada IS NOT NULL THEN
@@ -429,6 +465,23 @@ BEGIN
     SET estado_entrega = 'pendiente',
         hora_entrega   = NULL
     WHERE id = v_parada;
+
+  ELSIF OLD.estado = 'entregado' AND NEW.estado IS DISTINCT FROM 'entregado'
+        AND v_parada IS NULL THEN
+    -- mig NNN (Rut-B5): revertir una entrega que no dejó parada viva (la de la ruta en curso
+    -- quedó 'reasignado' y la otra ya no está): esa parada vuelve a esperar, para que no
+    -- quede pegada en una ruta en curso. Una 'reasignado' de una ruta cerrada es historia.
+    UPDATE recorrido_pedidos rp
+       SET estado_entrega = 'pendiente',
+           hora_entrega   = NULL
+     WHERE rp.id = (SELECT x.id
+                      FROM recorrido_pedidos x
+                      JOIN recorridos r ON r.id = x.recorrido_id
+                     WHERE x.pedido_id = NEW.id
+                       AND x.estado_entrega = 'reasignado'
+                       AND r.estado = 'en_curso'
+                     ORDER BY r.fecha DESC, r.created_at DESC, r.id DESC
+                     LIMIT 1);
   END IF;
 
   -- Los contadores se recalculan en TODAS las rutas que tienen al pedido (un
@@ -680,19 +733,21 @@ BEGIN
      OR EXISTS (SELECT 1 FROM recorrido_pedidos rp
                  WHERE rp.recorrido_id = v_recorrido_id
                    AND rp.pedido_id = (value->>'pedido_id')::BIGINT)
+  -- mig NNN (Rut-B5): una parada 'reasignado' de esta ruta (la entregó otro chofer y
+  -- después se revirtió) se reabre como la 'no_entregado', si el pedido vuelve a salir acá.
   ON CONFLICT (recorrido_id, pedido_id)
   DO UPDATE SET
     orden_entrega     = EXCLUDED.orden_entrega,
-    estado_entrega    = CASE WHEN recorrido_pedidos.estado_entrega = 'no_entregado'
+    estado_entrega    = CASE WHEN recorrido_pedidos.estado_entrega IN ('no_entregado', 'reasignado')
                               AND EXCLUDED.pedido_id = ANY(v_entran)
                              THEN 'pendiente' ELSE recorrido_pedidos.estado_entrega END,
-    motivo_no_entrega = CASE WHEN recorrido_pedidos.estado_entrega = 'no_entregado'
+    motivo_no_entrega = CASE WHEN recorrido_pedidos.estado_entrega IN ('no_entregado', 'reasignado')
                               AND EXCLUDED.pedido_id = ANY(v_entran)
                              THEN NULL ELSE recorrido_pedidos.motivo_no_entrega END,
-    nota_no_entrega   = CASE WHEN recorrido_pedidos.estado_entrega = 'no_entregado'
+    nota_no_entrega   = CASE WHEN recorrido_pedidos.estado_entrega IN ('no_entregado', 'reasignado')
                               AND EXCLUDED.pedido_id = ANY(v_entran)
                              THEN NULL ELSE recorrido_pedidos.nota_no_entrega END,
-    hora_entrega      = CASE WHEN recorrido_pedidos.estado_entrega = 'no_entregado'
+    hora_entrega      = CASE WHEN recorrido_pedidos.estado_entrega IN ('no_entregado', 'reasignado')
                               AND EXCLUDED.pedido_id = ANY(v_entran)
                              THEN NULL ELSE recorrido_pedidos.hora_entrega END;
 
@@ -832,6 +887,9 @@ AS $function$
   -- cobró antes, como en _rendicion_pagos, #1492), sin la nota de crédito (nota_credito_id) y
   -- sin lo que no es plata (formas_pago().dineraria: el adelanto de sueldo). Con monto_pagado,
   -- una boleta de 1000 cobrada 700 en la calle y 300 con saldo a favor sumaba 1000.
+  -- El JOIN interno con formas_pago() deja afuera un pago con una forma que no está en la
+  -- lista (una vieja): en prod no hay ninguno en pagos de rutas (medido el 25/11). El
+  -- «Pendiente» de /recorridos se mide contra monto_pagado (src/utils/pendienteRuta.ts).
   SELECT (COUNT(*) FILTER (WHERE rp.estado_entrega IN ('pendiente', 'entregado')))::integer,
          COALESCE(SUM(p.total) FILTER (
            WHERE rp.estado_entrega IN ('pendiente', 'entregado')

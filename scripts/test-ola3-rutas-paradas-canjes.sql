@@ -6,16 +6,28 @@
 -- FALLÓ): no deja rastro. Corre sobre la base de CI sin datos. Sin la migración falla; con
 -- ella, ENSAYO OK. Usa el día argentino (`_tablero_hoy()`), nunca CURRENT_DATE.
 --
--- Gente: E (encargado de la 1), E2 (encargado de la 2), choferes A, B, C y D de la 1, y PV
--- (preventista de la 1, sin el extra de chofer).
+-- Gente: E (encargado de la 1), E2 (encargado de la 2), E12 (encargado de las dos), choferes
+-- A, B, C, D, G (sin ruta), H, M1, M2 y M3 de la 1, y PV (preventista de la 1, sin el extra de
+-- chofer).
 --
 --   B13 · El canje K que E crea para la ruta (crear_pedido_cambio_en_ruta) nace con
 --         creado_por = E, como todo pedido.
 --   B4  · K sale en la ruta de B; A tiene una parada vieja de K (una ruta cerrada de ayer,
 --         'reasignado'). A no puede aplicar el cambio («No autorizado», sin mover el stock); B sí.
---   B5  · P1, P2 y P3 salen en la ruta de A. Una masiva de E a nombre de B entrega P1: la parada
---         de A queda 'reasignado' (no 'entregado') y la ruta de A no la cuenta. La masiva a
---         nombre de A de P2 sí marca su parada (control).
+--         Y una condición por vez, con las otras dos bien: B4a no es el chofer del canje, B4b
+--         su ruta no está en curso, B4c su parada no está viva. Los tres se rechazan.
+--   B5  · P1, P2, P3 y P5 salen en la ruta de A (decisión del dueño, #1554: la entrega a nombre
+--         de otro chofer mueve la parada sólo si ese chofer tiene ruta en curso ese día).
+--         B5a · una masiva a nombre de G, sin ruta, entrega P1: la parada de A queda entregada
+--               (1/4), como en la 547.
+--         B5b · una masiva a nombre de B, que tiene ruta hoy, entrega P5: cuenta en la de B
+--               (entregado, 1/2) y la de A queda 'reasignado' (1/3).
+--         La masiva a nombre de A de P2 marca su parada (control).
+--   B5r · Se revierte la entrega de P5, vuelve a A y A lo entrega: A entregado (4/4), B
+--         reasignado (0/1), una sola parada viva.
+--   B5c · Rearmar una ruta en curso con un pedido de parada 'reasignado' la reabre (pendiente).
+--   B5v · Revertir una entrega que no dejó parada viva vuelve a pendiente la 'reasignado' de la
+--         ruta en curso.
 --   B11 · P3 (1000) se cobra 700 en efectivo y 300 con saldo a favor aplicado, y A lo entrega:
 --         lo cobrado de la ruta de A es 700 (la plata), no 1000 (monto_pagado), en la función y
 --         en la columna de la ruta.
@@ -27,6 +39,7 @@
 --   B8  · registrar_cambio_producto con la misma clave dos veces: un solo canje, el mismo id,
 --         el stock movido una vez; la misma clave con otro contenido, 22023. Sin clave (un PWA
 --         viejo, los siete parámetros por nombre) anda como antes: dos llamadas, dos canjes.
+--         La misma clave del mismo usuario (E12) desde la otra sucursal: 22023.
 --         Queda UNA sola firma (sin dos sobrecargas: PGRST203).
 --   B10 · crear_recorrido ya no existe.
 --   B14 · optimizar_ruta_consumir_cupo: sin EXECUTE para anon, con EXECUTE para authenticated;
@@ -45,6 +58,21 @@ DECLARE
   v_c      uuid := gen_random_uuid();
   v_d      uuid := gen_random_uuid();
   v_pv     uuid := gen_random_uuid();
+  v_e12    uuid := gen_random_uuid();
+  v_g      uuid := gen_random_uuid();
+  v_h      uuid := gen_random_uuid();
+  v_m1     uuid := gen_random_uuid();
+  v_m2     uuid := gen_random_uuid();
+  v_m3     uuid := gen_random_uuid();
+  v_p5     bigint;
+  v_p6     bigint;
+  v_k1     bigint;
+  v_k2     bigint;
+  v_k3     bigint;
+  v_rh     bigint;
+  v_r2     bigint;
+  v_r3     bigint;
+  v_clave2 uuid := gen_random_uuid();
   v_cli    bigint;
   v_dev    bigint;
   v_ent    bigint;
@@ -81,7 +109,12 @@ BEGIN
     FROM (VALUES (v_enc, 'encargado', 1, 'E'), (v_enc2, 'encargado', 2, 'E2'),
                  (v_a, 'transportista', 1, 'A'), (v_b, 'transportista', 1, 'B'),
                  (v_c, 'transportista', 1, 'C'), (v_d, 'transportista', 1, 'D'),
-                 (v_pv, 'preventista', 1, 'PV')) AS u(id, rol, suc, que);
+                 (v_pv, 'preventista', 1, 'PV'), (v_e12, 'encargado', 1, 'E12'),
+                 (v_g, 'transportista', 1, 'G'), (v_h, 'transportista', 1, 'H'),
+                 (v_m1, 'transportista', 1, 'M1'), (v_m2, 'transportista', 1, 'M2'),
+                 (v_m3, 'transportista', 1, 'M3')) AS u(id, rol, suc, que);
+  -- E12 es encargado de las dos sucursales (para la clave del canje usada en la otra).
+  INSERT INTO usuario_sucursales (usuario_id, sucursal_id) VALUES (v_e12, 2) ON CONFLICT DO NOTHING;
 
   INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
   VALUES (v_tag, v_tag, 'Calle T3 1', 1) RETURNING id INTO v_cli;
@@ -98,6 +131,10 @@ BEGIN
   VALUES (v_cli, v_hoy, 'pendiente', 1000, 0, 'pendiente', 'app', v_enc, v_enc, 1) RETURNING id INTO v_p3;
   INSERT INTO pedidos (cliente_id, fecha, estado, total, monto_pagado, estado_pago, canal, usuario_id, creado_por, sucursal_id)
   VALUES (v_cli, v_hoy, 'pendiente', 1000, 0, 'pendiente', 'app', v_enc, v_enc, 1) RETURNING id INTO v_p4;
+  INSERT INTO pedidos (cliente_id, fecha, estado, total, monto_pagado, estado_pago, canal, usuario_id, creado_por, sucursal_id)
+  VALUES (v_cli, v_hoy, 'pendiente', 1000, 0, 'pendiente', 'app', v_enc, v_enc, 1) RETURNING id INTO v_p5;
+  INSERT INTO pedidos (cliente_id, fecha, estado, total, monto_pagado, estado_pago, canal, usuario_id, creado_por, sucursal_id)
+  VALUES (v_cli, v_hoy, 'pendiente', 1000, 0, 'pendiente', 'app', v_enc, v_enc, 1) RETURNING id INTO v_p6;
 
   -- ---------------------------------------------------------------- helpers -
   CREATE OR REPLACE FUNCTION pg_temp.como(p_uid uuid, p_suc bigint) RETURNS void LANGUAGE plpgsql AS $f$
@@ -148,6 +185,26 @@ BEGIN
     SELECT COALESCE((SELECT estado_entrega::text FROM public.recorrido_pedidos
                       WHERE recorrido_id = p_ruta AND pedido_id = p_pedido), '-');
   $f$;
+  -- 'entregados/total' de una ruta, como los guarda la ruta.
+  CREATE OR REPLACE FUNCTION pg_temp.cuenta(p_ruta bigint) RETURNS text LANGUAGE sql AS $f$
+    SELECT pedidos_entregados || '/' || total_pedidos FROM public.recorridos WHERE id = p_ruta;
+  $f$;
+  CREATE OR REPLACE FUNCTION pg_temp.masiva(p_pedido bigint, p_chofer uuid, p_f date) RETURNS text LANGUAGE sql AS $f$
+    SELECT format('SELECT public.marcar_entregas_masivo(ARRAY[%s]::bigint[], %L::uuid, %L::date)', p_pedido, p_chofer, p_f);
+  $f$;
+  -- Un chofer intenta aplicar un canje: '' si se rechazó sin mover nada; si no, lo que pasó.
+  CREATE OR REPLACE FUNCTION pg_temp.canje_ajeno(p_chofer uuid, p_canje bigint, p_ent bigint) RETURNS text LANGUAGE plpgsql AS $f$
+  DECLARE
+    v_st0 int := (SELECT stock FROM public.productos WHERE id = p_ent);
+    v_txt text := pg_temp.r(p_chofer, 1, format('SELECT public.aplicar_cambio_de_parada(%s, NULL, NULL)', p_canje));
+  BEGIN
+    IF v_txt ~ 'No autorizado para aplicar el cambio'
+       AND (SELECT aplicado_at FROM public.recorrido_cambios WHERE pedido_id = p_canje) IS NULL
+       AND (SELECT stock FROM public.productos WHERE id = p_ent) = v_st0 THEN
+      RETURN '';
+    END IF;
+    RETURN format('%s (stock %s → %s)', v_txt, v_st0, (SELECT stock FROM public.productos WHERE id = p_ent));
+  END $f$;
   CREATE OR REPLACE FUNCTION pg_temp.canje(p_clave uuid, p_cant int, p_obs text) RETURNS text LANGUAGE sql AS $f$
     SELECT format('SELECT public.registrar_cambio_producto(p_cliente_id => %s, p_producto_devuelto_id => %s, '
                   'p_cantidad_devuelta => %s, p_producto_entregado_id => %s, p_cantidad_entregada => %s, '
@@ -170,7 +227,7 @@ BEGIN
 
   -- ------------------------------------------------------------------- B4 ---
   v_rb := pg_temp.v(v_enc, 1, pg_temp.ruta(v_b, ARRAY[v_k], v_hoy))::bigint;
-  v_ra := pg_temp.v(v_enc, 1, pg_temp.ruta(v_a, ARRAY[v_p1, v_p2, v_p3], v_hoy))::bigint;
+  v_ra := pg_temp.v(v_enc, 1, pg_temp.ruta(v_a, ARRAY[v_p1, v_p2, v_p3, v_p5], v_hoy))::bigint;
   -- La ruta vieja de A, cerrada, con la parada de K que pasó a B.
   INSERT INTO recorridos (transportista_id, fecha, estado, sucursal_id, completed_at)
   VALUES (v_a, v_hoy - 1, 'completado', 1, now() - interval '1 day') RETURNING id INTO v_rold;
@@ -185,26 +242,62 @@ BEGIN
     v_fallas := v_fallas || format('B4 · A (parada vieja del canje) aplicó el cambio o no se rechazó: %s (stock %s → %s)',
                                    v_txt, v_st0, v_st1);
   END IF;
+  -- Cada una de las tres condiciones por separado, con las otras dos bien. M1, M2 y M3 tienen
+  -- cada uno su canje en su ruta de hoy, y a cada uno le falta una sola cosa:
+  --   B4a · no es el chofer del canje (el canje pasó a B sin mover la parada);
+  --   B4b · su ruta ya no está en curso (cerrada con la parada pendiente);
+  --   B4c · su parada no está viva (quedó 'reasignado').
+  v_k1 := pg_temp.v(v_enc, 1, format('SELECT public.crear_pedido_cambio_en_ruta(%s, %s, 1, %s, 1, %L, %L)::text',
+                                     v_cli, v_dev, v_ent, v_tag || ' B4a', 'erroneo'))::bigint;
+  v_k2 := pg_temp.v(v_enc, 1, format('SELECT public.crear_pedido_cambio_en_ruta(%s, %s, 1, %s, 1, %L, %L)::text',
+                                     v_cli, v_dev, v_ent, v_tag || ' B4b', 'erroneo'))::bigint;
+  v_k3 := pg_temp.v(v_enc, 1, format('SELECT public.crear_pedido_cambio_en_ruta(%s, %s, 1, %s, 1, %L, %L)::text',
+                                     v_cli, v_dev, v_ent, v_tag || ' B4c', 'erroneo'))::bigint;
+  PERFORM pg_temp.v(v_enc, 1, pg_temp.ruta(v_m1, ARRAY[v_k1], v_hoy));
+  v_r2 := pg_temp.v(v_enc, 1, pg_temp.ruta(v_m2, ARRAY[v_k2], v_hoy))::bigint;
+  v_r3 := pg_temp.v(v_enc, 1, pg_temp.ruta(v_m3, ARRAY[v_k3], v_hoy))::bigint;
+  UPDATE pedidos SET transportista_id = v_b WHERE id = v_k1;
+  UPDATE recorridos SET estado = 'completado', completed_at = now() WHERE id = v_r2;
+  UPDATE recorrido_pedidos SET estado_entrega = 'reasignado' WHERE recorrido_id = v_r3 AND pedido_id = v_k3;
+  v_txt := pg_temp.canje_ajeno(v_m1, v_k1, v_ent);
+  IF v_txt <> '' THEN
+    v_fallas := v_fallas || ('B4a · M1, con su parada viva en su ruta en curso pero sin ser el chofer del canje, lo aplicó: ' || v_txt);
+  END IF;
+  v_txt := pg_temp.canje_ajeno(v_m2, v_k2, v_ent);
+  IF v_txt <> '' THEN
+    v_fallas := v_fallas || ('B4b · M2, chofer del canje con la parada pendiente en una ruta cerrada, lo aplicó: ' || v_txt);
+  END IF;
+  v_txt := pg_temp.canje_ajeno(v_m3, v_k3, v_ent);
+  IF v_txt <> '' THEN
+    v_fallas := v_fallas || ('B4c · M3, chofer del canje en su ruta en curso con la parada reasignada, lo aplicó: ' || v_txt);
+  END IF;
+
   v_txt := pg_temp.r(v_b, 1, format('SELECT public.aplicar_cambio_de_parada(%s, NULL, NULL)', v_k));
   IF v_txt <> 'PASA' OR (SELECT aplicado_at FROM recorrido_cambios WHERE pedido_id = v_k) IS NULL THEN
     v_fallas := v_fallas || ('B4 · B (su parada viva) no pudo aplicar el cambio: ' || v_txt);
   END IF;
 
   -- ------------------------------------------------------------------- B5 ---
-  v_txt := pg_temp.r(v_enc, 1, format('SELECT public.marcar_entregas_masivo(ARRAY[%s]::bigint[], %L::uuid, %L::date)',
-                                      v_p1, v_b, v_hoy));
+  -- Decisión del dueño (#1554): la entrega a nombre de otro chofer mueve la parada sólo si
+  -- ese chofer tiene una ruta en curso ese día.
+  -- B5a · G no tiene ruta: P1 queda entregado en la ruta de A, como en la 547.
+  v_txt := pg_temp.r(v_enc, 1, pg_temp.masiva(v_p1, v_g, v_hoy));
   IF v_txt <> 'PASA' OR (SELECT estado FROM pedidos WHERE id = v_p1) <> 'entregado' THEN
-    v_fallas := v_fallas || ('B5 · la masiva a nombre de B no entregó P1: ' || v_txt);
-  ELSIF pg_temp.parada(v_ra, v_p1) <> 'reasignado'
-        OR (SELECT pedidos_entregados FROM recorridos WHERE id = v_ra) <> 0
-        OR (SELECT total_pedidos FROM recorridos WHERE id = v_ra) <> 2 THEN
-    v_fallas := v_fallas || format('B5 · P1, entregado por B, dejó la parada de A en %s (se esperaba reasignado) y la ruta de A en %s entregados de %s',
-                                   pg_temp.parada(v_ra, v_p1),
-                                   (SELECT pedidos_entregados FROM recorridos WHERE id = v_ra),
-                                   (SELECT total_pedidos FROM recorridos WHERE id = v_ra));
+    v_fallas := v_fallas || ('B5a · la masiva a nombre de G no entregó P1: ' || v_txt);
+  ELSIF pg_temp.parada(v_ra, v_p1) <> 'entregado' OR pg_temp.cuenta(v_ra) <> '1/4' THEN
+    v_fallas := v_fallas || format('B5a · P1, entregado por G (sin ruta), dejó la parada de A en %s y la ruta de A en %s (se esperaba entregado y 1/4)',
+                                   pg_temp.parada(v_ra, v_p1), pg_temp.cuenta(v_ra));
   END IF;
-  v_txt := pg_temp.r(v_enc, 1, format('SELECT public.marcar_entregas_masivo(ARRAY[%s]::bigint[], %L::uuid, %L::date)',
-                                      v_p2, v_a, v_hoy));
+  -- B5b · B tiene ruta hoy (la del canje K): P5 cuenta en la de B, y la de A queda reasignado.
+  v_txt := pg_temp.r(v_enc, 1, pg_temp.masiva(v_p5, v_b, v_hoy));
+  IF v_txt <> 'PASA' OR (SELECT estado FROM pedidos WHERE id = v_p5) <> 'entregado' THEN
+    v_fallas := v_fallas || ('B5b · la masiva a nombre de B no entregó P5: ' || v_txt);
+  ELSIF pg_temp.parada(v_ra, v_p5) <> 'reasignado' OR pg_temp.parada(v_rb, v_p5) <> 'entregado'
+        OR pg_temp.cuenta(v_ra) <> '1/3' OR pg_temp.cuenta(v_rb) <> '1/2' THEN
+    v_fallas := v_fallas || format('B5b · P5, entregado por B (con ruta), dejó A en %s (%s) y B en %s (%s); se esperaba reasignado (1/3) y entregado (1/2)',
+                                   pg_temp.parada(v_ra, v_p5), pg_temp.cuenta(v_ra), pg_temp.parada(v_rb, v_p5), pg_temp.cuenta(v_rb));
+  END IF;
+  v_txt := pg_temp.r(v_enc, 1, pg_temp.masiva(v_p2, v_a, v_hoy));
   IF v_txt <> 'PASA' OR pg_temp.parada(v_ra, v_p2) <> 'entregado' THEN
     v_fallas := v_fallas || format('B5 · control: P2 entregado por A dejó su parada en %s: %s', pg_temp.parada(v_ra, v_p2), v_txt);
   END IF;
@@ -227,6 +320,49 @@ BEGIN
      OR (SELECT total_cobrado FROM recorridos WHERE id = v_ra) IS DISTINCT FROM 700::numeric THEN
     v_fallas := v_fallas || format('B11 · lo cobrado de la ruta de A es %s (columna %s), se esperaba 700: el saldo a favor no es plata del chofer (%s)',
                                    v_num, (SELECT total_cobrado FROM recorridos WHERE id = v_ra), v_txt);
+  END IF;
+
+  -- ------------------------------------------------------------------ B5r ---
+  -- Revertir la entrega de P5 (la de B), devolvérselo a A y que A lo entregue: cuenta en la
+  -- de A (su parada 'reasignado' se toma de nuevo) y la de B queda reasignado. Ninguna parada
+  -- queda pegada, y el pedido vive en una sola ruta.
+  UPDATE pedidos SET estado = 'asignado', fecha_entrega = NULL WHERE id = v_p5;
+  IF pg_temp.parada(v_rb, v_p5) <> 'pendiente' OR pg_temp.parada(v_ra, v_p5) <> 'reasignado' THEN
+    v_fallas := v_fallas || format('B5r · revertir la entrega de P5 dejó B en %s y A en %s (se esperaba pendiente y reasignado)',
+                                   pg_temp.parada(v_rb, v_p5), pg_temp.parada(v_ra, v_p5));
+  END IF;
+  UPDATE pedidos SET transportista_id = v_a WHERE id = v_p5;
+  v_txt := pg_temp.r(v_enc, 1, pg_temp.masiva(v_p5, v_a, v_hoy));
+  IF v_txt <> 'PASA' OR pg_temp.parada(v_ra, v_p5) <> 'entregado' OR pg_temp.parada(v_rb, v_p5) <> 'reasignado'
+     OR pg_temp.cuenta(v_ra) <> '4/4' OR pg_temp.cuenta(v_rb) <> '0/1'
+     OR (SELECT count(*) FROM recorrido_pedidos WHERE pedido_id = v_p5 AND estado_entrega IN ('pendiente', 'entregado')) <> 1 THEN
+    v_fallas := v_fallas || format('B5r · A volvió a entregar P5: A en %s (%s), B en %s (%s); se esperaba entregado (4/4) y reasignado (0/1). %s',
+                                   pg_temp.parada(v_ra, v_p5), pg_temp.cuenta(v_ra),
+                                   pg_temp.parada(v_rb, v_p5), pg_temp.cuenta(v_rb), v_txt);
+  END IF;
+
+  -- ------------------------------------------------------------------ B5c ---
+  -- Rearmar una ruta en curso con un pedido cuya parada quedó 'reasignado': se reabre
+  -- (pendiente), como una 'no_entregado'.
+  v_rh := pg_temp.v(v_enc, 1, pg_temp.ruta(v_h, ARRAY[v_p6], v_hoy))::bigint;
+  UPDATE recorrido_pedidos SET estado_entrega = 'reasignado' WHERE recorrido_id = v_rh AND pedido_id = v_p6;
+  v_txt := pg_temp.r(v_enc, 1, pg_temp.ruta(v_h, ARRAY[v_p6], v_hoy));
+  IF v_txt <> 'PASA' OR pg_temp.parada(v_rh, v_p6) <> 'pendiente' OR pg_temp.cuenta(v_rh) <> '0/1' THEN
+    v_fallas := v_fallas || format('B5c · rearmar la ruta de H dejó la parada reasignada de P6 en %s (%s): %s',
+                                   pg_temp.parada(v_rh, v_p6), pg_temp.cuenta(v_rh), v_txt);
+  END IF;
+
+  -- ------------------------------------------------------------------ B5v ---
+  -- Revertir una entrega que no dejó parada viva: B (con ruta) entrega P6, la parada de H
+  -- queda 'reasignado'; la de B ya no está (se borra acá a mano). Al revertir, la de H, que
+  -- es de una ruta en curso, vuelve a pendiente: no queda pegada.
+  v_txt := pg_temp.r(v_enc, 1, pg_temp.masiva(v_p6, v_b, v_hoy));
+  DELETE FROM recorrido_pedidos WHERE recorrido_id = v_rb AND pedido_id = v_p6;
+  PERFORM public.recalcular_recorrido(v_rb);  -- los contadores de B, sin esa parada
+  UPDATE pedidos SET estado = 'asignado', fecha_entrega = NULL WHERE id = v_p6;
+  IF v_txt <> 'PASA' OR pg_temp.parada(v_rh, v_p6) <> 'pendiente' OR pg_temp.cuenta(v_rh) <> '0/1' THEN
+    v_fallas := v_fallas || format('B5v · revertir P6 sin parada viva dejó la de H en %s (%s): %s',
+                                   pg_temp.parada(v_rh, v_p6), pg_temp.cuenta(v_rh), v_txt);
   END IF;
 
   -- ------------------------------------------------------------------- B6 ---
@@ -298,6 +434,19 @@ BEGIN
     IF v_txt <> 'PASA / PASA' OR v_n <> 2 THEN
       v_fallas := v_fallas || format('B8 · sin clave (un PWA viejo) tenía que andar como antes: %s, %s canje(s)', v_txt, v_n);
     END IF;
+    -- La misma clave, el mismo usuario y lo mismo, pero desde la otra sucursal: no es el
+    -- reintento (la clave es de la sucursal en la que se registró): 22023, sin devolver el
+    -- canje de la sucursal 1.
+    BEGIN
+      v_id1 := pg_temp.v(v_e12, 1, pg_temp.canje(v_clave2, 1, v_tag || ' b8 sucursal'))::bigint;
+    EXCEPTION WHEN OTHERS THEN
+      PERFORM pg_temp.como(NULL, NULL);
+      v_fallas := v_fallas || ('B8 · el canje de E12 en la sucursal 1 falló: ' || SQLERRM);
+    END;
+    v_txt := pg_temp.r(v_e12, 2, pg_temp.canje(v_clave2, 1, v_tag || ' b8 sucursal'));
+    IF v_txt !~ '^22023 ' THEN
+      v_fallas := v_fallas || ('B8 · la misma clave usada desde la otra sucursal no se rechazó: ' || v_txt);
+    END IF;
     IF has_function_privilege('anon', 'public.registrar_cambio_producto(integer,bigint,integer,bigint,integer,text,text,uuid)', 'EXECUTE')
        OR NOT has_function_privilege('authenticated', 'public.registrar_cambio_producto(integer,bigint,integer,bigint,integer,text,text,uuid)', 'EXECUTE') THEN
       v_fallas := v_fallas || 'B8 · los permisos de registrar_cambio_producto no son los de antes (authenticated sí, anon no)'::text;
@@ -348,7 +497,7 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = 'ENSAYO FALLÓ · ' || array_to_string(v_fallas, ' | ');
   END IF;
   RAISE EXCEPTION USING ERRCODE = 'ZZ0OK',
-    MESSAGE = format('ENSAYO OK · B13 B4 B5 B11 B6 P1 B3 B8 B10 B14 AUD (hoy %s; canje %s, rutas A %s, B %s, C %s)',
+    MESSAGE = format('ENSAYO OK · B13 B4 B4a B4b B4c B5a B5b B11 B5r B5c B5v B6 P1 B3 B8 B10 B14 AUD (hoy %s; canje %s, rutas A %s, B %s, C %s)',
                      v_hoy, v_k, v_ra, v_rb, v_rc);
  END;
 END

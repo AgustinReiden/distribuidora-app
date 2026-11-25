@@ -13,31 +13,47 @@ import {
 
 // ------------------------------------------------------------------- CORS ---
 
-Deno.test("CORS: con APP_ORIGIN, Allow-Origin es ese origen exacto", () => {
+const desde = (origen: string) => new Request("https://fn.test", { headers: { Origin: origen } });
+
+Deno.test("CORS: con APP_ORIGIN, Allow-Origin es ese origen exacto, con Vary: Origin", () => {
   const c = configCors("https://app.ejemplo.test");
   assertEquals(c.ok, true);
-  assertEquals(c.headers["Access-Control-Allow-Origin"], "https://app.ejemplo.test");
-  assertStringIncludes(c.headers["Access-Control-Allow-Headers"], "x-sucursal-id");
-  assertEquals(c.headers["Access-Control-Allow-Methods"], "POST, OPTIONS");
+  const h = c.headers(desde("https://app.ejemplo.test"));
+  assertEquals(h["Access-Control-Allow-Origin"], "https://app.ejemplo.test");
+  assertEquals(h["Vary"], "Origin");
+  assertStringIncludes(h["Access-Control-Allow-Headers"], "x-sucursal-id");
+  assertEquals(h["Access-Control-Allow-Methods"], "POST, OPTIONS");
+});
+
+Deno.test("CORS: una lista separada por comas devuelve el origen pedido si está, y si no el primero", () => {
+  const c = configCors("https://app.ejemplo.test, https://staging.ejemplo.test");
+  assertEquals(c.ok, true);
+  assertEquals(c.headers(desde("https://staging.ejemplo.test"))["Access-Control-Allow-Origin"], "https://staging.ejemplo.test");
+  assertEquals(c.headers(desde("https://app.ejemplo.test"))["Access-Control-Allow-Origin"], "https://app.ejemplo.test");
+  // Un origen ajeno recibe el primero: el navegador bloquea la respuesta.
+  assertEquals(c.headers(desde("https://malo.test"))["Access-Control-Allow-Origin"], "https://app.ejemplo.test");
 });
 
 Deno.test("CORS: sin APP_ORIGIN falla cerrado, sin Allow-Origin y con el motivo para el log", () => {
-  for (const valor of [undefined, null, "", "   "]) {
+  for (const valor of [undefined, null, "", "   ", " , "]) {
     const c = configCors(valor);
     assertEquals(c.ok, false);
-    assertEquals("Access-Control-Allow-Origin" in c.headers, false);
+    assertEquals("Access-Control-Allow-Origin" in c.headers(desde("https://app.ejemplo.test")), false);
     if (!c.ok) assertStringIncludes(c.motivo, "APP_ORIGIN");
   }
 });
 
-Deno.test('CORS: APP_ORIGIN "*" también falla cerrado (no abre el CORS a cualquiera)', () => {
-  const c = configCors("*");
-  assertEquals(c.ok, false);
-  assertEquals("Access-Control-Allow-Origin" in c.headers, false);
+Deno.test('CORS: APP_ORIGIN con "*", solo o en la lista, también falla cerrado', () => {
+  for (const valor of ["*", "https://app.ejemplo.test,*"]) {
+    const c = configCors(valor);
+    assertEquals(c.ok, false);
+    assertEquals("Access-Control-Allow-Origin" in c.headers(desde("https://malo.test")), false);
+  }
 });
 
 Deno.test("CORS: los espacios del secret no entran al header", () => {
-  assertEquals(configCors("  https://app.ejemplo.test \n").headers["Access-Control-Allow-Origin"], "https://app.ejemplo.test");
+  const h = configCors("  https://app.ejemplo.test \n").headers(desde("https://app.ejemplo.test"));
+  assertEquals(h["Access-Control-Allow-Origin"], "https://app.ejemplo.test");
 });
 
 // ------------------------------------------------------------------- cupo ---

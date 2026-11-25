@@ -47,7 +47,7 @@ interface RecorridoRaw {
 const RECORRIDO_SELECT = `*,
   transportista:perfiles!transportista_id(id, nombre),
   recorrido_pedidos(id, orden_entrega, estado_entrega, hora_entrega,
-    pedido:pedidos(id, estado, estado_pago, total, monto_pagado, notas,
+    pedido:pedidos(id, estado, estado_pago, total, monto_pagado, tipo_factura, notas,
       cliente:clientes(nombre_fantasia, direccion, telefono, latitud, longitud),
       items:pedido_items(id)))`
 
