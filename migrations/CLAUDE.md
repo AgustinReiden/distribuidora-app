@@ -308,7 +308,9 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   alta del original (N2, tanda 6 bis: `_regalo_de_la_promo` sigue su `pedido_historial`), y la
   edición acepta volver a ese regalo (o a uno de su rubro) en una promo que el pedido ya tenía aunque
   hoy la promo dé otro (N1: un reparto que ya no cierra vuelve a él, no al de hoy), o a un producto
-  que el pedido ya tenía como regalo de esa promo, en una línea o al principio de una cadena (F5). El reparto la cumple sobre la suma
+  que el pedido ya tenía como regalo de esa promo, en una línea o al principio de una cadena (F5);
+  lo que entra sólo por ahí se conserva y no crece: no pasa de lo que el pedido ya tenía de ese
+  producto (G1; si es el principio de una cadena, de todo el regalo de la promo, en cortes). El reparto la cumple sobre la suma
   de las partes, y la edición no escala una cadena por encima (`_regalo_tope_de_cadena`): lo que
   armó un admin se conserva pero no crece, **salvo** cuando la edición baja lo que da la promo y el
   sustituto es de otro rubro: ahí no puede valer más que el regalo nuevo y se rechaza

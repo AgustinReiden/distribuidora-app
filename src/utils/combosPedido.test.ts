@@ -212,6 +212,14 @@ describe('combinarCombosConFotos · promos-B5 (tanda 6 bis de #1603): el combo q
       + 'Este pedido puede conservar sus 1 o bajarlos; los combos nuevos cargalos en otro pedido.')
   })
 
+  it('G2: con el precio cambiado también rige el tope del combo', () => {
+    const vigentes = [{ ...fernetCoca, precio: 11500, topeRestante: 0 }]
+    const dos = { ...fernetCoca, cantidadCombos: 2 }
+    expect(combinarCombosConFotos(vigentes, [dos]).find(c => c.id === '500')?.topeRestante).toBe(0)
+    expect(combinarCombosConFotos([{ ...vigentes[0], topeRestante: 1 }], [dos]).find(c => c.id === '500')?.topeRestante).toBe(1)
+    expect(combinarCombosConFotos([{ ...vigentes[0], topeRestante: null }], [dos]).find(c => c.id === '500')?.topeRestante).toBe(2)
+  })
+
   it('el precio bajó: igual', () => {
     const vigentes = [{ ...fernetCoca, precio: 10500 }]
     expect(pedido(lista(2, 2), combinarCombosConFotos(vigentes, [foto])).aplicados.map(a => a.cantidadCombos)).toEqual([1])

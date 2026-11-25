@@ -36,8 +36,12 @@
 --            (el regalo del pedido): anda. Con P×6 (el de hoy) también (control).
 --       D2 · N2: el admin le cambia el cliente a V×10 + R×4; la referencia del pedido nuevo
 --            es R (el del original), no P.
---       D3 · F5: el admin armó el pedido con un regalo de otro rubro (X) y lo repartió en X y
---            Y; el encargado sube la venta y la pantalla vuelve a X (la raíz de sus líneas): anda.
+--       D3 · F5: el admin armó el pedido con un regalo de otro rubro (X×4) y lo repartió en X y
+--            Y; el encargado baja la venta y la pantalla vuelve a X (la raíz de sus líneas): X×2
+--            anda. Subirla a X×6 se rechaza: lo que entra sólo por F5 no crece (G1).
+--       D4 · G1 de la segunda lente: el admin armó V×10 con R×3 + X×1 (X de otro rubro, a
+--            $ 5.000); el encargado edita a V×20: X×8 se rechaza, X×1 anda (se conserva) y R×8
+--            (X×0) anda.
 --
 -- Arma sus propios usuarios, clientes, productos, promos y combos en la primera sucursal
 -- activa. Todo se deshace: el veredicto es el RAISE final, 'ENSAYO OK …' o 'ENSAYO FALLÓ
@@ -46,7 +50,8 @@
 --
 --   tr -d '\r' < scripts/test-promos-combos-tanda6bis-1603.sql | docker exec -i <contenedor> psql -U postgres -d postgres -q
 --
--- Sin la migración falla en A1, A2, A4, B1, B2, C2, C3, D1, D2 y D3. A3, A5, C1, C4, C5, C6 y C7
+-- Sin la migración falla en A1, A2, A4, B1, B2, C2, C3, D1, D2, D3 y D4; con la entrega anterior de
+-- esta tarjeta (sin G1), en D3 (subir) y D4 (X×8). A3, A5, C1, C4, C5, C6 y C7
 -- son controles (lo que tiene que seguir andando como en main).
 
 SET client_min_messages = warning;
@@ -516,13 +521,37 @@ BEGIN
     RAISE EXCEPTION 'D3 · preparación: el reparto no anduvo (%)', j;
   END IF;
   j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_items(V, 15, p, jsonb_build_array(jsonb_build_array(X, 6))));
+  IF COALESCE((j->>'success')::boolean, false) OR j::text NOT LIKE '%no puede crecer%' THEN
+    v_fallas := v_fallas || format('D3: subir lo que entra sólo por F5 (X×6 sobre 4) tenía que rechazarse con «no puede crecer» (G1) (%s)', left(j::text, 300));
+  END IF;
+  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_items(V, 5, p, jsonb_build_array(jsonb_build_array(X, 2))));
   IF NOT COALESCE((j->>'success')::boolean, false) THEN
-    v_fallas := v_fallas || format('D3: volver al regalo que el pedido ya tenía (X×6) tenía que andar (%s)', left(j::text, 300));
+    v_fallas := v_fallas || format('D3: bajar la venta y volver al regalo que el pedido ya tenía (X×2) tenía que andar (%s)', left(j::text, 300));
+  END IF;
+
+  -- D4 · G1 de la segunda lente: R×3 + X×1 que armó el admin, y la venta que sube
+  V := pg_temp.t6i_prod(v_suc, 'D4 V', 'ZZ t6i venta', 100, 500);
+  R := pg_temp.t6i_prod(v_suc, 'D4 R', 'ZZ t6i rubro D4', 100, 500);
+  X := pg_temp.t6i_prod(v_suc, 'D4 X', 'ZZ t6i rubro caro D4', 5000, 500);
+  p := pg_temp.t6i_promo(v_suc, V, R, 5, 2, true);
+  p1 := pg_temp.t6i_alta(v_cli, v_adm, v_suc,
+          pg_temp.t6i_items(V, 10, p, jsonb_build_array(jsonb_build_array(R, 3), jsonb_build_array(X, 1))));
+  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_items(V, 20, p, jsonb_build_array(jsonb_build_array(X, 8))));
+  IF COALESCE((j->>'success')::boolean, false) OR j::text NOT LIKE '%no puede crecer%' THEN
+    v_fallas := v_fallas || format('D4: X×8 ($ 40.000 donde el admin aprobó X×1) tenía que rechazarse con «no puede crecer» (G1) (%s)', left(j::text, 300));
+  END IF;
+  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_items(V, 20, p, jsonb_build_array(jsonb_build_array(X, 1))));
+  IF NOT COALESCE((j->>'success')::boolean, false) THEN
+    v_fallas := v_fallas || format('D4: X×1 (X se conserva) tenía que andar (%s)', left(j::text, 300));
+  END IF;
+  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_items(V, 20, p, jsonb_build_array(jsonb_build_array(R, 8))));
+  IF NOT COALESCE((j->>'success')::boolean, false) THEN
+    v_fallas := v_fallas || format('D4: R×8 (sin X) tenía que andar (%s)', left(j::text, 300));
   END IF;
 
   IF array_length(v_fallas, 1) > 0 THEN
     RAISE EXCEPTION E'ENSAYO FALLÓ (%)\n%', array_length(v_fallas, 1), array_to_string(v_fallas, E'\n');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · tanda 6 bis, tarjeta I: promos-B1 (alta y edición, también el admin), promos-B4, promos-B5 (el combo que cambió de precio no crece), N1, N2 y F5';
+  RAISE EXCEPTION 'ENSAYO OK · tanda 6 bis, tarjeta I: promos-B1 (alta y edición, también el admin), promos-B4, promos-B5 (el combo que cambió de precio no crece), N1, N2, F5 y G1';
 END
 $ensayo$;

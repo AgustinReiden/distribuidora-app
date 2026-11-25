@@ -224,8 +224,9 @@ export function combinarCombosConFotos(
       combinaEscalas: f.combinaEscalas,
       componentes: f.componentes,
       prioridad: vigente?.prioridad ?? f.prioridad,
+      // Con el tope del combo, también: si otros pedidos lo llenaron, el server rechaza (G2).
       topeRestante: precioCambiado && !opciones.sumaConPrecioCambiado
-        ? f.cantidadCombos
+        ? Math.min(f.cantidadCombos, vigente.topeRestante ?? Infinity)
         : vigente ? vigente.topeRestante : f.cantidadCombos,
     })
   }
