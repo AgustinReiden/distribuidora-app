@@ -37,7 +37,9 @@
 -- tarjeta.
 --
 -- Premisas: los cuerpos vivos de la 548. Reaplicarla aborta (la firma vieja ya
--- no existe y el md5 del panel cambió).
+-- no existe y el md5 del panel cambió). El CHECK de `altas_por_clave` se arma
+-- sobre la lista vigente (otras tarjetas de la ola 3 le suman su operación): se
+-- le agrega 'visita' a lo que tenga, sin pisar lo de otra migración.
 -- =========================================================================
 
 BEGIN;
@@ -80,22 +82,43 @@ BEGIN
        WHERE n.nspname = 'public' AND p.proname = 'registrar_visita_cliente') <> 1 THEN
     RAISE EXCEPTION 'mig NNN · hay más de una firma de registrar_visita_cliente: rehacer sobre lo vigente';
   END IF;
-  -- El CHECK de las operaciones de altas_por_clave, como lo dejó la 542.
+  -- El CHECK de las operaciones de altas_por_clave: otras tarjetas de la ola 3 le suman
+  -- su operación (T3 'cambio_producto', T6…), así que no se exige la lista exacta de la 548:
+  -- que tenga la forma de siempre y las cinco de hoy. Las de antes quedan anotadas para la
+  -- poscondición (sólo en esta transacción).
   SELECT pg_get_constraintdef(oid) INTO v FROM pg_constraint
    WHERE conrelid = 'public.altas_por_clave'::regclass AND conname = 'altas_por_clave_operacion_check';
-  IF v IS DISTINCT FROM $c$CHECK ((operacion = ANY (ARRAY['condicion_mayorista'::text, 'promocion'::text, 'cliente'::text, 'gasto'::text, 'empleado'::text])))$c$ THEN
-    RAISE EXCEPTION 'mig NNN · el CHECK de altas_por_clave no es el de la 542 (%): rehacer sobre lo vigente', v;
+  IF v IS NULL OR v !~ $re$^CHECK \(\(operacion = ANY \(ARRAY\['[a-z_]+'::text(, '[a-z_]+'::text)*\]\)\)\)$$re$ THEN
+    RAISE EXCEPTION 'mig NNN · el CHECK de altas_por_clave no tiene la forma de siempre (%): rehacer sobre lo vigente', v;
   END IF;
+  IF NOT (ARRAY(SELECT m[1] FROM regexp_matches(v, $re$'([a-z_]+)'::text$re$, 'g') m)
+          @> ARRAY['condicion_mayorista', 'promocion', 'cliente', 'gasto', 'empleado']) THEN
+    RAISE EXCEPTION 'mig NNN · al CHECK de altas_por_clave le falta una de las cinco de la 548 (%): rehacer sobre lo vigente', v;
+  END IF;
+  PERFORM set_config('mig_ola3_t8.operaciones_antes',
+                     array_to_string(ARRAY(SELECT m[1] FROM regexp_matches(v, $re$'([a-z_]+)'::text$re$, 'g') m), ','), true);
 END
 $premisas$;
 
 -- =========================================================================
 -- 1 · Var-B1: la visita con clave
 -- =========================================================================
-ALTER TABLE public.altas_por_clave DROP CONSTRAINT altas_por_clave_operacion_check;
-ALTER TABLE public.altas_por_clave ADD CONSTRAINT altas_por_clave_operacion_check
-  CHECK (operacion = ANY (ARRAY['condicion_mayorista'::text, 'promocion'::text, 'cliente'::text,
-                                'gasto'::text, 'empleado'::text, 'visita'::text]));
+-- El CHECK se arma sobre la lista VIGENTE (la que dejó la última migración que lo tocó),
+-- más 'visita'. Si ya la tiene, no se toca.
+DO $check$
+DECLARE
+  v_ops text[] := string_to_array(current_setting('mig_ola3_t8.operaciones_antes'), ',');
+BEGIN
+  IF 'visita' = ANY (v_ops) THEN
+    RETURN;
+  END IF;
+  v_ops := v_ops || 'visita'::text;
+  ALTER TABLE public.altas_por_clave DROP CONSTRAINT altas_por_clave_operacion_check;
+  EXECUTE format('ALTER TABLE public.altas_por_clave ADD CONSTRAINT altas_por_clave_operacion_check '
+                 'CHECK (operacion = ANY (ARRAY[%s]))',
+                 (SELECT string_agg(format('%L::text', o), ', ' ORDER BY i) FROM unnest(v_ops) WITH ORDINALITY u(o, i)));
+END
+$check$;
 
 DROP FUNCTION public.registrar_visita_cliente(bigint, text, numeric, numeric, numeric, timestamp with time zone, text, jsonb);
 
@@ -428,10 +451,14 @@ BEGIN
         FROM pg_proc WHERE oid = F_GEO::regprocedure) THEN
     RAISE EXCEPTION 'mig NNN · el panel de geolocalización no quedó como se esperaba';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                  WHERE conrelid = 'public.altas_por_clave'::regclass AND conname = 'altas_por_clave_operacion_check'
-                    AND pg_get_constraintdef(oid) LIKE '%''empleado''::text, ''visita''::text%') THEN
-    RAISE EXCEPTION 'mig NNN · el CHECK de altas_por_clave no quedó con visita';
+  -- El CHECK quedó con las operaciones de antes más 'visita', ni una más ni una menos.
+  IF (SELECT ARRAY(SELECT DISTINCT m[1] FROM regexp_matches(pg_get_constraintdef(c.oid), $re$'([a-z_]+)'::text$re$, 'g') m ORDER BY 1)
+        FROM pg_constraint c
+       WHERE c.conrelid = 'public.altas_por_clave'::regclass AND c.conname = 'altas_por_clave_operacion_check')
+     IS DISTINCT FROM
+     ARRAY(SELECT DISTINCT o FROM unnest(string_to_array(current_setting('mig_ola3_t8.operaciones_antes'), ',')
+                                         || 'visita'::text) o ORDER BY 1) THEN
+    RAISE EXCEPTION 'mig NNN · el CHECK de altas_por_clave no quedó con las operaciones de antes más visita';
   END IF;
 END
 $post$;
