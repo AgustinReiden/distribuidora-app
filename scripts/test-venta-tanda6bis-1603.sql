@@ -1,4 +1,4 @@
--- Ensayo de la migración NNN_venta_edicion_alta_cobro_y_dashboard (plan #1603, tanda 6 bis,
+-- Ensayo de la migración 545_venta_edicion_alta_cobro_y_dashboard (plan #1603, tanda 6 bis,
 -- tarjeta H: lo que la tanda 6 dejó sin hacer en la edición del pedido, el alta, el cobro
 -- combinado y el Dashboard del preventista).
 --
