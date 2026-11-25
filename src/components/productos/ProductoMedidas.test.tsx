@@ -4,7 +4,7 @@
  * tecla del punto se escribe como coma (D17).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom/vitest'
 import ProductoMedidas from './ProductoMedidas'
@@ -38,7 +38,7 @@ describe('ProductoMedidas · lo tipeado', () => {
     await user.click(screen.getByRole('textbox'))
     await user.paste(texto)
     await user.keyboard('{Enter}')
-    expect(mutateAsync).toHaveBeenCalledWith([{ productoId: '7', medidaId: 'pal', unidadesPor: esperado }])
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith([{ productoId: '7', medidaId: 'pal', unidadesPor: esperado }]))
   })
 
   it('tipeado «1200» se ve «1.200» (los miles los pone el campo) y se guarda 1200', async () => {
@@ -47,7 +47,7 @@ describe('ProductoMedidas · lo tipeado', () => {
     await user.type(screen.getByRole('textbox'), '1200')
     expect(screen.getByRole('textbox')).toHaveValue('1.200')
     await user.keyboard('{Enter}')
-    expect(mutateAsync).toHaveBeenCalledWith([{ productoId: '7', medidaId: 'pal', unidadesPor: 1200 }])
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith([{ productoId: '7', medidaId: 'pal', unidadesPor: 1200 }]))
   })
 
   it('tipeado «1.200» se ve «1,200» y se guarda 1,2', async () => {
@@ -56,7 +56,7 @@ describe('ProductoMedidas · lo tipeado', () => {
     await user.type(screen.getByRole('textbox'), '1.200')
     expect(screen.getByRole('textbox')).toHaveValue('1,200')
     await user.keyboard('{Enter}')
-    expect(mutateAsync).toHaveBeenCalledWith([{ productoId: '7', medidaId: 'pal', unidadesPor: 1.2 }])
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith([{ productoId: '7', medidaId: 'pal', unidadesPor: 1.2 }]))
   })
 
   it.each(['1,200,5', 'abc', '0', '-5', '1e3', 'Infinity'])('%j no se guarda y lo dice', async texto => {
@@ -65,7 +65,7 @@ describe('ProductoMedidas · lo tipeado', () => {
     await user.click(screen.getByRole('textbox'))
     await user.paste(texto)
     await user.keyboard('{Enter}')
+    expect(await screen.findByText('Tiene que ser un número mayor que 0')).toBeInTheDocument()
     expect(mutateAsync).not.toHaveBeenCalled()
-    expect(screen.getByText('Tiene que ser un número mayor que 0')).toBeInTheDocument()
   })
 })

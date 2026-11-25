@@ -44,6 +44,10 @@ vi.mock('../../contexts/SucursalContext', () => ({
   useSucursal: () => ({ currentSucursalNombre: 'Sucursal de prueba' }),
 }))
 
+// La lista y el formulario son lazy: el import en frío, con la máquina cargada, pasa los 5 s de
+// setup.js. La cota sólo cuenta cuando el elemento NO aparece (si aparece, findBy vuelve en el acto).
+const ESPERA_LAZY = { timeout: 20000 }
+
 beforeEach(() => {
   vi.clearAllMocks()
 })
@@ -51,7 +55,7 @@ beforeEach(() => {
 describe('UsuariosContainer — la propia fila', () => {
   it('no abre el formulario sobre uno mismo y dice por qué', async () => {
     render(<UsuariosContainer />)
-    fireEvent.click(await screen.findByRole('button', { name: /editar usuario admin propio/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /editar usuario admin propio/i }, ESPERA_LAZY))
 
     expect(mocks.warning).toHaveBeenCalledWith(expect.stringMatching(/tu propio usuario.*otro administrador/i))
     expect(screen.queryByText('Editar Usuario')).not.toBeInTheDocument()
@@ -59,9 +63,9 @@ describe('UsuariosContainer — la propia fila', () => {
 
   it('a otro usuario lo abre', async () => {
     render(<UsuariosContainer />)
-    fireEvent.click(await screen.findByRole('button', { name: /editar usuario otra persona/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /editar usuario otra persona/i }, ESPERA_LAZY))
 
-    expect(await screen.findByText('Editar Usuario')).toBeInTheDocument()
+    expect(await screen.findByText('Editar Usuario', {}, ESPERA_LAZY)).toBeInTheDocument()
     expect(mocks.warning).not.toHaveBeenCalled()
   })
 })

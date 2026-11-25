@@ -36,6 +36,7 @@ const flag = (n, def) => {
 };
 const comando = args.find((a, i) => !a.startsWith("--") && !(args[i - 1] ?? "").startsWith("--"));
 const out = flag("out", join(aqui, "resultados"));
+const usada = args.includes("--aunque-este-usada"); // t6 sobre una base que ya corrió t6 (ver revisarBaseNuevaT6)
 const rondasForzadas = flag("rondas", null) ? Number(flag("rondas")) : null;
 const solo = flag("variante", null); // prefijo del nombre, p. ej. "C3b"
 
@@ -231,6 +232,20 @@ async function cmdAudit() {
   console.log("auditoría base guardada. Fallos:", JSON.stringify(fallos(a)));
 }
 
+// T6o fija sus tiempos (250 y 450 ms) y cada ronda de las `a14_setup` de t6 suma promos y productos a la sucursal A, que el
+// trigger de sentencia de los contenedores recorre: sobre una base que ya corrió t6 la venta le gana al guardado y T6o baja
+// de 100/100 (94, 69, 51 en corridas seguidas), sin que el código haya cambiado. Se niega a correr T6o ahí y dice qué falta.
+async function revisarBaseNuevaT6(variantes) {
+  if (usada || !variantes.some((v) => v.nombre.startsWith("T6o"))) return;
+  const r = await sql("select count(*)::int as n from public.promociones where nombre = 'CONC a14'");
+  const n = r[0]?.[0]?.n ?? 0;
+  if (n === 0) return;
+  console.error(`t6 pide una base nueva: ya hay ${n} promos 'CONC a14' de una corrida anterior de t6 y T6o no da lo mismo sobre una base usada.\n` +
+    "Armala de cero (docker-local.mjs up, dump, aplicar, fixtures; ver el README) o, para correr igual sabiendo que T6o puede bajar,\n" +
+    "pasá --aunque-este-usada. Para correr t6 sin T6o: --variante T6k (o la que quieras).");
+  process.exit(2);
+}
+
 async function cmdEscenarios() {
   mkdirSync(out, { recursive: true });
   const ids = comando === "todos" ? Object.keys(ESCENARIOS) : [comando];
@@ -242,6 +257,7 @@ async function cmdEscenarios() {
     const esc = ESCENARIOS[id];
     console.log(`\n== ${id}: ${esc.titulo}`);
     const res = [];
+    if (id === "t6") await revisarBaseNuevaT6(esc.variantes().filter((v) => !solo || v.nombre.startsWith(solo)));
     for (const v of esc.variantes()) {
       if (solo && !v.nombre.startsWith(solo)) continue;
       console.log(`- ${v.nombre}`);

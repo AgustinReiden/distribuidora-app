@@ -173,8 +173,9 @@ function renderContainer() {
 }
 
 // El modal de pago es lazy: el import en frío se come casi todo el segundo por
-// defecto de `findBy*`.
-const ESPERA_MODAL = { timeout: 5000 }
+// defecto de `findBy*`, y con la máquina cargada pasa también los 5 de setup.js. La cota sólo
+// cuenta cuando el elemento NO aparece (si aparece, findBy vuelve en el acto), así que es holgada.
+const ESPERA_MODAL = { timeout: 20000 }
 const AVISO = /No se pudieron cargar los pagos de esta boleta/
 
 beforeEach(() => {
@@ -189,14 +190,14 @@ describe('PedidosContainer — el aviso de pagos sin cargar es de cada boleta (#
     fetchPagosPedido.mockResolvedValueOnce(null).mockReturnValueOnce(new Promise(() => {}))
     renderContainer()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Entregar la A' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Entregar la A' }, ESPERA_MODAL))
     expect((await screen.findByRole('alert', {}, ESPERA_MODAL)).textContent).toMatch(AVISO)
 
     // fireEvent y hidden: con el modal abierto, Radix oculta la vista y su overlay
     // bloquea el puntero.
     fireEvent.click(screen.getByRole('button', { name: 'Entregar la B', hidden: true }))
-    await waitFor(() => expect(fetchPagosPedido).toHaveBeenCalledTimes(2))
-    expect(await screen.findByText('Cargando pagos previos...')).toBeInTheDocument()
+    await waitFor(() => expect(fetchPagosPedido).toHaveBeenCalledTimes(2), ESPERA_MODAL)
+    expect(await screen.findByText('Cargando pagos previos...', {}, ESPERA_MODAL)).toBeInTheDocument()
     expect(screen.queryByText(AVISO)).not.toBeInTheDocument()
   })
 
@@ -205,10 +206,10 @@ describe('PedidosContainer — el aviso de pagos sin cargar es de cada boleta (#
     fetchPagosPedido.mockResolvedValueOnce(null).mockReturnValueOnce(new Promise(() => {}))
     renderContainer()
 
-    await user.click(await screen.findByRole('button', { name: 'Entregar la A' }))
+    await user.click(await screen.findByRole('button', { name: 'Entregar la A' }, ESPERA_MODAL))
     await screen.findByText(AVISO, {}, ESPERA_MODAL)
     await user.click(screen.getByRole('button', { name: 'Cerrar' }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument(), ESPERA_MODAL)
 
     await user.click(screen.getByRole('button', { name: 'Entregar la B' }))
     expect(await screen.findByText('Cargando pagos previos...', {}, ESPERA_MODAL)).toBeInTheDocument()
