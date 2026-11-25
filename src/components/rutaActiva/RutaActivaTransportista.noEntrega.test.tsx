@@ -87,8 +87,7 @@ import RutaActivaTransportista from './RutaActivaTransportista'
 const ERROR_DE_RED = { message: 'TypeError: Failed to fetch', details: '', hint: '', code: '' }
 const ERROR_DE_SERVIDOR = { message: 'El pedido ya no está asignado a vos', details: '', hint: '', code: 'P0001' }
 
-async function montarYAgarrar() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+async function montarYAgarrar(queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   render(
     <QueryClientProvider client={queryClient}>
       <RutaActivaTransportista onMarcarEntregado={vi.fn()} userId="chofer-1" />
@@ -123,5 +122,21 @@ describe('RutaActivaTransportista — marcar no entregado (#1011)', () => {
 
     expect((e as Error).message).toBe('El pedido ya no está asignado a vos')
     expect((e as Error & { code?: string }).code).toBe('P0001')
+  })
+
+  // Fr-B5 de #1554 (T14 de #1690): sólo se refrescaba la ruta. Un admin o encargado con el rol de
+  // chofer sigue viendo el pedido en su lista de Pedidos (su RLS no filtra por transportista_id), y
+  // esa lista quedaba con el estado de antes de la no entrega.
+  it('una no entrega que sale bien refresca también la lista de pedidos', async () => {
+    supabaseStub.rpc.mockResolvedValue({ data: null, error: null })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(['pedidos', 1, 'list', {}], [{ id: '4625', estado: 'asignado' }])
+    queryClient.setQueryData(['recorrido-activo', 1, 'chofer-1'], { id: '77' })
+    const marcar = await montarYAgarrar(queryClient)
+
+    await marcar('4625', 'cliente_ausente', '')
+
+    expect(queryClient.getQueryState(['recorrido-activo', 1, 'chofer-1'])?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(['pedidos', 1, 'list', {}])?.isInvalidated).toBe(true)
   })
 })
