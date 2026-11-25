@@ -47,7 +47,9 @@
 --   D4  · PXT le asigna H a PX → 42501 'Solo un administrador…'
 --   D4b · PXT le asigna H a T → 42501 'Solo un administrador…'
 --   D5  · ENC se asigna H → 42501 'Sólo un preventista…' (cambio declarado de la 378)
---   D6  · ADM le asigna H a T → PASA
+--   D6  · ADM le asigna H a T → 22023 'No se le puede asignar…' (D12, cambio declarado de
+--         NNN_ola3_zonas_cartera_vehiculos: antes PASABA)
+--   D6b · ADM le asigna H a PX → PASA
 --   D7  · server, sin claims, le asigna H a T → PASA (el fixture C_T de la 1179)
 --   D8  · T con el extra 'preventista' en S se asigna H → PASA (levanta
 --         perfil_roles_rol_check en el sub-bloque, lock_timeout 2s)
@@ -442,12 +444,18 @@ BEGIN
     WHEN OTHERS THEN v_fallas := v_fallas || ('D5 · error inesperado: ' || SQLERRM);
   END;
 
-  -- D6 · el admin sigue sin restricción
+  -- D6 · el admin tampoco le asigna un cliente a un chofer (D12, mig NNN_ola3_zonas_cartera_vehiculos:
+  --      sólo a quien actúa como preventista activo en la sucursal del cliente); a un preventista, sí (D6b)
   BEGIN
     PERFORM pg_temp.como(v_adm, v_suc);
     v_res := pg_temp.intenta(format('INSERT INTO public.cliente_preventistas (cliente_id, preventista_id) VALUES (%s, %L)', v_h, v_tr));
+    v_notas := v_notas || ('D6 · ' || v_res);
+    IF COALESCE(v_res, '') NOT LIKE '22023 No se le puede asignar el cliente%no actúa como preventista activo%' THEN
+      v_fallas := v_fallas || format('D6 · ADM le asignó un huérfano a T o lo frenó otra cosa (tenía que dar 22023 ''No se le puede asignar…''): %s', v_res);
+    END IF;
+    v_res := pg_temp.intenta(format('INSERT INTO public.cliente_preventistas (cliente_id, preventista_id) VALUES (%s, %L)', v_h, v_px));
     IF v_res IS DISTINCT FROM 'PASA' THEN
-      v_fallas := v_fallas || format('D6 · ADM no pudo asignarle un huérfano a T: %s', v_res);
+      v_fallas := v_fallas || format('D6b · ADM no pudo asignarle un huérfano a PX: %s', v_res);
     END IF;
     RAISE EXCEPTION USING ERRCODE = 'ZZ001';
   EXCEPTION WHEN SQLSTATE 'ZZ001' THEN NULL;

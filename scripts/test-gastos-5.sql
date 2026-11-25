@@ -17,7 +17,10 @@
 -- Las RPCs se llaman COMO EL FRONT (pg_temp.como). Los pedidos, sus cambios
 -- (salvedad, edicion, cancelacion, volver a pendiente) y el cierre de una
 -- rendicion se arman como postgres sobre las tablas: lo que importa es lo que
--- ve la comision. actualizar_preventista_pedido es la real.
+-- ve la comision. actualizar_preventista_pedido es la real hasta que la mig
+-- NNN_ola3_zonas_cartera_vehiculos (Var-B5) dejo de cambiar el vendedor de un pedido
+-- entregado: 8i lo afirma y hace el cambio sobre la tabla (el que llega cuando se
+-- revierte la entrega, se cambia el vendedor y se vuelve a entregar).
 --
 -- a1, at y ad son admins reales (Tucuman, Taco Pozo y las dos). Los vendedores,
 -- el encargado y los choferes los crea el ensayo en auth.users, sin ventas
@@ -727,14 +730,18 @@ BEGIN
     v_u2 := pg_temp.u('preventista', v_t);
     e2 := pg_temp.a(v_u2, v_l);
     v_txt := pg_temp.como(v_a1, v_t, format('SELECT public.actualizar_preventista_pedido(%s, %L::uuid)', g.p, v_u2));
-    v_fallas := v_fallas || pg_temp.chk((v_txt::jsonb->>'success')::boolean, format('8i cambio: %s', v_txt));
+    v_fallas := v_fallas || pg_temp.chk(NOT COALESCE((v_txt::jsonb->>'success')::boolean, false),
+                                        format('8i la RPC cambió el vendedor de un pedido entregado: %s', v_txt));
+    PERFORM pg_temp.adm();
+    UPDATE pedidos SET usuario_id = v_u2 WHERE id = g.p;
     v_k := pg_temp.pv(g.e)->'ajustes';
     v_fallas := v_fallas || pg_temp.chk((v_k->>'total')::numeric = -2000 AND v_k#>>'{detalle,0,motivo}' = 'El pedido pasó a otro vendedor', format('8i anterior: %s', v_k));
     v_j := pg_temp.pv(e2);
     v_fallas := v_fallas || pg_temp.chk((v_j#>>'{comisiones,total}')::numeric = 2000 AND pg_temp.tiene(v_j#>'{comisiones,detalle}', g.p), format('8i nuevo: %s', v_j->'comisiones'));
     PERFORM pg_temp.lq(e2);
     PERFORM pg_temp.lq(g.e);
-    v_txt := pg_temp.como(v_a1, v_t, format('SELECT public.actualizar_preventista_pedido(%s, %L::uuid)', g.p, g.u));
+    PERFORM pg_temp.adm();
+    UPDATE pedidos SET usuario_id = g.u WHERE id = g.p;
     v_k := pg_temp.pv(e2)->'ajustes';
     v_fallas := v_fallas || pg_temp.chk((v_k->>'total')::numeric = -2000 AND v_k#>>'{detalle,0,motivo}' = 'El pedido pasó a otro vendedor', format('8i le sale al nuevo: %s', v_k));
     v_j := pg_temp.pv(g.e);

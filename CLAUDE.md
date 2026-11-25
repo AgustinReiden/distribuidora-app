@@ -721,7 +721,9 @@ suelta en `sucursales`.
   y `bot_metricas_admin_dia`. Una pantalla o un reporte nuevo de stock bajo usa una de ellas.
 - **La compra mínima del pedido la cambia sólo el admin, hasta $ 99.999.999** (1561-b9 y 1596-b3,
   decisiones del dueño), y el mínimo de venta, hasta 99.999.999 u. Los rubros son únicos sin mirar
-  mayúsculas ni espacios de los bordes (`upper(btrim(nombre))`, por sucursal y rubro padre).
+  mayúsculas ni espacios de los bordes (`upper(btrim(nombre))`, por sucursal y rubro padre), y las
+  zonas y las patentes de los vehículos también, por sucursal (D13 y Var-B6; espejo de zonas en
+  `src/utils/nombreZona.ts`).
 - **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** → `migrations/CLAUDE.md`.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
@@ -752,8 +754,10 @@ suelta en `sucursales`.
   Desde la 378 (#1182/#1183), el que reparte un pedido (sin VB) ve su cliente sin poder
   operarlo, y sólo quien actúa como preventista en la sucursal (`_actua_como_preventista`) puede
   tener clientes asignados: el trigger de `cliente_preventistas` frena al transportista y al
-  encargado; el admin y el server no pasan por ahí. El admin sí tiene que elegir a alguien de la
-  sucursal del cliente (#1374); el server y la reasignación por zona, no.
+  encargado; el admin y el server no pasan por ahí. El admin sí tiene que elegir a quien actúa como
+  preventista activo en la sucursal del cliente (#1374 y D12, la regla de ASG-B:
+  `_preventista_activo_de_sucursal`), por REST y por `guardar_cliente`; el server y la reasignación
+  por zona, no.
 - **La zona manda la asignación** (mig 359). Cada zona tiene a lo sumo **un** preventista
   (`preventista_zonas`, UNIQUE por zona) y sus clientes son de él. Linkear la zona o cambiar
   el dueño pasa **todos** sus clientes al dueño (`asignar_preventista_zona`). Cambiarle la

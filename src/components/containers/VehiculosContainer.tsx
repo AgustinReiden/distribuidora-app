@@ -10,6 +10,7 @@ import {
   useGastosDelMesQuery,
   useGuardarVehiculoMutation,
   useRegistrarKmMutation,
+  useCorregirLecturaKmMutation,
   useVehiculoFichaQuery,
   useVehiculosQuery,
   useEmpleadosParaElegirQuery,
@@ -40,6 +41,7 @@ function FichaVehiculo({ vehiculo, mes, onClose }: { vehiculo: Vehiculo; mes: st
   const notify = useNotification()
   const { data, isLoading } = useVehiculoFichaQuery(vehiculo.id)
   const registrarKm = useRegistrarKmMutation()
+  const corregirKm = useCorregirLecturaKmMutation()
   const { data: empleados, isSuccess: empleadosCargados } = useEmpleadosParaElegirQuery()
   // `undefined` mientras carga o si falla: ahí no se sabe quién lo usa, y "nadie" sería mentira.
   const usadoPor = useMemo(
@@ -54,6 +56,11 @@ function FichaVehiculo({ vehiculo, mes, onClose }: { vehiculo: Vehiculo; mes: st
     notify.success('Lectura de km registrada')
   }, [registrarKm, vehiculo.id, notify])
 
+  const handleCorregirKm = useCallback(async (lecturaId: number, fecha: string | null, km: number | null, borrar: boolean) => {
+    await corregirKm.mutateAsync({ lecturaId, fecha, km, borrar })
+    notify.success(borrar ? 'Lectura de km borrada' : 'Lectura de km corregida')
+  }, [corregirKm, notify])
+
   return (
     <ModalFichaVehiculo
       vehiculo={vehiculo}
@@ -63,6 +70,7 @@ function FichaVehiculo({ vehiculo, mes, onClose }: { vehiculo: Vehiculo; mes: st
       mes={mes}
       usadoPor={usadoPor}
       onRegistrarKm={handleRegistrarKm}
+      onCorregirKm={handleCorregirKm}
       onClose={onClose}
     />
   )
