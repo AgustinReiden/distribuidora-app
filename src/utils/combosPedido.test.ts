@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { orquestarPrecios } from './orquestacionPrecios'
 import { ESCENARIOS, PRODUCTOS, pricingMapDe } from './orquestacionPrecios.fixture'
-import { aplicarCombosAlPedido, camposComboRPC, combinarCombosConFotos, crearOraculoPrecios } from './combosPedido'
+import { aplicarCombosAlPedido, camposComboRPC, combinarCombosConFotos, combosConPrecioCambiado, crearOraculoPrecios, textoComboConPrecioCambiado } from './combosPedido'
 import type { ComboVigente } from './combos'
 import { validarMOQPedido, type ItemPedido } from './precioMayorista'
 
@@ -188,8 +188,46 @@ describe('combinarCombosConFotos', () => {
     const vigente = { ...fernetCoca, precio: 10500, topeRestante: 7, prioridad: 3 }
     const foto = { ...fernetCoca, cantidadCombos: 2 }
     const viejo = { ...fernetCoca, id: '501', cantidadCombos: 1 }
-    const r = combinarCombosConFotos([vigente], [foto, viejo])
+    // promos-B5 (tanda 6 bis): con el precio cambiado, sólo el admin conserva el tope del vigente.
+    const r = combinarCombosConFotos([vigente], [foto, viejo], { sumaConPrecioCambiado: true })
     expect(r.find(c => c.id === '500')).toMatchObject({ precio: 11000, topeRestante: 7, prioridad: 3 })
     expect(r.find(c => c.id === '501')).toMatchObject({ topeRestante: 1 })
+  })
+})
+
+describe('combinarCombosConFotos · promos-B5 (tanda 6 bis de #1603): el combo que cambió de precio no crece', () => {
+  // Decisión del dueño (25/11): a un pedido que ya tiene un combo cuyo precio cambió, quien no
+  // es admin no le puede sumar más; conservar y bajar siguen andando. El combo valía $ 11.000.
+  const foto = { ...fernetCoca, cantidadCombos: 1 }
+
+  it('el precio subió: conserva el que tiene y lo demás queda suelto, y lo avisa', () => {
+    const vigentes = [{ ...fernetCoca, precio: 11500 }]
+    const r = pedido(lista(2, 2), combinarCombosConFotos(vigentes, [foto]))
+    expect(r.aplicados.map(a => a.cantidadCombos)).toEqual([1])
+    expect(r.total).toBe(11000 + 10000 + 2500)
+    const avisos = combosConPrecioCambiado(vigentes, [foto])
+    expect(avisos).toEqual([{ id: '500', nombre: 'Fernet + Coca', precioFoto: 11000, precioHoy: 11500, cantidadCombos: 1 }])
+    expect(textoComboConPrecioCambiado(avisos[0])).toBe(
+      'El combo «Fernet + Coca» cambió de precio desde que se armó el pedido: valía $ 11.000,00 y hoy vale $ 11.500,00. '
+      + 'Este pedido puede conservar sus 1 o bajarlos; los combos nuevos cargalos en otro pedido.')
+  })
+
+  it('el precio bajó: igual', () => {
+    const vigentes = [{ ...fernetCoca, precio: 10500 }]
+    expect(pedido(lista(2, 2), combinarCombosConFotos(vigentes, [foto])).aplicados.map(a => a.cantidadCombos)).toEqual([1])
+  })
+
+  it('el admin sí le suma, a la plata de la foto', () => {
+    const vigentes = [{ ...fernetCoca, precio: 11500 }]
+    const r = pedido(lista(2, 2), combinarCombosConFotos(vigentes, [foto], { sumaConPrecioCambiado: true }))
+    expect(r.aplicados.map(a => a.cantidadCombos)).toEqual([2])
+    expect(r.total).toBe(22000)
+  })
+
+  it('sin cambio de precio suma como siempre, y no avisa nada', () => {
+    const r = pedido(lista(3, 3), combinarCombosConFotos([fernetCoca], [{ ...fernetCoca, cantidadCombos: 2 }]))
+    expect(r.aplicados.map(a => a.cantidadCombos)).toEqual([3])
+    expect(r.total).toBe(33000)
+    expect(combosConPrecioCambiado([fernetCoca], [foto])).toEqual([])
   })
 })

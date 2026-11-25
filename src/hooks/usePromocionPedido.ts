@@ -36,7 +36,7 @@ import {
 import type { ClienteConDescuentos, ProductoConCategoria } from '../utils/descuentoCliente'
 import { useCombosVigentesQuery, type FotoCombo } from './queries/useCombosQuery'
 import type { ComboAplicado, ComboVigente } from '../utils/combos'
-import { aplicarCombosAlPedido, combinarCombosConFotos, type LineaConCombo } from '../utils/combosPedido'
+import { aplicarCombosAlPedido, combinarCombosConFotos, combosConPrecioCambiado, type ComboConPrecioCambiado, type LineaConCombo } from '../utils/combosPedido'
 import type { PricingMap } from '../utils/precioMayorista'
 import { sugerirCombos, type EntradaSugerencias, type SugerenciaCombo } from '../utils/comboSugerencia'
 import { entradaDeConsulta, resumirDatosDePrecio, type DatosDePrecio, type EntradaDatoDePrecio } from '../utils/datosDePrecio'
@@ -64,6 +64,11 @@ export interface OpcionesCombos {
   pedidoId?: string
   /** Edición: la foto de los combos que el pedido ya tiene (pedido_combos). */
   fotos?: FotoCombo[]
+  /**
+   * Edición: el admin puede sumar combos que cambiaron de precio desde que se armó el pedido;
+   * quien no es admin no (promos-B5, decisión del dueño del 25/11).
+   */
+  sumaConPrecioCambiado?: boolean
   /** Edición: las promos de las que el pedido ya tiene regalo, que siguen resolviendo aunque se hayan apagado (#1300). */
   promosDelPedido?: readonly string[]
   /**
@@ -83,6 +88,8 @@ export interface OpcionesCombos {
 }
 
 interface UsePromocionPedidoReturn {
+  /** Edición: los combos del pedido que hoy valen otra cosa (promos-B5): no se les suma. */
+  combosConPrecioCambiado: ComboConPrecioCambiado[]
   /** Mapa de productoId → precio resuelto (mayorista) */
   preciosResueltos: Map<string, PrecioResuelto>
   /** Nudges de mayorista */
@@ -252,8 +259,15 @@ export function usePromocionPedido(
   // Combos (#1191): una capa aparte, encima de la orquestación (que es la del
   // bot y no los arma). Parte cada producto en combo y suelta.
   const fotos = opcionesCombos?.fotos
+  const sumaConPrecioCambiado = opcionesCombos?.sumaConPrecioCambiado ?? false
   const combos = useMemo(
-    () => (combosHabilitados ? combinarCombosConFotos(combosVigentes ?? [], fotos ?? []) : []),
+    () => (combosHabilitados
+      ? combinarCombosConFotos(combosVigentes ?? [], fotos ?? [], { sumaConPrecioCambiado })
+      : []),
+    [combosHabilitados, combosVigentes, fotos, sumaConPrecioCambiado],
+  )
+  const precioCambiado = useMemo(
+    () => (combosHabilitados ? combosConPrecioCambiado(combosVigentes ?? [], fotos ?? []) : []),
     [combosHabilitados, combosVigentes, fotos],
   )
   const resultadoCombos = useMemo(
@@ -326,6 +340,7 @@ export function usePromocionPedido(
   }
 
   return {
+    combosConPrecioCambiado: precioCambiado,
     preciosResueltos: orquestacion.preciosResueltos,
     faltantes,
     promoResolucion: orquestacion.promoResolucion,

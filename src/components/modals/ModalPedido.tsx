@@ -13,7 +13,7 @@ import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocio
 import { resolverDescuentoPctCliente } from '../../utils/descuentoCliente';
 import { validarRepartoRegalo, type ParteReparto } from '../../utils/repartoRegalo';
 import { avisosDeCupo } from '../../utils/cupoPromo';
-import { usePromoCuposQuery } from '../../hooks/queries/usePromocionesQuery';
+import { usePromoAcumuladoresMapQuery, usePromoCuposQuery } from '../../hooks/queries/usePromocionesQuery';
 import { AvisoCupoPromo } from '../ui/AvisoCupoPromo';
 import type { BonificacionResult } from '../../utils/promociones';
 import { useGeolocationCapture } from '../../hooks/useGeolocationCapture';
@@ -775,6 +775,8 @@ const ModalPedido = memo(function ModalPedido({
 
   // #1283: el preventista ve el cupo acá, no recién en el rechazo del server.
   const { data: cuposPromo } = usePromoCuposQuery();
+  // promos-B1 (F4): la barra de cada sabor y de qué contenedor descuenta, como el server.
+  const { data: acumuladoresPorPromo } = usePromoAcumuladoresMapQuery();
   const avisosCupo = useMemo(
     () => avisosDeCupo(cuposPromo, gruposBonif.map(g => ({
       promocionId: g.promoId,
@@ -841,7 +843,11 @@ const ModalPedido = memo(function ModalPedido({
     if (!promo) return [];
     return partesDeGrupo(grupo).flatMap(parte => {
       const prod = productos.find(p => String(p.id) === String(parte.productoId));
-      return prod && regaloSinBulto({ promo, producto: prod }) ? [textoRegaloSinBulto(prod.nombre)] : [];
+      return prod && regaloSinBulto({
+        promo, producto: prod,
+        acumuladores: acumuladoresPorPromo ? (acumuladoresPorPromo.get(String(promo.id)) ?? []) : undefined,
+        productoPorId: id => productos.find(p => String(p.id) === id),
+      }) ? [textoRegaloSinBulto(prod.nombre)] : [];
     });
   };
   const regalosSinBulto = gruposBonif.flatMap(regalosSinBultoDeGrupo);

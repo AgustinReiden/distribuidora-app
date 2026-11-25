@@ -57,6 +57,7 @@ vi.mock('../../hooks/useGoogleMaps', () => ({
 // Resolución de precios neutra, como en el smoke: el total es la suma cruda.
 vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
   usePromoCuposQuery: () => ({ data: undefined }),
+  usePromoAcumuladoresMapQuery: () => ({ data: new Map() }),
 }))
 
 vi.mock('../../hooks/usePromocionPedido', () => ({

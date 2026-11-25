@@ -192,21 +192,36 @@ describe('evaluarCambioRegalo con el regalo de la promo como referencia (#1592)'
 describe('regaloSinBulto · promos-B1 en el alta y la edición (tanda 6 bis de #1603)', () => {
   // Promo de fracción «5 V dan 2 R», R es su propio contenedor (6 R = 1 R).
   const promo = { regaloMueveStock: false, unidadesPorBloque: 6, ajusteProductoId: 'R', productoRegaloId: 'R' }
+  const productos: Record<string, { unidades_por_bulto?: number | null }> = { K: { unidades_por_bulto: 12 }, L: {} }
+  const base = { promo, acumuladores: [] as { producto_regalo_id: string; ajuste_producto_id?: string | null }[], productoPorId: (id: string) => productos[id] }
 
   it('otro sabor sin bulto: no se puede regalar', () => {
-    expect(regaloSinBulto({ promo, producto: { id: 'X', unidades_por_bulto: null } })).toBe(true)
+    expect(regaloSinBulto({ ...base, producto: { id: 'X', unidades_por_bulto: null } })).toBe(true)
     expect(textoRegaloSinBulto('Manaos Naranja')).toBe(
       'Para regalar Manaos Naranja hay que cargar en su ficha cuántas unidades sueltas trae cada unidad de stock (unidades por bulto).')
   })
 
   it('con su bulto, el regalo o el contenedor de la promo, sí', () => {
-    expect(regaloSinBulto({ promo, producto: { id: 'X1', unidades_por_bulto: 1 } })).toBe(false)
-    expect(regaloSinBulto({ promo, producto: { id: 'R', unidades_por_bulto: null } })).toBe(false)
-    expect(regaloSinBulto({ promo: { ...promo, productoRegaloId: 'C', ajusteProductoId: 'K' }, producto: { id: 'K' } })).toBe(false)
+    expect(regaloSinBulto({ ...base, producto: { id: 'X1', unidades_por_bulto: 1 } })).toBe(false)
+    expect(regaloSinBulto({ ...base, producto: { id: 'R', unidades_por_bulto: null } })).toBe(false)
+    expect(regaloSinBulto({ ...base, promo: { ...promo, productoRegaloId: 'C', ajusteProductoId: 'K' }, producto: { id: 'K' } })).toBe(false)
+  })
+
+  it('F4: manda el contenedor de su barra (promo_acumuladores), como el server', () => {
+    // X sin bulto, pero su barra descuenta de K (con bulto): el server lo acepta.
+    expect(regaloSinBulto({ ...base, acumuladores: [{ producto_regalo_id: 'X', ajuste_producto_id: 'K' }], producto: { id: 'X' } })).toBe(false)
+    // X1 con bulto, pero su barra descuenta de L (sin bulto): el server lo rechaza.
+    expect(regaloSinBulto({ ...base, acumuladores: [{ producto_regalo_id: 'X1', ajuste_producto_id: 'L' }], producto: { id: 'X1', unidades_por_bulto: 1 } })).toBe(true)
+    // Su barra descuenta del contenedor de la promo: cuenta con su N.
+    expect(regaloSinBulto({ ...base, acumuladores: [{ producto_regalo_id: 'X', ajuste_producto_id: 'R' }], producto: { id: 'X' } })).toBe(false)
+  })
+
+  it('sin los acumuladores cargados no decide: decide el server', () => {
+    expect(regaloSinBulto({ ...base, acumuladores: undefined, producto: { id: 'X' } })).toBe(false)
   })
 
   it('una promo que mueve stock o sin unidades por bloque no lo pide', () => {
-    expect(regaloSinBulto({ promo: { ...promo, regaloMueveStock: true }, producto: { id: 'X' } })).toBe(false)
-    expect(regaloSinBulto({ promo: { ...promo, unidadesPorBloque: null }, producto: { id: 'X' } })).toBe(false)
+    expect(regaloSinBulto({ ...base, promo: { ...promo, regaloMueveStock: true }, producto: { id: 'X' } })).toBe(false)
+    expect(regaloSinBulto({ ...base, promo: { ...promo, unidadesPorBloque: null }, producto: { id: 'X' } })).toBe(false)
   })
 })

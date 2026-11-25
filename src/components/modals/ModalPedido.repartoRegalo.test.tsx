@@ -79,6 +79,7 @@ const { cupoMock } = vi.hoisted(() => ({
 
 vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
   usePromoCuposQuery: () => ({ data: cupoMock.cupos }),
+  usePromoAcumuladoresMapQuery: () => ({ data: new Map() }),
   usePromoMapQuery: (fecha?: string) => usePromoMapQueryMock(fecha),
 }))
 vi.mock('../../hooks/queries/useGruposPrecioQuery', () => ({

@@ -307,7 +307,8 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   `topeSustituto.espejo.json`); la pantalla sugiere con ella. El pedido que rehízo un cambio de cliente mide desde el
   alta del original (N2, tanda 6 bis: `_regalo_de_la_promo` sigue su `pedido_historial`), y la
   edición acepta volver a ese regalo (o a uno de su rubro) en una promo que el pedido ya tenía aunque
-  hoy la promo dé otro (N1: un reparto que ya no cierra vuelve a él, no al de hoy). El reparto la cumple sobre la suma
+  hoy la promo dé otro (N1: un reparto que ya no cierra vuelve a él, no al de hoy), o a un producto
+  que el pedido ya tenía como regalo de esa promo, en una línea o al principio de una cadena (F5). El reparto la cumple sobre la suma
   de las partes, y la edición no escala una cadena por encima (`_regalo_tope_de_cadena`): lo que
   armó un admin se conserva pero no crece, **salvo** cuando la edición baja lo que da la promo y el
   sustituto es de otro rubro: ahí no puede valer más que el regalo nuevo y se rechaza
@@ -374,7 +375,8 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   con su propio bulto (`unidades_por_bulto` del contenedor), también del mismo rubro: sin el dato
   se rechaza (promos-B1; antes heredaba el N de la promo, que es el empaque del regalo). Lo mismo
   otro sabor cargado como regalo en el alta o la edición, también por el admin (es un dato, no un
-  permiso): la regla es `_regalo_sin_bulto`, que llaman `regalo_fuera_de_promo` y la rama del admin
+  permiso): la regla es `_regalo_sin_bulto` (con el contenedor de la barra de cada sabor, como
+  `contenedor_de_barra`), que llaman `regalo_fuera_de_promo` y la rama del admin
   de `crear_pedido_completo` y `actualizar_pedido_items`; no la pide un producto que el pedido (o
   el original de un cambio de cliente) ya tenía como regalo de esa promo. Y sólo una promo de fracción con
   ajuste automático tiene barra: en la que mueve stock o no tiene ajuste, `usos_pendientes` es un
@@ -389,8 +391,8 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   front arma y el server valida**: `armarCombos` (`src/utils/combos.ts`) elige los combos y
   `combo_fuera_de_regla` comprueba que sean legítimos (estructura para todo rol; vigencia, tope,
   total y reparto exactos para quien no es admin). Las tres puras que recalcula el server
-  (`_combo_total`, `_combo_prorrateo`, `_combo_cantidad`, y `_combo_tramos_para`) tienen espejo con
-  gate (`combos.espejo.json`): si cambiás una, cambiá la otra. El reparto no deja ninguna línea en $0
+  (`_combo_total`, `_combo_prorrateo`, `_combo_cantidad`) tienen espejo con gate
+  (`combos.espejo.json`): si cambiás una, cambiá la otra. El reparto no deja ninguna línea en $0
   (1592-b4): si el de siempre deja una por debajo de un centavo, cada unidad toma un centavo y el
   resto se reparte igual sin bajar de 0; si ni así se puede, NULL. `precio_fuera_de_politica` valida la
   línea de combo por su precio **sin** combo, y saca del conteo de escalas las unidades de un
@@ -400,16 +402,14 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   `app.combo_sin_escala` y guarda `_guardar_combos_pedido`; 0 sin el dato) (promos-B4). La foto del
   combo de cada pedido es `pedido_combos`: al editar, un combo que
   el pedido ya tenía se mide contra su foto, y en un cambio de cliente, contra la del pedido
-  original (`app.combo_foto_pedido`), que el pedido nuevo hereda (#1301). **Lo que se suma al editar
-  va al precio de hoy** (promos-B5, decisiones del dueño del 24/11 y el 25/11: «los combos nuevos, al
-  precio de hoy», «un renglón, precio promedio»): la foto lleva los tramos (`pedido_combos.tramos`,
-  `[{cantidad, precio}]` en el orden en que entraron, que suman los armados; NULL en una de antes es
-  un tramo de `precio`). Lo que el pedido conserva son los primeros tramos (se van primero los
-  últimos, `_combo_tramos_para`), lo que se suma es un tramo nuevo al precio de hoy del combo, para
-  todo rol (la plata del admin no se valida), y el total es la suma de los tramos; sigue siendo un
-  renglón por producto, al promedio (1 a $ 1.000 y 1 a $ 1.200 son 2 a $ 1.100; si una salvedad
-  rompe uno, el que queda vale $ 1.100). Un camino nuevo que escriba `pedido_combos` mantiene los
-  tramos (lo vigila su CHECK). Un lugar del combo puede
+  original (`app.combo_foto_pedido`), que el pedido nuevo hereda (#1301). **Un combo que cambió de precio no
+  crece** (promos-B5, decisión del dueño del 25/11): a un pedido que ya tiene un combo cuyo precio
+  de hoy (`_combo_definicion`) no es el de su foto, al centavo, quien no es admin no le suma más;
+  el que tiene queda a la foto, conservarlo y bajarlo andan, y `combo_fuera_de_regla` rechaza
+  sumar con el combo y los dos precios («los combos nuevos cargalos en otro pedido»). El admin sí
+  (decide la plata, como siempre). Sin cambio de precio, sumar anda como siempre; la edición no lo
+  arma y lo avisa (`combosConPrecioCambiado`). Una foto tiene un solo precio: dos precios en un
+  renglón por producto no siempre se reparten al centavo. Un lugar del combo puede
   ser una **categoría viva**
   (`combo_componentes.categoria_id`, mig 386): lo que vende lo resuelve `_combo_definicion`, así
   que nada lee `combo_componentes.producto_id` directo; en el front, `resolverLugares`. La

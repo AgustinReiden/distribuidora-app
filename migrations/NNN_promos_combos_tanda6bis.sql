@@ -1,20 +1,17 @@
 -- =========================================================================
 -- NNN · PROMOS Y COMBOS: EL OTRO SABOR SIN SU BULTO EN EL ALTA Y LA EDICIÓN, EL
---       COMBO CON UN COMPONENTE SIN LISTA, EL COMBO QUE SE SUMA AL PRECIO DE HOY
+--       COMBO CON UN COMPONENTE SIN LISTA, EL COMBO QUE CAMBIÓ DE PRECIO NO CRECE
 --       Y EL REGALO DEL PEDIDO EN LA EDICIÓN Y EN EL CAMBIO DE CLIENTE
 --       (tanda 6 bis del plan #1603, tarjeta I: promos-B1, B4 y B5 de la
---        reauditoría del 24/11 y las notas N1 y N2 de la segunda lente de promos)
+--        reauditoría del 24/11, las notas N1 y N2 de la segunda lente de promos y
+--        F5 de la lente de esta tarjeta)
 --
--- Agrega a `pedido_combos` la columna `tramos` (con su CHECK), crea cuatro funciones
--- (`_regalo_sin_bulto`, `_combo_tramos_para`, `_combo_tramos_validos` y la nueva firma
--- de `_combo_total`, que reemplaza a la vieja), reescribe `_guardar_combos_pedido`, y
--- parcha por ancla, con premisa de md5 sobre los cuerpos vivos de la 544,
--- `regalo_fuera_de_promo`, `_regalo_de_la_promo` y `combo_fuera_de_regla`. Suma además,
--- por ancla y SIN premisa de md5 (son de la tarjeta H y su migración va antes: el
--- ancla aparece exactamente una vez), una llamada a `_regalo_sin_bulto` en la rama del
--- admin de `crear_pedido_completo` y de `actualizar_pedido_items`. No cambia firmas ni
--- permisos de lo que existe (salvo `_combo_total`, interna: sin EXECUTE para
--- authenticated, la llama sólo `combo_fuera_de_regla`).
+-- Crea `_regalo_sin_bulto` y parcha por ancla, con premisa de md5 sobre los cuerpos
+-- vivos de la 545, `regalo_fuera_de_promo`, `_regalo_de_la_promo`,
+-- `combo_fuera_de_regla` y `_guardar_combos_pedido`, y en la rama del admin de
+-- `crear_pedido_completo` y `actualizar_pedido_items` (de la tarjeta H, ya aplicadas en
+-- la 545) suma una llamada a `_regalo_sin_bulto`. No cambia firmas, permisos ni tablas:
+-- no hay DDL de tabla ni LOCK TABLE.
 -- Ensayo: scripts/test-promos-combos-tanda6bis-1603.sql. Se aplica en LF.
 --
 -- -------------------------------------------------------------------------
@@ -25,14 +22,15 @@
 -- se podía cargar como regalo otro sabor del mismo rubro (el admin desde el selector;
 -- cualquiera con un request armado a mano), y su barra contaba con el N de la promo,
 -- que es el empaque del regalo. `_regalo_sin_bulto` es la regla: un regalo de una promo
--- de fracción con unidades por bloque cuya barra no es la del contenedor de la promo, y
--- cuyo contenedor no tiene bulto, se rechaza. No la piden el regalo de la promo, un
--- producto que el pedido ya tenía como regalo de esa promo (o el pedido original de un
--- cambio de cliente), una línea con su cadena de sustitución, una promo sin unidades por
--- bloque ni una que mueve stock. La llama `regalo_fuera_de_promo` (paso 3: quien no es
--- admin, y el bot) y, decisión de la coordinadora con el molde de la 544 (es un dato que
--- falta para contar la barra, no un permiso), la rama del admin del alta y de la
--- edición. El selector del admin en ModalPedido dice lo mismo antes de confirmar.
+-- de fracción con unidades por bloque cuya barra (contenedor_de_barra) no es la del
+-- contenedor de la promo, y cuyo contenedor no tiene bulto, se rechaza. No la piden el
+-- regalo de la promo, un producto que el pedido (o el original de un cambio de cliente)
+-- ya tenía como regalo de esa promo, una línea con su cadena de sustitución, una promo
+-- sin unidades por bloque ni una que mueve stock. La llama `regalo_fuera_de_promo` (su
+-- paso 4b: quien no es admin, y el bot) y, decisión de la coordinadora con el molde de la
+-- 544 (es un dato que falta para contar la barra, no un permiso), la rama del admin del
+-- alta y de la edición. El selector del admin en ModalPedido dice lo mismo antes de
+-- confirmar, con el contenedor de la barra de cada sabor.
 --
 -- -------------------------------------------------------------------------
 -- 2 · promos-B4: el combo acumulable con un componente sin precio de lista
@@ -40,7 +38,7 @@
 -- `precio_fuera_de_politica` no valida una línea sin lista: en la edición, la que
 -- conserva su precio (1559-b3) podía declarar un `precio_sin_escala_unitario` más alto
 -- o un `precio_sin_combo_unitario` más bajo, y el descuento de escala de más le bajaba
--- `_combo_total` y el precio a las otras líneas. Ahora `combo_fuera_de_regla` publica
+-- el total del combo y el precio a las otras líneas. Ahora `combo_fuera_de_regla` publica
 -- el sin escala que declaró cada línea (`app.combo_sin_escala`), `_guardar_combos_pedido`
 -- lo guarda en `pedido_combos.precios` (`sin_escala`, junto a `combo` y `sin_combo`), y a
 -- una línea sin lista no se le acepta un descuento de escala por unidad (sin escala −
@@ -48,44 +46,38 @@
 -- producto que no estaba en el combo).
 --
 -- -------------------------------------------------------------------------
--- 3 · promos-B5: los combos que se suman al editar, al precio de hoy
+-- 3 · promos-B5: el combo que cambió de precio no crece
 -- -------------------------------------------------------------------------
--- Decisión del dueño (24/11): «los combos nuevos, al precio de hoy»; y (25/11): «un
--- renglón, precio promedio». Combo de $ 1.000 que hoy vale $ 1.200; el pedido de ayer
--- tiene 1; para sumar otro, quien no es admin lo carga a $ 1.200: 2 combos, $ 2.200, a
--- $ 1.100 cada uno en sus líneas. La foto lleva los tramos de precio en
--- `pedido_combos.tramos` ([{cantidad, precio}], en el orden en que entraron; NULL, en
--- los de antes, es un tramo de `cantidad_combos_armados` a `precio`). Al editar, lo que
--- el pedido conserva sale de sus tramos (los primeros que entraron: recorte LIFO), lo
--- que se suma va al precio de hoy (`_combo_tramos_para`), y el total es la suma de los
--- tramos menos lo que bajó la escala (`_combo_total` con tramos). Una línea por producto
--- y por combo, como siempre: la comisión, los reportes de combos, la nota de crédito y
--- la salvedad leen las líneas y `precios`, no `precio`. La foto del admin también suma
--- al precio de hoy (la plata de sus líneas no se valida, como hoy).
+-- Decisión del dueño (25/11, reemplaza «un renglón, precio promedio»): a un pedido que
+-- ya tiene un combo cuyo precio cambió, quien no es admin no le puede sumar más de ese
+-- combo. El que ya estaba queda a su precio; conservar y bajar siguen andando; sumar se
+-- rechaza con el motivo (el combo, lo que valía y lo que vale): «los combos nuevos
+-- cargalos en otro pedido». El admin sí suma (decide el precio, como hoy). Si el precio
+-- no cambió, sumar anda como siempre. `combo_fuera_de_regla` compara al centavo el
+-- precio de la foto con el de hoy (`_combo_definicion`). La pantalla de edición no lo
+-- arma y lo avisa con el mismo texto.
 --
 -- -------------------------------------------------------------------------
--- 4 · N1 y N2 de la segunda lente: el regalo del pedido
+-- 4 · N1, N2 y F5: el regalo del pedido
 -- -------------------------------------------------------------------------
 -- N1 · Decisión del dueño: el regalo del pedido es el que la promo daba cuando nació. La
 -- edición que vuelve a ese regalo (un reparto que ya no cierra, en la pantalla) mandaba
 -- el regalo de hoy; ahora manda el del pedido, y `regalo_fuera_de_promo` (paso 3) lo
 -- acepta en una promo que el pedido ya tenía: el regalo de referencia
 -- (`_regalo_de_la_promo`) o uno de su rubro, además del de hoy como siempre.
+-- F5 · Y también un producto que el pedido ya tenía como regalo de esa promo, en una
+-- línea o al principio de una cadena: la pantalla vuelve a la raíz de sus líneas, que
+-- puede ser el regalo de otro rubro que eligió un admin.
 -- N2 · El pedido rehecho por un cambio de cliente nace de nuevo, pero su regalo es el del
 -- original: `_regalo_de_la_promo` sigue el `pedido_historial` del cambio de cliente
 -- («(cambio de cliente desde pedido #N)», que escribe cambiar_cliente_pedido) hasta el
 -- primer pedido y mide desde su alta. Sin columna nueva.
 --
--- Revertir: volver `regalo_fuera_de_promo`, `_regalo_de_la_promo`, `combo_fuera_de_regla`
--- y `_guardar_combos_pedido` a los cuerpos de la premisa, sacar los dos bloques del admin
--- de `crear_pedido_completo` y `actualizar_pedido_items`, recrear `_combo_total` con su
--- firma vieja, y borrar las funciones nuevas, el CHECK y la columna.
+-- Revertir: volver las seis funciones a los cuerpos de la premisa y borrar
+-- `_regalo_sin_bulto`.
 -- =========================================================================
 
 BEGIN;
-
--- La única tabla con DDL (la columna y su CHECK): su lock primero, sin esperar.
-LOCK TABLE public.pedido_combos IN ACCESS EXCLUSIVE MODE NOWAIT;
 
 SET LOCAL lock_timeout = '5s';
 
@@ -98,8 +90,8 @@ END
 $lf$;
 
 -- ---------------------------------------------------------------------------
--- Premisas: los cuerpos vivos (ledger en la 544) de las funciones de esta tarjeta, lo
--- que el arreglo usa tal como está, y que lo nuevo todavía no existe.
+-- Premisas: los cuerpos vivos (ledger en la 545), lo que el arreglo usa tal como está, y
+-- que la función nueva todavía no existe.
 -- ---------------------------------------------------------------------------
 DO $premisas$
 DECLARE
@@ -111,13 +103,11 @@ BEGIN
     ('public._regalo_de_la_promo(bigint,bigint,bigint,uuid,bigint,numeric)', '0ed07e72b5d047e60695d13bfae3d312'),
     ('public.combo_fuera_de_regla(jsonb,bigint,date,bigint,boolean)', '589942c33c244c752112bf7712d1fe84'),
     ('public._guardar_combos_pedido(bigint,bigint)', '3279e74715f9b580e7323bb66a085d55'),
-    ('public._combo_total(numeric,integer,jsonb)', '0469ca14f72cc71b0864a50244367159'),
-    ('public.crear_pedido_completo(bigint,numeric,uuid,jsonb,text,text,text,date,text,numeric,numeric,date,uuid)', NULL),
-    ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)', NULL),
+    ('public.crear_pedido_completo(bigint,numeric,uuid,jsonb,text,text,text,date,text,numeric,numeric,date,uuid)', 'e163e8f2bb16ec4c71243eeb77fd7761'),
+    ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)', '7e04bbbcb8876573286ef5d819f6dfe8'),
     ('public.contenedor_de_barra(bigint,bigint,bigint,bigint)', NULL),
     ('public._regalo_modo_del_pedido(bigint,bigint,bigint)', NULL),
     ('public._combo_definicion(bigint,bigint)', NULL),
-    ('public._combo_cantidad(jsonb,jsonb)', NULL),
     ('public.regalo_misma_categoria(bigint,bigint,bigint)', NULL)
   ) AS t(f, h) LOOP
     IF to_regprocedure(r.f) IS NULL THEN
@@ -130,13 +120,8 @@ BEGIN
       END IF;
     END IF;
   END LOOP;
-  IF to_regprocedure('public._regalo_sin_bulto(jsonb,bigint,bigint)') IS NOT NULL
-     OR to_regprocedure('public._combo_tramos_para(jsonb,integer,numeric)') IS NOT NULL
-     OR to_regprocedure('public._combo_tramos_validos(jsonb,integer)') IS NOT NULL
-     OR to_regprocedure('public._combo_total(numeric,integer,jsonb,jsonb)') IS NOT NULL
-     OR EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.pedido_combos'::regclass
-                                             AND attname = 'tramos' AND NOT attisdropped) THEN
-    RAISE EXCEPTION 'mig NNN · lo que crea esta migración ya existe';
+  IF to_regprocedure('public._regalo_sin_bulto(jsonb,bigint,bigint)') IS NOT NULL THEN
+    RAISE EXCEPTION 'mig NNN · _regalo_sin_bulto ya existe';
   END IF;
 END
 $premisas$;
@@ -195,219 +180,12 @@ REVOKE ALL ON FUNCTION public._regalo_sin_bulto(jsonb, bigint, bigint) FROM PUBL
 GRANT EXECUTE ON FUNCTION public._regalo_sin_bulto(jsonb, bigint, bigint) TO service_role;
 
 -- =========================================================================
--- 3 · promos-B5: los tramos de la foto de un combo
--- =========================================================================
--- Los tramos de `p_k` combos a partir de `p_tramos`: con menos, los primeros que entraron
--- (se van primero los últimos: LIFO); con más, lo que falta en un tramo nuevo a
--- `p_precio_nuevo` (pegado al último si es el mismo precio). Espejo: `tramosDelCombo`
--- (src/utils/combos.ts), con los casos de combos.espejo.json.
-CREATE FUNCTION public._combo_tramos_para(p_tramos jsonb, p_k integer, p_precio_nuevo numeric)
- RETURNS jsonb
- LANGUAGE plpgsql
- IMMUTABLE
- SET search_path = public, pg_temp
-AS $function$
-DECLARE
-  v_out   jsonb := '[]'::jsonb;
-  v_resto integer := GREATEST(COALESCE(p_k, 0), 0);
-  v_toma  integer;
-  t       record;
-BEGIN
-  FOR t IN
-    SELECT (x->>'cantidad')::integer AS cantidad, (x->>'precio')::numeric AS precio
-      FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_tramos) = 'array' THEN p_tramos ELSE '[]'::jsonb END)
-           WITH ORDINALITY AS a(x, o)
-     ORDER BY a.o
-  LOOP
-    EXIT WHEN v_resto <= 0;
-    v_toma := LEAST(t.cantidad, v_resto);
-    CONTINUE WHEN v_toma <= 0;
-    v_out := v_out || jsonb_build_array(jsonb_build_object('cantidad', v_toma, 'precio', t.precio));
-    v_resto := v_resto - v_toma;
-  END LOOP;
-  IF v_resto > 0 THEN
-    IF jsonb_array_length(v_out) > 0
-       AND (v_out->-1->>'precio')::numeric = p_precio_nuevo THEN
-      v_out := jsonb_set(v_out, '{-1,cantidad}', to_jsonb((v_out->-1->>'cantidad')::integer + v_resto));
-    ELSE
-      v_out := v_out || jsonb_build_array(jsonb_build_object('cantidad', v_resto, 'precio', p_precio_nuevo));
-    END IF;
-  END IF;
-  RETURN v_out;
-END
-$function$;
-
-REVOKE ALL ON FUNCTION public._combo_tramos_para(jsonb, integer, numeric) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public._combo_tramos_para(jsonb, integer, numeric) TO service_role;
-
--- El CHECK de la columna: NULL (una foto de antes), o un array de tramos con cantidad
--- entera > 0 y precio > 0, con centavos y finito (un número de JSON no es NaN ni
--- infinito, pero un string sí: tiene que ser número), que suman los combos armados.
-CREATE FUNCTION public._combo_tramos_validos(p_tramos jsonb, p_armados integer)
- RETURNS boolean
- LANGUAGE sql
- IMMUTABLE
- SET search_path = public, pg_temp
-AS $function$
-  SELECT p_tramos IS NULL
-      OR (jsonb_typeof(p_tramos) = 'array'
-          AND NOT EXISTS (
-                SELECT 1 FROM jsonb_array_elements(p_tramos) x
-                 WHERE jsonb_typeof(x) <> 'object'
-                    OR jsonb_typeof(x->'cantidad') IS DISTINCT FROM 'number'
-                    OR jsonb_typeof(x->'precio') IS DISTINCT FROM 'number'
-                    OR (x->>'cantidad')::numeric <= 0
-                    OR (x->>'cantidad')::numeric <> trunc((x->>'cantidad')::numeric)
-                    OR (x->>'precio')::numeric <= 0
-                    OR (x->>'precio')::numeric > 9999999999.99
-                    OR (x->>'precio')::numeric <> round((x->>'precio')::numeric, 2))
-          AND (SELECT COALESCE(sum((x->>'cantidad')::numeric), 0) FROM jsonb_array_elements(p_tramos) x)
-              = COALESCE(p_armados, 0));
-$function$;
-
-REVOKE ALL ON FUNCTION public._combo_tramos_validos(jsonb, integer) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public._combo_tramos_validos(jsonb, integer) TO service_role;
-
-ALTER TABLE public.pedido_combos ADD COLUMN tramos jsonb;
-COMMENT ON COLUMN public.pedido_combos.tramos IS
-  'promos-B5 (tanda 6 bis de #1603): los tramos de precio de los combos armados, [{cantidad, precio}] en el orden en que entraron. NULL: un tramo de cantidad_combos_armados a precio (las fotos de antes). Lo escribe _guardar_combos_pedido.';
-ALTER TABLE public.pedido_combos ADD CONSTRAINT pedido_combos_tramos_validos
-  CHECK (public._combo_tramos_validos(tramos, cantidad_combos_armados));
-
--- El total: con tramos, Σ precio × cantidad de cada tramo en lugar de precio × k.
--- Firma nueva con el parámetro opcional y sin la vieja (dos sobrecargas con 3
--- argumentos serían ambiguas). Espejo: totalDelCombo.
-DROP FUNCTION public._combo_total(numeric, integer, jsonb);
-
-CREATE FUNCTION public._combo_total(p_precio numeric, p_k integer, p_lineas jsonb, p_tramos jsonb DEFAULT NULL)
- RETURNS numeric
- LANGUAGE sql
- IMMUTABLE
- SET search_path = public, pg_temp
-AS $function$
-  SELECT round((CASE WHEN p_tramos IS NULL THEN round(p_precio * 100) * p_k
-                     ELSE (SELECT sum(round((t->>'precio')::numeric * 100) * (t->>'cantidad')::numeric)
-                             FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_tramos) = 'array'
-                                                            THEN p_tramos ELSE '[]'::jsonb END) t) END
-                - COALESCE((SELECT sum(NULLIF(e->>'cantidad', '')::numeric
-                                       * (round(NULLIF(e->>'sin_escala', '')::numeric * 100)
-                                          - round(NULLIF(e->>'ref', '')::numeric * 100)))
-                              FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_lineas) = 'array'
-                                                             THEN p_lineas ELSE '[]'::jsonb END) e
-                             WHERE NULLIF(e->>'sin_escala', '') IS NOT NULL), 0)) / 100, 2);
-$function$;
-
-REVOKE ALL ON FUNCTION public._combo_total(numeric, integer, jsonb, jsonb) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public._combo_total(numeric, integer, jsonb, jsonb) TO service_role;
-
--- La foto: los tramos en cada guardado, y el sin escala que declaró cada línea (B4).
-CREATE OR REPLACE FUNCTION public._guardar_combos_pedido(p_pedido_id bigint, p_sucursal bigint)
- RETURNS void
- LANGUAGE plpgsql
- SET search_path = public, pg_temp
-AS $function$
-DECLARE
-  r     record;
-  v_f   record;
-  v_def jsonb;
-  v_k   integer;
-  -- #1301: el pedido nuevo de un cambio de cliente hereda la foto del original.
-  v_original bigint := NULLIF(current_setting('app.combo_foto_pedido', true), '')::bigint;
-  -- promos-B4 (tanda 6 bis de #1603): el sin escala que declaró cada línea de un combo
-  -- acumulable, como lo publicó combo_fuera_de_regla ({combo: {producto: sin escala}}).
-  v_sin      jsonb := COALESCE(NULLIF(current_setting('app.combo_sin_escala', true), '')::jsonb, '{}'::jsonb);
-  v_hoy      numeric;
-  v_tramos   jsonb;
-BEGIN
-  DELETE FROM pedido_combos f
-   WHERE f.pedido_id = p_pedido_id AND f.sucursal_id = p_sucursal
-     AND NOT EXISTS (SELECT 1 FROM pedido_items pi
-                      WHERE pi.pedido_id = f.pedido_id AND pi.sucursal_id = f.sucursal_id
-                        AND pi.combo_id = f.combo_id);
-
-  FOR r IN
-    SELECT pi.combo_id,
-           jsonb_agg(jsonb_build_object('producto_id', pi.producto_id, 'cantidad', pi.cantidad)) AS lineas,
-           jsonb_object_agg(pi.producto_id::text,
-                            jsonb_strip_nulls(jsonb_build_object(
-                              'combo', pi.precio_unitario,
-                              'sin_combo', pi.precio_sin_combo_unitario,
-                              'sin_escala', (v_sin->(pi.combo_id::text)->>(pi.producto_id::text))::numeric))) AS precios
-      FROM pedido_items pi
-     WHERE pi.pedido_id = p_pedido_id AND pi.sucursal_id = p_sucursal AND pi.combo_id IS NOT NULL
-     GROUP BY pi.combo_id
-  LOOP
-    -- promos-B5 (tanda 6 bis de #1603), decisiones del dueño del 24/11 y el 25/11: lo que
-    -- el pedido conserva queda a su precio (los primeros tramos), lo que se suma va al
-    -- precio de hoy del combo, para todo rol (la plata de las líneas del admin no se
-    -- valida, como siempre).
-    v_hoy := (public._combo_definicion(r.combo_id, p_sucursal)->>'precio')::numeric;
-    SELECT fc.componentes, fc.tramos, fc.cantidad_combos, fc.cantidad_combos_armados, fc.precio INTO v_f
-      FROM pedido_combos fc
-     WHERE fc.pedido_id = p_pedido_id AND fc.combo_id = r.combo_id AND fc.sucursal_id = p_sucursal;
-    IF FOUND THEN
-      v_def := v_f.componentes;
-      v_k := public._combo_cantidad(v_def, r.lineas);
-      IF v_k IS NULL THEN
-        RAISE EXCEPTION 'Las líneas del combo #% del pedido #% no forman combos enteros', r.combo_id, p_pedido_id;
-      END IF;
-      v_tramos := public._combo_tramos_para(
-                    public._combo_tramos_para(COALESCE(v_f.tramos, jsonb_build_array(jsonb_build_object(
-                                                'cantidad', v_f.cantidad_combos_armados, 'precio', v_f.precio))),
-                                              v_f.cantidad_combos, NULL),
-                    v_k, COALESCE(v_hoy, v_f.precio));
-      UPDATE pedido_combos
-         SET cantidad_combos = v_k,
-             cantidad_combos_armados = v_k,
-             armado_at = now(),
-             precios = precios || r.precios,
-             recargo = 0,
-             tramos = v_tramos
-       WHERE pedido_id = p_pedido_id AND combo_id = r.combo_id AND sucursal_id = p_sucursal;
-    ELSE
-      v_def := NULL;
-      v_tramos := NULL;
-      IF v_original IS NOT NULL THEN
-        SELECT jsonb_build_object('nombre', fo.nombre, 'precio', fo.precio,
-                                  'combina_escalas', fo.combina_escalas, 'componentes', fo.componentes),
-               public._combo_tramos_para(COALESCE(fo.tramos, jsonb_build_array(jsonb_build_object(
-                                           'cantidad', fo.cantidad_combos_armados, 'precio', fo.precio))),
-                                         fo.cantidad_combos, NULL)
-          INTO v_def, v_tramos
-          FROM pedido_combos fo
-         WHERE fo.pedido_id = v_original AND fo.combo_id = r.combo_id AND fo.sucursal_id = p_sucursal;
-      END IF;
-      v_def := COALESCE(v_def, public._combo_definicion(r.combo_id, p_sucursal));
-      v_k := public._combo_cantidad(v_def->'componentes', r.lineas);
-      IF v_k IS NULL THEN
-        RAISE EXCEPTION 'Las líneas del combo #% del pedido #% no forman combos enteros', r.combo_id, p_pedido_id;
-      END IF;
-      v_tramos := public._combo_tramos_para(
-                    COALESCE(v_tramos, '[]'::jsonb), v_k,
-                    CASE WHEN v_tramos IS NULL THEN (v_def->>'precio')::numeric
-                         ELSE COALESCE(v_hoy, (v_def->>'precio')::numeric) END);
-      INSERT INTO pedido_combos (pedido_id, combo_id, sucursal_id, cantidad_combos, nombre, precio,
-                                 combina_escalas, componentes, cantidad_combos_armados, armado_at, precios,
-                                 tramos)
-      VALUES (p_pedido_id, r.combo_id, p_sucursal, v_k, v_def->>'nombre', (v_def->>'precio')::numeric,
-              (v_def->>'combina_escalas')::boolean, v_def->'componentes', v_k, now(), r.precios,
-              v_tramos);
-    END IF;
-  END LOOP;
-  -- Lo publicado vale para este guardado y nada más.
-  PERFORM set_config('app.combo_sin_escala', '', true);
-END
-$function$;
-
--- =========================================================================
--- Los tramos que se cambian por ancla: la función, el ancla y su reemplazo. Las de
--- esta tarjeta tienen premisa de md5 y su poscondición los vuelve a poner al revés;
--- las dos de la tarjeta H (sin md5) piden que el ancla aparezca una vez.
+-- Los tramos que se cambian por ancla: la función, el ancla y su reemplazo. La
+-- poscondición los vuelve a poner al revés y compara con el md5 de la premisa.
 -- =========================================================================
 CREATE TEMP TABLE t6bi_tramos (ord int PRIMARY KEY, fn text, que text, ancla text, nuevo text) ON COMMIT DROP;
 
 INSERT INTO t6bi_tramos VALUES
--- 1 y 4 · regalo_fuera_de_promo
 (1, 'public.regalo_fuera_de_promo(jsonb,jsonb,bigint,bigint,date)', 'las declaraciones',
 $a$  v_conservado int;
 $a$,
@@ -443,7 +221,19 @@ $r$               OR (p_pedido_id IS NOT NULL AND v_n_lineas = 1
                    AND v_prod_unica = NULLIF(e->>'producto_id', '')::bigint)
                OR (v_ref IS NOT NULL
                    AND (v_ref = NULLIF(e->>'producto_id', '')::bigint
-                        OR public.regalo_misma_categoria(v_ref, NULLIF(e->>'producto_id', '')::bigint, p_sucursal))),
+                        OR public.regalo_misma_categoria(v_ref, NULLIF(e->>'producto_id', '')::bigint, p_sucursal)))
+               -- F5 (tanda 6 bis de #1603): un producto que el pedido ya tenía como regalo de esta
+               -- promo, en una línea o al principio de una cadena (la raíz a la que vuelve la
+               -- pantalla), aunque sea de otro rubro porque lo eligió un admin.
+               OR (v_n_lineas > 0
+                   AND (EXISTS (SELECT 1 FROM pedido_items pi
+                                 WHERE pi.pedido_id = p_pedido_id AND pi.sucursal_id = p_sucursal
+                                   AND COALESCE(pi.es_bonificacion, false) AND pi.promocion_id = v_promo.id
+                                   AND pi.producto_id = NULLIF(e->>'producto_id', '')::bigint)
+                        OR EXISTS (SELECT 1 FROM pedido_item_sustituciones s
+                                    WHERE s.pedido_id = p_pedido_id AND s.sucursal_id = p_sucursal
+                                      AND s.promocion_id = v_promo.id
+                                      AND s.producto_original_id = NULLIF(e->>'producto_id', '')::bigint))),
                false)) THEN
 $r$),
 (4, 'public.regalo_fuera_de_promo(jsonb,jsonb,bigint,bigint,date)', 'el bulto del regalo',
@@ -459,7 +249,7 @@ $r$  -- 4b. promos-B1 (tanda 6 bis de #1603): un regalo cuya barra no es la del 
 
   -- 5. Exclusion (#1136): una sola promo con regalo por grupo excluyente.
 $r$),
--- 4 · N2: _regalo_de_la_promo
+-- 4 · N2: _regalo_de_la_promo,
 (5, 'public._regalo_de_la_promo(bigint,bigint,bigint,uuid,bigint,numeric)', 'las declaraciones',
 $a$  v_precio  numeric;
 BEGIN
@@ -501,14 +291,15 @@ $r$  SELECT pe.created_at INTO v_nacio
     v_previo := NULL;
   END LOOP;
 $r$),
--- 2 y 3 · combo_fuera_de_regla
+-- 2 y 3 · combo_fuera_de_regla,
 (7, 'public.combo_fuera_de_regla(jsonb,bigint,date,bigint,boolean)', 'las declaraciones',
 $a$  v_vendidos bigint;
 $a$,
 $r$  v_vendidos bigint;
-  -- promos-B5 (tanda 6 bis de #1603): los tramos de la foto, y su precios (B4).
-  v_tramos   jsonb;
+  -- promos-B4 (tanda 6 bis de #1603): los precios de la foto.
   v_precios  jsonb;
+  -- promos-B5 (tanda 6 bis de #1603): el precio de hoy del combo.
+  v_precio_hoy numeric;
 $r$),
 (8, 'public.combo_fuera_de_regla(jsonb,bigint,date,bigint,boolean)', 'lo publicado empieza vacío',
 $a$BEGIN
@@ -520,7 +311,7 @@ $r$BEGIN
   PERFORM set_config('app.combo_sin_escala', '', true);
   IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_items) e WHERE NULLIF(e->>'combo_id', '') IS NOT NULL) THEN
 $r$),
-(9, 'public.combo_fuera_de_regla(jsonb,bigint,date,bigint,boolean)', 'los tramos de la foto',
+(9, 'public.combo_fuera_de_regla(jsonb,bigint,date,bigint,boolean)', 'los precios de la foto',
 $a$    v_def := NULL;
     v_k_foto := NULL;
     IF v_foto_de IS NOT NULL THEN
@@ -531,19 +322,12 @@ $a$    v_def := NULL;
 $a$,
 $r$    v_def := NULL;
     v_k_foto := NULL;
-    v_tramos := NULL;
     v_precios := NULL;
     IF v_foto_de IS NOT NULL THEN
-      -- promos-B5: lo que el pedido conserva, a los precios de sus tramos (los primeros que
-      -- entraron, hasta los combos que tiene hoy).
       SELECT jsonb_build_object('nombre', f.nombre, 'precio', f.precio,
                                 'combina_escalas', f.combina_escalas, 'componentes', f.componentes),
-             f.cantidad_combos,
-             public._combo_tramos_para(COALESCE(f.tramos, jsonb_build_array(jsonb_build_object(
-                                         'cantidad', f.cantidad_combos_armados, 'precio', f.precio))),
-                                       f.cantidad_combos, NULL),
-             f.precios
-        INTO v_def, v_k_foto, v_tramos, v_precios
+             f.cantidad_combos, f.precios
+        INTO v_def, v_k_foto, v_precios
 $r$),
 (10, 'public.combo_fuera_de_regla(jsonb,bigint,date,bigint,boolean)', 'publicar el sin escala',
 $a$    CONTINUE WHEN NOT p_validar_politica;
@@ -585,20 +369,31 @@ $r$        RETURN format('Una línea del combo "%s" viene sin su precio sin esca
       END IF;
       v_lineas := r.lineas;
 $r$),
-(12, 'public.combo_fuera_de_regla(jsonb,bigint,date,bigint,boolean)', 'el total por tramos',
-$a$    v_total := public._combo_total((v_def->>'precio')::numeric, v_k, v_lineas);
-$a$,
-$r$    -- promos-B5 (tanda 6 bis de #1603), decisiones del dueño del 24/11 y el 25/11: con foto,
-    -- lo que el pedido conserva vale lo de sus tramos y lo que se suma, el precio de hoy del
-    -- combo; un renglón por producto, al precio promedio.
-    IF v_tramos IS NOT NULL THEN
-      v_tramos := public._combo_tramos_para(v_tramos, v_k,
-                    COALESCE((public._combo_definicion(r.combo_id, p_sucursal)->>'precio')::numeric,
-                             (v_def->>'precio')::numeric));
+(12, 'public.combo_fuera_de_regla(jsonb,bigint,date,bigint,boolean)', 'el combo que cambió de precio no crece',
+$a$    IF p_validar_politica AND v_k_foto IS NOT NULL AND NOT v_vigente AND v_k > v_k_foto THEN
+      RETURN format('El combo "%s" ya no está vigente: el pedido puede conservar sus %s, no sumar más.',
+                    v_nombre, v_k_foto);
     END IF;
-    v_total := public._combo_total((v_def->>'precio')::numeric, v_k, v_lineas, v_tramos);
+$a$,
+$r$    IF p_validar_politica AND v_k_foto IS NOT NULL AND NOT v_vigente AND v_k > v_k_foto THEN
+      RETURN format('El combo "%s" ya no está vigente: el pedido puede conservar sus %s, no sumar más.',
+                    v_nombre, v_k_foto);
+    END IF;
+    -- promos-B5 (tanda 6 bis de #1603), decisión del dueño del 25/11: a un combo que cambió
+    -- de precio desde que se armó el pedido, quien no es admin no le suma más. El que ya
+    -- estaba queda a su precio (la foto); conservar y bajar andan; sin cambio de precio,
+    -- sumar anda como siempre. Al centavo, contra el precio de hoy del combo.
+    IF p_validar_politica AND v_k_foto IS NOT NULL AND v_k > v_k_foto THEN
+      v_precio_hoy := (public._combo_definicion(r.combo_id, p_sucursal)->>'precio')::numeric;
+      IF round(v_precio_hoy * 100) IS DISTINCT FROM round((v_def->>'precio')::numeric * 100) THEN
+        RETURN format('El combo "%s" cambió de precio desde que se armó el pedido: valía $ %s y hoy vale $ %s. Este pedido puede conservar sus %s o bajarlos; los combos nuevos cargalos en otro pedido.',
+                      v_nombre,
+                      translate(to_char((v_def->>'precio')::numeric, 'FM999,999,990.00'), ',.', '.,'),
+                      translate(to_char(v_precio_hoy, 'FM999,999,990.00'), ',.', '.,'),
+                      v_k_foto);
+      END IF;
+    END IF;
 $r$),
--- 1 · promos-B1 para el admin, en las dos RPC de la tarjeta H (sin premisa de md5)
 (13, 'public.crear_pedido_completo(bigint,numeric,uuid,jsonb,text,text,text,date,text,numeric,numeric,date,uuid)', 'el bulto del regalo del admin',
 $a$  IF v_user_role <> 'admin' AND p_items IS NOT NULL AND jsonb_typeof(p_items) = 'array' THEN
     DECLARE
@@ -644,6 +439,34 @@ $r$  -- Incluye al encargado. El admin queda exento.
   IF v_user_role <> 'admin' THEN
     DECLARE
       v_motivo_regalo TEXT;
+$r$),
+(15, 'public._guardar_combos_pedido(bigint,bigint)', 'las declaraciones',
+$a$  v_original bigint := NULLIF(current_setting('app.combo_foto_pedido', true), '')::bigint;
+$a$,
+$r$  v_original bigint := NULLIF(current_setting('app.combo_foto_pedido', true), '')::bigint;
+  -- promos-B4 (tanda 6 bis de #1603): el sin escala que declaró cada línea de un combo
+  -- acumulable, como lo publicó combo_fuera_de_regla ({combo: {producto: sin escala}}).
+  v_sin      jsonb := COALESCE(NULLIF(current_setting('app.combo_sin_escala', true), '')::jsonb, '{}'::jsonb);
+$r$),
+(16, 'public._guardar_combos_pedido(bigint,bigint)', 'el sin escala en la foto',
+$a$           jsonb_object_agg(pi.producto_id::text,
+                            jsonb_build_object('combo', pi.precio_unitario,
+                                               'sin_combo', pi.precio_sin_combo_unitario)) AS precios
+$a$,
+$r$           jsonb_object_agg(pi.producto_id::text,
+                            jsonb_strip_nulls(jsonb_build_object(
+                              'combo', pi.precio_unitario,
+                              'sin_combo', pi.precio_sin_combo_unitario,
+                              'sin_escala', (v_sin->(pi.combo_id::text)->>(pi.producto_id::text))::numeric))) AS precios
+$r$),
+(17, 'public._guardar_combos_pedido(bigint,bigint)', 'lo publicado vale para este guardado',
+$a$  END LOOP;
+END
+$a$,
+$r$  END LOOP;
+  -- promos-B4: lo publicado vale para este guardado y nada más.
+  PERFORM set_config('app.combo_sin_escala', '', true);
+END
 $r$);
 
 -- =========================================================================
@@ -675,10 +498,9 @@ END
 $parche$;
 
 -- ---------------------------------------------------------------------------
--- Poscondición: los cuerpos de esta tarjeta son los del repo y no cambiaron fuera de
--- sus tramos (deshaciéndolos vuelve el md5 de la premisa); en las dos de la tarjeta H,
--- el tramo nuevo aparece una vez y el ancla sigue entera adentro. El definer, el
--- search_path y los EXECUTE, los de antes. Lo nuevo, como dice este archivo.
+-- Poscondición: los cuerpos son los del repo y no cambiaron fuera de sus tramos
+-- (deshaciéndolos vuelve el md5 de la premisa); el definer, el search_path y los
+-- EXECUTE, los de antes. La función nueva, como dice este archivo.
 -- ---------------------------------------------------------------------------
 DO $post$
 DECLARE
@@ -689,22 +511,27 @@ DECLARE
 BEGIN
   FOR r IN SELECT * FROM (VALUES
     ('public.regalo_fuera_de_promo(jsonb,jsonb,bigint,bigint,date)',
-     '59ed33b778a9fac3e74a80935f6edf5b', '7a5d67c746a4d5bb67b8d313d13584be',
+     '62fccf4b0a13abbd0af303f978ebb52a', '7a5d67c746a4d5bb67b8d313d13584be',
      '{postgres=X/postgres,service_role=X/postgres}', false),
     ('public._regalo_de_la_promo(bigint,bigint,bigint,uuid,bigint,numeric)',
      '3aa97e8704a400fc675ac77ec4073b74', '0ed07e72b5d047e60695d13bfae3d312',
      '{postgres=X/postgres,service_role=X/postgres}', false),
     ('public.combo_fuera_de_regla(jsonb,bigint,date,bigint,boolean)',
-     '5d463b7b7766b6e2e5036edafe151f5f', '589942c33c244c752112bf7712d1fe84',
+     'aa01d4500c61a4ada5ac6685c4894aef', '589942c33c244c752112bf7712d1fe84',
+     '{postgres=X/postgres,service_role=X/postgres}', false),
+    ('public._guardar_combos_pedido(bigint,bigint)',
+     'b66a29e1ceba1a6f91f29b2cdf9c7a7b', '3279e74715f9b580e7323bb66a085d55',
      '{postgres=X/postgres,service_role=X/postgres}', false),
     ('public.crear_pedido_completo(bigint,numeric,uuid,jsonb,text,text,text,date,text,numeric,numeric,date,uuid)',
-     NULL, NULL, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', true),
+     '18a774b42cba9bcb9cbfb7fbee0f0680', 'e163e8f2bb16ec4c71243eeb77fd7761',
+     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', true),
     ('public.actualizar_pedido_items(bigint,jsonb,uuid,text,timestamp with time zone)',
-     NULL, NULL, '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', true)
+     'daed6db30d98970e80858ebd106fe7af', '7e04bbbcb8876573286ef5d819f6dfe8',
+     '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', true)
   ) AS v(fn, h, h_antes, acl, def) LOOP
     SELECT prosrc, md5(prosrc) AS h, proacl::text AS a, prosecdef AS def, proconfig::text AS cfg INTO x
       FROM pg_proc WHERE oid = r.fn::regprocedure;
-    IF (r.h IS NOT NULL AND x.h IS DISTINCT FROM r.h) OR x.a IS DISTINCT FROM r.acl OR x.def IS DISTINCT FROM r.def
+    IF x.h IS DISTINCT FROM r.h OR x.a IS DISTINCT FROM r.acl OR x.def IS DISTINCT FROM r.def
        OR x.cfg IS DISTINCT FROM '{"search_path=public, pg_temp"}' THEN
       RAISE EXCEPTION 'mig NNN · % no quedó como en el repo (md5 %, acl %, definer %, config %)', r.fn, x.h, x.a, x.def, x.cfg;
     END IF;
@@ -715,34 +542,16 @@ BEGIN
       END IF;
       v_src := replace(v_src, t.nuevo, t.ancla);
     END LOOP;
-    IF r.h_antes IS NOT NULL AND md5(v_src) IS DISTINCT FROM r.h_antes THEN
+    IF md5(v_src) IS DISTINCT FROM r.h_antes THEN
       RAISE EXCEPTION 'mig NNN · % cambió fuera de sus tramos (md5 sin el parche %)', r.fn, md5(v_src);
     END IF;
   END LOOP;
 
-  FOR r IN SELECT * FROM (VALUES
-    ('public._guardar_combos_pedido(bigint,bigint)', 'b08723128ac5eb501e1999a13b0197e3', '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public._regalo_sin_bulto(jsonb,bigint,bigint)', 'b1bd188fea2bc5e03b3b8ac68399a73d', '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public._combo_tramos_para(jsonb,integer,numeric)', '3747714542581be348cde7a0b2a900a5', '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public._combo_tramos_validos(jsonb,integer)', '7747cb9253e7254a52d58dc71a9b2a91', '{postgres=X/postgres,service_role=X/postgres}'),
-    ('public._combo_total(numeric,integer,jsonb,jsonb)', '0316ee3480fd7d8a05a624c0ba9d1bd8', '{postgres=X/postgres,service_role=X/postgres}')
-  ) AS v(fn, h, acl) LOOP
-    SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS def, proconfig::text AS cfg INTO x
-      FROM pg_proc WHERE oid = r.fn::regprocedure;
-    IF x.h IS DISTINCT FROM r.h OR x.a IS DISTINCT FROM r.acl OR x.def
-       OR x.cfg IS DISTINCT FROM '{"search_path=public, pg_temp"}' THEN
-      RAISE EXCEPTION 'mig NNN · % no quedó como en el repo (md5 %, acl %, definer %, config %)', r.fn, x.h, x.a, x.def, x.cfg;
-    END IF;
-  END LOOP;
-  IF to_regprocedure('public._combo_total(numeric,integer,jsonb)') IS NOT NULL THEN
-    RAISE EXCEPTION 'mig NNN · la firma vieja de _combo_total sigue viva';
-  END IF;
-  IF (SELECT format_type(atttypid, atttypmod) FROM pg_attribute
-       WHERE attrelid = 'public.pedido_combos'::regclass AND attname = 'tramos' AND NOT attisdropped) IS DISTINCT FROM 'jsonb'
-     OR (SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
-          WHERE c.conrelid = 'public.pedido_combos'::regclass AND c.conname = 'pedido_combos_tramos_validos')
-        IS DISTINCT FROM 'CHECK (_combo_tramos_validos(tramos, cantidad_combos_armados))' THEN
-    RAISE EXCEPTION 'mig NNN · la columna tramos o su CHECK no quedaron como en el repo';
+  SELECT md5(prosrc) AS h, proacl::text AS a, prosecdef AS def, proconfig::text AS cfg INTO x
+    FROM pg_proc WHERE oid = 'public._regalo_sin_bulto(jsonb,bigint,bigint)'::regprocedure;
+  IF x.h IS DISTINCT FROM 'b1bd188fea2bc5e03b3b8ac68399a73d' OR x.a IS DISTINCT FROM '{postgres=X/postgres,service_role=X/postgres}'
+     OR x.def OR x.cfg IS DISTINCT FROM '{"search_path=public, pg_temp"}' THEN
+    RAISE EXCEPTION 'mig NNN · _regalo_sin_bulto no quedó como en el repo (md5 %, acl %, definer %, config %)', x.h, x.a, x.def, x.cfg;
   END IF;
 END
 $post$;

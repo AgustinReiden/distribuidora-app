@@ -18,7 +18,6 @@
  * pedidos honestos:
  *   - `prorratearTotal`   ↔ `public._combo_prorrateo`
  *   - `totalDelCombo`     ↔ `public._combo_total`
- *   - `tramosDelCombo`    ↔ `public._combo_tramos_para`
  *   - `cantidadDeCombos`  ↔ `public._combo_cantidad`
  * Si cambiás una, cambiá la otra y sumá el caso al fixture.
  *
@@ -44,19 +43,6 @@ export interface ComboVigente {
   componentes: ComboComponente[]
   /** Combos que todavía se pueden vender (tope − vendidos). null = sin tope. */
   topeRestante: number | null
-  /**
-   * promos-B5 (tanda 6 bis de #1603), sólo en la edición: los tramos de precio que el
-   * pedido ya tiene (`pedido_combos.tramos`, los primeros que entraron). Lo que se suma
-   * va a `precioNuevo`, el precio de hoy del combo (decisión del dueño del 24/11).
-   */
-  tramos?: readonly TramoCombo[] | null
-  precioNuevo?: number | null
-}
-
-/** Un tramo de precio de los combos de un pedido: `cantidad` combos a `precio`. */
-export interface TramoCombo {
-  cantidad: number
-  precio: number
 }
 
 export interface LineaProrrateo {
@@ -160,65 +146,13 @@ export function precioRepartible(precio: number, cantidades: readonly number[]):
  * la escala ya bajó en cada unidad (Σ q × (sin escala − referencia)). Las
  * líneas sin `sinEscala` (o de un excluyente) no restan nada.
  */
-export function totalDelCombo(
-  precio: number,
-  k: number,
-  lineas: readonly LineaTotal[],
-  /** promos-B5: con tramos, Σ precio × cantidad de cada tramo en lugar de k × precio. */
-  tramos?: readonly TramoCombo[] | null,
-): number {
-  let t = tramos
-    ? tramos.reduce((acc, x) => acc + BigInt(centavos(x.precio)) * BigInt(x.cantidad), 0n)
-    : BigInt(centavos(precio)) * BigInt(k)
+export function totalDelCombo(precio: number, k: number, lineas: readonly LineaTotal[]): number {
+  let t = BigInt(centavos(precio)) * BigInt(k)
   for (const l of lineas) {
     if (l.sinEscala == null) continue
     t -= BigInt(l.cantidad) * (BigInt(centavos(l.sinEscala)) - BigInt(centavos(l.ref)))
   }
   return Number(t) / 100
-}
-
-// ---------------------------------------------------------------------------
-// Tramos (espejo: public._combo_tramos_para)
-// ---------------------------------------------------------------------------
-
-/**
- * promos-B5 (tanda 6 bis de #1603), decisiones del dueño del 24/11 y el 25/11: los
- * tramos de `k` combos a partir de los que el pedido tiene. Con menos, quedan los
- * primeros que entraron (se van primero los últimos); con más, lo que falta va en un
- * tramo nuevo a `precioNuevo` (pegado al último si es el mismo precio). El total es la
- * suma de los tramos (`totalDelCombo`) y se reparte en un renglón por producto, al
- * precio promedio.
- */
-export function tramosDelCombo(
-  tramos: readonly TramoCombo[],
-  k: number,
-  precioNuevo: number | null,
-): TramoCombo[] {
-  const out: TramoCombo[] = []
-  let resto = Math.max(Math.trunc(k), 0)
-  for (const t of tramos) {
-    if (resto <= 0) break
-    const toma = Math.min(t.cantidad, resto)
-    if (toma <= 0) continue
-    out.push({ cantidad: toma, precio: t.precio })
-    resto -= toma
-  }
-  if (resto > 0) {
-    const ultimo = out[out.length - 1]
-    if (ultimo && precioNuevo != null && centavos(ultimo.precio) === centavos(precioNuevo)) {
-      out[out.length - 1] = { cantidad: ultimo.cantidad + resto, precio: ultimo.precio }
-    } else {
-      out.push({ cantidad: resto, precio: precioNuevo as number })
-    }
-  }
-  return out
-}
-
-/** El total de `k` combos de `combo`: con los tramos de su foto si los tiene (edición). */
-export function totalDeCombos(combo: ComboVigente, k: number, lineas: readonly LineaTotal[]): number {
-  if (!combo.tramos) return totalDelCombo(combo.precio, k, lineas)
-  return totalDelCombo(combo.precio, k, lineas,
-    tramosDelCombo(combo.tramos, k, combo.precioNuevo ?? combo.precio))
 }
 
 // ---------------------------------------------------------------------------
@@ -450,7 +384,6 @@ export function armarCombos(
     c.precio > 0 && c.componentes.length > 0
     && c.componentes.every(x => Number.isInteger(x.cantidad) && x.cantidad > 0 && x.productos.length > 0)
     && precioRepartible(c.precio, c.componentes.map(x => x.cantidad))
-    && (c.precioNuevo == null || precioRepartible(c.precioNuevo, c.componentes.map(x => x.cantidad)))
     && (c.topeRestante === null || c.topeRestante > 0))
   const estimado = new Map(validos.map(c => [c.id, ahorroEstimado(c, disponibles, oraculo)]))
   const orden = [...validos].sort((a, b) =>
@@ -471,7 +404,7 @@ export function armarCombos(
     }))
   const costo = (usos: readonly Uso[], disp: ReadonlyMap<string, number>, excl: ReadonlyMap<string, number>) => {
     let total = 0
-    for (const u of usos) total += totalDeCombos(u.combo, u.k, lineasDe(u, excl))
+    for (const u of usos) total += totalDelCombo(u.combo.precio, u.k, lineasDe(u, excl))
     for (const [p, q] of disp) total += q * libre(p, excl)
     return total
   }
@@ -519,7 +452,7 @@ export function armarCombos(
       // El total del combo tiene que quedar positivo (un acumulable sobre una
       // escala muy baja podría no dejar nada que repartir).
       const lineas2 = lineasDe(uso2, excl2)
-      const total2 = totalDeCombos(combo, uso2.k, lineas2)
+      const total2 = totalDelCombo(combo.precio, uso2.k, lineas2)
       if (total2 <= 0) break
       // Ni un combo cuyo total no alcanza para un centavo en cada línea (1592-b4).
       if (!sePuedeRepartir(total2, lineas2)) break
@@ -541,7 +474,7 @@ export function armarCombos(
 
   const aplicados: ComboAplicado[] = usos.map(u => {
     const lineasTotal = lineasDe(u, excluidas)
-    const precios = prorratearTotal(totalDeCombos(u.combo, u.k, lineasTotal), lineasTotal)
+    const precios = prorratearTotal(totalDelCombo(u.combo.precio, u.k, lineasTotal), lineasTotal)
     const lineas: LineaCombo[] = lineasTotal.map(l => ({
       productoId: l.productoId,
       cantidad: l.cantidad,

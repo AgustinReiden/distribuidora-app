@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import fixture from './combos.espejo.json'
-import { cantidadDeCombos, prorratearTotal, totalDelCombo, tramosDelCombo, type TramoCombo } from './combos'
+import { cantidadDeCombos, prorratearTotal, totalDelCombo } from './combos'
 
 /**
  * PARIDAD DE LOS COMBOS (#1191), lado TypeScript.
@@ -23,9 +23,7 @@ interface LineaEspejo {
 
 /** `esperado: null`: el total no se puede repartir exacto; el TS tira y el SQL devuelve NULL. */
 interface CasoProrrateo { caso: string; total: number; lineas: LineaEspejo[]; esperado: Record<string, number> | null }
-interface CasoTotal { caso: string; precio: number; k: number; tramos?: TramoCombo[]; lineas: LineaEspejo[]; esperado: number }
-/** promos-B5 (tanda 6 bis de #1603): los tramos de `k` combos, espejo de `_combo_tramos_para`. */
-interface CasoTramos { caso: string; tramos: TramoCombo[]; k: number; precio_nuevo: number; esperado: TramoCombo[] }
+interface CasoTotal { caso: string; precio: number; k: number; lineas: LineaEspejo[]; esperado: number }
 interface CasoCantidad {
   caso: string
   componentes: { componente: number; cantidad: number; productos: number[] }[]
@@ -33,7 +31,7 @@ interface CasoCantidad {
   esperado: number | null
 }
 
-const casos = fixture as unknown as { prorrateo: CasoProrrateo[]; total: CasoTotal[]; tramos: CasoTramos[]; cantidad: CasoCantidad[] }
+const casos = fixture as unknown as { prorrateo: CasoProrrateo[]; total: CasoTotal[]; cantidad: CasoCantidad[] }
 
 describe('espejo de combos: prorrateo', () => {
   it.each(casos.prorrateo.map(c => [c.caso, c] as const))('%s', (_n, c) => {
@@ -52,13 +50,7 @@ describe('espejo de combos: total', () => {
   it.each(casos.total.map(c => [c.caso, c] as const))('%s', (_n, c) => {
     expect(totalDelCombo(c.precio, c.k, c.lineas.map(l => ({
       productoId: String(l.producto_id), cantidad: l.cantidad, ref: l.ref as number, sinEscala: l.sin_escala ?? null,
-    })), c.tramos ?? null)).toBe(c.esperado)
-  })
-})
-
-describe('espejo de combos: tramos', () => {
-  it.each(casos.tramos.map(c => [c.caso, c] as const))('%s', (_n, c) => {
-    expect(tramosDelCombo(c.tramos, c.k, c.precio_nuevo)).toEqual(c.esperado)
+    })))).toBe(c.esperado)
   })
 })
 
@@ -72,7 +64,7 @@ describe('espejo de combos: cantidad de combos', () => {
 
 describe('espejo de combos: el fixture', () => {
   it('no repite nombres de caso', () => {
-    const nombres = [...casos.prorrateo, ...casos.total, ...casos.tramos, ...casos.cantidad].map(c => c.caso)
+    const nombres = [...casos.prorrateo, ...casos.total, ...casos.cantidad].map(c => c.caso)
     expect(new Set(nombres).size).toBe(nombres.length)
   })
 })

@@ -129,14 +129,12 @@ interface FotoComboDB {
   combina_escalas: boolean
   componentes: unknown
   cantidad_combos: number
-  /** promos-B5 (tanda 6 bis de #1603): los tramos de precio; null en una foto de antes. */
-  tramos?: { cantidad: number | string; precio: number | string }[] | null
 }
 
 export async function fetchFotosCombosPedido(pedidoId: string): Promise<FotoCombo[]> {
   const { data, error } = await supabase
     .from('pedido_combos')
-    .select('combo_id, nombre, precio, combina_escalas, componentes, cantidad_combos, tramos')
+    .select('combo_id, nombre, precio, combina_escalas, componentes, cantidad_combos')
     .eq('pedido_id', Number(pedidoId))
   if (error) throw errorDeSupabase(error, 'No se pudieron cargar los combos del pedido')
   return ((data as FotoComboDB[] | null) ?? []).map(f => ({
@@ -148,9 +146,6 @@ export async function fetchFotosCombosPedido(pedidoId: string): Promise<FotoComb
     componentes: componentesDe(f.componentes),
     topeRestante: null,
     cantidadCombos: Number(f.cantidad_combos),
-    tramos: Array.isArray(f.tramos)
-      ? f.tramos.map(t => ({ cantidad: Number(t.cantidad), precio: Number(t.precio) }))
-      : null,
   }))
 }
 

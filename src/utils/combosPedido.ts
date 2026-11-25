@@ -18,7 +18,7 @@
 import { resolverPreciosMayorista, type ItemPedido, type PricingMap } from './precioMayorista'
 import { aplicarDescuentoClienteItems, type ClienteConDescuentos, type ProductoConCategoria } from './descuentoCliente'
 import type { ItemResuelto } from './orquestacionPrecios'
-import { armarCombos, redondear2, tramosDelCombo, type ComboAplicado, type ComboVigente, type OraculoPrecios } from './combos'
+import { armarCombos, redondear2, type ComboAplicado, type ComboVigente, type OraculoPrecios } from './combos'
 
 /** Línea del pedido con, si es de un combo, su combo y su precio sin combo. */
 export interface LineaConCombo extends ItemResuelto {
@@ -201,18 +201,22 @@ export function aplicarCombosAlPedido(e: EntradaCombosPedido): ResultadoCombosPe
 /**
  * Los combos de una edición: los vigentes y, encima, la foto de los que el
  * pedido ya tiene (pedido_combos). Un combo que ya tiene se mide contra su foto
- * (sus tramos de precio, lugares, escalas), como lo valida el server; lo que se le
- * suma va al precio de hoy. Si ya no está vigente
+ * (precio, lugares, escalas), como lo valida el server. Si ya no está vigente
  * se conserva, pero no crece: su tope es la cantidad que el pedido ya tenía.
  */
 export function combinarCombosConFotos(
   vigentes: readonly ComboVigente[],
   fotos: readonly (ComboVigente & { cantidadCombos: number })[],
+  opciones: { sumaConPrecioCambiado?: boolean } = {},
 ): ComboVigente[] {
   const porId = new Map(vigentes.map(c => [c.id, c]))
   const out: ComboVigente[] = vigentes.filter(c => !fotos.some(f => f.id === c.id))
   for (const f of fotos) {
     const vigente = porId.get(f.id)
+    // promos-B5 (tanda 6 bis de #1603), decisión del dueño del 25/11: si el combo cambió de
+    // precio desde que se armó el pedido, quien no es admin conserva (o baja) los que tiene y
+    // no suma más: tope en los de la foto, como combo_fuera_de_regla. El admin sí.
+    const precioCambiado = vigente !== undefined && comboCambioDePrecio(f, vigente)
     out.push({
       id: f.id,
       nombre: f.nombre,
@@ -220,13 +224,49 @@ export function combinarCombosConFotos(
       combinaEscalas: f.combinaEscalas,
       componentes: f.componentes,
       prioridad: vigente?.prioridad ?? f.prioridad,
-      topeRestante: vigente ? vigente.topeRestante : f.cantidadCombos,
-      // promos-B5 (tanda 6 bis de #1603), decisión del dueño del 24/11: lo que el pedido ya
-      // tiene vale lo de sus tramos (los primeros que entraron, hasta los combos de hoy); lo
-      // que se suma, el precio de hoy del combo. Como combo_fuera_de_regla.
-      tramos: tramosDelCombo(f.tramos ?? [{ cantidad: f.cantidadCombos, precio: f.precio }], f.cantidadCombos, null),
-      precioNuevo: vigente?.precio ?? f.precio,
+      topeRestante: precioCambiado && !opciones.sumaConPrecioCambiado
+        ? f.cantidadCombos
+        : vigente ? vigente.topeRestante : f.cantidadCombos,
     })
   }
   return out
+}
+
+/** ¿El combo de la foto vale hoy otra cosa? Al centavo, como el server. */
+function comboCambioDePrecio(foto: { precio: number }, vigente: { precio: number }): boolean {
+  return Math.round(Number(foto.precio) * 100) !== Math.round(Number(vigente.precio) * 100)
+}
+
+export interface ComboConPrecioCambiado {
+  id: string
+  nombre: string
+  precioFoto: number
+  precioHoy: number
+  cantidadCombos: number
+}
+
+/**
+ * promos-B5 (tanda 6 bis de #1603): los combos del pedido que cambiaron de precio desde que se
+ * armó. Quien no es admin no les puede sumar más (decisión del dueño del 25/11): la pantalla
+ * lo avisa con `textoComboConPrecioCambiado`, el mismo texto que el rechazo del server.
+ */
+export function combosConPrecioCambiado(
+  vigentes: readonly ComboVigente[],
+  fotos: readonly (ComboVigente & { cantidadCombos: number })[],
+): ComboConPrecioCambiado[] {
+  const porId = new Map(vigentes.map(c => [c.id, c]))
+  return fotos.flatMap(f => {
+    const vigente = porId.get(f.id)
+    if (!vigente || !comboCambioDePrecio(f, vigente)) return []
+    return [{ id: f.id, nombre: f.nombre, precioFoto: f.precio, precioHoy: vigente.precio, cantidadCombos: f.cantidadCombos }]
+  })
+}
+
+const pesos = (n: number): string =>
+  '$ ' + Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+/** El aviso de un combo que cambió de precio: el mismo que da `combo_fuera_de_regla`. */
+export function textoComboConPrecioCambiado(c: ComboConPrecioCambiado): string {
+  return `El combo «${c.nombre}» cambió de precio desde que se armó el pedido: valía ${pesos(c.precioFoto)} y hoy vale ${pesos(c.precioHoy)}. `
+    + `Este pedido puede conservar sus ${c.cantidadCombos} o bajarlos; los combos nuevos cargalos en otro pedido.`
 }

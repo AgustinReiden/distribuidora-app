@@ -45,7 +45,7 @@ import { regaloSustitutoCaro, CODIGO_REGALO_SUSTITUTO_SOBRE_TOPE } from '../../u
 import { supabase } from '../../lib/supabase';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../ui/Dialog';
 import { useFotosCombosPedidoQuery } from '../../hooks/queries/useCombosQuery';
-import { aplicarCombosAlPedido, camposCombo, type CamposCombo } from '../../utils/combosPedido';
+import { aplicarCombosAlPedido, camposCombo, textoComboConPrecioCambiado, type CamposCombo } from '../../utils/combosPedido';
 import { sugerirCombos, type SugerenciaCombo } from '../../utils/comboSugerencia';
 import { orquestarPrecios } from '../../utils/orquestacionPrecios';
 import type { ItemPedido } from '../../utils/precioMayorista';
@@ -538,13 +538,17 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     pricingMap,
     promoMap,
     combos,
+    combosConPrecioCambiado,
     entradasDatosPrecio,
     reintentarDatosPrecio,
   } = usePromocionPedido(itemsConPrecioBase, fechaReferenciaPromo, overridesRegaloDelPedido, promosEliminadasSet,
     undefined,
     // #1191: los combos vigentes (sin contar los de este pedido contra el tope)
     // y la foto de los que el pedido ya tiene, que se miden contra esa foto.
-    { pedidoId: pedido?.id ? String(pedido.id) : undefined, fotos: fotosCombos, promosDelPedido });
+    // promos-B5 (decisión del dueño del 25/11): quien no es admin no le suma a un combo que
+    // cambió de precio desde que se armó el pedido.
+    { pedidoId: pedido?.id ? String(pedido.id) : undefined, fotos: fotosCombos, promosDelPedido,
+      sumaConPrecioCambiado: !!isAdmin });
 
   // El cliente del pedido, con sus descuentos. Viene del embed de
   // `PEDIDO_CLIENT_COLS`; el alta (PedidosContainer) y el cambio de cliente ya
@@ -2022,6 +2026,12 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
               ))}
             </div>
           )}
+          {/* promos-B5: un combo que cambió de precio no crece (quien no es admin). */}
+          {!isAdmin && (combosConPrecioCambiado ?? []).map(c => (
+            <p key={`combo-precio-${c.id}`} role="status" className="mt-2 p-2 rounded text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/20">
+              {textoComboConPrecioCambiado(c)}
+            </p>
+          ))}
           {/* #1194: los combos a los que les falta poco. */}
           <SugerenciasCombo
             sugerencias={sugerenciasCombos}

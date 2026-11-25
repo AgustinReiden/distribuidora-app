@@ -139,6 +139,7 @@ vi.mock('../../hooks/useGoogleMaps', () => ({
 // suma cruda de `precioUnitario * cantidad`.
 vi.mock('../../hooks/queries/usePromocionesQuery', () => ({
   usePromoCuposQuery: () => ({ data: undefined }),
+  usePromoAcumuladoresMapQuery: () => ({ data: new Map() }),
 }))
 
 vi.mock('../../hooks/usePromocionPedido', () => ({

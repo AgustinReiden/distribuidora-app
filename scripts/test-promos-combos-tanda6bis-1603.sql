@@ -15,20 +15,19 @@
 --       B1 · el alta guarda en la foto el sin escala de cada línea.
 --       B2 · B queda sin lista ($ 0): una edición que le declara a B un sin escala de $ 600
 --            (descuento de escala de $ 200 que no tenía) se rechaza; con el de la foto anda.
---   C · promos-B5 (decisiones del dueño del 24/11 y el 25/11). Combo excluyente 1 A + 1 B a
---       $ 1.000; el pedido tiene 1; el combo pasa a $ 1.200.
---       C1 · el encargado lo pasa a 2 combos a $ 2.000 (la foto): se rechaza.
---       C2 · a 2 combos a $ 2.200 (1.000 + 1.200): anda; tramos [1×1000, 1×1200].
---       C3 · 2 → 1 → 3 (el combo pasa a $ 1.150): tramos [1×1000] y [1×1000, 2×1150]; a 3
---            combos a $ 3.000 (los que se suman, a la foto) se rechaza.
---       C4 · (i) el admin edita sin cambiar la cantidad y con otra plata (anda, como hoy);
---            después el encargado guarda a la plata de la foto: anda, y los tramos no cambian.
---       C5 · (iii) una salvedad del cliente rompe un combo de 2 (tramos 1000 y 1200): queda
---            1 combo; la validación de la edición con 1 combo pide $ 1.000 (LIFO) y con 2,
---            $ 2.200; guardar 1 deja tramos [1×1000].
---       C6 · el CHECK de la columna rechaza tramos que no suman los armados o que traen un
---            precio que no es número.
---       C7 · el cambio de cliente copia los tramos del original.
+--   C · promos-B5 (decisión del dueño del 25/11): a un pedido que ya tiene un combo cuyo
+--       precio cambió, quien no es admin no le puede sumar más. Combo excluyente 1 A + 1 B a
+--       $ 1.000 (A lista $ 800, B lista $ 400).
+--       C1 · (a) el precio no cambió: sumar de 1 a 2 anda.
+--       C2 · (b) el precio sube a $ 1.200: sumar se rechaza con el motivo (el combo y los dos
+--            precios); conservar 2 y bajar a 1 andan, a la plata de la foto.
+--       C3 · (c) el precio baja a $ 800: igual.
+--       C4 · (d) el admin suma con el precio cambiado (a la plata de la foto, como hoy).
+--       C5 · (e) un pedido de 2 combos que pasa a 3 con el precio sin cambio anda (F1 de la lente).
+--       C6 · (f) después de una salvedad que rompió un combo, la edición del combo que quedó
+--            vale lo de la foto, como en main (F2 de la lente).
+--       C7 · (g) el cambio de cliente (admin) con el precio cambiado anda y hereda la foto; un
+--            combo acumulable se edita sin cambios como en main.
 --   D · N1 y N2 de la segunda lente. Promo de unidad entera «5 V dan 2 R», R a $ 100 (rubro
 --       D); S es del rubro D; P es un perfume. El pedido nació «ayer»; el admin cambió el
 --       regalo de la promo a P «hace 12 h» (las fechas se corren para atrás: no depende del
@@ -37,6 +36,8 @@
 --            (el regalo del pedido): anda. Con P×6 (el de hoy) también (control).
 --       D2 · N2: el admin le cambia el cliente a V×10 + R×4; la referencia del pedido nuevo
 --            es R (el del original), no P.
+--       D3 · F5: el admin armó el pedido con un regalo de otro rubro (X) y lo repartió en X y
+--            Y; el encargado sube la venta y la pantalla vuelve a X (la raíz de sus líneas): anda.
 --
 -- Arma sus propios usuarios, clientes, productos, promos y combos en la primera sucursal
 -- activa. Todo se deshace: el veredicto es el RAISE final, 'ENSAYO OK …' o 'ENSAYO FALLÓ
@@ -45,8 +46,8 @@
 --
 --   tr -d '\r' < scripts/test-promos-combos-tanda6bis-1603.sql | docker exec -i <contenedor> psql -U postgres -d postgres -q
 --
--- Sin la migración falla en A1, A2, A4, B1, B2, C1, C2, C3, C4 (los tramos), C5 (la preparación: C6 va
--- adentro y no llega), C7, D1 y D2. A3 y A5 son controles.
+-- Sin la migración falla en A1, A2, A4, B1, B2, C2, C3, D1, D2 y D3. A3, A5, C1, C4, C5, C6 y C7
+-- son controles (lo que tiene que seguir andando como en main).
 
 SET client_min_messages = warning;
 
@@ -244,17 +245,6 @@ BEGIN
 END
 $fn$;
 
-CREATE OR REPLACE FUNCTION pg_temp.t6i_foto(p_ped bigint, p_combo bigint)
-RETURNS text LANGUAGE sql AS $fn$
-  SELECT COALESCE((SELECT f.cantidad_combos || '/' || f.cantidad_combos_armados || ' ' || COALESCE((to_jsonb(f)->'tramos')::text, 'null')
-                     FROM public.pedido_combos f WHERE f.pedido_id = p_ped AND f.combo_id = p_combo), '-');
-$fn$;
-
-CREATE OR REPLACE FUNCTION pg_temp.t6i_tramos(p_ped bigint, p_combo bigint)
-RETURNS jsonb LANGUAGE sql AS $fn$
-  SELECT to_jsonb(f)->'tramos' FROM public.pedido_combos f WHERE f.pedido_id = p_ped AND f.combo_id = p_combo;
-$fn$;
-
 CREATE OR REPLACE FUNCTION pg_temp.t6i_estado(p_ped bigint, p_estado text)
 RETURNS void LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -366,131 +356,110 @@ BEGIN
   END IF;
 
   -- =====================================================================
-  -- C · promos-B5: el combo que se suma, al precio de hoy
+  -- C · promos-B5: el combo que cambió de precio no crece
   -- =====================================================================
   A := pg_temp.t6i_prod(v_suc, 'C A', 'ZZ t6i combos', 800, 500);
   B := pg_temp.t6i_prod(v_suc, 'C B', 'ZZ t6i combos', 400, 500);
   cb := pg_temp.t6i_combo(v_adm, v_suc, A, B, 1000, false);
+  -- C1 · (a) sin cambio de precio, sumar anda
   p1 := pg_temp.t6i_alta(v_cli, v_enc, v_suc, pg_temp.t6i_combo_items(cb, 1, 1000, A, 800, B, 400));
-  UPDATE public.combos SET precio = 1200 WHERE id = cb;
-  -- C1 · 2 a la foto
   j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_combo_items(cb, 2, 2000, A, 800, B, 400));
-  IF COALESCE((j->>'success')::boolean, false) THEN
-    v_fallas := v_fallas || format('C1: 2 combos a $ 2.000 (el segundo a la foto) tenía que rechazarse (%s)', pg_temp.t6i_foto(p1, cb));
-  END IF;
-  -- C2 · 2 a 1.000 + 1.200
-  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_combo_items(cb, 2, 2200, A, 800, B, 400));
   IF NOT COALESCE((j->>'success')::boolean, false) THEN
-    v_fallas := v_fallas || format('C2: 2 combos a $ 2.200 tenía que andar (%s)', left(j::text, 300));
-  ELSIF pg_temp.t6i_tramos(p1, cb) IS DISTINCT FROM '[{"cantidad":1,"precio":1000},{"cantidad":1,"precio":1200}]'::jsonb
-        OR (SELECT total FROM public.pedidos WHERE id = p1) <> 2200 THEN
-    v_fallas := v_fallas || format('C2: tramos 1×1000 + 1×1200 y total 2.200 (%s, total %s)', pg_temp.t6i_foto(p1, cb),
-                                   (SELECT total FROM public.pedidos WHERE id = p1));
+    v_fallas := v_fallas || format('C1: sin cambio de precio, sumar un combo tenía que andar (%s)', left(j::text, 300));
   END IF;
-  -- C3 · 2 → 1 → 3
-  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_combo_items(cb, 1, 1000, A, 800, B, 400));
-  IF NOT COALESCE((j->>'success')::boolean, false)
-     OR pg_temp.t6i_tramos(p1, cb) IS DISTINCT FROM '[{"cantidad":1,"precio":1000}]'::jsonb THEN
-    v_fallas := v_fallas || format('C3: bajar a 1 combo a $ 1.000 tenía que andar y dejar 1×1000 (%s, %s)', left(j::text, 200), pg_temp.t6i_foto(p1, cb));
-  END IF;
-  UPDATE public.combos SET precio = 1150 WHERE id = cb;
-  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_combo_items(cb, 3, 3000, A, 800, B, 400));
-  IF COALESCE((j->>'success')::boolean, false) THEN
-    v_fallas := v_fallas || 'C3: 3 combos a $ 3.000 (los dos que se suman a la foto) tenía que rechazarse'::text;
-  END IF;
-  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_combo_items(cb, 3, 3300, A, 800, B, 400));
-  IF NOT COALESCE((j->>'success')::boolean, false)
-     OR pg_temp.t6i_tramos(p1, cb) IS DISTINCT FROM '[{"cantidad":1,"precio":1000},{"cantidad":2,"precio":1150}]'::jsonb THEN
-    v_fallas := v_fallas || format('C3: 3 combos a $ 3.300 tenía que andar y dejar 1×1000 + 2×1150 (%s, %s)', left(j::text, 200), pg_temp.t6i_foto(p1, cb));
-  END IF;
-
-  -- C4 · (i) el admin carga otra plata sin cambiar la cantidad; después el encargado
-  A := pg_temp.t6i_prod(v_suc, 'C4 A', 'ZZ t6i combos', 800, 500);
-  B := pg_temp.t6i_prod(v_suc, 'C4 B', 'ZZ t6i combos', 400, 500);
-  cb := pg_temp.t6i_combo(v_adm, v_suc, A, B, 1000, false);
-  p1 := pg_temp.t6i_alta(v_cli, v_enc, v_suc, pg_temp.t6i_combo_items(cb, 1, 1000, A, 800, B, 400));
+  -- C2 · (b) el precio sube: sumar se rechaza; conservar y bajar andan
   UPDATE public.combos SET precio = 1200 WHERE id = cb;
-  j := pg_temp.t6i_editar(v_adm, v_suc, p1, pg_temp.t6i_combo_items(cb, 1, 900, A, 800, B, 400));
-  IF NOT COALESCE((j->>'success')::boolean, false)
-     OR pg_temp.t6i_tramos(p1, cb) IS DISTINCT FROM '[{"cantidad":1,"precio":1000}]'::jsonb THEN
-    v_fallas := v_fallas || format('C4: la edición del admin a $ 900 tenía que andar sin tocar los tramos (%s, %s)', left(j::text, 200), pg_temp.t6i_foto(p1, cb));
+  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_combo_items(cb, 3, 3000, A, 800, B, 400));
+  IF COALESCE((j->>'success')::boolean, false) OR j::text NOT ILIKE '%cambió de precio%'
+     OR j::text NOT LIKE '%1.000,00%' OR j::text NOT LIKE '%1.200,00%' THEN
+    v_fallas := v_fallas || format('C2: con el precio subido, sumar a la foto tenía que rechazarse con los dos precios (%s)', left(j::text, 400));
+  END IF;
+  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_combo_items(cb, 4, 4400, A, 800, B, 400));
+  IF COALESCE((j->>'success')::boolean, false) THEN
+    v_fallas := v_fallas || 'C2: con el precio subido, sumar al promedio (2 a $ 1.000 y 2 a $ 1.200) también tenía que rechazarse'::text;
+  END IF;
+  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_combo_items(cb, 2, 2000, A, 800, B, 400));
+  IF NOT COALESCE((j->>'success')::boolean, false) THEN
+    v_fallas := v_fallas || format('C2: conservar los 2 combos a la foto tenía que andar (%s)', left(j::text, 300));
   END IF;
   j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_combo_items(cb, 1, 1000, A, 800, B, 400));
+  IF NOT COALESCE((j->>'success')::boolean, false) OR (SELECT total FROM public.pedidos WHERE id = p1) <> 1000 THEN
+    v_fallas := v_fallas || format('C2: bajar a 1 combo a la foto tenía que andar (%s)', left(j::text, 300));
+  END IF;
+  -- C3 · (c) el precio baja: igual
+  UPDATE public.combos SET precio = 800 WHERE id = cb;
+  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_combo_items(cb, 2, 2000, A, 800, B, 400));
+  IF COALESCE((j->>'success')::boolean, false) OR j::text NOT ILIKE '%cambió de precio%' THEN
+    v_fallas := v_fallas || format('C3: con el precio bajado, sumar tenía que rechazarse (%s)', left(j::text, 300));
+  END IF;
+  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_combo_items(cb, 1, 1000, A, 800, B, 400));
+  IF NOT COALESCE((j->>'success')::boolean, false) THEN
+    v_fallas := v_fallas || format('C3: con el precio bajado, conservar tenía que andar (%s)', left(j::text, 300));
+  END IF;
+  -- C4 · (d) el admin suma, a la plata de la foto
+  j := pg_temp.t6i_editar(v_adm, v_suc, p1, pg_temp.t6i_combo_items(cb, 2, 2000, A, 800, B, 400));
   IF NOT COALESCE((j->>'success')::boolean, false)
-     OR pg_temp.t6i_tramos(p1, cb) IS DISTINCT FROM '[{"cantidad":1,"precio":1000}]'::jsonb
-     OR (SELECT total FROM public.pedidos WHERE id = p1) <> 1000 THEN
-    v_fallas := v_fallas || format('C4: después, el encargado a la foto ($ 1.000) tenía que andar, como hoy (%s, %s)', left(j::text, 200), pg_temp.t6i_foto(p1, cb));
+     OR (SELECT cantidad_combos FROM public.pedido_combos WHERE pedido_id = p1 AND combo_id = cb) <> 2 THEN
+    v_fallas := v_fallas || format('C4: el admin tenía que poder sumar con el precio cambiado (%s)', left(j::text, 300));
   END IF;
 
-  -- C5 · (iii) la rotura de un combo de 2 (1.000 + 1.200)
+  -- C5 · (e) 2 combos que pasan a 3 con el precio sin cambio (F1 de la lente)
   A := pg_temp.t6i_prod(v_suc, 'C5 A', 'ZZ t6i combos', 800, 500);
   B := pg_temp.t6i_prod(v_suc, 'C5 B', 'ZZ t6i combos', 400, 500);
   cb := pg_temp.t6i_combo(v_adm, v_suc, A, B, 1000, false);
-  p1 := pg_temp.t6i_alta(v_cli, v_enc, v_suc, pg_temp.t6i_combo_items(cb, 1, 1000, A, 800, B, 400));
-  UPDATE public.combos SET precio = 1200 WHERE id = cb;
-  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_combo_items(cb, 2, 2200, A, 800, B, 400));
-  IF NOT COALESCE((j->>'success')::boolean, false) THEN
-    v_fallas := v_fallas || format('C5: (preparación) 2 combos a $ 2.200 tenía que andar (%s)', left(j::text, 200));
-  ELSE
+  p1 := pg_temp.t6i_alta(v_cli, v_enc, v_suc, pg_temp.t6i_combo_items(cb, 2, 2000, A, 800, B, 400));
+  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_combo_items(cb, 3, 3000, A, 800, B, 400));
+  IF NOT COALESCE((j->>'success')::boolean, false) OR (SELECT total FROM public.pedidos WHERE id = p1) <> 3000 THEN
+    v_fallas := v_fallas || format('C5: de 2 a 3 combos con el precio sin cambio tenía que andar a $ 3.000 (%s)', left(j::text, 300));
+  END IF;
+
+  -- C6 · (f) la rotura: el combo que quedó vale lo de la foto (F2 de la lente)
+  A := pg_temp.t6i_prod(v_suc, 'C6 A', 'ZZ t6i combos', 800, 500);
+  B := pg_temp.t6i_prod(v_suc, 'C6 B', 'ZZ t6i combos', 400, 500);
+  cb := pg_temp.t6i_combo(v_adm, v_suc, A, B, 1000, false);
+  p1 := pg_temp.t6i_alta(v_cli, v_enc, v_suc, pg_temp.t6i_combo_items(cb, 2, 2000, A, 800, B, 400));
   PERFORM pg_temp.t6i_estado(p1, 'asignado');
   PERFORM pg_temp.t6i_claims(v_enc, v_suc);
   it := (SELECT id FROM public.pedido_items WHERE pedido_id = p1 AND producto_id = B);
   j := public.registrar_salvedad(p1, it, 1, 'cliente_rechaza', 'ensayo tanda 6 bis', NULL, true, NULL);
   PERFORM pg_temp.t6i_reset();
   IF NOT COALESCE((j->>'success')::boolean, false) THEN
-    RAISE EXCEPTION 'C5 · preparación: la salvedad no anduvo (%)', j;
+    RAISE EXCEPTION 'C6 · preparación: la salvedad no anduvo (%)', j;
   END IF;
   IF (SELECT cantidad_combos FROM public.pedido_combos WHERE pedido_id = p1 AND combo_id = cb) <> 1 THEN
-    v_fallas := v_fallas || format('C5: la salvedad tenía que dejar 1 combo (%s)', pg_temp.t6i_foto(p1, cb));
+    v_fallas := v_fallas || 'C6: la salvedad tenía que dejar 1 combo'::text;
   END IF;
   v_txt := public.combo_fuera_de_regla(pg_temp.t6i_combo_items(cb, 1, 1000, A, 800, B, 400),
                                        v_suc, public._tablero_hoy(), p1, true);
   IF v_txt IS NOT NULL THEN
-    v_fallas := v_fallas || format('C5: después de la rotura, 1 combo vale $ 1.000 (el primero que entró) (%s)', v_txt);
+    v_fallas := v_fallas || format('C6: después de la rotura, el combo que quedó vale $ 1.000, como en main (%s)', v_txt);
   END IF;
-  v_txt := public.combo_fuera_de_regla(pg_temp.t6i_combo_items(cb, 2, 2200, A, 800, B, 400),
+  v_txt := public.combo_fuera_de_regla(pg_temp.t6i_combo_items(cb, 2, 2000, A, 800, B, 400),
                                        v_suc, public._tablero_hoy(), p1, true);
   IF v_txt IS NOT NULL THEN
-    v_fallas := v_fallas || format('C5: después de la rotura, volver a 2 combos vale $ 2.200 (%s)', v_txt);
+    v_fallas := v_fallas || format('C6: después de la rotura, volver a 2 combos a la foto anda, como en main (%s)', v_txt);
   END IF;
-  v_txt := public.combo_fuera_de_regla(pg_temp.t6i_combo_items(cb, 1, 1100, A, 800, B, 400),
-                                       v_suc, public._tablero_hoy(), p1, true);
-  IF v_txt IS NULL THEN
-    v_fallas := v_fallas || 'C5: después de la rotura, 1 combo a $ 1.100 (el promedio) tenía que rechazarse'::text;
-  END IF;
-  -- guardar 1 combo recorta los tramos a lo que quedó
-  PERFORM public._guardar_combos_pedido(p1, v_suc);
-  IF pg_temp.t6i_tramos(p1, cb) IS DISTINCT FROM '[{"cantidad":1,"precio":1000}]'::jsonb THEN
-    v_fallas := v_fallas || format('C5: el guardado tenía que dejar 1×1000 (%s)', pg_temp.t6i_foto(p1, cb));
-  END IF;
-  -- C6 · el CHECK
-  BEGIN
-    UPDATE public.pedido_combos SET tramos = '[{"cantidad":5,"precio":1000}]'::jsonb WHERE pedido_id = p1 AND combo_id = cb;
-    v_fallas := v_fallas || 'C6: tramos que no suman los armados tenían que rechazarse'::text;
-  EXCEPTION WHEN check_violation THEN NULL;
-  END;
-  BEGIN
-    UPDATE public.pedido_combos SET tramos = jsonb_build_array(jsonb_build_object('cantidad', cantidad_combos_armados, 'precio', 'NaN'))
-     WHERE pedido_id = p1 AND combo_id = cb;
-    v_fallas := v_fallas || 'C6: un precio que no es número tenía que rechazarse'::text;
-  EXCEPTION WHEN check_violation THEN NULL;
-  END;
   PERFORM pg_temp.t6i_estado(p1, 'pendiente');
-  END IF;
 
-  -- C7 · el cambio de cliente copia los tramos
+  -- C7 · (g) el cambio de cliente con el precio cambiado, y un acumulable sin cambios
   A := pg_temp.t6i_prod(v_suc, 'C7 A', 'ZZ t6i combos', 800, 500);
   B := pg_temp.t6i_prod(v_suc, 'C7 B', 'ZZ t6i combos', 400, 500);
   cb := pg_temp.t6i_combo(v_adm, v_suc, A, B, 1000, false);
-  p1 := pg_temp.t6i_alta(v_cli, v_enc, v_suc, pg_temp.t6i_combo_items(cb, 1, 1000, A, 800, B, 400));
+  p1 := pg_temp.t6i_alta(v_cli, v_enc, v_suc, pg_temp.t6i_combo_items(cb, 2, 2000, A, 800, B, 400));
   UPDATE public.combos SET precio = 1200 WHERE id = cb;
-  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_combo_items(cb, 2, 2200, A, 800, B, 400));
   j := pg_temp.t6i_cambio_cli(v_adm, v_suc, p1, v_cli2);
   IF NOT COALESCE((j->>'success')::boolean, false)
-     OR pg_temp.t6i_tramos((j->>'nuevo_pedido_id')::bigint, cb)
-        IS DISTINCT FROM '[{"cantidad":1,"precio":1000},{"cantidad":1,"precio":1200}]'::jsonb THEN
-    v_fallas := v_fallas || format('C7: el pedido nuevo tenía que heredar 1×1000 + 1×1200 (%s, %s)', left(j::text, 200),
-                                   pg_temp.t6i_foto((j->>'nuevo_pedido_id')::bigint, cb));
+     OR (SELECT f.precio FROM public.pedido_combos f
+          WHERE f.pedido_id = (j->>'nuevo_pedido_id')::bigint AND f.combo_id = cb) IS DISTINCT FROM 1000 THEN
+    v_fallas := v_fallas || format('C7: el cambio de cliente tenía que andar y heredar la foto a $ 1.000 (%s)', left(j::text, 300));
+  END IF;
+  A := pg_temp.t6i_prod(v_suc, 'C7 Aa', 'ZZ t6i combos', 800, 500);
+  B := pg_temp.t6i_prod(v_suc, 'C7 Ba', 'ZZ t6i combos', 400, 500);
+  cb := pg_temp.t6i_combo(v_adm, v_suc, A, B, 1000, true);
+  p1 := pg_temp.t6i_alta(v_cli, v_enc, v_suc, pg_temp.t6i_combo_items(cb, 1, 1000, A, 800, B, 400, 800, 400));
+  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_combo_items(cb, 2, 2000, A, 800, B, 400, 800, 400));
+  IF NOT COALESCE((j->>'success')::boolean, false) THEN
+    v_fallas := v_fallas || format('C7: el acumulable sin cambio de precio tenía que sumar como en main (%s)', left(j::text, 300));
   END IF;
 
   -- =====================================================================
@@ -531,9 +500,29 @@ BEGIN
       (SELECT x.producto_id FROM public._regalo_de_la_promo(p1, p, v_suc, NULL, R, 4) x), R, Pf);
   END IF;
 
+  -- D3 · F5: el regalo de otro rubro que eligió el admin, repartido, y la venta que sube
+  V := pg_temp.t6i_prod(v_suc, 'D3 V', 'ZZ t6i venta', 100, 500);
+  R := pg_temp.t6i_prod(v_suc, 'D3 R', 'ZZ t6i rubro D3', 100, 500);
+  X := pg_temp.t6i_prod(v_suc, 'D3 X', 'ZZ t6i rubro otro D3', 100, 500);
+  S := pg_temp.t6i_prod(v_suc, 'D3 Y', 'ZZ t6i rubro otro D3', 100, 500);
+  p := pg_temp.t6i_promo(v_suc, V, R, 5, 2, true);
+  p1 := pg_temp.t6i_alta(v_cli, v_adm, v_suc, pg_temp.t6i_items(V, 10, p, jsonb_build_array(jsonb_build_array(X, 4))));
+  it := (SELECT id FROM public.pedido_items WHERE pedido_id = p1 AND es_bonificacion);
+  PERFORM pg_temp.t6i_claims(v_adm, v_suc);
+  j := public.dividir_regalo_pedido(it, jsonb_build_array(jsonb_build_object('producto_id', X, 'cantidad', 2),
+                                                         jsonb_build_object('producto_id', S, 'cantidad', 2)), 'ensayo', NULL);
+  PERFORM pg_temp.t6i_reset();
+  IF NOT COALESCE((j->>'success')::boolean, false) THEN
+    RAISE EXCEPTION 'D3 · preparación: el reparto no anduvo (%)', j;
+  END IF;
+  j := pg_temp.t6i_editar(v_enc, v_suc, p1, pg_temp.t6i_items(V, 15, p, jsonb_build_array(jsonb_build_array(X, 6))));
+  IF NOT COALESCE((j->>'success')::boolean, false) THEN
+    v_fallas := v_fallas || format('D3: volver al regalo que el pedido ya tenía (X×6) tenía que andar (%s)', left(j::text, 300));
+  END IF;
+
   IF array_length(v_fallas, 1) > 0 THEN
     RAISE EXCEPTION E'ENSAYO FALLÓ (%)\n%', array_length(v_fallas, 1), array_to_string(v_fallas, E'\n');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · tanda 6 bis, tarjeta I: promos-B1 (alta y edición, también el admin), promos-B4, promos-B5 (tramos), N1 y N2';
+  RAISE EXCEPTION 'ENSAYO OK · tanda 6 bis, tarjeta I: promos-B1 (alta y edición, también el admin), promos-B4, promos-B5 (el combo que cambió de precio no crece), N1, N2 y F5';
 END
 $ensayo$;
