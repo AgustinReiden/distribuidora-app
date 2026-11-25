@@ -231,3 +231,49 @@ export function evaluarCambioRegalo(args: {
         }),
   }
 }
+
+/**
+ * promos-B1 en el alta y la edición (tanda 6 bis de #1603): ¿este producto, puesto como
+ * regalo de la promo, necesita su bulto y no lo tiene? Espejo de `_regalo_sin_bulto`: en una
+ * promo de fracción con unidades por bloque, un regalo cuenta en la barra de SU contenedor
+ * (`contenedor_de_barra`: el de la promo para su regalo, el de su fila de
+ * `promo_acumuladores` si la tiene, o él mismo), con el bulto de ese contenedor; sin el dato
+ * contaría con el N de la promo, que es el empaque del regalo. Sin bulto el server lo
+ * rechaza, también al admin.
+ *
+ * Sin los acumuladores cargados (`acumuladores` undefined), o sin el contenedor en la lista
+ * de productos, no decide (false): decide el server, con el mismo texto. Así la pantalla no
+ * bloquea lo que el server acepta (F4 de la lente de la tarjeta I).
+ */
+export function regaloSinBulto(args: {
+  promo: {
+    regaloMueveStock?: boolean | null
+    unidadesPorBloque?: number | null
+    ajusteProductoId?: string | number | null
+    productoRegaloId?: string | number | null
+  }
+  producto: { id: string | number; unidades_por_bulto?: number | null }
+  /** Las filas de `promo_acumuladores` de ESTA promo; undefined = todavía no se sabe. */
+  acumuladores: readonly { producto_regalo_id: string | number; ajuste_producto_id?: string | number | null }[] | undefined
+  /** Para leer el bulto del contenedor. */
+  productoPorId: (id: string) => { unidades_por_bulto?: number | null } | undefined
+}): boolean {
+  const { promo, producto, acumuladores } = args
+  if (promo.regaloMueveStock) return false
+  if (positivo(promo.unidadesPorBloque) === null) return false
+  const id = (v: string | number | null | undefined) => (v == null ? null : String(v))
+  if (id(producto.id) === id(promo.productoRegaloId)) return false
+  if (acumuladores === undefined) return false
+  const fila = acumuladores.find(a => id(a.producto_regalo_id) === id(producto.id))
+  const contenedor = fila ? id(fila.ajuste_producto_id) : id(producto.id)
+  if (contenedor === id(promo.ajusteProductoId)) return false
+  if (contenedor === null) return true
+  const c = contenedor === id(producto.id) ? producto : args.productoPorId(contenedor)
+  if (!c) return false
+  return positivo(c.unidades_por_bulto) === null
+}
+
+/** El texto del rechazo, el mismo que da el server (`_regalo_sin_bulto`). */
+export function textoRegaloSinBulto(nombre: string): string {
+  return `Para regalar ${nombre} hay que cargar en su ficha cuántas unidades sueltas trae cada unidad de stock (unidades por bulto).`
+}

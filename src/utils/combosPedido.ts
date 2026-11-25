@@ -207,11 +207,16 @@ export function aplicarCombosAlPedido(e: EntradaCombosPedido): ResultadoCombosPe
 export function combinarCombosConFotos(
   vigentes: readonly ComboVigente[],
   fotos: readonly (ComboVigente & { cantidadCombos: number })[],
+  opciones: { sumaConPrecioCambiado?: boolean } = {},
 ): ComboVigente[] {
   const porId = new Map(vigentes.map(c => [c.id, c]))
   const out: ComboVigente[] = vigentes.filter(c => !fotos.some(f => f.id === c.id))
   for (const f of fotos) {
     const vigente = porId.get(f.id)
+    // promos-B5 (tanda 6 bis de #1603), decisión del dueño del 25/11: si el combo cambió de
+    // precio desde que se armó el pedido, quien no es admin conserva (o baja) los que tiene y
+    // no suma más: tope en los de la foto, como combo_fuera_de_regla. El admin sí.
+    const precioCambiado = vigente !== undefined && comboCambioDePrecio(f, vigente)
     out.push({
       id: f.id,
       nombre: f.nombre,
@@ -219,8 +224,50 @@ export function combinarCombosConFotos(
       combinaEscalas: f.combinaEscalas,
       componentes: f.componentes,
       prioridad: vigente?.prioridad ?? f.prioridad,
-      topeRestante: vigente ? vigente.topeRestante : f.cantidadCombos,
+      // Con el tope del combo, también: si otros pedidos lo llenaron, el server rechaza (G2).
+      topeRestante: precioCambiado && !opciones.sumaConPrecioCambiado
+        ? Math.min(f.cantidadCombos, vigente.topeRestante ?? Infinity)
+        : vigente ? vigente.topeRestante : f.cantidadCombos,
     })
   }
   return out
+}
+
+/** ¿El combo de la foto vale hoy otra cosa? Al centavo, como el server. */
+function comboCambioDePrecio(foto: { precio: number }, vigente: { precio: number }): boolean {
+  return Math.round(Number(foto.precio) * 100) !== Math.round(Number(vigente.precio) * 100)
+}
+
+export interface ComboConPrecioCambiado {
+  id: string
+  nombre: string
+  precioFoto: number
+  precioHoy: number
+  cantidadCombos: number
+}
+
+/**
+ * promos-B5 (tanda 6 bis de #1603): los combos del pedido que cambiaron de precio desde que se
+ * armó. Quien no es admin no les puede sumar más (decisión del dueño del 25/11): la pantalla
+ * lo avisa con `textoComboConPrecioCambiado`, el mismo texto que el rechazo del server.
+ */
+export function combosConPrecioCambiado(
+  vigentes: readonly ComboVigente[],
+  fotos: readonly (ComboVigente & { cantidadCombos: number })[],
+): ComboConPrecioCambiado[] {
+  const porId = new Map(vigentes.map(c => [c.id, c]))
+  return fotos.flatMap(f => {
+    const vigente = porId.get(f.id)
+    if (!vigente || !comboCambioDePrecio(f, vigente)) return []
+    return [{ id: f.id, nombre: f.nombre, precioFoto: f.precio, precioHoy: vigente.precio, cantidadCombos: f.cantidadCombos }]
+  })
+}
+
+const pesos = (n: number): string =>
+  '$ ' + Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+/** El aviso de un combo que cambió de precio: el mismo que da `combo_fuera_de_regla`. */
+export function textoComboConPrecioCambiado(c: ComboConPrecioCambiado): string {
+  return `El combo «${c.nombre}» cambió de precio desde que se armó el pedido: valía ${pesos(c.precioFoto)} y hoy vale ${pesos(c.precioHoy)}. `
+    + `Este pedido puede conservar sus ${c.cantidadCombos} o bajarlos; los combos nuevos cargalos en otro pedido.`
 }

@@ -308,7 +308,10 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   de la línea, nunca contra la línea de hoy ni el producto con que se cargó: ni sustituir dos
   veces, ni cargar otro sabor, ni repartir suben el techo. La pantalla lee ese regalo con
   `regalo_referencia_de_linea`. La regla es una, `regalo_tope_sustituto`, con espejo en `topeSustitutoRegalo` (gate:
-  `topeSustituto.espejo.json`); la pantalla sugiere con ella. El reparto la cumple sobre la suma
+  `topeSustituto.espejo.json`); la pantalla sugiere con ella. El pedido que rehízo un cambio de cliente mide desde el
+  alta del original (N2, tanda 6 bis: `_regalo_de_la_promo` sigue su `pedido_historial`), y la
+  edición acepta volver a ese regalo (o a uno de su rubro) en una promo que el pedido ya tenía aunque
+  hoy la promo dé otro (N1: un reparto que ya no cierra vuelve a él, no al de hoy). El reparto la cumple sobre la suma
   de las partes, y la edición no escala una cadena por encima (`_regalo_tope_de_cadena`): lo que
   armó un admin se conserva pero no crece, **salvo** cuando la edición baja lo que da la promo y el
   sustituto es de otro rubro: ahí no puede valer más que el regalo nuevo y se rechaza
@@ -373,7 +376,12 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   con la promo en unidad entera esos pedidos ya no abren el bloque y el contenedor queda un fardo
   abajo). Un sustituto o un sabor de reparto cuya barra no es la del contenedor de la promo cuenta
   con su propio bulto (`unidades_por_bulto` del contenedor), también del mismo rubro: sin el dato
-  se rechaza (promos-B1; antes heredaba el N de la promo, que es el empaque del regalo). Y sólo una promo de fracción con
+  se rechaza (promos-B1; antes heredaba el N de la promo, que es el empaque del regalo). Lo mismo
+  otro sabor cargado como regalo en el alta o la edición, también por el admin (es un dato, no un
+  permiso): la regla es `_regalo_sin_bulto` (con el contenedor de la barra de cada sabor, como
+  `contenedor_de_barra`), que llaman `regalo_fuera_de_promo` y la rama del admin
+  de `crear_pedido_completo` y `actualizar_pedido_items`; no la pide un producto que el pedido (o
+  el original de un cambio de cliente) ya tenía como regalo de esa promo. Y sólo una promo de fracción con
   ajuste automático tiene barra: en la que mueve stock o no tiene ajuste, `usos_pendientes` es un
   contador en la unidad de la línea, que `aplicar_uso_promo_acumulador` no convierte en bloques ni
   la renormalización tampoco (1592-b2), y la sustitución le pasa la diferencia (1592-b3).
@@ -391,9 +399,20 @@ Si vas a escribir o aplicar SQL de estos temas sin abrir esta carpeta, leé este
   (1592-b4): si el de siempre deja una por debajo de un centavo, cada unidad toma un centavo y el
   resto se reparte igual sin bajar de 0; si ni así se puede, NULL. `precio_fuera_de_politica` valida la
   línea de combo por su precio **sin** combo, y saca del conteo de escalas las unidades de un
-  combo excluyente. La foto del combo de cada pedido es `pedido_combos`: al editar, un combo que
+  combo excluyente; una línea sin precio de lista no la valida, así que en un combo acumulable no
+  puede descontar por escala, por unidad, más que lo guardado en la foto
+  (`pedido_combos.precios->producto->sin_escala`, que publica `combo_fuera_de_regla` en
+  `app.combo_sin_escala` y guarda `_guardar_combos_pedido`; 0 sin el dato) (promos-B4). La foto del
+  combo de cada pedido es `pedido_combos`: al editar, un combo que
   el pedido ya tenía se mide contra su foto, y en un cambio de cliente, contra la del pedido
-  original (`app.combo_foto_pedido`), que el pedido nuevo hereda (#1301). Un lugar del combo puede
+  original (`app.combo_foto_pedido`), que el pedido nuevo hereda (#1301). **Un combo que cambió de precio no
+  crece** (promos-B5, decisión del dueño del 25/11): a un pedido que ya tiene un combo cuyo precio
+  de hoy (`_combo_definicion`) no es el de su foto, al centavo, quien no es admin no le suma más;
+  el que tiene queda a la foto, conservarlo y bajarlo andan, y `combo_fuera_de_regla` rechaza
+  sumar con el combo y los dos precios («los combos nuevos cargalos en otro pedido»). El admin sí
+  (decide la plata, como siempre). Sin cambio de precio, sumar anda como siempre; la edición no lo
+  arma y lo avisa (`combosConPrecioCambiado`). Una foto tiene un solo precio: dos precios en un
+  renglón por producto no siempre se reparten al centavo. Un lugar del combo puede
   ser una **categoría viva**
   (`combo_componentes.categoria_id`, mig 386): lo que vende lo resuelve `_combo_definicion`, así
   que nada lee `combo_componentes.producto_id` directo; en el front, `resolverLugares`. La

@@ -512,10 +512,16 @@ BEGIN
   Y := pg_temp.t6b_prod(v_suc, 'D4 W', 'ZZ t6b rubro D4', 50, 500);
   p := pg_temp.t6b_promo(v_suc, V, R, 5, 2, true);
   p1 := pg_temp.t6b_alta(v_cli, v_enc, v_suc, pg_temp.t6b_items(V, 10, R, 4, p));
+  -- Tanda 6 bis (lente t6b2): el pedido nació «ayer» y el cambio de la promo fue «hace 12 h».
+  -- En una sola transacción now() es uno solo y la foto renovada por la edición empataba con
+  -- la fila de audit_logs: el caso no mordía contra el cuerpo de antes de la 544.
+  UPDATE public.pedidos SET created_at = now() - interval '1 day' WHERE id = p1;
   j := pg_temp.t6b_guardar(v_adm, v_suc, p, format('{"producto_regalo_id": %s}', X)::jsonb);
   IF NOT COALESCE((j->>'success')::boolean, false) THEN
     RAISE EXCEPTION 'D4 · preparación: no se pudo cambiar el regalo de la promo (%)', j;
   END IF;
+  UPDATE public.audit_logs SET created_at = now() - interval '12 hours'
+   WHERE tabla = 'promociones' AND registro_id = p::text AND accion = 'UPDATE';
   j := pg_temp.t6b_editar(v_enc, v_suc, p1, pg_temp.t6b_items(V, 10, R, 4, p));
   IF NOT COALESCE((j->>'success')::boolean, false) THEN
     RAISE EXCEPTION 'D4 · preparación: la edición sin cambios no anduvo (%)', j;
