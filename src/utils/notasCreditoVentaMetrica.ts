@@ -15,8 +15,12 @@
  * La plata es `total` de la nota (nunca cantidad × precio, B22) y nunca incluye el envío.
  *
  * Quién la lee por REST: `mt_notas_credito_venta_select` es de admin y encargado de la sucursal
- * (`es_encargado_o_admin()`). Para un preventista la consulta vuelve vacía, sin error, y sus
- * cifras quedan brutas como hasta hoy (ver el informe de la tarjeta).
+ * (`es_encargado_o_admin()`). Para un preventista la consulta vuelve vacía, sin error.
+ *
+ * El preventista (tanda 6 bis; decisión del dueño del 24/11: «que vea $ 700, neto») las lee por
+ * la RPC `notas_credito_venta_del_vendedor`: de cada nota que resta de una boleta que ÉL vendió,
+ * en la sucursal activa, sólo la fecha, el cliente y el total. A admin y encargado la RPC no les
+ * da nada (leen por REST), así que las dos fuentes se suman sin repetir ninguna nota.
  */
 import { esTipoVB } from './valeBlanco'
 
@@ -80,6 +84,32 @@ export function notasEnVentana(
     if (hasta && n.fecha > hasta) return false
     return true
   })
+}
+
+/** La RPC con las notas del preventista que llama (fecha, cliente y total; nada más). */
+export const RPC_NOTAS_DEL_VENDEDOR = 'notas_credito_venta_del_vendedor'
+
+/** Una fila de `notas_credito_venta_del_vendedor`. */
+export interface NotaDelVendedorRow {
+  fecha: string | null
+  cliente_id: string | number
+  total: number | string | null
+}
+
+/**
+ * Una fila de la RPC como una nota de la consulta REST, para que el Dashboard y la ficha la
+ * resten con las mismas cuentas. La RPC ya filtró lo que `notaRestaDeLaVenta` mira (vigente, de
+ * una boleta entregada que no es canje ni vale blanco), así que la boleta va como venta; el
+ * vendedor es quien llamó (`usuarioId`), que es lo que filtra `notasDelVendedor`.
+ */
+export function notaDelVendedorComoMetrica(n: NotaDelVendedorRow, usuarioId: string | null): NotaCreditoVentaMetricaRow {
+  return {
+    fecha: n.fecha,
+    cliente_id: n.cliente_id,
+    total: n.total,
+    anulada: false,
+    pedido: { estado: 'entregado', canal: null, tipo_factura: null, usuario_id: usuarioId },
+  }
 }
 
 /** Las notas de las boletas de un vendedor (el filtro del Dashboard de un preventista). */
