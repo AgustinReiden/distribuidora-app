@@ -19,7 +19,8 @@ import { promosSinRegaloEnElPedido } from '../../utils/promosSinRegalo';
 import { entradaDeConsulta, motivoDatosDePrecio, resumirDatosDePrecio, sePuedeReintentarDatos } from '../../utils/datosDePrecio';
 import { cadenaDelRegalo, cantidadBaseDeLinea, conservarRepartos, regaloParaEditar } from '../../utils/repartoRegalo';
 import { regaloQueNoCrece } from '../../utils/regaloPromoApagada';
-import { regaloDelPedidoParaPromo } from '../../utils/regaloDelPedido';
+import { primeraLineaDeLaPromo, regaloDelPedidoParaPromo } from '../../utils/regaloDelPedido';
+import { regaloReferenciaDeRpc } from '../../hooks/queries/useSustituirRegaloMutation';
 import { avisosDeCupo, promosConRegalo } from '../../utils/cupoPromo';
 import { AvisoCupoPromo } from '../ui/AvisoCupoPromo';
 import { usePreventistasAsignablesQuery } from '../../hooks/queries/useUsuariosQuery';
@@ -825,6 +826,36 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     })).then(pares => { if (vigente) setCortesGuardados(new Map(pares)); });
     return () => { vigente = false; };
   }, [idsConCadena]);
+  // N1 (tanda 6 bis de #1603): el regalo de referencia de cada promo repartida en sabores (la
+  // RPC `regalo_referencia_de_linea`, de admin y encargado), para saber si un reparto que deja
+  // de cerrar puede volver a la raíz de sus líneas. Sin el dato queda el regalo de hoy.
+  const lineasDeReparto = useMemo(() => {
+    const porPromo = new Map<string, number>();
+    for (const i of pedido?.items ?? []) {
+      if (i.es_bonificacion && i.promocion_id != null) {
+        porPromo.set(String(i.promocion_id), (porPromo.get(String(i.promocion_id)) ?? 0) + 1);
+      }
+    }
+    return [...porPromo].filter(([, n]) => n > 1).map(([promo]) => {
+      const primera = primeraLineaDeLaPromo(pedido?.items ?? [], promo);
+      return `${promo}:${primera?.id ?? ''}`;
+    }).filter(par => !par.endsWith(':')).join(',');
+  }, [pedido]);
+  const [referenciasDeReparto, setReferenciasDeReparto] = useState<Map<string, string | null>>(() => new Map());
+  useEffect(() => {
+    if (!lineasDeReparto) return;
+    let vigente = true;
+    void Promise.all(lineasDeReparto.split(',').map(async (par): Promise<[string, string | null]> => {
+      const [promo, id] = par.split(':');
+      try {
+        const { data, error } = await supabase.rpc('regalo_referencia_de_linea', { p_pedido_item_id: Number(id) });
+        return [promo, error ? null : (regaloReferenciaDeRpc(data)?.productoId ?? null)];
+      } catch {
+        return [promo, null];
+      }
+    })).then(pares => { if (vigente) setReferenciasDeReparto(new Map(pares)); });
+    return () => { vigente = false; };
+  }, [lineasDeReparto]);
   const { bonificacionesCalculadas, repartosPerdidos } = useMemo(() => {
     // promos-B6 (tanda 6 de #1603, decisión del dueño del 24/11): el regalo de una promo que
     // ya no rige se conserva pero no crece, como mide el server (regalo_fuera_de_promo). Lo
@@ -939,16 +970,20 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
     // N1 (tanda 6 bis de #1603), decisión del dueño: el regalo del pedido es el que la promo
     // daba cuando nació. Un reparto que ya no cierra vuelve a ESE regalo (la raíz de sus
     // líneas), no al que la promo da hoy: si el admin cambió el regalo de la promo (R por P),
-    // la edición pasaba R a P sin que nadie lo pidiera.
+    // la edición pasaba R a P sin que nadie lo pidiera. Sólo si la raíz es la referencia o de
+    // su rubro, que es lo que el server acepta; si no, el de hoy, como en la 545.
     const conRegaloDelPedido = bonificaciones.map(b => {
       if (b.promocionId == null || !perdidos.includes(String(b.promocionId))) return b;
-      const pid = regaloDelPedidoParaPromo(pedido?.items ?? [], sustituciones, b.promocionId);
+      const refId = referenciasDeReparto.get(String(b.promocionId)) ?? null;
+      const pid = regaloDelPedidoParaPromo(pedido?.items ?? [], sustituciones, b.promocionId,
+        refId ? productos.find(p => String(p.id) === refId) : null,
+        id => productos.find(p => String(p.id) === id));
       if (!pid || pid === String(b.productoId)) return b;
       const producto = productos.find(p => String(p.id) === pid);
       return { ...b, productoId: pid, productoIdEnvio: pid, nombre: producto?.nombre || b.nombre, esSustituido: false };
     });
     return { bonificacionesCalculadas: conRegaloDelPedido, repartosPerdidos: perdidos };
-  }, [itemsFinales, productos, sustituciones, pedido, regalosAlOriginal, isAdmin, promoInfoMap, cortesGuardados, promociones]);
+  }, [itemsFinales, productos, sustituciones, pedido, regalosAlOriginal, isAdmin, promoInfoMap, cortesGuardados, promociones, referenciasDeReparto]);
 
   // H1: lo que el aviso tiene que decir, antes de tocar Guardar (con lo que el modal sabe) o
   // con el rechazo del server. Nada se cambia solo: el usuario elige volver al regalo de la
