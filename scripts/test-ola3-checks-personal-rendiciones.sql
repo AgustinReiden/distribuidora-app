@@ -1,6 +1,6 @@
 -- Ensayo de la tarjeta T1 de la ola 3 (plan #1677): los checks de integridad del personal y de
 -- las rendiciones en auditoria_integridad(). #1392 (LIQ-A, LIQ-B, LIQ-C) y #1426 (FALT-A,
--- FALT-B, FALT-C). Migración: NNN_ola3_checks_personal_rendiciones.
+-- FALT-B, FALT-C). Migración: 548_ola3_checks_personal_rendiciones.
 --
 -- Un único DO con datos propios que termina SIEMPRE en una excepción: no deja rastro (salvo
 -- valores de secuencia). Veredicto: 'ENSAYO OK' o 'ENSAYO FALLÓ' con la lista. Sin la migración
