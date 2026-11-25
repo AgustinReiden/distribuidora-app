@@ -22,6 +22,9 @@ const PRODUCTOS = [
 ]
 
 const sustituir = vi.fn()
+const { estado } = vi.hoisted(() => ({
+  estado: { referencia: null as null | { productoId: string; precio: number | null; factor: number } },
+}))
 
 vi.mock('../../hooks/queries', () => ({
   useProductosQuery: () => ({ data: PRODUCTOS }),
@@ -32,6 +35,8 @@ vi.mock('../../hooks/queries/useSustituirRegaloMutation', () => ({
   useDividirRegaloMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   // el corte de la línea: lo que da la promo, 4 botellas
   useCorteRegaloQuery: () => ({ data: 4 }),
+  // promos-B2: el regalo del pedido que da el server (null: el de la promo de hoy)
+  useRegaloReferenciaQuery: () => ({ data: estado.referencia }),
 }))
 vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => ({ success: vi.fn(), error: vi.fn() }),
@@ -69,6 +74,17 @@ const confirmar = () => screen.getByRole('button', { name: /cambiar regalo/i })
 describe('ModalSustituirRegalo — el tope del sustituto de quien no es admin (#1592)', () => {
   beforeEach(() => {
     sustituir.mockReset().mockResolvedValue({ sustitucionId: '1', modo: 'B' })
+    estado.referencia = null
+  })
+
+  it('promos-B2: mide contra el regalo del pedido y lo que valía, no contra el de hoy de la promo', () => {
+    // Cuando se armó el pedido el fardo de Manaos 3L valía $300 ($50 la botella); hoy, $600.
+    estado.referencia = { productoId: '1', precio: 300, factor: 6 }
+    renderModal(false)
+    elegir('3')
+    // 4 botellas de $50 = $200 → Cola 1L a $20 la botella: 10 (contra el precio de hoy, 20).
+    expect(cantidad().value).toBe('10')
+    expect(screen.getByText(/Podés poner hasta 10 de Cola 1L: lo que da la promo es 4 de Manaos 3L/)).toBeInTheDocument()
   })
 
   it('el cambio por valor se sugiere contra el regalo de la promo y su corte, no contra la línea', () => {

@@ -39,7 +39,7 @@ import { Button } from '../ui/Button'
 import NumberInput from '../ui/NumberInput'
 import { Combobox } from '../ui/Combobox'
 import { useProductosQuery, usePromoAcumuladorQuery } from '../../hooks/queries'
-import { useSustituirRegaloMutation, useDividirRegaloMutation, useCorteRegaloQuery } from '../../hooks/queries/useSustituirRegaloMutation'
+import { useSustituirRegaloMutation, useDividirRegaloMutation, useCorteRegaloQuery, useRegaloReferenciaQuery } from '../../hooks/queries/useSustituirRegaloMutation'
 import { validarRepartoRegalo, type ParteReparto } from '../../utils/repartoRegalo'
 import { nuevoRequestId } from '../../utils/idempotencia'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -239,9 +239,18 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
   // cupo), contra el que el server mide el sustituto. Sin el corte, la cantidad de la línea.
   const { data: corteLinea } = useCorteRegaloQuery(pedidoItemId)
   const corte = corteLinea ?? cantidadOriginal
-  const referencia = regaloPromo
-    ? { regalo: regaloPromo, factor: regaloMueveStock ? 1 : (factorRegaloPromo && factorRegaloPromo > 0 ? factorRegaloPromo : 1), corte }
+  // promos-B2 (tanda 6 de #1603): el regalo DEL PEDIDO (el de su foto, con lo que valía), que
+  // es contra el que mide el server. Sin ese dato, el regalo de hoy de la promo.
+  const { data: referenciaLinea } = useRegaloReferenciaQuery(pedidoItemId)
+  const regaloDelPedido = referenciaLinea
+    ? { ...(buscarProducto(referenciaLinea.productoId) ?? regaloPromo ?? { id: referenciaLinea.productoId }),
+        id: referenciaLinea.productoId, precio: referenciaLinea.precio } as ProductoDB
     : null
+  const referencia = regaloDelPedido && referenciaLinea
+    ? { regalo: regaloDelPedido, factor: referenciaLinea.factor, corte }
+    : regaloPromo
+      ? { regalo: regaloPromo, factor: regaloMueveStock ? 1 : (factorRegaloPromo && factorRegaloPromo > 0 ? factorRegaloPromo : 1), corte }
+      : null
   const esAdmin = puedeCambiarDeProducto
   const evaluar = (sustitutoId: string, ajusteElegido: string) => {
     const sustituto = buscarProducto(sustitutoId)
@@ -255,6 +264,8 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
       regaloMueveStock,
       unidadesPorBloquePromo: unidadesPorBloque,
       referencia,
+      contenedorPromoId: ajusteProductoIdOriginal,
+      regaloPromoId: regaloPromo?.id ?? null,
     })
   }
   // Hasta cuánto puede poner quien no es admin (null: el admin, o sin el regalo de la promo).
@@ -478,9 +489,10 @@ const ModalSustituirRegalo = memo(function ModalSustituirRegalo({
                   <p role="alert" className="text-xs text-red-600 dark:text-red-400 flex items-start gap-1">
                     <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
                     <span>
-                      {cambio.productoACargar.nombre ?? 'Ese producto'} es de otra categoría y no tiene cargadas
-                      sus unidades sueltas por unidad de stock (cuántas botellas o paquetes trae cada una).
-                      Cargalo en su ficha de Productos para poder regalarlo.
+                      {cambio.productoACargar.nombre ?? 'Ese producto'} no tiene cargadas sus unidades
+                      sueltas por unidad de stock (cuántas botellas o paquetes trae cada una): sin ese dato,
+                      se contaría con el empaque del regalo de la promo. Cargalo en su ficha de Productos
+                      para poder regalarlo.
                     </span>
                   </p>
                 )}

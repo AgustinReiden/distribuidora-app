@@ -18,7 +18,9 @@ const PRODUCTOS = [
   // Otra categoría y otra subcategoría: no se ofrecen como regalo (#950).
   { id: '500', nombre: 'Papas Fritas 100g', stock: 50, categoria_id: 'snacks' },
   { id: '501', nombre: 'Manaos Naranja 500cc', stock: 50, categoria_id: 'bebidas', subcategoria_id: 'gaseosa-chica' },
-].map(p => ({ categoria_id: 'bebidas', subcategoria_id: 'gaseosa-3l', ...p }))
+  // promos-B1 (tanda 6 de #1603): el sabor del mismo rubro que descuenta de su propio
+  // contenedor tiene su bulto cargado (fardo x6); sin él, la sustitución pide cargarlo.
+].map(p => ({ categoria_id: 'bebidas', subcategoria_id: 'gaseosa-3l', unidades_por_bulto: 6, ...p }))
 
 const dividir = vi.fn()
 const sustituir = vi.fn()
@@ -31,6 +33,7 @@ vi.mock('../../hooks/queries/useSustituirRegaloMutation', () => ({
   useSustituirRegaloMutation: () => ({ mutateAsync: sustituir, isPending: false }),
   useDividirRegaloMutation: () => ({ mutateAsync: dividir, isPending: false }),
   useCorteRegaloQuery: () => ({ data: null }),
+  useRegaloReferenciaQuery: () => ({ data: null }),
 }))
 vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => ({ success: vi.fn(), error: vi.fn() }),

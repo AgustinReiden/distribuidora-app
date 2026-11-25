@@ -78,10 +78,33 @@ describe('evaluarCambioRegalo', () => {
       .toEqual({ tipo: 'mismo_empaque', factorSustituto: 6 })
   })
 
-  it('mismo rubro sin bulto cargado: cae al factor de la promo, como hasta ahora', () => {
+  // promos-B1 (tanda 6 de #1603), cambió de regla: antes el mismo rubro sin bulto caía al factor
+  // de la promo (el empaque del regalo) aunque descontara de su propio contenedor.
+  it('mismo rubro sin bulto cargado y con su propio contenedor: hay que cargarlo', () => {
+    const naranjaSinBulto = { ...MANAOS_NARANJA, unidades_por_bulto: null }
+    expect(evaluarCambioRegalo({ ...base, original: MANAOS_3L, sustituto: naranjaSinBulto, contenedorPromoId: '82' }))
+      .toEqual({ tipo: 'falta_bulto', productoACargar: naranjaSinBulto })
+  })
+
+  it('mismo rubro sin bulto que descuenta del contenedor de la promo: el factor de la promo', () => {
+    const naranjaSinBulto = { ...MANAOS_NARANJA, unidades_por_bulto: null }
+    const fardo = { id: '900', nombre: 'Fardo Manaos', unidades_por_bulto: null }
     expect(evaluarCambioRegalo({
-      ...base, original: MANAOS_3L, sustituto: { ...MANAOS_NARANJA, unidades_por_bulto: null },
+      ...base, original: MANAOS_3L, sustituto: naranjaSinBulto, contenedorSustituto: fardo, contenedorPromoId: '900',
     })).toEqual({ tipo: 'mismo_empaque', factorSustituto: 6 })
+  })
+
+  it('el regalo de la promo sin bulto: el factor de la promo', () => {
+    expect(evaluarCambioRegalo({
+      ...base, original: MANAOS_NARANJA, sustituto: { ...MANAOS_3L, unidades_por_bulto: null }, regaloPromoId: '82',
+    })).toEqual({ tipo: 'mismo_empaque', factorSustituto: 6 })
+  })
+
+  it('una promo sin unidades por bloque cuenta de a una: no pide el bulto', () => {
+    expect(evaluarCambioRegalo({
+      ...base, factorOriginal: 1, unidadesPorBloquePromo: null,
+      original: MANAOS_3L, sustituto: { ...MANAOS_NARANJA, unidades_por_bulto: null },
+    })).toEqual({ tipo: 'mismo_empaque', factorSustituto: 1 })
   })
 
   it('mismo rubro con otro empaque: por valor', () => {
