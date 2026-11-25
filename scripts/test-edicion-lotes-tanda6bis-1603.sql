@@ -1,4 +1,4 @@
--- Ensayo de la migración NNN_edicion_lotes_bloques_y_mensajes (plan #1603, tanda 6 bis,
+-- Ensayo de la migración 547_edicion_lotes_bloques_y_mensajes (plan #1603, tanda 6 bis,
 -- tarjeta J: dos defectos viejos de la edición del pedido y dos retoques de sus mensajes).
 --
 -- No deja rastro (salvo valores de secuencia): un único DO que termina SIEMPRE en una excepción.
