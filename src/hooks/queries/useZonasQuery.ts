@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { useSucursal } from '../../contexts/SucursalContext'
 import { clientesKeys } from './useClientesQuery'
+import { esZonaRepetidaDelServer } from '../../utils/nombreZona'
 
 // Types
 export interface ZonaDB {
@@ -55,6 +56,8 @@ async function crearZona(nombre: string, sucursalId: number): Promise<ZonaDB> {
     .single()
 
   if (error) {
+    // D13: el server nombra la zona que ya existe (sin mirar mayúsculas ni espacios); se muestra tal cual.
+    if (esZonaRepetidaDelServer(error)) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la zona. Revisá la lista de zonas antes de reintentar.')
     if (error.code === '23505') throw new Error(`La zona "${trimmed}" ya existe`)
     throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el alta de la zona. Revisá la lista de zonas antes de reintentar, puede haber quedado hecho.')
   }
@@ -115,6 +118,7 @@ async function renombrarZona(id: string, nombre: string): Promise<void> {
   if (!trimmed) throw new Error('El nombre de la zona es requerido');
   const { error } = await supabase.from('zonas').update({ nombre: trimmed }).eq('id', id);
   if (error) {
+    if (esZonaRepetidaDelServer(error)) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la zona. Revisá la lista de zonas antes de reintentar.');
     if (error.code === '23505') throw new Error(`La zona "${trimmed}" ya existe`);
     throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar el cambio de nombre de la zona. Revisá la lista de zonas antes de reintentar, puede haber quedado hecho.');
   }

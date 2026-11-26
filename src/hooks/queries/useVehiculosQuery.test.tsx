@@ -44,6 +44,7 @@ import {
   useVehiculosQuery,
   useGuardarVehiculoMutation,
   useRegistrarKmMutation,
+  useCorregirLecturaKmMutation,
   useVehiculoFichaQuery,
 } from './useVehiculosQuery'
 
@@ -97,6 +98,24 @@ describe('useRegistrarKmMutation', () => {
   })
 })
 
+describe('useCorregirLecturaKmMutation', () => {
+  it('manda la lectura, la fecha y los km nuevos a corregir_lectura_km', async () => {
+    const { result } = renderHook(() => useCorregirLecturaKmMutation(), { wrapper: makeWrapper(nuevoCliente()) })
+    await result.current.mutateAsync({ lecturaId: 41, fecha: '2026-10-06', km: 184550 })
+    expect(rpcCalls).toEqual([
+      { fn: 'corregir_lectura_km', args: { p_lectura_id: 41, p_fecha: '2026-10-06', p_km: 184550, p_borrar: false } },
+    ])
+  })
+
+  it('el borrado va con p_borrar', async () => {
+    const { result } = renderHook(() => useCorregirLecturaKmMutation(), { wrapper: makeWrapper(nuevoCliente()) })
+    await result.current.mutateAsync({ lecturaId: 41, fecha: null, km: null, borrar: true })
+    expect(rpcCalls).toEqual([
+      { fn: 'corregir_lectura_km', args: { p_lectura_id: 41, p_fecha: null, p_km: null, p_borrar: true } },
+    ])
+  })
+})
+
 describe('useVehiculosQuery', () => {
   it('por defecto trae sólo los activos, ordenados por patente', async () => {
     const { result } = renderHook(() => useVehiculosQuery(), { wrapper: makeWrapper(nuevoCliente()) })
@@ -126,6 +145,8 @@ describe('useVehiculoFichaQuery', () => {
     expect(llamadas).toContainEqual(['is', 'anulado_at', null])
     expect(llamadas.some(l => l[0] === 'gte' && l[1] === 'mes_fin')).toBe(true)
     expect(llamadas.some(l => l[0] === 'gte' && l[1] === 'fecha')).toBe(true)
+    // GTO-5: el id de la lectura, para corregirla o borrarla.
+    expect(llamadas).toContainEqual(['select', 'id,fecha,km,origen,gasto_id'])
     expect(result.current.data).toEqual({ gastos: [], lecturas: [] })
   })
 
