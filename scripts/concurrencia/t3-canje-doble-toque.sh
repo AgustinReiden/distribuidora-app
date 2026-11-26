@@ -10,7 +10,7 @@
 #       canje de S1, sin mover el stock otra vez. Queda UN canje y el stock entregado baja 2, no 4.
 #   2 · control negativo, SIN clave (un PWA de antes): las dos pasan y quedan DOS canjes. Es lo que pasaba
 #       siempre, y prueba que las sesiones se cruzan de verdad (si no, la ronda 1 no probaría nada).
-# Sin la migración (NNN_ola3_rutas_paradas_canjes) la ronda 1 falla: p_clave no existe. Al final borra lo
+# Sin la migración (550_ola3_rutas_paradas_canjes) la ronda 1 falla: p_clave no existe. Al final borra lo
 # que creó. Sale con 1 si la ronda 1 no deja un solo canje o si las sesiones no se cruzaron.
 set -u
 C="${CONTENEDOR:?Falta CONTENEDOR (una base descartable de docker)}"

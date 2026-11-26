@@ -447,7 +447,6 @@ BEGIN
                             AND rp.estado_entrega IN ('pendiente', 'entregado')
                             AND r.estado = 'en_curso');
     END IF;
-
     IF v_mueve THEN
       UPDATE recorrido_pedidos rp
          SET estado_entrega = 'reasignado'

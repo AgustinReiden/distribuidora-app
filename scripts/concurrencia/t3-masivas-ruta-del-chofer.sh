@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # La ruta del chofer que entrega, con otra sesión en el medio (Rut-B5, ola 3, tarjeta T3 de #1677; revisión de
-# c38729c2). Sesiones psql reales contra una base DESCARTABLE de Docker con la migración NNN_ola3_rutas_paradas_canjes.
+# c38729c2). Sesiones psql reales contra una base DESCARTABLE de Docker con la migración 550_ola3_rutas_paradas_canjes.
 # NUNCA contra prod.
 #
 #   CONTENEDOR=<contenedor> bash scripts/concurrencia/t3-masivas-ruta-del-chofer.sh

@@ -1,4 +1,4 @@
--- Ensayo de la migración NNN_ola3_rutas_paradas_canjes (tarjeta T3 de la ola 3, #1677;
+-- Ensayo de la migración 550_ola3_rutas_paradas_canjes (tarjeta T3 de la ola 3, #1677;
 -- puntos Rut-B3, B4, B5, B6, B8, B10, B11, B13 y B14 de #1554, y permisos-B1 = 1564-b9).
 --
 -- Un único DO que arma sus propios datos (gente, un cliente, productos y pedidos nuevos en la
