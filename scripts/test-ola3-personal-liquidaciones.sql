@@ -43,7 +43,8 @@
 --     liquidado y una venta entregada hoy, el motivo dice desde qué lunes se puede liquidar.
 --     8c (decisión del dueño, 26/11): con los mismos $ 2.000 tampoco se le saca el usuario a la
 --     ficha ni se le pasa otro, con el motivo; la pantalla lo ve antes (aviso_usuario). Sí se
---     edita lo demás y se le vincula usuario a una ficha que no tenía; liquidado, se le cambia.
+--     edita lo demás y se le vincula usuario a una ficha que no tenía (aunque tenga pendiente);
+--     liquidado, se le cambia.
 -- 9 · m5 una liquidación sin movimientos (sueldo 0, sin comisión, sin pago) adelanta el corte: el
 --     ajuste de $ 1.000 que ya liquidó no vuelve a salir en la vista previa siguiente, que lo
 --     cuenta en el saldo anterior.
@@ -643,9 +644,20 @@ BEGIN
     v_fallas := v_fallas || pg_temp.chk((SELECT usuario_id FROM empleados WHERE id = e8) = v_p8,
                   '8c la ficha cambió de usuario con la comisión sin liquidar');
     v_fallas := v_fallas || pg_temp.anda('8c editar sin tocar el usuario', pg_temp.edicion(e8, '{"telefono":"381 555 0002"}'));
-    -- Vincularle usuario a una ficha que no tenía no se frena (aunque comisione).
-    e8c := pg_temp.alta('{}', 0, true);
-    v_fallas := v_fallas || pg_temp.anda('8c vincular usuario a una ficha sin usuario',
+    -- Vincularle usuario a una ficha que no tenía no se frena, aunque tenga pendiente: la ficha
+    -- tuvo a U, se liquidó, se le sacó U con pendiente 0, y después la boleta de U bajó y le dejó
+    -- un ajuste de -$ 1.000 (vuelve a la ficha por empleado_id, como en 7c).
+    v_q1 := pg_temp.u('preventista', v_s1);
+    e8c := pg_temp.alta(jsonb_build_object('usuario_id', v_q1), 0, true);
+    v_ped := pg_temp.pedido(v_q1, v_l + 2, 100000);
+    PERFORM pg_temp.lq(e8c, 2000);
+    PERFORM pg_temp.como(pg_temp.edicion(e8c, '{"usuario_id":null}'));
+    UPDATE pedido_items SET cantidad = 500, subtotal = 50000 WHERE pedido_id = v_ped;
+    UPDATE pedidos SET total = 50000 WHERE id = v_ped;
+    v_fallas := v_fallas || pg_temp.chk((SELECT public._empleado_comision_sin_liquidar(e) FROM empleados e WHERE e.id = e8c) = -1000
+                    AND (SELECT usuario_id FROM empleados WHERE id = e8c) IS NULL,
+                  '8c el armado: la ficha sin usuario no quedó con -$ 1.000 pendiente');
+    v_fallas := v_fallas || pg_temp.anda('8c vincular usuario a una ficha sin usuario con pendiente',
                   pg_temp.edicion(e8c, jsonb_build_object('usuario_id', v_p8c)));
     v_fallas := v_fallas || pg_temp.chk((SELECT usuario_id FROM empleados WHERE id = e8c) = v_p8c, '8c la ficha sin usuario no quedó vinculada');
     -- Liquidado (pendiente 0), se le cambia.
