@@ -142,6 +142,7 @@ import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
 import { mensajeCobroMasivo, avisoNoCobrados } from '../../utils/avisoCobroMasivo'
 import { mensajeEntregaConSalvedades } from '../../utils/salvedades'
+import { usePedidosGpsQuery } from '../../hooks/queries/pedidoGps'
 
 // Lazy load de componentes
 const VistaPedidos = lazyWithReload(() => import('../vistas/VistaPedidos'))
@@ -470,6 +471,8 @@ export default function PedidosContainer(): React.ReactElement {
 
   // Derived data
   const pedidos = useMemo(() => paginatedResult?.data ?? [], [paginatedResult?.data])
+  // El GPS del check-in de la página (permisos-B4): vive en pedido_gps y lo lee sólo el admin.
+  const { data: gpsPorPedido } = usePedidosGpsQuery(pedidos.map(p => p.id), { enabled: isAdmin })
   const totalCount = paginatedResult?.totalCount ?? 0
   const totalPaginas = Math.ceil(totalCount / ITEMS_PER_PAGE)
   // FRV-4 (#1598): cancelar o entregar el último pedido de la última página la
@@ -2962,6 +2965,7 @@ export default function PedidosContainer(): React.ReactElement {
       <Suspense fallback={<LoadingState />}>
         <VistaPedidos
           pedidos={pedidos}
+          gpsPorPedido={gpsPorPedido}
           saldoActualizadoAt={pedidosActualizadosAt}
           totalCount={totalCount}
           statsSummary={statsSummary}

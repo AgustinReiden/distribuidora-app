@@ -69,9 +69,11 @@ BEGIN
    WHERE sucursal_id = v_suc AND stock >= 1 ORDER BY id LIMIT 1;
   IF v_prod IS NULL THEN RAISE EXCEPTION 'ensayo · no hay producto con stock en la sucursal %', v_suc; END IF;
 
-  SELECT id INTO v_pedido FROM pedidos
-   WHERE sucursal_id = v_suc AND usuario_id = v_prev AND gps_status IS DISTINCT FROM 'ok'
-   ORDER BY id DESC LIMIT 1;
+  -- Desde la T8b de la ola 3 (permisos-B4) el GPS del pedido vive en pedido_gps.
+  SELECT p.id INTO v_pedido FROM pedidos p
+   WHERE p.sucursal_id = v_suc AND p.usuario_id = v_prev
+     AND NOT EXISTS (SELECT 1 FROM pedido_gps g WHERE g.pedido_id = p.id AND g.gps_status = 'ok')
+   ORDER BY p.id DESC LIMIT 1;
 
   SELECT p.id INTO v_admin_red
     FROM perfiles p

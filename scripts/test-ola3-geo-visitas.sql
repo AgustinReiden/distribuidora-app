@@ -96,35 +96,33 @@ BEGIN
 
   -- Cuatro pedidos nuevos del primer preventista, con la carga de cada caso (como postgres:
   -- la fecha y la hora de carga no se eligen por la API, y acá se prueba el panel).
-  INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, created_at,
-                       gps_status, gps_lat, gps_lng, gps_capturado_at)
-  VALUES (v_cli, v_suc, v_p1, 1000, 'pendiente', v_ayer, now(), 'ok', -26.8, -65.2, now())
+  -- Desde la T8b de la ola 3 (permisos-B4) el GPS del pedido va en pedido_gps.
+  INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, created_at)
+  VALUES (v_cli, v_suc, v_p1, 1000, 'pendiente', v_ayer, now())
   RETURNING id INTO v_x;
-  INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, created_at,
-                       gps_status, gps_lat, gps_lng, gps_capturado_at)
-  VALUES (v_cli, v_suc, v_p1, 1000, 'pendiente', v_hoy,
-          (v_ayer + time '12:00') AT TIME ZONE 'America/Argentina/Buenos_Aires', 'ok', -26.8, -65.2,
-          (v_ayer + time '12:00') AT TIME ZONE 'America/Argentina/Buenos_Aires')
+  INSERT INTO pedido_gps (pedido_id, sucursal_id, gps_status, gps_lat, gps_lng, gps_capturado_at)
+  VALUES (v_x, v_suc, 'ok', -26.8, -65.2, now());
+  INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, created_at)
+  VALUES (v_cli, v_suc, v_p1, 1000, 'pendiente', v_hoy, (v_ayer + time '12:00') AT TIME ZONE 'America/Argentina/Buenos_Aires')
   RETURNING id INTO v_y;
-  INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, created_at,
-                       gps_status, gps_lat, gps_lng, gps_capturado_at)
-  VALUES (v_cli, v_suc, v_p1, 1000, 'pendiente', v_ayer,
-          (v_ayer + time '23:30') AT TIME ZONE 'America/Argentina/Buenos_Aires', 'ok', -26.8, -65.2,
-          (v_ayer + time '23:30') AT TIME ZONE 'America/Argentina/Buenos_Aires')
+  INSERT INTO pedido_gps (pedido_id, sucursal_id, gps_status, gps_lat, gps_lng, gps_capturado_at)
+  VALUES (v_y, v_suc, 'ok', -26.8, -65.2, (v_ayer + time '12:00') AT TIME ZONE 'America/Argentina/Buenos_Aires');
+  INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, created_at)
+  VALUES (v_cli, v_suc, v_p1, 1000, 'pendiente', v_ayer, (v_ayer + time '23:30') AT TIME ZONE 'America/Argentina/Buenos_Aires')
   RETURNING id INTO v_w;
+  INSERT INTO pedido_gps (pedido_id, sucursal_id, gps_status, gps_lat, gps_lng, gps_capturado_at)
+  VALUES (v_w, v_suc, 'ok', -26.8, -65.2, (v_ayer + time '23:30') AT TIME ZONE 'America/Argentina/Buenos_Aires');
   -- El borde de la medianoche: el 00:00:00 de hoy es de hoy (`>=` en el «desde»), el 23:59:59 de ayer no.
-  INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, created_at,
-                       gps_status, gps_lat, gps_lng, gps_capturado_at)
-  VALUES (v_cli, v_suc, v_p1, 1000, 'pendiente', v_hoy,
-          v_hoy::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires', 'ok', -26.8, -65.2,
-          v_hoy::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires')
+  INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, created_at)
+  VALUES (v_cli, v_suc, v_p1, 1000, 'pendiente', v_hoy, v_hoy::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires')
   RETURNING id INTO v_m0;
-  INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, created_at,
-                       gps_status, gps_lat, gps_lng, gps_capturado_at)
-  VALUES (v_cli, v_suc, v_p1, 1000, 'pendiente', v_ayer,
-          (v_ayer + time '23:59:59') AT TIME ZONE 'America/Argentina/Buenos_Aires', 'ok', -26.8, -65.2,
-          (v_ayer + time '23:59:59') AT TIME ZONE 'America/Argentina/Buenos_Aires')
+  INSERT INTO pedido_gps (pedido_id, sucursal_id, gps_status, gps_lat, gps_lng, gps_capturado_at)
+  VALUES (v_m0, v_suc, 'ok', -26.8, -65.2, v_hoy::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires');
+  INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, created_at)
+  VALUES (v_cli, v_suc, v_p1, 1000, 'pendiente', v_ayer, (v_ayer + time '23:59:59') AT TIME ZONE 'America/Argentina/Buenos_Aires')
   RETURNING id INTO v_m1;
+  INSERT INTO pedido_gps (pedido_id, sucursal_id, gps_status, gps_lat, gps_lng, gps_capturado_at)
+  VALUES (v_m1, v_suc, 'ok', -26.8, -65.2, (v_ayer + time '23:59:59') AT TIME ZONE 'America/Argentina/Buenos_Aires');
   INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, created_at, motivo_cancelacion)
   VALUES (v_cli, v_suc, v_p1, 0, 'cancelado', v_hoy, now(), 'ensayo T8')
   RETURNING id INTO v_z;

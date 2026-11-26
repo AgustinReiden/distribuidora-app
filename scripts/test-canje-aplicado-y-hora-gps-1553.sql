@@ -78,7 +78,8 @@ BEGIN
   v_r := public.registrar_geolocalizacion_pedido(p_pedido_id => v_c1, p_status => 'ok', p_lat => -26.8, p_lng => -65.2,
                                                  p_accuracy => 10, p_capturado_at => TIMESTAMPTZ '2099-01-01 12:00+00');
   RESET ROLE;
-  SELECT gps_capturado_at INTO v_ts FROM pedidos WHERE id = v_c1;
+  -- Desde la T8b de la ola 3 (permisos-B4) el GPS del pedido vive en pedido_gps.
+  SELECT gps_capturado_at INTO v_ts FROM pedido_gps WHERE pedido_id = v_c1;
   IF NOT COALESCE((v_r->>'success')::boolean, false) OR v_ts IS DISTINCT FROM now() THEN
     v_fallas := v_fallas || format('H2 · un GPS con hora de 2099 quedó con %s (se esperaba la del servidor): %s', v_ts, v_r)::text;
   END IF;
@@ -86,7 +87,7 @@ BEGIN
   v_r := public.registrar_geolocalizacion_pedido(p_pedido_id => v_c2, p_status => 'ok', p_lat => -26.8, p_lng => -65.2,
                                                  p_accuracy => 10, p_capturado_at => now() - interval '2 hours');
   RESET ROLE;
-  SELECT gps_capturado_at INTO v_ts FROM pedidos WHERE id = v_c2;
+  SELECT gps_capturado_at INTO v_ts FROM pedido_gps WHERE pedido_id = v_c2;
   IF NOT COALESCE((v_r->>'success')::boolean, false) OR v_ts IS DISTINCT FROM now() - interval '2 hours' THEN
     v_fallas := v_fallas || format('H2 · un GPS de hace 2 horas no conservó su hora: %s / %s', v_ts, v_r)::text;
   END IF;

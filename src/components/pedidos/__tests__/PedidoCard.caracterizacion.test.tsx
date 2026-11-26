@@ -92,7 +92,7 @@ import { AuthDataProvider } from '../../../contexts/AuthDataContext'
 import { NotificationProvider } from '../../../contexts/NotificationContext'
 import { supabase } from '../../../lib/supabase'
 import { generarReciboPedido } from '../../../lib/pdfExport'
-import type { PedidoDB, RolUsuario } from '../../../types'
+import type { PedidoDB, PedidoGps, RolUsuario } from '../../../types'
 import { PEDIDOS_FIXTURE } from '../../../../dev/gallery/fixtures/pedidos'
 import { authDataDeRol, ROLES_GALERIA } from '../../../../dev/gallery/fixtures/auth'
 import { PRODUCTOS_FIXTURE, TRANSPORTISTAS_FIXTURE, USUARIOS_FIXTURE } from '../../../../dev/gallery/fixtures/catalogo'
@@ -160,6 +160,11 @@ const FECHAS_FIJAS: Record<string, Partial<PedidoDB>> = {
   [CANCELADO]: { fecha: '2026-09-10', created_at: '2026-09-10T16:20:00-03:00' },
   [GPS_DENEGADO]: { fecha: '2026-09-17', created_at: '2026-09-17T12:44:00-03:00' },
   [GPS_LEJOS]: { fecha: '2026-09-17', created_at: '2026-09-17T13:05:00-03:00' },
+}
+
+/** El check-in del fixture (`pedido_gps`), o null si el pedido no tiene. */
+function gpsDe(id: string): PedidoGps | null {
+  return PEDIDOS_FIXTURE.find(e => e.pedido.id === id)?.gps ?? null
 }
 
 function fixture(id: string): PedidoDB {
@@ -234,7 +239,7 @@ type FlagsDeRol = Pick<PedidoCardProps, 'isAdmin' | 'isPreventista' | 'isTranspo
 function renderCard(
   pedido: PedidoDB,
   rol: RolUsuario,
-  opciones: { flags?: FlagsDeRol } = {},
+  opciones: { flags?: FlagsDeRol; gps?: PedidoGps | null } = {},
 ): { handlers: Handlers; pedido: PedidoDB; qc: QueryClient } {
   const auth = authDataDeRol(rol)
   const handlers = crearHandlers()
@@ -256,7 +261,10 @@ function renderCard(
     )
   }
 
-  render(<PedidoCard pedido={pedido} {...flags} {...handlers} />, { wrapper: Wrapper })
+  // El GPS llega aparte (pedido_gps, permisos-B4), como lo pasa VistaPedidos al admin:
+  // por defecto, el del fixture.
+  const gps = 'gps' in opciones ? opciones.gps : gpsDe(String(pedido.id))
+  render(<PedidoCard pedido={pedido} gps={gps} {...flags} {...handlers} />, { wrapper: Wrapper })
   return { handlers, pedido, qc }
 }
 
@@ -559,10 +567,12 @@ describe('PedidoCard cerrada — los datos que se ven, iguales para los 5 roles'
 
 // El GPS paso al detalle en WP-43: cada caso expande antes de mirar (tambien
 // los "no se ve", para que no pasen por no haber abierto nada).
-describe('PedidoCard — GPS del check-in: solo admin y el preventista dueno', () => {
+// permisos-B4 (D10): el GPS vive en pedido_gps, que lee sólo el admin. El preventista dueño
+// ya no lo ve (lo más cerrado; decisión abierta del dueño).
+describe('PedidoCard — GPS del check-in: solo admin', () => {
   it.each([
     { rol: 'admin', ve: true },
-    { rol: 'preventista', ve: true },
+    { rol: 'preventista', ve: false },
     { rol: 'encargado', ve: false },
     { rol: 'transportista', ve: false },
     { rol: 'deposito', ve: false },
@@ -577,6 +587,13 @@ describe('PedidoCard — GPS del check-in: solo admin y el preventista dueno', (
     renderCard({ ...fixture(GPS_DENEGADO), usuario_id: OTRA_PREVENTISTA.id }, 'preventista')
     await expandir()
     noSeVe('Sin GPS')
+  })
+
+  it('sin el GPS aparte (un pedido que trae solo la fila de pedidos) no hay chip, ni para el admin', async () => {
+    renderCard(fixture(GPS_DENEGADO), 'admin', { gps: null })
+    await expandir()
+    noSeVe('Sin GPS')
+    noSeVe('s/ref')
   })
 
   it('con GPS ok muestra la distancia a la direccion del cliente', async () => {
@@ -597,7 +614,7 @@ describe('PedidoCard — GPS del check-in: solo admin y el preventista dueno', (
     { gps_status: 'unavailable', motivo: 'GPS no disponible' },
     { gps_status: 'error', motivo: 'GPS con error' },
   ] as const)('un check-in con GPS $gps_status dice "Sin GPS" y el motivo "$motivo"', async ({ gps_status, motivo }) => {
-    renderCard({ ...fixture(GPS_DENEGADO), gps_status }, 'admin')
+    renderCard(fixture(GPS_DENEGADO), 'admin', { gps: { pedido_id: GPS_DENEGADO, gps_status } })
     await expandir()
     seVe('Sin GPS')
     expect(etiquetados(motivo).length).toBeGreaterThan(0)
@@ -611,7 +628,7 @@ describe('PedidoCard — GPS del check-in: solo admin y el preventista dueno', (
     noSeVe(/^\d+(\.\d)? k?m$/)
   })
 
-  it('un pedido sin check-in (sin gps_status) no muestra ningun chip de GPS', async () => {
+  it('un pedido sin check-in (sin fila en pedido_gps) no muestra ningun chip de GPS', async () => {
     renderCard(fixture(PENDIENTE), 'admin')
     await expandir()
     noSeVe('Sin GPS')

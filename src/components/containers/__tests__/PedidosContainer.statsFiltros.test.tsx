@@ -27,7 +27,7 @@
  * PedidoStats seguiría verde, y nada más se enteraría.
  */
 import React from 'react'
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -169,13 +169,17 @@ vi.mock('../../vistas/VistaPedidos', async () => {
     '../../pedidos/PedidoStats',
   )
   return {
-    default: ({ filtros, onFiltrosChange, isEncargado, isDeposito }: {
+    default: ({ filtros, onFiltrosChange, isEncargado, isDeposito, gpsPorPedido }: {
       filtros: FiltrosPedidosState
       onFiltrosChange: (cambios: Partial<FiltrosPedidosState>) => void
       isEncargado?: boolean
       isDeposito?: boolean
+      gpsPorPedido?: ReadonlyMap<string, { gps_status: string }>
     }) => (
       <>
+        <p data-testid="gps-vista">
+          {gpsPorPedido ? [...gpsPorPedido].map(([id, g]) => `${id}:${g.gps_status}`).join(',') : 'sin-gps'}
+        </p>
         <PedidoStats
           summary={SUMMARY}
           filtros={filtros}
@@ -253,6 +257,45 @@ describe('PedidosContainer — le pasa a la vista el rol real para los montos (#
     renderContainer()
     await screen.findByRole('button', { name: /^Pendientes/ })
     expect(montosEnTiles()).toEqual([])
+  })
+})
+
+// permisos-B4 (D10): el GPS del check-in ya no viene en la fila de pedidos (que lee el chofer):
+// el container lo pide a pedido_gps para los pedidos de la página, sólo si es admin.
+describe('PedidosContainer — el GPS del check-in sale de pedido_gps, sólo para el admin (permisos-B4)', () => {
+  const fromOriginal = supabaseStub.from.getMockImplementation()
+  const paginadaOriginal = usePedidosPaginatedQuery.getMockImplementation()
+  const inFn = vi.fn()
+
+  beforeEach(() => {
+    usePedidosPaginatedQuery.mockReturnValue({
+      data: { data: [{ id: 42, cliente_id: '9', estado: 'pendiente', total: 1000, items: [] }], totalCount: 1 },
+      isLoading: false, isFetching: false,
+    } as never)
+    inFn.mockResolvedValue({ data: [{ pedido_id: 42, gps_status: 'denied', gps_lat: null, gps_lng: null }], error: null })
+    supabaseStub.from.mockImplementation(((tabla: string) =>
+      tabla === 'pedido_gps'
+        ? { select: vi.fn(() => ({ in: inFn })) }
+        : { select: vi.fn(() => ({ data: [], error: null })) }) as never)
+  })
+  afterEach(() => {
+    if (fromOriginal) supabaseStub.from.mockImplementation(fromOriginal)
+    if (paginadaOriginal) usePedidosPaginatedQuery.mockImplementation(paginadaOriginal)
+  })
+
+  it('admin: lo pide para los pedidos de la página y se lo pasa a la vista', async () => {
+    renderContainer()
+    await waitFor(() => expect(screen.getByTestId('gps-vista')).toHaveTextContent('42:denied'))
+    expect(supabaseStub.from).toHaveBeenCalledWith('pedido_gps')
+    expect(inFn).toHaveBeenCalledWith('pedido_id', ['42'])
+  })
+
+  it('depósito: no lo pide (la tabla no le da nada) y la vista no recibe GPS', async () => {
+    auth.deposito = true
+    renderContainer()
+    await screen.findByRole('button', { name: /^Pendientes/ })
+    expect(supabaseStub.from).not.toHaveBeenCalledWith('pedido_gps')
+    expect(screen.getByTestId('gps-vista')).toHaveTextContent('sin-gps')
   })
 })
 

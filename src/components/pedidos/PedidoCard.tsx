@@ -70,7 +70,7 @@ import { entregaMarcada } from '../../utils/entregaMarcada';
 import { puedeVerDeudaCliente, puedeVerPreciosLineaPedido } from '../../lib/permisos';
 import { formatCantidadItem, equivalenteEnUnidades } from '../../utils/unidadesRegalo';
 import { esSalvedadAnulada, salvedadesVigentes, totalRecargoCombos } from '../../utils/salvedades';
-import type { PedidoDB, MotivoSalvedad, RolUsuario, TipoComprobanteVenta } from '../../types';
+import type { PedidoDB, PedidoGps, MotivoSalvedad, RolUsuario, TipoComprobanteVenta } from '../../types';
 import {
   destinosTipoFactura,
   esTipoVB,
@@ -112,6 +112,11 @@ export interface PedidoCardProps {
    * sync y no incluye lo cobrado despues.
    */
   saldoActualizadoAt?: number | null;
+  /**
+   * El check-in GPS del pedido (`pedido_gps`, permisos-B4). Lo trae la lista para el admin
+   * (`usePedidosGpsQuery`); sin él no hay chip de GPS.
+   */
+  gps?: PedidoGps | null;
 }
 
 // =============================================================================
@@ -332,22 +337,24 @@ function BadgeAntiguedad({ dias, estado }: BadgeAntiguedadProps): React.ReactEle
 }
 
 // Badge: distancia entre el GPS del check-in del preventista y la dirección
-// del cliente. Solo se muestra a admin (y al preventista dueño). Si no hubo
-// check-in (gps_status null), no renderiza nada para no contaminar las cards
-// históricas previas a la migración 040.
+// del cliente. Solo se muestra al admin: el GPS vive en `pedido_gps`, que lee
+// sólo él (permisos-B4, D10; el preventista dueño ya no lo ve, decisión abierta
+// del dueño). Si no hubo check-in (sin fila), no renderiza nada para no
+// contaminar las cards históricas previas a la migración 040.
 interface BadgeGeolocalizacionProps {
   pedido: PedidoDB;
+  gps: PedidoGps | null | undefined;
 }
 
-function BadgeGeolocalizacion({ pedido }: BadgeGeolocalizacionProps): React.ReactElement | null {
-  if (!pedido.gps_status) return null;
+function BadgeGeolocalizacion({ pedido, gps }: BadgeGeolocalizacionProps): React.ReactElement | null {
+  if (!gps?.gps_status) return null;
 
   // GPS fallido: mostrar chip neutro indicando el motivo.
-  if (pedido.gps_status !== 'ok') {
+  if (gps.gps_status !== 'ok') {
     const motivo =
-      pedido.gps_status === 'denied' ? 'GPS denegado' :
-      pedido.gps_status === 'timeout' ? 'GPS sin respuesta' :
-      pedido.gps_status === 'unavailable' ? 'GPS no disponible' :
+      gps.gps_status === 'denied' ? 'GPS denegado' :
+      gps.gps_status === 'timeout' ? 'GPS sin respuesta' :
+      gps.gps_status === 'unavailable' ? 'GPS no disponible' :
       'GPS con error';
     return (
       <Badge tone="neutral" icon={MapPin} title={motivo}>
@@ -359,8 +366,8 @@ function BadgeGeolocalizacion({ pedido }: BadgeGeolocalizacionProps): React.Reac
   // GPS ok: si el cliente no tiene coordenadas, no podemos calcular distancia.
   const clienteLat = pedido.cliente?.latitud;
   const clienteLng = pedido.cliente?.longitud;
-  const pedidoLat = pedido.gps_lat;
-  const pedidoLng = pedido.gps_lng;
+  const pedidoLat = gps.gps_lat;
+  const pedidoLng = gps.gps_lng;
 
   if (clienteLat == null || clienteLng == null || pedidoLat == null || pedidoLng == null) {
     return (
@@ -406,6 +413,7 @@ function PedidoCard({
   onRegistrarPago,
   onNotaCreditoVenta,
   saldoActualizadoAt,
+  gps,
 }: PedidoCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState<boolean>(false);
   // Una salvedad anulada deshace todo (las unidades vuelven al pedido): no cuenta
@@ -483,7 +491,8 @@ function PedidoCard({
   const mostrarEntregado = pedido.estado === 'entregado' && pedido.fecha_entrega;
   // Quién la marcó y cuándo (`entregado_at`, no la fecha declarada de la entrega).
   const entrega = entregaMarcada(pedido);
-  const puedeVerGps = isAdmin || (isPreventista && user?.id === pedido.usuario_id);
+  // permisos-B4: el GPS del check-in lo lee sólo el admin (pedido_gps).
+  const puedeVerGps = Boolean(isAdmin);
   const estado = estadoVisual(pedido, tieneSalvedad);
   // La entrega con salvedad va en ámbar y no en verde, en el badge y en el riel:
   // hubo mercadería que no llegó y puede quedar algo por resolver. Es el color
@@ -688,7 +697,7 @@ function PedidoCard({
                 </span>
               )}
               <BadgeAntiguedad dias={diasAntiguedad} estado={pedido.estado} />
-              {puedeVerGps && <BadgeGeolocalizacion pedido={pedido} />}
+              {puedeVerGps && <BadgeGeolocalizacion pedido={pedido} gps={gps} />}
             </div>
             {entrega && (
               <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-gray-600 dark:text-gray-400">
