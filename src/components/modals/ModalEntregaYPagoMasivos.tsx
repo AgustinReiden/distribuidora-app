@@ -13,6 +13,8 @@ import {
   formatPrecio, fechaLocalISO,
 } from '../../utils/formatters'
 import { Badge } from '../ui/Badge'
+import FiltrosMasivos from './FiltrosMasivos'
+import { filtrarPedidosMasivos, TIPO_FECHA_MASIVAS_POR_DEFECTO, type FiltroMasivo } from '../../utils/filtroMasivas'
 import { toneDeEstadoPedido, toneDeEstadoPago } from '../../lib/estadoTones'
 import { FORMAS_PAGO_SELECCIONABLES } from '../../constants/formasPago'
 import { errorDeFechaEntrega, rangoFechaEntrega } from '../../utils/fechaEntrega'
@@ -57,8 +59,12 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
   // `selectedIds`, que más abajo se acota a lo que el filtro deja ver (Fr-B6, como 1598-b8 en pagos).
   const [tildados, setSelectedIds] = useState<Set<string>>(new Set())
   const [busqueda, setBusqueda] = useState('')
-  const [fechaDesde, setFechaDesde] = useState('')
-  const [fechaHasta, setFechaHasta] = useState('')
+  const [filtro, setFiltro] = useState<FiltroMasivo>({
+    tipoFecha: TIPO_FECHA_MASIVAS_POR_DEFECTO,
+    desde: '',
+    hasta: '',
+    formaPago: '',
+  })
   const [fecha, setFecha] = useState<string>(hoy)
   const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null)
 
@@ -68,9 +74,8 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
   const { data: rendicionCerrada = false } = useRendicionCerradaQuery(fecha, fechaBloqueada)
 
   const pedidosFiltrados = useMemo(() => {
-    let resultado = pedidos
-    if (fechaDesde) resultado = resultado.filter(p => (p.fecha || p.created_at?.split('T')[0] || '') >= fechaDesde)
-    if (fechaHasta) resultado = resultado.filter(p => (p.fecha || p.created_at?.split('T')[0] || '') <= fechaHasta)
+    // Fecha (de entrega por defecto, como «Armar ruta») y forma de pago: #1698.
+    let resultado = filtrarPedidosMasivos(pedidos, filtro)
     if (busqueda.trim()) {
       const term = busqueda.toLowerCase()
       resultado = resultado.filter(p =>
@@ -80,7 +85,7 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
       )
     }
     return resultado
-  }, [pedidos, busqueda, fechaDesde, fechaHasta])
+  }, [pedidos, busqueda, filtro])
 
   const selectedIds = useMemo(() => {
     const visibles = new Set(pedidosFiltrados.map(p => p.id))
@@ -249,19 +254,8 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
           </div>
         )}
 
-        {/* Filtro por fechas */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Desde</label>
-            <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)}
-              className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Hasta</label>
-            <input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)}
-              className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-          </div>
-        </div>
+        {/* Filtros: fecha (entrega o pedido) y forma de pago */}
+        <FiltrosMasivos filtro={filtro} onChange={setFiltro} conFormaPago />
 
         {/* Busqueda */}
         <div className="relative">
