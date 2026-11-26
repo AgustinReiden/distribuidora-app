@@ -2,8 +2,9 @@
 -- cartera, vehículos y tablero; #1554, #1522 y #1690).
 --
 -- No deja rastro (salvo valores de secuencia): un único DO que termina SIEMPRE en una excepción.
--- Antes de aplicar la migración tiene que FALLAR en A1, A2, A3, A5, B1, B2, C1, D1, E1, F1, F2, F3,
--- F4, F6, F7, F8, F9, F10, F11, G1, G2 y G4; después, dar 'ENSAYO OK'. Corre en una base local con
+-- Antes de aplicar la migración tiene que FALLAR en A1, A2, A3, A5, B1, B2, B7, C1, D1, E1, F1, F2,
+-- F3, F4, F6, F7, F8, F9, F10, F11, G1, G2 y G4; después, dar 'ENSAYO OK'. A8, B6 y E3 pasan también
+-- antes: son regresiones que matan a los mutantes M1c, M2c y M5b (ver el PR). Corre en una base local con
 -- la semilla mínima (un admin activo de las sucursales 1 y 2) o en una copia de prod: arma sus
 -- propias personas, clientes, pedidos, zonas y vehículos. Usa el día argentino (_tablero_hoy()).
 --
@@ -16,12 +17,18 @@
 --   A5 · el admin, por guardar_cliente, con preventista_ids = [chofer] → 22023 y no queda asignado.
 --   A6 · el server (sin claims) le asigna el huérfano al chofer → entra (sigue como está).
 --   A7 · asignar_preventista_zona como admin con un preventista activo → entra y la zona queda suya.
+--   A8 · guardar_cliente, editando un cliente que ya tiene un dueño inválido (un chofer, de antes), no
+--        se traba: el chofer se queda y el preventista que se suma entra (la regla mira lo que entra).
 -- Var-B5 · actualizar_preventista_pedido: estado y destino.
 --   B1 · pedido entregado → success false (antes lo cambiaba).
 --   B2 · pedido cancelado → success false.
 --   B3 · pedido pendiente, destino un chofer → success false (regresión).
 --   B4 · pedido pendiente, destino el admin → entra (regresión: el selector ofrece admins).
 --   B5 · pedido en camino (asignado), destino otro preventista → entra (regresión).
+--   B6 · pedido en preparación → entra.
+--   B7 · un chofer con el rol extra de preventista en la sucursal entra como destino; un preventista
+--        desactivado no. El extra 'preventista' hoy lo prohíbe perfil_roles_rol_check: el ensayo lo
+--        levanta (se revierte con todo), como el D8 de test-cartera-chofer-y-asignacion-1182-1183.
 -- Var-B6 · la patente es única por sucursal.
 --   C1 · la misma patente en las sucursales 1 y 2 → entran las dos (antes, la segunda daba «Ya hay…»).
 --   C2 · la misma patente otra vez en la sucursal 1, escrita distinto → «Ya hay un vehículo…» (regresión).
@@ -32,6 +39,7 @@
 -- Var-B11 · tablero_cobertura.
 --   E1 · el mes que viene → avance_mes_pct = 0 (antes negativo) y el corte es el día anterior al inicio.
 --   E2 · el mes en curso → avance entre 0 y 100 y el corte es hoy (regresión).
+--   E3 · el mes pasado → avance 100 y el corte es su último día.
 -- GTO-5 y Var-B7 · las lecturas de km.
 --   F1 · registrar una lectura con fecha de mañana → «posterior a hoy».
 --   F2 · la misma lectura dos veces (mismo día y km) → «ya está cargada».
@@ -39,7 +47,7 @@
 --   F4 · una lectura en el medio que pasa a la siguiente por fecha → «no pueden bajar».
 --   F5 · una lectura que sube, y otra del mismo día con menos km → entran (regresión y regla del día).
 --   F6 · corregir_lectura_km como admin: la lectura queda con los km nuevos.
---   F7 · corregir como encargado entra; como preventista, no.
+--   F7 · corregir es sólo del admin: el encargado y el preventista, no.
 --   F8 · una corrección que rompe la serie → «no pueden bajar», y la lectura no cambia.
 --   F9 · una lectura del GPS no se corrige a mano.
 --   F10 · borrar una lectura manual la saca.
@@ -63,6 +71,7 @@ DECLARE
   v_p2     uuid := gen_random_uuid();
   v_pd     uuid := gen_random_uuid();
   v_tr     uuid := gen_random_uuid();
+  v_tx     uuid := gen_random_uuid();
   v_enc    uuid := gen_random_uuid();
   v_h      bigint;
   v_h2     bigint;
@@ -99,6 +108,7 @@ BEGIN
          jsonb_build_object('rol', u.rol, 'sucursal_id', 1), jsonb_build_object('nombre', u.nombre), now(), now()
     FROM (VALUES (v_p1, 'preventista', 'T9 prev uno'), (v_p2, 'preventista', 'T9 prev dos'),
                  (v_pd, 'preventista', 'T9 prev baja'), (v_tr, 'transportista', 'T9 chofer'),
+                 (v_tx, 'transportista', 'T9 chofer con extra'),
                  (v_enc, 'encargado', 'T9 encargado')) AS u(id, rol, nombre);
   -- El sync con auth.users (el ban) pide una columna que la base local no tiene: se apaga para esto.
   ALTER TABLE public.perfiles DISABLE TRIGGER trg_perfiles_sync_acceso_auth;
@@ -173,6 +183,16 @@ BEGIN
                                       'A5 · guardar_cliente le asignó un cliente a un chofer: ' || COALESCE(v_t, 'entró'));
   v_t := pg_temp.err_server(format('INSERT INTO public.cliente_preventistas (cliente_id, preventista_id) VALUES (%s, %L) RETURNING cliente_id::text', v_h, v_tr));
   v_fallas := v_fallas || pg_temp.chk(v_t IS NULL, 'A6 · el server no pudo asignar (tiene que seguir como está): ' || COALESCE(v_t, ''));
+  -- A8 · el chofer de A6 queda como dueño inválido de antes; el admin edita el cliente y suma a P1.
+  v_t := pg_temp.err(format('SELECT public.guardar_cliente(%L::jsonb)::text',
+                            jsonb_build_object('id', v_h, 'campos', jsonb_build_object('notas', 'T9 edición'),
+                                               'preventista_ids', jsonb_build_array(v_tr, v_p1),
+                                               'preventista_ids_previos', jsonb_build_array(v_tr))));
+  v_fallas := v_fallas || pg_temp.chk(v_t IS NULL
+                                      AND (SELECT notas FROM clientes WHERE id = v_h) = 'T9 edición'
+                                      AND (SELECT array_agg(preventista_id ORDER BY preventista_id::text) FROM cliente_preventistas WHERE cliente_id = v_h)
+                                          = (SELECT array_agg(x ORDER BY x::text) FROM unnest(ARRAY[v_tr, v_p1]) x),
+                                      'A8 · editar un cliente con un dueño inválido de antes se trabó: ' || COALESCE(v_t, '¿sin los dos dueños?'));
   DELETE FROM cliente_preventistas WHERE cliente_id = v_h;
 
   INSERT INTO zonas (nombre, sucursal_id) VALUES ('ZT9 zona A ' || gen_random_uuid(), 1) RETURNING id INTO v_z1;
@@ -211,6 +231,21 @@ BEGIN
   v_fallas := v_fallas || pg_temp.chk(COALESCE((v_j->>'success')::boolean, false)
                                       AND (SELECT usuario_id FROM pedidos WHERE id = v_ped) = v_p2,
                                       'B5 · no le pudo cambiar el preventista a un pedido en camino: ' || v_j::text);
+  UPDATE pedidos SET estado = 'en_preparacion' WHERE id = v_ped;
+  v_j := pg_temp.como(format('SELECT public.actualizar_preventista_pedido(%s, %L)::text', v_ped, v_p1))::jsonb;
+  v_fallas := v_fallas || pg_temp.chk(COALESCE((v_j->>'success')::boolean, false)
+                                      AND (SELECT usuario_id FROM pedidos WHERE id = v_ped) = v_p1,
+                                      'B6 · no le pudo cambiar el preventista a un pedido en preparación: ' || v_j::text);
+  ALTER TABLE public.perfil_roles DROP CONSTRAINT perfil_roles_rol_check;
+  INSERT INTO perfil_roles (usuario_id, sucursal_id, rol) VALUES (v_tx, 1, 'preventista');
+  v_j := pg_temp.como(format('SELECT public.actualizar_preventista_pedido(%s, %L)::text', v_ped, v_tx))::jsonb;
+  v_fallas := v_fallas || pg_temp.chk(COALESCE((v_j->>'success')::boolean, false)
+                                      AND (SELECT usuario_id FROM pedidos WHERE id = v_ped) = v_tx,
+                                      'B7 · un chofer con el extra de preventista no pudo quedar de vendedor: ' || v_j::text);
+  v_j := pg_temp.como(format('SELECT public.actualizar_preventista_pedido(%s, %L)::text', v_ped, v_pd))::jsonb;
+  v_fallas := v_fallas || pg_temp.chk(NOT COALESCE((v_j->>'success')::boolean, false)
+                                      AND (SELECT usuario_id FROM pedidos WHERE id = v_ped) = v_tx,
+                                      'B7 · un preventista desactivado quedó de vendedor: ' || v_j::text);
 
   -- ----------------------------------------------------------- C · Var-B6 ---
   v_t := pg_temp.err(format('SELECT public.guardar_vehiculo(%L::jsonb)::text', jsonb_build_object('patente', v_pat, 'descripcion', 'T9 uno')));
@@ -239,6 +274,10 @@ BEGIN
   v_j := public.tablero_cobertura(1, v_hoy);
   v_fallas := v_fallas || pg_temp.chk((v_j->>'avance_mes_pct')::numeric BETWEEN 0 AND 100 AND (v_j->>'corte')::date = v_hoy,
                                       format('E2 · el mes en curso da avance %s y corte %s', v_j->>'avance_mes_pct', v_j->>'corte'));
+  v_j := public.tablero_cobertura(1, (date_trunc('month', v_hoy) - interval '1 month')::date);
+  v_fallas := v_fallas || pg_temp.chk((v_j->>'avance_mes_pct')::numeric = 100
+                                      AND (v_j->>'corte')::date = date_trunc('month', v_hoy)::date - 1,
+                                      format('E3 · el mes pasado da avance %s y corte %s', v_j->>'avance_mes_pct', v_j->>'corte'));
 
   -- ---------------------------------------------------------- F · km --------
   INSERT INTO vehiculos (sucursal_id, patente, descripcion, creado_por)
@@ -267,10 +306,10 @@ BEGIN
   v_fallas := v_fallas || pg_temp.chk(v_t IS NULL AND (SELECT km FROM vehiculo_km WHERE id = v_l2) = 2010,
                                       'F6 · el admin no pudo corregir la lectura: ' || COALESCE(v_t, '¿sin cambio?'));
   v_t := pg_temp.err(format('SELECT public.corregir_lectura_km(%s, %L, %s, false)::text', v_l2, v_hoy - 5, 2020), v_enc);
-  v_fallas := v_fallas || pg_temp.chk(v_t IS NULL AND (SELECT km FROM vehiculo_km WHERE id = v_l2) = 2020,
-                                      'F7 · el encargado no pudo corregir la lectura: ' || COALESCE(v_t, '¿sin cambio?'));
+  v_fallas := v_fallas || pg_temp.chk(v_t LIKE '%Sólo un admin puede corregir%' AND (SELECT km FROM vehiculo_km WHERE id = v_l2) = 2010,
+                                      'F7 · el encargado corrigió una lectura o lo frenó otra cosa: ' || COALESCE(v_t, 'entró'));
   v_t := pg_temp.err(format('SELECT public.corregir_lectura_km(%s, %L, %s, false)::text', v_l2, v_hoy - 5, 2030), v_p1);
-  v_fallas := v_fallas || pg_temp.chk(v_t LIKE '%Sólo un admin o un encargado%' AND (SELECT km FROM vehiculo_km WHERE id = v_l2) = 2020,
+  v_fallas := v_fallas || pg_temp.chk(v_t LIKE '%Sólo un admin puede corregir%' AND (SELECT km FROM vehiculo_km WHERE id = v_l2) = 2010,
                                       'F7 · un preventista corrigió una lectura o lo frenó otra cosa: ' || COALESCE(v_t, 'entró'));
   v_t := pg_temp.err(format('SELECT public.corregir_lectura_km(%s, %L, %s, false)::text', v_l1, v_hoy - 10, 3000));
   v_fallas := v_fallas || pg_temp.chk(v_t LIKE '%no pueden bajar%' AND (SELECT km FROM vehiculo_km WHERE id = v_l1) = 1000,
@@ -308,7 +347,7 @@ BEGIN
 
   -- ------------------------------------------------------------- veredicto ---
   IF cardinality(v_fallas) = 0 THEN
-    RAISE EXCEPTION 'ENSAYO OK · ola 3, tarjeta T9 (A1-A7 B1-B5 C1-C2 D1 E1-E2 F1-F11 G1-G5)';
+    RAISE EXCEPTION 'ENSAYO OK · ola 3, tarjeta T9 (A1-A8 B1-B7 C1-C2 D1 E1-E3 F1-F11 G1-G5)';
   END IF;
   RAISE EXCEPTION E'ENSAYO FALLÓ · %', array_to_string(v_fallas, E'\n  · ');
 END

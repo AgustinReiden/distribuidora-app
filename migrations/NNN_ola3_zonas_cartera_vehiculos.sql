@@ -2,10 +2,11 @@
 -- NNN · ZONAS, CARTERA, VEHÍCULOS Y TABLERO (ola 3 de #1603, tarjeta T9; #1554, #1522, #1690)
 --
 -- Ensayo: scripts/test-ola3-zonas-cartera-vehiculos.sql (falla sin esta migración en A1, A2,
--- A3, A5, B1, B2, C1, D1, E1, F1, F2, F3, F4, F6, F7, F8, F9, F10, F11, G1, G2 y G4; ENSAYO OK
--- con ella). Concurrencia: scripts/concurrencia/t9-zona-y-cliente.sh (dos sesiones; sin esta
+-- A3, A5, B1, B2, B7, C1, D1, E1, F1, F2, F3, F4, F6, F7, F8, F9, F10, F11, G1, G2 y G4; ENSAYO
+-- OK con ella). Concurrencia, dos sesiones: scripts/concurrencia/t9-zona-y-cliente.sh (sin esta
 -- migración el cliente que entra a la zona queda con el dueño de antes (Z1), la segunda
--- asignación da un 23505 crudo (Z2) y el cliente que se va queda con dos dueños (Z3)). Corrige
+-- asignación da un 23505 crudo (Z2) y el cliente que se va queda con dos dueños (Z3)) y
+-- scripts/concurrencia/t9-km-a-la-vez.sh (sin ella, la misma lectura entra dos veces). Corrige
 -- el caso D6 de test-cartera-chofer-y-asignacion-1182-1183.sql (el admin ya no le asigna un
 -- cliente a un chofer) y el 8i de test-gastos-5.sql (la RPC ya no cambia el vendedor de un
 -- entregado). Se aplica en LF, sobre la 548.
@@ -31,7 +32,8 @@
 --     · el destino: activo, de la sucursal del pedido y, o un admin (el que carga el pedido; el
 --       selector los ofrece hoy), o quien actúa como preventista activo en la sucursal (la regla
 --       de D12, el mismo helper). Cambia: un chofer con el extra de preventista en la sucursal
---       ahora entra (antes no, por el rol base).
+--       ahora entra (antes no, por el rol base). El vendedor de un pedido entregado ya no se
+--       cambia: el camino es revertir la entrega, cambiarlo y volver a entregar.
 -- 3 · Var-B6. La patente es única por sucursal, sin mirar mayúsculas ni los espacios de los
 --     bordes: el índice vehiculos_patente_por_sucursal (sucursal_id, upper(btrim(patente)))
 --     reemplaza a vehiculos_patente_key UNIQUE (patente), que le decía a un admin si la patente
@@ -50,9 +52,10 @@
 --     menos que la lectura anterior por fecha ni más que la siguiente (las de otro día; las del
 --     mismo día no se ordenan entre sí). Se compara con la vecina, no con todas: una lectura vieja
 --     mal cargada traba sólo a sus vecinas y el mensaje dice cuál corregir. Toma el vehículo
---     (FOR NO KEY UPDATE) para que dos cargas a la vez no pasen las dos. La regla es una,
---     _km_lectura_fuera_de_serie (de server). RPC nueva corregir_lectura_km(id, fecha, km, borrar):
---     admin o encargado de la sucursal de la lectura (la activa); sólo las manuales (la de una
+--     (FOR NO KEY UPDATE) para que dos cargas a la vez no pasen las dos (K1 del guion
+--     scripts/concurrencia/t9-km-a-la-vez.sh). La regla es una, _km_lectura_fuera_de_serie (de
+--     server). RPC nueva corregir_lectura_km(id, fecha, km, borrar): sólo el admin, como
+--     registrar_km_vehiculo, en la sucursal de la lectura (la activa); sólo las manuales (la de una
 --     carga se corrige editando su gasto, la del GPS no se toca); la corrección pasa por las
 --     mismas reglas, sin compararse consigo misma. Sin motivo: audit_vehiculo_km ya guarda el
 --     antes, el después, quién y cuándo. Lo que ya está cargado no se toca.
@@ -171,11 +174,11 @@ CREATE FUNCTION public._preventista_activo_de_sucursal(p_usuario uuid, p_sucursa
 AS $function$
   -- La regla de ASG-B de auditoria_integridad() (#1316) y de D12: activo, de la sucursal y
   -- actúa como preventista en ella (rol base preventista o el extra de esa sucursal; ni admin
-  -- ni encargado).
+  -- ni encargado). activo NULL cuenta como activo, como en los helpers de rol (es_admin()…).
   SELECT EXISTS (
     SELECT 1 FROM public.perfiles pf
      WHERE pf.id = p_usuario
-       AND COALESCE(pf.activo, false)
+       AND COALESCE(pf.activo, true)
        AND EXISTS (SELECT 1 FROM public.usuario_sucursales us
                     WHERE us.usuario_id = pf.id AND us.sucursal_id = p_sucursal)
        AND public._actua_como_preventista(pf.id, p_sucursal));
@@ -693,10 +696,11 @@ DECLARE
   v_l   vehiculo_km%ROWTYPE;
   v_motivo text;
 BEGIN
-  -- GTO-5 (mig NNN): corregir o borrar una lectura de km cargada a mano. Admin o encargado de la
-  -- sucursal de la lectura (la activa). audit_vehiculo_km guarda el antes, el después y quién.
-  IF NOT public.es_encargado_o_admin() THEN
-    RAISE EXCEPTION 'Sólo un admin o un encargado puede corregir una lectura de km';
+  -- GTO-5 (mig NNN): corregir o borrar una lectura de km cargada a mano. Sólo el admin, como
+  -- registrar_km_vehiculo y la pantalla de Vehículos, y en la sucursal de la lectura (la activa).
+  -- audit_vehiculo_km guarda el antes, el después y quién.
+  IF NOT public.es_admin() THEN
+    RAISE EXCEPTION 'Sólo un admin puede corregir una lectura de km';
   END IF;
   IF v_suc IS NULL THEN
     RAISE EXCEPTION 'No se pudo determinar la sucursal activa';
@@ -828,11 +832,11 @@ BEGIN
      '{postgres=X/postgres,service_role=X/postgres}', true),
     ('public.registrar_km_vehiculo(bigint,date,integer)', 'fee73cb33fb108f7039ba1203a3ed16d',
      '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', true),
-    ('public.corregir_lectura_km(bigint,date,integer,boolean)', 'd2c940b7ef347c10c2920a0e69a1ed5f',
+    ('public.corregir_lectura_km(bigint,date,integer,boolean)', 'be552b843b591e78566d61d1d2f1b19a',
      '{authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres}', true),
     ('public._km_lectura_fuera_de_serie(bigint,date,integer,bigint)', '47d32ce80647c0c9480c2c4711237f02',
      '{postgres=X/postgres,service_role=X/postgres}', false),
-    ('public._preventista_activo_de_sucursal(uuid,bigint)', 'f11ad54483683e654229df77abf2af39',
+    ('public._preventista_activo_de_sucursal(uuid,bigint)', '098f257faa7c50d52ce7eecb1c66c72b',
      '{postgres=X/postgres,service_role=X/postgres}', false),
     ('public.zonas_nombre_unico()', 'a1bf63e3ed176d9d4bfa981252f5227a',
      '{postgres=X/postgres,service_role=X/postgres}', true)

@@ -559,7 +559,10 @@ suelta en `sucursales`.
   Una línea congelada se identifica por producto + combo + origen (`clave`), nunca por
   `pedido_items.id`: `actualizar_pedido_items` borra y reinserta las líneas. Lo pagado es la foto
   (`empleado_liquidacion_lineas`, un libro de deltas, con el vendedor de cada línea: si cambia
-  `pedidos.usuario_id`, al anterior le sale como ajuste). `calcular_comisiones` es un cálculo y va
+  `pedidos.usuario_id`, al anterior le sale como ajuste). Desde la migración de la T9 (ola 3), el
+  vendedor de un pedido entregado no se cambia (`actualizar_preventista_pedido` sólo acepta pendiente,
+  en preparación y asignado): el camino es revertir la entrega, cambiar el vendedor y volver a
+  entregar. `calcular_comisiones` es un cálculo y va
   por `pedidos.fecha`, así que su total puede no coincidir con lo liquidado.
   **La nota de crédito que le descuenta al vendedor resta de la comisión** (B16, #1545; decisiones
   del dueño del 16/11 y del 17/11): `_comision_lineas` baja cada clave por lo que acreditan las notas

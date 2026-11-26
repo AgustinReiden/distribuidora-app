@@ -2462,7 +2462,8 @@ interface SelectorPreventistaPedidoProps {
 }
 
 function SelectorPreventistaPedido({ pedido, disabled, onCambiar }: SelectorPreventistaPedidoProps) {
-  const { data: preventistasAsignables = [] } = usePreventistasAsignablesQuery();
+  // T9: el cambio de vendedor acepta también al que actúa como preventista por el rol extra.
+  const { data: preventistasAsignables = [] } = usePreventistasAsignablesQuery({ conExtraPreventista: true });
   const [saving, setSaving] = useState<boolean>(false);
 
   return (
