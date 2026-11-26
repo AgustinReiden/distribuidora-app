@@ -5,7 +5,9 @@
  *   hizo hoy. Solo se llama cuando isPreventista, scope a la sucursal
  *   activa (vía la RPC `listar_visitas_hoy`).
  * - `useRegistrarVisitaMutation`: dispara el RPC `registrar_visita_cliente`
- *   con el GPS capturado. Cada llamada crea un registro nuevo (sin dedup).
+ *   con el GPS capturado y la clave del intento (Var-B1, T8 de la ola 3): el
+ *   reintento de la misma visita (mismo cliente, la respuesta se perdió) manda la
+ *   misma clave y el server devuelve la visita del primero en vez de crear otra.
  */
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -15,6 +17,7 @@ import { geolocalizacionKeys } from './useGeolocalizacionPreventistasQuery'
 import type { GpsStatus } from './useGeolocalizacionPreventistasQuery'
 import { rpcGpsConDiagnostico } from '../useRegistrarGeolocalizacionPedido'
 import type { DiagnosticoGps } from '../../utils/ubicacionEquipo'
+import { useRequestIdPersistente } from '../useRequestIdPersistente'
 
 export interface VisitaHoy {
   visita_id: number
@@ -70,12 +73,15 @@ interface RegistrarVisitaResponse {
   success: boolean
   error?: string
   visita_id?: number
+  /** La clave ya se había usado: es la visita del intento anterior (Var-B1). */
+  replay?: boolean
 }
 
-async function registrarVisita(input: RegistrarVisitaInput): Promise<RegistrarVisitaResponse> {
+async function registrarVisita(input: RegistrarVisitaInput, clave: string): Promise<RegistrarVisitaResponse> {
   const params: Record<string, unknown> = {
     p_cliente_id: input.clienteId,
     p_status: input.status,
+    p_clave: clave,
   }
   if (input.status === 'ok') {
     params.p_lat = input.lat
@@ -94,8 +100,20 @@ async function registrarVisita(input: RegistrarVisitaInput): Promise<RegistrarVi
 export function useRegistrarVisitaMutation() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
+  // Var-B1 (T8 de la ola 3): una clave por visita a un cliente. El reintento (la respuesta se
+  // perdió y se vuelve a tocar el cliente) lleva la misma aunque el GPS se haya vuelto a capturar:
+  // es la misma visita. Después de una que salió bien, la próxima a ese cliente es otra visita.
+  // Persistente (como los cobros, #1410) y no `useRequestIdEstable`: este hook vive dentro de
+  // `ModalMarcarVisita`, que se desmonta al cerrarse, y con el aviso «revisá las visitas de hoy
+  // antes de reintentar» el preventista lo cierra y lo vuelve a abrir: la clave tiene que seguir.
+  const { requestId: claveVisita, olvidar: olvidarClave } = useRequestIdPersistente()
   return useMutation({
-    mutationFn: registrarVisita,
+    mutationFn: async (input: RegistrarVisitaInput): Promise<RegistrarVisitaResponse> => {
+      const huella = `${currentSucursalId ?? ''}|${input.clienteId}`
+      const res = await registrarVisita(input, claveVisita(huella))
+      if (res?.success) olvidarClave([huella])
+      return res
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: visitasKeys.all(currentSucursalId) })
       // El panel admin también refleja visitas en su data combinada.

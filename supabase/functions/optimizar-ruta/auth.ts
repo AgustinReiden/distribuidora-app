@@ -27,6 +27,7 @@
 // real de Supabase Auth fallaría igual por la sandbox de red.
 
 import { createClient } from "@supabase/supabase-js";
+import type { LlamarCupo } from "./cupo.ts";
 
 export type AutorizacionResultado =
   | { ok: true; userId: string }
@@ -110,6 +111,30 @@ export async function autorizarCaller(
   }
 
   return { ok: true, userId: usuario.id };
+}
+
+/**
+ * Rut-B14 (ola 3): la llamada a optimizar_ruta_consumir_cupo con la sesión del caller y su
+ * sucursal activa, como las preguntas de rol. Sin URL o anon key, contesta un error (el cupo
+ * deja pasar y lo dice en el log).
+ */
+export function crearLlamarCupo(authHeader: string, sucursalId: string | null): LlamarCupo {
+  const url = Deno.env.get("SUPABASE_URL") ?? "";
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+  return async (maxPorMinuto, maxPorDia) => {
+    if (!url || !anonKey) return { data: null, error: { message: "sin SUPABASE_URL o SUPABASE_ANON_KEY" } };
+    const headers: Record<string, string> = { Authorization: authHeader };
+    if (sucursalId !== null) headers["X-Sucursal-ID"] = sucursalId;
+    const cliente = createClient(url, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers },
+    });
+    const { data, error } = await cliente.rpc("optimizar_ruta_consumir_cupo", {
+      p_max_por_minuto: maxPorMinuto,
+      p_max_por_dia: maxPorDia,
+    });
+    return { data, error: error ? { message: error.message } : null };
+  };
 }
 
 /** Deps de producción: JWT y permisos vía PostgREST con la sesión del caller (anon key + su JWT). */

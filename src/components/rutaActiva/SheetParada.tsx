@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { filtrarOpciones } from '../../utils/filtrarOpciones';
 import { formatPrecio, getFormaPagoLabel } from '../../utils/formatters';
+import { faltantePedido } from '../../utils/imputacionCredito';
 import { esTipoVB, ETIQUETA_CONSUMO_INTERNO } from '../../utils/valeBlanco';
 import { formatDistancia } from '../../utils/geo';
 import { googleMapsNavUrl, googleMapsSearchUrl } from '../../utils/navegacion';
@@ -380,7 +381,18 @@ export default function SheetParada({
                       {getFormaPagoLabel(paradaActiva.forma_pago || '')}
                     </span>
                     </>)}
-                    <span className="font-semibold text-gray-900 dark:text-white">{formatPrecio(paradaActiva.total)}</span>
+                    {/* Lo que falta cobrar, no el total (Fr-B1): un parcial de 1.000 con 400
+                        cobrados dice «Falta $ 600 de $ 1.000». Pagada, queda el total de la boleta. */}
+                    {paradaActiva.estado_pago === 'pagado' ? (
+                      <span className="font-semibold text-gray-900 dark:text-white">{formatPrecio(paradaActiva.total)}</span>
+                    ) : paradaActiva.estado_pago === 'parcial' ? (
+                      <span className="font-semibold text-gray-900 dark:text-white">
+                        Falta {formatPrecio(faltantePedido(paradaActiva))}
+                        <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">de {formatPrecio(paradaActiva.total)}</span>
+                      </span>
+                    ) : (
+                      <span className="font-semibold text-gray-900 dark:text-white">{formatPrecio(faltantePedido(paradaActiva))}</span>
+                    )}
                     {paradaActiva.cliente?.telefono && (
                       <a href={`tel:${paradaActiva.cliente.telefono}`} className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
                         <Phone className="h-3.5 w-3.5" />

@@ -24,24 +24,13 @@ export interface EscanearDeps {
 }
 
 /**
- * Orígenes permitidos: `APP_ORIGIN` (como optimizar-ruta), que acá además
- * acepta varios separados por coma (prod + staging). Si el origen del request
- * está en la lista se le devuelve ese; si no, el primero (el navegador lo
- * bloquea). Sin `APP_ORIGIN`, "*" como las otras funciones.
+ * Orígenes permitidos: `APP_ORIGIN`, uno o varios separados por coma (prod +
+ * staging). Si el origen del request está en la lista se le devuelve ese; si
+ * no, el primero (el navegador lo bloquea). Sin `APP_ORIGIN`, "*". La función
+ * vive en _shared/cors.ts desde Rut-B14 (ola 3), sin cambios: la usa también
+ * optimizar-ruta.
  */
-export function crearCors(appOrigin: string | undefined): (req: Request) => Record<string, string> {
-  const origenes = (appOrigin ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  return (req) => {
-    const origen = req.headers.get("Origin") ?? "";
-    const permitido = origenes.length === 0 ? "*" : origenes.includes(origen) ? origen : origenes[0];
-    return {
-      "Access-Control-Allow-Origin": permitido,
-      "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-sucursal-id",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Vary": "Origin",
-    };
-  };
-}
+export { crearCors } from "../_shared/cors.ts";
 
 export function crearHandler(deps: EscanearDeps): (req: Request) => Promise<Response> {
   return async (req: Request): Promise<Response> => {

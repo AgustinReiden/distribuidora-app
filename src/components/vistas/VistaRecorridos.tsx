@@ -8,6 +8,7 @@ import QueryErrorState from '../layout/QueryErrorState';
 import { useDepositoCoords } from '../../hooks/queries';
 import { decodePolylines } from '../../utils/polyline';
 import { esTipoVB, ETIQUETA_CONSUMO_INTERNO } from '../../utils/valeBlanco';
+import { pendienteDeRuta, type ParadaParaPendiente } from '../../utils/pendienteRuta';
 
 import PanelNoEntregados from '../recorridos/PanelNoEntregados';
 
@@ -344,7 +345,9 @@ function RecorridoCard({ recorrido, defaultExpanded = false, onRecalcular }: Rec
           </div>
           <div className="bg-white/50 dark:bg-gray-700/50 rounded-lg p-2 text-center">
             <p className="text-lg font-bold text-red-600">
-              {formatPrecio((recorrido.total_facturado || 0) - (recorrido.total_cobrado || 0))}
+              {/* Rut-B11: contra lo pagado de las boletas, no contra lo cobrado en plata
+                  (el saldo a favor y la nota de crédito aplicados no son deuda). */}
+              {formatPrecio(pendienteDeRuta(recorrido.total_facturado, (recorrido.pedidos ?? []) as ParadaParaPendiente[]))}
             </p>
             <p className="text-xs text-gray-500 dark:text-gray-400">Pendiente</p>
           </div>

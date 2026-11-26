@@ -37,7 +37,8 @@ DECLARE
   v_diag   CONSTANT jsonb := '{"permiso":"denied","error":1,"instalada":true,"navegador":"chrome 131","so":"android 10"}';
   v_diag_ok CONSTANT jsonb := '{"permiso":"granted","error":null,"instalada":true,"navegador":"chrome 131","so":"android 10"}';
   F_GEO CONSTANT text := 'public.registrar_geolocalizacion_pedido(bigint,text,numeric,numeric,numeric,timestamp with time zone,text,jsonb)';
-  F_VIS CONSTANT text := 'public.registrar_visita_cliente(bigint,text,numeric,numeric,numeric,timestamp with time zone,text,jsonb)';
+  -- Desde T8 de la ola 3 (Var-B1) la visita suma p_clave al final: la firma es la de nueve.
+  F_VIS CONSTANT text := 'public.registrar_visita_cliente(bigint,text,numeric,numeric,numeric,timestamp with time zone,text,jsonb,uuid)';
 BEGIN
  BEGIN
   -- ------------------------------------------------------------------- G0 ---
