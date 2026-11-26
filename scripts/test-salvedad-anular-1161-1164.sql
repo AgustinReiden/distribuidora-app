@@ -549,7 +549,7 @@ BEGIN
                     format('anular tendria que rechazar con pedido_editado: %s', v_res));
   f := pg_temp.t_si(f, pg_temp.t_cant_ped(v_ped, v_prod) = 16 AND pg_temp.t_lineas(v_ped, v_prod) = 1
                        AND pg_temp.t_total(v_ped) = v_total AND pg_temp.t_foto(v_prod) = v_f
-                       AND (SELECT estado_resolucion FROM public.salvedades_items WHERE id = v_s) = 'pendiente',
+                       AND (SELECT estado_resolucion FROM public.salvedades_items WHERE id = v_s) = 'resuelto_otro', -- #1700: la cargó el admin, nació resuelta
                     format('el rechazo movio algo: %s u. en %s lineas, total %s, foto %s (antes %s)',
                            pg_temp.t_cant_ped(v_ped, v_prod), pg_temp.t_lineas(v_ped, v_prod),
                            pg_temp.t_total(v_ped), pg_temp.t_foto(v_prod), v_f));
@@ -746,7 +746,7 @@ BEGIN
                        AND v_res->>'error' = 'El pedido tiene la nota de crédito #' || v_nc || ' vigente: anulala primero',
                     format('anular tendria que rechazar con nota_credito_vigente (NC %s): %s', v_nc, v_res));
   f := pg_temp.t_si(f, pg_temp.t_cant(v_item) = 15 AND pg_temp.t_total(v_ped) = 1500 AND pg_temp.t_foto(v_prod) = v_f
-                       AND (SELECT estado_resolucion FROM public.salvedades_items WHERE id = v_s) = 'pendiente',
+                       AND (SELECT estado_resolucion FROM public.salvedades_items WHERE id = v_s) = 'resuelto_otro', -- #1700: la cargó el admin, nació resuelta
                     format('el rechazo movio algo: linea %s, total %s, foto %s (antes %s)',
                            pg_temp.t_cant(v_item), pg_temp.t_total(v_ped), pg_temp.t_foto(v_prod), v_f));
   v_res := public.anular_nota_credito_venta(v_nc, 'ensayo 1163');

@@ -37,6 +37,27 @@ export function salvedadesVigentes<T extends ConEstado>(lista: readonly T[] | un
   return (lista ?? []).filter(s => !esSalvedadAnulada(s))
 }
 
+/** El aviso de siempre al entregar con salvedades. */
+export const MENSAJE_ENTREGA_CON_SALVEDADES = 'Pedido entregado con salvedades registradas'
+/** #1700: la que carga la oficina nace resuelta, y el aviso lo dice. */
+export const MENSAJE_ENTREGA_CON_SALVEDADES_RESUELTAS =
+  'Pedido entregado con salvedades registradas y resueltas por la oficina'
+
+/**
+ * El aviso al entregar con salvedades (#1700, decisión del dueño del 25/11). La salvedad que
+ * carga un admin o un encargado nace resuelta (`resuelto_otro`) y no queda pendiente en el
+ * panel; el aviso lo dice sólo si el server dijo que TODAS las que entraron quedaron así. Si
+ * alguna quedó pendiente, o el server no lo dice (uno anterior a #1700), el aviso de siempre.
+ */
+export function mensajeEntregaConSalvedades(
+  resultados: readonly { success: boolean; estado_resolucion?: string }[] | undefined | null,
+): string {
+  const entraron = (resultados ?? []).filter(r => r.success)
+  return entraron.length > 0 && entraron.every(r => r.estado_resolucion === 'resuelto_otro')
+    ? MENSAJE_ENTREGA_CON_SALVEDADES_RESUELTAS
+    : MENSAJE_ENTREGA_CON_SALVEDADES
+}
+
 /**
  * Lo que el total del pedido subió por los combos que rompió el cliente (#1192),
  * sumando el recargo de las salvedades que le pasen (las vigentes). Va aparte de

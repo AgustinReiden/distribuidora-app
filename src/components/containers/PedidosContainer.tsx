@@ -141,6 +141,7 @@ import type { RutaMultiResultadoUI } from '../modals/ModalGestionRutas'
 import { PRODUCTO_COLUMNAS } from '../../lib/productoColumnas'
 import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
 import { mensajeCobroMasivo, avisoNoCobrados } from '../../utils/avisoCobroMasivo'
+import { mensajeEntregaConSalvedades } from '../../utils/salvedades'
 
 // Lazy load de componentes
 const VistaPedidos = lazyWithReload(() => import('../vistas/VistaPedidos'))
@@ -581,6 +582,9 @@ export default function PedidosContainer(): React.ReactElement {
   // guardado a medias): la segunda va contra lo que dejó la primera.
   const versionEdicion = useRef<string | null>(null)
   const [pedidoParaSalvedad, setPedidoParaSalvedad] = useState<PedidoDB | null>(null)
+  // #1700: lo que contestó el server en el último guardado de salvedades del modal de entrega,
+  // para que el aviso diga si quedaron resueltas (las de la oficina nacen resueltas).
+  const ultimasSalvedadesRef = useRef<RegistrarSalvedadResult[]>([])
   // #1204: un pedido sin chofer pregunta quién lo repartió en la misma pantalla
   // de entrega. Con saldo, adentro de ModalPagoPedido; ya pagado o parada de
   // cambio, en ModalQuienRepartio, que es la confirmación con chofer y fecha.
@@ -2779,6 +2783,8 @@ export default function PedidosContainer(): React.ReactElement {
             success: !!result?.success,
             error: result?.success ? undefined : String(result?.error || 'Error desconocido'),
             codigo: result?.codigo ? String(result.codigo) : undefined,
+            // #1700: la de la oficina nace resuelta; el aviso de la entrega lo dice.
+            estado_resolucion: result?.estado_resolucion ? String(result.estado_resolucion) : undefined,
           })
         }
       } catch (err) {
@@ -2809,6 +2815,7 @@ export default function PedidosContainer(): React.ReactElement {
     // nuevo. `invalidateQueries` no tira si el refetch falla (sin red queda lo que había).
     queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
     await queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
+    ultimasSalvedadesRef.current = results
     return results
   }, [queryClient])
 
@@ -2894,7 +2901,8 @@ export default function PedidosContainer(): React.ReactElement {
       await cambiarEstado.mutateAsync({ pedidoId: pedidoParaSalvedad.id, nuevoEstado: 'entregado' })
       setModalEntregaSalvedadOpen(false)
       setPedidoParaSalvedad(null)
-      notify.success('Pedido entregado con salvedades registradas')
+      notify.success(mensajeEntregaConSalvedades(ultimasSalvedadesRef.current))
+      ultimasSalvedadesRef.current = []
     } catch (e) { notify.error((e as Error).message) }
   }, [pedidoParaSalvedad, cambiarEstado, notify])
 

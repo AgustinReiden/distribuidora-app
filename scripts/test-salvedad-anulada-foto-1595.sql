@@ -357,7 +357,7 @@ BEGIN
                        AND v_res->>'error' LIKE '%que una salvedad de este pedido habia recortado%',
                     format('anular tendría que rechazar por el recorte: %s', v_res));
   f := pg_temp.t_si(f, pg_temp.t_regalos(v_ped, v_promo) = 2 AND pg_temp.t_vendido(v_ped, v_prod) = 15
-                       AND (SELECT estado_resolucion FROM public.salvedades_items WHERE id = v_s) = 'pendiente',
+                       AND (SELECT estado_resolucion FROM public.salvedades_items WHERE id = v_s) = 'resuelto_otro', -- #1700: la cargó el admin, nació resuelta
                     'el rechazo movió algo');
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
