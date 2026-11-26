@@ -656,7 +656,8 @@ BEGIN
   UPDATE public.clientes SET tipo_factura_default = v_tf WHERE id = c;
 
   -- (e) aplicar_orden_ruta saltea el cancelado; marcar_no_entregado y
-  --     marcar_entregas_masivo. Fecha lejana: no pisa un recorrido real.
+  --     marcar_entregas_masivo. Fecha lejana: no pisa un recorrido real. Desde Rut-B6 (ola 3)
+  --     una ruta va de hoy a 60 días: la más lejana que entra (antes, hoy + 400).
   v_prod := pg_temp.t_prod_std(s, a);
   v_ped := pg_temp.t_pedido(c, a, v_prod, 10);
   v_ped2 := pg_temp.t_pedido(c, a, v_prod, 10);
@@ -665,7 +666,7 @@ BEGIN
     'SELECT to_jsonb(public.aplicar_orden_ruta(%L, %L::jsonb, NULL, NULL, NULL, %L))', tr,
     jsonb_build_array(jsonb_build_object('pedido_id', v_ped, 'orden_entrega', 1),
                       jsonb_build_object('pedido_id', v_ped2, 'orden_entrega', 2)),
-    pg_temp.t_hoy() + 400));
+    pg_temp.t_hoy() + 60));
   f := pg_temp.t_si(f, NOT (v_res ? 'exception')
                        AND pg_temp.t_ped(v_ped)->>'estado' = 'asignado'
                        AND pg_temp.t_ped(v_ped2)->>'estado' = 'cancelado',

@@ -320,11 +320,13 @@ BEGIN
   END IF;
 
   -- ------------------------------------- 5 · las que nadie del front llama --
-  -- Como authenticated (aunque sea admin) → permiso denegado. Con el bug, la
-  -- primera ESCRIBE (un recorrido): se deshace al final.
+  -- Como authenticated (aunque sea admin) → permiso denegado.
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_prev, 'role', 'authenticated')::text, true);
+  -- crear_recorrido ya no está: la borró la ola 3 (Rut-B10, tarjeta T3 de #1677).
+  IF to_regproc('public.crear_recorrido') IS NOT NULL THEN
+    v_fallas := v_fallas || 'sin uso en el front · crear_recorrido volvió a existir (la borró Rut-B10)'::text;
+  END IF;
   FOREACH v_fn IN ARRAY ARRAY[
-    format('SELECT public.crear_recorrido(%L::uuid, %L::jsonb, NULL, NULL)::text', v_prev, jsonb_build_array(jsonb_build_object('pedido_id', v_pedido, 'orden_entrega', 1))),
     -- crear_rendicion_por_fecha y obtener_estadisticas_rendiciones ya no están:
     -- las borró la limpieza de #1368.
     -- obtener_estadisticas_pedidos ya no está: la borró #1044.
