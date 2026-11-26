@@ -2,7 +2,8 @@
 --
 -- Corre contra prod SIN dejar rastro, como scripts/test-volver-a-pendiente-1313.sql:
 -- un único DO que termina SIEMPRE en una excepción (`ENSAYO OK …` o `ENSAYO FALLO …`).
--- Sin la migración falla en G0 (las columnas no existen).
+-- Sin la migración falla en G0 (las columnas no existen). Desde la T8b de la ola 3 (permisos-B4)
+-- el GPS del pedido vive en pedido_gps (una fila por pedido con check-in), no en pedidos.
 --
 -- Usa un pedido que ya existe de un preventista activo (le borra el GPS adentro de
 -- la transacción) y un cliente que ese preventista puede operar. En la base local,
@@ -16,7 +17,7 @@
 --        Escalar a `ok` reemplaza el diagnóstico y borra el motivo.
 --   G3 · Un diagnóstico que no es un objeto, o que se pasa del tope, no se guarda,
 --        pero el GPS sí.
---   G4 · VAR-01 en pedidos: latitud 91, longitud −181, precisión −1, NaN en las
+--   G4 · VAR-01 en pedido_gps: latitud 91, longitud −181, precisión −1, NaN en las
 --        tres y un diagnóstico de más de 300 bytes → 23514. Por la RPC, una
 --        latitud NaN tampoco entra.
 --   G5 · Lo mismo en visitas_cliente, con la visita que deja la RPC nueva (y la
@@ -43,15 +44,15 @@ BEGIN
  BEGIN
   -- ------------------------------------------------------------------- G0 ---
   IF (SELECT count(*) FROM information_schema.columns
-       WHERE table_schema = 'public' AND table_name IN ('pedidos', 'visitas_cliente')
+       WHERE table_schema = 'public' AND table_name IN ('pedido_gps', 'visitas_cliente')
          AND column_name = 'gps_diagnostico') <> 2 THEN
     RAISE EXCEPTION USING ERRCODE = 'ZZ0FA',
-      MESSAGE = 'ENSAYO FALLO · G0: pedidos/visitas_cliente no tienen gps_diagnostico (falta la migración)';
+      MESSAGE = 'ENSAYO FALLO · G0: pedido_gps/visitas_cliente no tienen gps_diagnostico (falta la migración)';
   END IF;
   IF (SELECT count(*) FROM pg_constraint
-       WHERE conrelid IN ('public.pedidos'::regclass, 'public.visitas_cliente'::regclass)
-         AND conname IN ('pedidos_gps_lat_rango', 'pedidos_gps_lng_rango', 'pedidos_gps_accuracy_rango',
-                         'pedidos_gps_diagnostico_forma',
+       WHERE conrelid IN (to_regclass('public.pedido_gps'), 'public.visitas_cliente'::regclass)
+         AND conname IN ('pedido_gps_lat_rango', 'pedido_gps_lng_rango', 'pedido_gps_accuracy_rango',
+                         'pedido_gps_diagnostico_forma',
                          'visitas_cliente_gps_lat_rango', 'visitas_cliente_gps_lng_rango',
                          'visitas_cliente_gps_accuracy_rango', 'visitas_cliente_gps_diagnostico_forma')
          AND convalidated) <> 8 THEN
@@ -68,9 +69,9 @@ BEGIN
      OR NOT (SELECT bool_and(prosecdef) FROM pg_proc WHERE oid IN (to_regprocedure(F_GEO), to_regprocedure(F_VIS))) THEN
     v_fallas := v_fallas || 'G0 · EXECUTE o DEFINER de las RPC no quedaron como antes'::text;
   END IF;
-  IF has_column_privilege('authenticated', 'public.pedidos', 'gps_diagnostico', 'UPDATE')
+  IF has_table_privilege('authenticated', 'public.pedido_gps', 'INSERT, UPDATE')
      OR has_column_privilege('authenticated', 'public.visitas_cliente', 'gps_diagnostico', 'INSERT')
-     OR has_column_privilege('anon', 'public.pedidos', 'gps_diagnostico', 'SELECT') THEN
+     OR has_table_privilege('anon', 'public.pedido_gps', 'SELECT') THEN
     v_fallas := v_fallas || 'G0 · gps_diagnostico se puede escribir por REST, o lo lee anon'::text;
   END IF;
 
@@ -94,9 +95,7 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = 'ENSAYO FALLO · no hay un cliente que el preventista pueda operar';
   END IF;
 
-  UPDATE pedidos SET gps_status = NULL, gps_lat = NULL, gps_lng = NULL, gps_accuracy = NULL,
-                     gps_capturado_at = NULL, gps_motivo_omision = NULL, gps_diagnostico = NULL
-   WHERE id = v_ped;
+  DELETE FROM pedido_gps WHERE pedido_id = v_ped;
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_prev, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc::text)::text, true);
@@ -106,19 +105,19 @@ BEGIN
   v_r := public.registrar_geolocalizacion_pedido(p_pedido_id => v_ped, p_status => 'timeout',
                                                  p_motivo_omision => 'sótano sin señal');
   RESET ROLE;
-  SELECT gps_status, gps_motivo_omision, gps_diagnostico INTO v_row FROM pedidos WHERE id = v_ped;
+  SELECT gps_status, gps_motivo_omision, gps_diagnostico INTO v_row FROM pedido_gps WHERE pedido_id = v_ped;
   IF NOT COALESCE((v_r->>'success')::boolean, false) OR v_row.gps_status IS DISTINCT FROM 'timeout'
      OR v_row.gps_motivo_omision IS DISTINCT FROM 'sótano sin señal' OR v_row.gps_diagnostico IS NOT NULL THEN
     v_fallas := v_fallas || format('G1 · la llamada del bundle viejo no anduvo: %s / %s', v_r, row_to_json(v_row))::text;
   END IF;
 
   -- ------------------------------------------------------------------- G2 ---
-  UPDATE pedidos SET gps_status = NULL, gps_motivo_omision = NULL WHERE id = v_ped;
+  DELETE FROM pedido_gps WHERE pedido_id = v_ped;
   SET LOCAL ROLE authenticated;
   v_r := public.registrar_geolocalizacion_pedido(p_pedido_id => v_ped, p_status => 'denied',
                                                  p_motivo_omision => 'no me deja activarla', p_diagnostico => v_diag);
   RESET ROLE;
-  SELECT gps_status, gps_motivo_omision, gps_diagnostico INTO v_row FROM pedidos WHERE id = v_ped;
+  SELECT gps_status, gps_motivo_omision, gps_diagnostico INTO v_row FROM pedido_gps WHERE pedido_id = v_ped;
   IF NOT COALESCE((v_r->>'success')::boolean, false) OR v_row.gps_status IS DISTINCT FROM 'denied'
      OR v_row.gps_motivo_omision IS DISTINCT FROM 'no me deja activarla' OR v_row.gps_diagnostico IS DISTINCT FROM v_diag THEN
     v_fallas := v_fallas || format('G2 · denied con motivo y diagnóstico: %s / %s', v_r, row_to_json(v_row))::text;
@@ -127,33 +126,36 @@ BEGIN
   v_r := public.registrar_geolocalizacion_pedido(p_pedido_id => v_ped, p_status => 'ok', p_lat => -26.8241, p_lng => -65.2226,
                                                  p_accuracy => 12.5, p_diagnostico => v_diag_ok);
   RESET ROLE;
-  SELECT gps_status, gps_lat, gps_motivo_omision, gps_diagnostico INTO v_row FROM pedidos WHERE id = v_ped;
+  SELECT gps_status, gps_lat, gps_motivo_omision, gps_diagnostico INTO v_row FROM pedido_gps WHERE pedido_id = v_ped;
   IF v_row.gps_status IS DISTINCT FROM 'ok' OR v_row.gps_lat IS DISTINCT FROM -26.8241
      OR v_row.gps_motivo_omision IS NOT NULL OR v_row.gps_diagnostico IS DISTINCT FROM v_diag_ok THEN
     v_fallas := v_fallas || format('G2 · escalar a ok: %s / %s', v_r, row_to_json(v_row))::text;
   END IF;
 
   -- ------------------------------------------------------------------- G3 ---
-  UPDATE pedidos SET gps_status = NULL, gps_diagnostico = NULL WHERE id = v_ped;
+  DELETE FROM pedido_gps WHERE pedido_id = v_ped;
   SET LOCAL ROLE authenticated;
   v_r := public.registrar_geolocalizacion_pedido(p_pedido_id => v_ped, p_status => 'denied',
                                                  p_diagnostico => '["no", "es", "un objeto"]'::jsonb);
   RESET ROLE;
-  SELECT gps_status, gps_diagnostico INTO v_row FROM pedidos WHERE id = v_ped;
+  SELECT gps_status, gps_diagnostico INTO v_row FROM pedido_gps WHERE pedido_id = v_ped;
   IF v_row.gps_status IS DISTINCT FROM 'denied' OR v_row.gps_diagnostico IS NOT NULL THEN
     v_fallas := v_fallas || format('G3 · diagnóstico que no es objeto: %s / %s', v_r, row_to_json(v_row))::text;
   END IF;
-  UPDATE pedidos SET gps_status = NULL WHERE id = v_ped;
+  DELETE FROM pedido_gps WHERE pedido_id = v_ped;
   SET LOCAL ROLE authenticated;
   v_r := public.registrar_geolocalizacion_pedido(p_pedido_id => v_ped, p_status => 'denied',
                                                  p_diagnostico => jsonb_build_object('so', repeat('x', 400)));
   RESET ROLE;
-  SELECT gps_status, gps_diagnostico INTO v_row FROM pedidos WHERE id = v_ped;
+  SELECT gps_status, gps_diagnostico INTO v_row FROM pedido_gps WHERE pedido_id = v_ped;
   IF v_row.gps_status IS DISTINCT FROM 'denied' OR v_row.gps_diagnostico IS NOT NULL THEN
     v_fallas := v_fallas || format('G3 · diagnóstico de más de 300 bytes: %s / %s', v_r, row_to_json(v_row))::text;
   END IF;
 
   -- ------------------------------------------------------------------- G4 ---
+  -- Sobre una fila ok: en un no-ok, las coordenadas ya las frena la coherencia y no se probaría el rango.
+  UPDATE pedido_gps SET gps_status = 'ok', gps_lat = -26, gps_lng = -65, gps_accuracy = 1, gps_motivo_omision = NULL
+   WHERE pedido_id = v_ped;
   FOR v_row IN SELECT * FROM (VALUES
     ('gps_lat = 91'), ('gps_lat = -90.0000001'), ('gps_lat = ''NaN'''),
     ('gps_lng = -181'), ('gps_lng = ''NaN'''),
@@ -161,19 +163,19 @@ BEGIN
     ('gps_diagnostico = jsonb_build_object(''so'', repeat(''x'', 400))'), ('gps_diagnostico = ''[1]''::jsonb')
   ) AS t(set_) LOOP
     BEGIN
-      EXECUTE format('UPDATE public.pedidos SET %s WHERE id = %s', v_row.set_, v_ped);
-      v_fallas := v_fallas || format('G4 · pedidos aceptó %s', v_row.set_)::text;
+      EXECUTE format('UPDATE public.pedido_gps SET %s WHERE pedido_id = %s', v_row.set_, v_ped);
+      v_fallas := v_fallas || format('G4 · pedido_gps aceptó %s', v_row.set_)::text;
     EXCEPTION WHEN check_violation THEN
       NULL;
     END;
   END LOOP;
   -- Los bordes entran.
   BEGIN
-    UPDATE pedidos SET gps_lat = -90, gps_lng = 180, gps_accuracy = 0 WHERE id = v_ped;
+    UPDATE pedido_gps SET gps_lat = -90, gps_lng = 180, gps_accuracy = 0 WHERE pedido_id = v_ped;
   EXCEPTION WHEN check_violation THEN
-    v_fallas := v_fallas || 'G4 · pedidos rechazó los bordes (-90, 180, 0)'::text;
+    v_fallas := v_fallas || 'G4 · pedido_gps rechazó los bordes (-90, 180, 0)'::text;
   END;
-  UPDATE pedidos SET gps_status = NULL WHERE id = v_ped;
+  DELETE FROM pedido_gps WHERE pedido_id = v_ped;
   v_estado := NULL;
   BEGIN
     SET LOCAL ROLE authenticated;

@@ -6,7 +6,7 @@
  * esto rompe en `npm run typecheck`, que es exactamente para lo que está incluido
  * `dev/gallery/**` en el tsconfig.
  */
-import type { PedidoDB, PedidoItemDB, PerfilDB } from '../../../src/types'
+import type { PedidoDB, PedidoGps, PedidoItemDB, PerfilDB } from '../../../src/types'
 import type { PedidoStatsSummary } from '../../../src/hooks/queries'
 import { CLIENTES_FIXTURE, PRODUCTOS_FIXTURE } from './catalogo'
 import { PERFILES_FIXTURE } from './auth'
@@ -116,10 +116,6 @@ const PEDIDO_ASIGNADO_CON_DEUDA: PedidoDB = {
     { id: '18190', fecha: hace(19), monto: 58_900 },
     { id: '18277', fecha: hace(9), monto: 64_000 },
   ],
-  gps_status: 'ok',
-  gps_lat: -26.8569,
-  gps_lng: -65.2219,
-  gps_accuracy: 12,
   items: [
     item('18398', 1, 'aceite', 12),
     item('18398', 2, 'harina', 20),
@@ -152,9 +148,6 @@ const PEDIDO_ENTREGADO_PAGADO_FC: PedidoDB = {
     { forma_pago: 'transferencia', monto: 300_000 },
     { forma_pago: 'efectivo', monto: 112_600 },
   ],
-  gps_status: 'ok',
-  gps_lat: -26.8151,
-  gps_lng: -65.3186,
   deuda_previa: 0,
   items: [
     item('18355', 1, 'manaosCola', 40),
@@ -271,7 +264,6 @@ const PEDIDO_SIN_GPS: PedidoDB = {
   tipo_factura: 'ZZ',
   fecha: hace(0),
   created_at: selloHora(0, '12:44:00'),
-  gps_status: 'denied',
   deuda_previa: 0,
   items: [item('18433', 1, 'manaosCola', 10)],
 }
@@ -289,11 +281,6 @@ const PEDIDO_GPS_LEJOS: PedidoDB = {
   tipo_factura: 'FC',
   fecha: hace(0),
   created_at: selloHora(0, '13:05:00'),
-  // Check-in a ~2 km de la dirección cargada: semáforo en rojo.
-  gps_status: 'ok',
-  gps_lat: -26.8330,
-  gps_lng: -65.3050,
-  gps_accuracy: 18,
   deuda_previa: 0,
   items: [
     item('18434', 1, 'aguaMineral', 30),
@@ -342,18 +329,25 @@ const PEDIDO_TEXTOS_LARGOS: PedidoDB = {
 export interface EjemploPedido {
   etiqueta: string
   pedido: PedidoDB
+  /** El check-in GPS (`pedido_gps`, permisos-B4): ya no viene en el pedido; lo ve sólo el admin. */
+  gps?: PedidoGps
 }
 
 export const PEDIDOS_FIXTURE: EjemploPedido[] = [
   { etiqueta: 'pendiente · pago pendiente · sin transportista', pedido: PEDIDO_PENDIENTE },
   { etiqueta: 'en preparación · pago parcial · entrega programada', pedido: PEDIDO_EN_PREPARACION },
-  { etiqueta: 'asignado · con transportista · con deuda previa · GPS ok', pedido: PEDIDO_ASIGNADO_CON_DEUDA },
-  { etiqueta: 'entregado · pagado (combinado) · FC · 9 ítems con regalo', pedido: PEDIDO_ENTREGADO_PAGADO_FC },
+  { etiqueta: 'asignado · con transportista · con deuda previa · GPS ok', pedido: PEDIDO_ASIGNADO_CON_DEUDA,
+    gps: { pedido_id: '18398', gps_status: 'ok', gps_lat: -26.8569, gps_lng: -65.2219, gps_accuracy: 12 } },
+  { etiqueta: 'entregado · pagado (combinado) · FC · 9 ítems con regalo', pedido: PEDIDO_ENTREGADO_PAGADO_FC,
+    gps: { pedido_id: '18355', gps_status: 'ok', gps_lat: -26.8151, gps_lng: -65.3186 } },
   { etiqueta: 'entregado con salvedad · pago parcial · con notas', pedido: PEDIDO_ENTREGADO_CON_SALVEDAD },
   { etiqueta: 'cancelado · sin estado de pago · con motivo', pedido: PEDIDO_CANCELADO },
   { etiqueta: 'vale blanco · consumo interno · entregado a costo, sin transportista', pedido: PEDIDO_VALE_BLANCO },
-  { etiqueta: 'pendiente · GPS denegado', pedido: PEDIDO_SIN_GPS },
-  { etiqueta: 'pendiente · GPS lejos de la dirección · FC', pedido: PEDIDO_GPS_LEJOS },
+  { etiqueta: 'pendiente · GPS denegado', pedido: PEDIDO_SIN_GPS,
+    gps: { pedido_id: '18433', gps_status: 'denied' } },
+  { etiqueta: 'pendiente · GPS lejos de la dirección · FC', pedido: PEDIDO_GPS_LEJOS,
+    // Check-in a ~2 km de la dirección cargada: semáforo en rojo.
+    gps: { pedido_id: '18434', gps_status: 'ok', gps_lat: -26.8330, gps_lng: -65.3050, gps_accuracy: 18 } },
   { etiqueta: 'pendiente · nombre y dirección largos · deuda previa · entrega programada · FC', pedido: PEDIDO_TEXTOS_LARGOS },
 ]
 

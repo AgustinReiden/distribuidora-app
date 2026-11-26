@@ -310,19 +310,27 @@ export interface PedidoDB {
   created_at?: string;
   updated_at?: string;
   deleted_at?: string | null;
-  // Geolocalizacion del check-in del preventista al confirmar el pedido.
-  // Null en pedidos previos a migration 040 o creados por roles que no capturan GPS.
-  gps_lat?: number | null;
-  gps_lng?: number | null;
-  gps_accuracy?: number | null;
-  gps_capturado_at?: string | null;
-  gps_status?: 'ok' | 'denied' | 'unavailable' | 'timeout' | 'error' | null;
+  // El GPS del check-in ya no viene en el pedido: vive en `pedido_gps` (PedidoGps), que lee
+  // sólo el admin (permisos-B4, mig NNN_ola3_t8b_pedido_gps).
   // Canal de origen del pedido. 'cambio' marca una parada de cambio/devolución
   // (pedido especial total=0; mig 089), no una venta.
   canal?: string;
   // Detalle del cambio embebido (recorrido_cambios) cuando canal='cambio'.
   // Lo adjunta la ruta activa del transportista para mostrar qué retirar/entregar.
   cambio?: ParadaCambioDetalle | null;
+}
+
+/**
+ * El check-in GPS del preventista al confirmar un pedido: una fila de `pedido_gps`
+ * (permisos-B4, mig NNN_ola3_t8b_pedido_gps). La lee sólo el admin de la sucursal; sin fila,
+ * el pedido no tiene check-in (previo a la mig 040, o de un rol que no captura GPS).
+ */
+export interface PedidoGps {
+  pedido_id: string | number;
+  gps_status: 'ok' | 'denied' | 'unavailable' | 'timeout' | 'error';
+  gps_lat?: number | null;
+  gps_lng?: number | null;
+  gps_accuracy?: number | null;
 }
 
 /** Detalle de una parada de cambio/devolución (recorrido_cambios, mig 089). */

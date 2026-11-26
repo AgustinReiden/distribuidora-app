@@ -325,10 +325,11 @@ export default function SeccionPedidos() {
       <div>
         <Subtitulo>PedidoCard</Subtitulo>
         <div className="mt-3 space-y-4">
-          {PEDIDOS_FIXTURE.map(({ etiqueta, pedido }) => (
+          {PEDIDOS_FIXTURE.map(({ etiqueta, pedido, gps }) => (
             <Marco key={pedido.id} etiqueta={`#${pedido.id} · ${etiqueta}`}>
               <PedidoCard
                 pedido={pedido}
+                gps={gps}
                 isAdmin={isAdmin}
                 isPreventista={isPreventista}
                 isTransportista={isTransportista}

@@ -17,6 +17,7 @@ import PedidosViewHeader from '../pedidos/PedidosViewHeader';
 import PedidoToolbar from '../pedidos/PedidoToolbar';
 import type {
   PedidoDB,
+  PedidoGps,
   ClienteDB,
   ProductoDB,
   PerfilDB,
@@ -33,6 +34,11 @@ import type { PedidoStatsSummary } from '../../hooks/queries';
 export interface VistaPedidosProps {
   /** Pedidos de la página actual (ya paginados server-side) */
   pedidos: PedidoDB[];
+  /**
+   * El check-in GPS de los pedidos de la página, por id (`pedido_gps`, permisos-B4). Lo trae el
+   * contenedor sólo para el admin; sin él las tarjetas no muestran el chip de GPS.
+   */
+  gpsPorPedido?: ReadonlyMap<string, PedidoGps>;
   /**
    * `dataUpdatedAt` de la query de pedidos. Sólo lo usa la card sin conexión,
    * para fechar la deuda previa del cliente.
@@ -136,6 +142,7 @@ export interface VistaPedidosProps {
 
 export default function VistaPedidos({
   pedidos,
+  gpsPorPedido,
   saldoActualizadoAt,
   totalCount,
   statsSummary,
@@ -319,6 +326,7 @@ export default function VistaPedidos({
                   onCancelarPedido={onCancelarPedido}
                   onRegistrarPago={onAbrirPagoPedido}
                   onNotaCreditoVenta={onNotaCreditoVenta}
+                  gps={gpsPorPedido?.get(String(pedido.id))}
                 />
               </div>
             ))}
