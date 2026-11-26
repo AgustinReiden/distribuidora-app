@@ -33,7 +33,7 @@ describe('la limpieza de #1700: el ensayo prueba el bloque de la migración', ()
       fs.readFileSync(path.join(RAIZ, 'scripts', 'test-salvedades-limpieza-1700.sql'), 'utf8'),
     )
     expect(deLaMigracion).not.toBeNull()
-    expect(deLaMigracion).toContain('c_n_oficina CONSTANT int := 84;')
+    expect(deLaMigracion).toContain('c_n_oficina CONSTANT int := 86;')
     expect(deLaMigracion).toContain('c_n_calle   CONSTANT int := 7;')
     expect(delEnsayo).toBe(deLaMigracion)
   })

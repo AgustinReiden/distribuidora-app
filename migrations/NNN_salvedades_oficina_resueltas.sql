@@ -9,10 +9,11 @@
 --
 -- QUÉ PASABA
 --   · Hoy las entregas y las salvedades las carga la oficina, y toda salvedad nacía «pendiente»
---     aunque quien la cargaba ya la había resuelto de hecho. El panel de Salvedades tenía 91
---     pendientes (25/11): 83 de un admin, 1 de un encargado y 7 de preventistas con el rol extra
---     de chofer. Cuando los choferes empiecen a cargar en la calle, las de ellos se iban a perder
---     entre las viejas.
+--     aunque quien la cargaba ya la había resuelto de hecho. El panel de Salvedades tenía 93
+--     pendientes (medido el 26/11): 86 de la oficina (admin o encargado) y 7 de preventistas con
+--     el rol extra de chofer. De las 86, 2 son del 25/11, posteriores a la primera medición, y el
+--     dueño decidió cerrarlas también (26/11). Cuando los choferes empiecen a cargar en la calle,
+--     las de ellos se iban a perder entre las viejas.
 --
 -- QUÉ CAMBIA (decisiones del dueño del 25/11, en #1700)
 --   1 · registrar_salvedad(): la salvedad que carga un ADMIN o un ENCARGADO nace «resuelto_otro»,
@@ -36,17 +37,17 @@
 --       · Si la oficina quiere otra resolución, la hace aparte, como hoy: una nota de crédito de
 --         venta desde el pedido, o anular la salvedad (admin). resolver_salvedad() no se toca y
 --         sigue rechazando una resuelta ('Ya resuelta').
---   2 · Limpieza: se cierran las pendientes que midió y revisó el dueño (25/11), y sólo esas,
+--   2 · Limpieza: se cierran las pendientes que midió y revisó el dueño (25/11 y 26/11), y sólo esas,
 --       como «resuelto_otro», sin tocar reportado_por ni created_at, con resolucion_fecha = la de
 --       la limpieza y una fila 'resolucion' en salvedad_historial (como cerrar_salvedades_en_lote):
---       · las 84 que cargó un admin o un encargado (perfiles.rol de reportado_por, hoy): nota
+--       · las 86 que cargó un admin o un encargado (perfiles.rol de reportado_por, hoy): nota
 --         «Cargada y resuelta por la oficina», resuelto_por = quien la cargó;
 --       · las 7 de la calle: las de un preventista (con el rol extra de chofer) cargadas entre el
 --         10/10 y el 17/10 de 2026, día argentino. Nota «Cerrada en la limpieza de la ola 3:
 --         cargada en la calle, revisada por el dueño», resuelto_por NULL (las revisó el dueño, sin
 --         un usuario de la app que lo diga; la columna lo acepta y el panel no muestra «Por:»).
 --       Cualquier otra pendiente (la de un chofer cargada hoy, antes de aplicar) no la vio nadie:
---       queda pendiente. Si las de la oficina no son 84 o las de la calle no son 7, aborta; con
+--       queda pendiente. Si las de la oficina no son 86 o las de la calle no son 7, aborta; con
 --       ninguna pendiente (la base de CI, sin datos) no hace nada. La lógica la prueba
 --       scripts/test-salvedades-limpieza-1700.sql, que tiene una copia exacta de este bloque (lo
 --       fija src/test/limpiezaSalvedades1700.contract.test.ts).
@@ -55,7 +56,7 @@
 --       es OF lotes_devueltos y no salta. salvedades_items no tiene auditoría (audit_logs).
 --
 -- PREMISAS: md5(prosrc) de registrar_salvedad() es el de la 548; las anclas aparecen una vez cada
--- una; las pendientes que cierra son 84 de la oficina y 7 de la calle (o ninguna pendiente).
+-- una; las pendientes que cierra son 86 de la oficina y 7 de la calle (o ninguna pendiente).
 -- Reaplicarla aborta en la primera premisa.
 -- Se parchea por ancla sobre pg_get_functiondef, que conserva SECURITY DEFINER y el
 -- SET search_path (public, pg_temp); CREATE OR REPLACE conserva los EXECUTE (postgres,
@@ -202,9 +203,10 @@ DO $limpieza$
 DECLARE
   c_oficina   CONSTANT text := 'Cargada y resuelta por la oficina';
   c_calle     CONSTANT text := 'Cerrada en la limpieza de la ola 3: cargada en la calle, revisada por el dueño';
-  -- Lo medido en prod el 25/11 (#1700): 83 de un admin y 1 de un encargado, y 7 de preventistas
-  -- con el rol extra de chofer, cargadas del 10/10 al 17/10 (día argentino).
-  c_n_oficina CONSTANT int := 84;
+  -- Lo medido en prod el 26/11 (#1700): 86 de la oficina (admin o encargado; las 2 de más que el
+  -- 25/11 son de ese día, y el dueño decidió cerrarlas también), y 7 de preventistas con el rol
+  -- extra de chofer, cargadas del 10/10 al 17/10 (día argentino).
+  c_n_oficina CONSTANT int := 86;
   c_n_calle   CONSTANT int := 7;
   c_desde     CONSTANT date := DATE '2026-10-10';
   c_hasta     CONSTANT date := DATE '2026-10-17';

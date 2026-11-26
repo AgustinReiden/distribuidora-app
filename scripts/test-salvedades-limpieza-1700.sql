@@ -1,9 +1,9 @@
 -- Ensayo de la limpieza de la migración de las salvedades de la oficina (#1700, Part of #1690).
 --
--- La migración cierra sólo las pendientes que midió y revisó el dueño (25/11): las 84 que cargó un
+-- La migración cierra sólo las pendientes que midió y revisó el dueño (25/11 y 26/11): las 86 que cargó un
 -- admin o un encargado, y las 7 de preventistas cargadas del 10/10 al 17/10 (día argentino). Una
 -- pendiente de la calle fuera de eso (la de un chofer cargada hoy, antes de aplicar) queda
--- pendiente. Si los conteos no dan 84 y 7, aborta; sin ninguna pendiente no hace nada.
+-- pendiente. Si los conteos no dan 86 y 7, aborta; sin ninguna pendiente no hace nada.
 --
 -- El bloque de la migración es un DO, que no se puede llamar: acá va el MISMO cuerpo como
 -- pg_temp.limpieza_1700(). Que sea el mismo, byte a byte, lo fija
@@ -12,14 +12,14 @@
 -- estaban.
 --
 -- Casos:
---   K1 · 83 del admin + 1 del encargado + 7 de un preventista en el rango (con los dos bordes del
+--   K1 · 85 del admin + 1 del encargado + 7 de un preventista en el rango (con los dos bordes del
 --        día argentino), y afuera: una del chofer cargada hoy, una del preventista del 09/10 23:30
---        (ya 10/10 en UTC) y una del 18/10 00:30. Cierra 91 con su nota, su resuelto_por y su fila
+--        (ya 10/10 en UTC) y una del 18/10 00:30. Cierra 93 con su nota, su resuelto_por y su fila
 --        de historial; las tres de afuera quedan pendientes.
---   K2 · 83 de la oficina (falta una): aborta en la premisa y no cierra nada.
+--   K2 · 85 de la oficina (falta una): aborta en la premisa y no cierra nada.
 --   K3 · 8 de la calle en el rango (sobra una): aborta en la premisa.
 --   K4 · sin ninguna pendiente: no hace nada y no aborta.
---   K5 · sólo pendientes que no son de la limpieza (un chofer hoy): aborta (no son 84 y 7).
+--   K5 · sólo pendientes que no son de la limpieza (un chofer hoy): aborta (no son 86 y 7).
 --
 -- Un único DO que termina siempre en una excepción; cada caso en un sub-bloque que se revierte.
 -- Fixtures: una sucursal activa con un admin, un encargado, un preventista y un chofer activos y
@@ -30,9 +30,10 @@ RETURNS void LANGUAGE plpgsql AS $limpieza$
 DECLARE
   c_oficina   CONSTANT text := 'Cargada y resuelta por la oficina';
   c_calle     CONSTANT text := 'Cerrada en la limpieza de la ola 3: cargada en la calle, revisada por el dueño';
-  -- Lo medido en prod el 25/11 (#1700): 83 de un admin y 1 de un encargado, y 7 de preventistas
-  -- con el rol extra de chofer, cargadas del 10/10 al 17/10 (día argentino).
-  c_n_oficina CONSTANT int := 84;
+  -- Lo medido en prod el 26/11 (#1700): 86 de la oficina (admin o encargado; las 2 de más que el
+  -- 25/11 son de ese día, y el dueño decidió cerrarlas también), y 7 de preventistas con el rol
+  -- extra de chofer, cargadas del 10/10 al 17/10 (día argentino).
+  c_n_oficina CONSTANT int := 86;
   c_n_calle   CONSTANT int := 7;
   c_desde     CONSTANT date := DATE '2026-10-10';
   c_hasta     CONSTANT date := DATE '2026-10-17';
@@ -206,7 +207,7 @@ DECLARE
 BEGIN
   PERFORM pg_temp.lz_vaciar();
   x := pg_temp.lz_pedido(r);
-  v_adm   := pg_temp.lz_poner(x, v_suc, (r->>'adm')::uuid, 83, timestamptz '2026-09-20 10:00-03');
+  v_adm   := pg_temp.lz_poner(x, v_suc, (r->>'adm')::uuid, 85, timestamptz '2026-09-20 10:00-03');
   v_enc   := pg_temp.lz_poner(x, v_suc, (r->>'enc')::uuid, 1, now());
   v_calle := pg_temp.lz_calle_en_rango(x, v_suc, (r->>'pre')::uuid, 7);
   v_fuera := pg_temp.lz_poner(x, v_suc, (r->>'tra')::uuid, 1, now())
@@ -218,8 +219,8 @@ BEGIN
          (SELECT count(*) FROM public.salvedades_items
            WHERE id = ANY (v_adm || v_enc) AND estado_resolucion = 'resuelto_otro'
              AND resolucion_notas = 'Cargada y resuelta por la oficina'
-             AND resuelto_por = reportado_por AND resolucion_fecha = now()) = 84,
-         'las 84 de la oficina no quedaron resuelto_otro, con su nota y resueltas por quien las cargó');
+             AND resuelto_por = reportado_por AND resolucion_fecha = now()) = 86,
+         'las 86 de la oficina no quedaron resuelto_otro, con su nota y resueltas por quien las cargó');
   f := pg_temp.lz_si(f,
          (SELECT count(*) FROM public.salvedades_items
            WHERE id = ANY (v_calle) AND estado_resolucion = 'resuelto_otro'
@@ -235,13 +236,13 @@ BEGIN
   f := pg_temp.lz_si(f,
          (SELECT count(*) FROM public.salvedad_historial
            WHERE salvedad_id = ANY (v_adm || v_enc || v_calle) AND accion = 'resolucion'
-             AND estado_anterior = 'pendiente' AND estado_nuevo = 'resuelto_otro') = 91
+             AND estado_anterior = 'pendiente' AND estado_nuevo = 'resuelto_otro') = 93
          AND NOT EXISTS (SELECT 1 FROM public.salvedad_historial WHERE salvedad_id = ANY (v_fuera)),
-         'el historial no tiene una resolución por cada una de las 91 (y ninguna de las de afuera)');
+         'el historial no tiene una resolución por cada una de las 93 (y ninguna de las de afuera)');
   f := pg_temp.lz_si(f,
          (SELECT count(*) FROM public.salvedades_items
            WHERE id = ANY (v_adm || v_enc || v_calle || v_fuera)
-             AND reportado_por IS NOT NULL AND created_at < now() + interval '1 second') = 94
+             AND reportado_por IS NOT NULL AND created_at < now() + interval '1 second') = 96
          AND (SELECT min(created_at) FROM public.salvedades_items WHERE id = ANY (v_adm)) = timestamptz '2026-09-20 10:00-03',
          'la limpieza tocó reportado_por o created_at');
   RETURN jsonb_build_object('fallas', to_jsonb(f));
@@ -258,12 +259,12 @@ DECLARE
 BEGIN
   PERFORM pg_temp.lz_vaciar();
   x := pg_temp.lz_pedido(r);
-  PERFORM pg_temp.lz_poner(x, v_suc, (r->>'adm')::uuid, 83, now());
+  PERFORM pg_temp.lz_poner(x, v_suc, (r->>'adm')::uuid, 85, now());
   PERFORM pg_temp.lz_calle_en_rango(x, v_suc, (r->>'pre')::uuid, 7);
   v_err := pg_temp.lz_correr();
-  f := pg_temp.lz_si(f, v_err LIKE 'premisa · hay 83 pendientes de la oficina y 7 de la calle%',
-         format('con 83 de la oficina no abortó en la premisa: %s', v_err));
-  f := pg_temp.lz_si(f, pg_temp.lz_pendientes() = 90, format('cerró algo: quedan %s pendientes', pg_temp.lz_pendientes()));
+  f := pg_temp.lz_si(f, v_err LIKE 'premisa · hay 85 pendientes de la oficina y 7 de la calle%',
+         format('con 85 de la oficina no abortó en la premisa: %s', v_err));
+  f := pg_temp.lz_si(f, pg_temp.lz_pendientes() = 92, format('cerró algo: quedan %s pendientes', pg_temp.lz_pendientes()));
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;
@@ -278,13 +279,13 @@ DECLARE
 BEGIN
   PERFORM pg_temp.lz_vaciar();
   x := pg_temp.lz_pedido(r);
-  PERFORM pg_temp.lz_poner(x, v_suc, (r->>'adm')::uuid, 83, now());
+  PERFORM pg_temp.lz_poner(x, v_suc, (r->>'adm')::uuid, 85, now());
   PERFORM pg_temp.lz_poner(x, v_suc, (r->>'enc')::uuid, 1, now());
   PERFORM pg_temp.lz_calle_en_rango(x, v_suc, (r->>'pre')::uuid, 8);
   v_err := pg_temp.lz_correr();
-  f := pg_temp.lz_si(f, v_err LIKE 'premisa · hay 84 pendientes de la oficina y 8 de la calle%',
+  f := pg_temp.lz_si(f, v_err LIKE 'premisa · hay 86 pendientes de la oficina y 8 de la calle%',
          format('con 8 de la calle no abortó en la premisa: %s', v_err));
-  f := pg_temp.lz_si(f, pg_temp.lz_pendientes() = 92, format('cerró algo: quedan %s pendientes', pg_temp.lz_pendientes()));
+  f := pg_temp.lz_si(f, pg_temp.lz_pendientes() = 94, format('cerró algo: quedan %s pendientes', pg_temp.lz_pendientes()));
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;
