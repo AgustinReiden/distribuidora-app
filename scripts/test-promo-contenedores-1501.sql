@@ -193,7 +193,7 @@ BEGIN
         -- Tanda 6 de #1603 (promos-B3): y lo que valida el alta.
         ('public.cambiar_regalo_promocion(bigint,bigint,bigint,boolean,jsonb)', '6c2eac9df3f7375aad69fbbc7c9ef341',
          '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
-        ('public._rendicion_pagos(bigint,date,date,bigint)', '25f0aebcefe469fdc1a6e5205ea83efa',
+        ('public._rendicion_pagos(bigint,date,date,bigint)', '288191e29ea1fc75196260416e8bfeed',
          '{postgres=X/postgres,service_role=X/postgres}'),
         ('public._alta_bloquea_boletas_credito(bigint,bigint)', '68fd4baf367b2074f95bb7be2ec97792',
          '{postgres=X/postgres,service_role=X/postgres}')

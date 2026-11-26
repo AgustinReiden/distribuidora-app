@@ -543,7 +543,9 @@ BEGIN
   -- El cobro anticipado: la boleta de hace 3 días, con su chofer, cobrada ese día.
   UPDATE public.pedidos SET fecha = v_hoy - 3, transportista_id = v_tra WHERE id = v_ped;
   PERFORM pg_temp.t6_claims(v_adm, v_suc);
-  v_res := public.registrar_pagos_pedido(v_ped, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb, v_hoy - 3);
+  -- T4 (#1710): el admin lo carga a nombre del chofer (p_cobrado_por): es de su rendición.
+  v_res := public.registrar_pagos_pedido(v_ped, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb, v_hoy - 3,
+                                         NULL, NULL, NULL, v_tra);
   PERFORM pg_temp.t6_reset();
   SELECT id INTO v_pg FROM public.pagos WHERE pedido_id = v_ped;
   UPDATE public.pedidos SET estado = 'entregado', fecha_entrega = now() WHERE id = v_ped;

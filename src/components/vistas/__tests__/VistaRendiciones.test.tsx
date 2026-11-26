@@ -77,6 +77,7 @@ const { useClienteQueryMock } = vi.hoisted(() => ({
 }))
 vi.mock('../../../hooks/queries', () => ({
   useTransportistasQuery: () => ({ data: TRANSPORTISTAS }),
+  useUsuariosQuery: () => ({ data: [] }),
   useClienteQuery: useClienteQueryMock,
   gastosKeys: { todas: () => ['gastos'] },
   personalKeys: { all: (sucursalId: number | null) => ['personal', sucursalId] },

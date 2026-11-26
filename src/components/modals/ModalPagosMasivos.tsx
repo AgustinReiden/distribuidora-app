@@ -15,6 +15,7 @@ import FiltrosMasivos from './FiltrosMasivos'
 import { filtrarPedidosMasivos, TIPO_FECHA_MASIVAS_POR_DEFECTO, type FiltroMasivo } from '../../utils/filtroMasivas'
 import { toneDeEstadoPago } from '../../lib/estadoTones'
 import { FORMAS_PAGO_SELECCIONABLES } from '../../constants/formasPago'
+import CampoQuienCobro, { type PersonaQueCobra } from '../rendiciones/CampoQuienCobro'
 
 export interface ModalPagosMasivosProps {
   /**
@@ -23,12 +24,15 @@ export interface ModalPagosMasivosProps {
    * @param pedidoIds - IDs de los pedidos seleccionados
    * @param fechaPago - Fecha contable a aplicar al pago (YYYY-MM-DD)
    */
-  onConfirm: (formaPago: string, pedidoIds: string[], fechaPago: string) => Promise<void>
+  onConfirm: (formaPago: string, pedidoIds: string[], fechaPago: string, cobradoPor?: string | null) => Promise<void>
   onClose: () => void
   guardando: boolean
   /** Si el caller es encargado (no admin): fecha bloqueada a hoy y check de rendicion. */
   isEncargado?: boolean
   isAdmin?: boolean
+  /** T4 (#1710): con esto (sólo el admin) se elige «Quién cobró»; sin elegir, de quien lo carga. */
+  quienesCobran?: PersonaQueCobra[]
+  yoId?: string | null
 }
 
 const ModalPagosMasivos = memo(function ModalPagosMasivos({
@@ -37,7 +41,10 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
   guardando,
   isEncargado = false,
   isAdmin = false,
+  quienesCobran,
+  yoId,
 }: ModalPagosMasivosProps) {
+  const [cobradoPor, setCobradoPor] = useState<string | null>(null)
   const hoy = fechaLocalISO()
   const fechaBloqueada = isEncargado && !isAdmin
   const [selectedFormaPago, setSelectedFormaPago] = useState('')
@@ -143,7 +150,9 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
         `${rango}, con fecha ${fechaPago}. Esta acción no se puede deshacer en bloque.`,
       onConfirm: () => {
         setConfirmConfig(null)
-        void onConfirm(selectedFormaPago, Array.from(selectedIds), fechaPago)
+        void (quienesCobran
+          ? onConfirm(selectedFormaPago, Array.from(selectedIds), fechaPago, cobradoPor)
+          : onConfirm(selectedFormaPago, Array.from(selectedIds), fechaPago))
       },
     })
   }
@@ -168,6 +177,16 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
               ))}
             </select>
           </div>
+
+          {quienesCobran && (
+            <CampoQuienCobro
+              id="quien-cobro-masivo"
+              personas={quienesCobran}
+              value={cobradoPor}
+              yoId={yoId}
+              onChange={setCobradoPor}
+            />
+          )}
 
           {/* Fecha contable del pago */}
           <div>

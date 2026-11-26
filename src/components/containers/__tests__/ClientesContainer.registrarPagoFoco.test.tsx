@@ -74,6 +74,7 @@ vi.mock('../../../hooks/queries', () => ({
   useZonasEstandarizadasQuery: () => ({ data: [] }),
   useProductosQuery: () => ({ data: [] }),
   useClienteAdmiteAdelantoQuery: () => ({ data: undefined }),
+  useUsuariosQuery: () => ({ data: [] }),
 }))
 
 const usePagosMock = () => ({

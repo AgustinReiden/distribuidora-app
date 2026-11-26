@@ -277,17 +277,20 @@ BEGIN
   f := pg_temp.t_si(f, jsonb_typeof(j) = 'array' AND COALESCE((j->0->>'general')::numeric, 0) = 0,
                     format('el resumen del otro chofer recibio plata de la cerrada: %s', j));
 
-  -- Reabrir descarta la foto: se ve lo vivo, y el total del dia sigue en 170.
+  -- Reabrir descarta la foto: se ve lo vivo, y el total del dia sigue en 170. Desde la T4 (#1710)
+  -- todo sigue siendo del chofer: el cobro es de quien lo cobró (pagos.cobrado_por) y no pasa al
+  -- admin porque la boleta se cancele (antes, lo que quedaba suelto era de quien lo cargó).
   j := pg_temp.t_rpc(a, format('SELECT to_jsonb(public.confirmar_rendicion(p_fecha => %L::date, p_transportista_id => %L::uuid, p_estado => ''disconformidad'', p_observaciones => ''ensayo 1248'', p_gastos_rendicion => ''{"vistos":[],"guardar":[],"quitar":[]}''::jsonb))', v_x, tr));
   f := pg_temp.t_si(f, NOT EXISTS (SELECT 1 FROM public.rendicion_pagos_confirmados WHERE rendicion_id = v_rc),
                     'reabrir no descarto la foto');
-  f := pg_temp.t_si(f, pg_temp.t_num(pg_temp.t_detalle(a, v_x, tr), 'total') = 70
-                       AND pg_temp.t_num(pg_temp.t_detalle(a, v_x, a), 'total') = 100,
-                    format('reabierta, lo vivo no es 70 + 100: %s / %s',
+  f := pg_temp.t_si(f, pg_temp.t_num(pg_temp.t_detalle(a, v_x, tr), 'total') = 170
+                       AND pg_temp.t_num(pg_temp.t_detalle(a, v_x, a), 'total') = 0,
+                    format('reabierta, lo vivo no es 170 del chofer y 0 del admin: %s / %s',
                            pg_temp.t_detalle(a, v_x, tr), pg_temp.t_detalle(a, v_x, a)));
   -- Confirmar de nuevo toma la foto nueva.
   j := pg_temp.t_rpc(a, format('SELECT to_jsonb(public.resolver_rendicion(%L::date, %L::uuid, ''ensayo 1248''))', v_x, tr));
-  f := pg_temp.t_si(f, (SELECT count(*) FROM public.rendicion_pagos_confirmados WHERE rendicion_id = v_rc) = 1,
+  -- Los tres pagos vivos del chofer: los 70 suyos, los 70 que quedaron sueltos y el pedazo de 30.
+  f := pg_temp.t_si(f, (SELECT count(*) FROM public.rendicion_pagos_confirmados WHERE rendicion_id = v_rc) = 3,
                     format('resolver no tomo la foto nueva: %s', j));
   -- #1547 (REN-4): una resuelta no se desmarca. El admin deshace la resolucion (queda en
   -- disconformidad, sin foto) y se confirma de nuevo, que toma otra foto.
@@ -297,7 +300,7 @@ BEGIN
   j := pg_temp.t_rpc(a, format('SELECT to_jsonb(public.deshacer_resolucion_rendicion(%L::date, %L::uuid, ''ensayo 1248''))', v_x, tr));
   f := pg_temp.t_si(f, j ? 'exception' IS NOT TRUE, format('deshacer la resolucion fallo: %s', j));
   j := pg_temp.t_confirmar(a, v_x, tr, 'confirmada');
-  f := pg_temp.t_si(f, (SELECT count(*) FROM public.rendicion_pagos_confirmados WHERE rendicion_id = v_rc) = 1,
+  f := pg_temp.t_si(f, (SELECT count(*) FROM public.rendicion_pagos_confirmados WHERE rendicion_id = v_rc) = 3,
                     format('confirmar de nuevo no tomo la foto: %s', j));
   -- Desmarcar la borra por CASCADE.
   j := pg_temp.t_rpc(a, format('SELECT ''{}''::jsonb FROM (SELECT public.desmarcar_rendicion_controlada(%L::date, %L::uuid)) x', v_x, tr));
@@ -368,6 +371,10 @@ BEGIN
   UPDATE public.pedidos SET total = 300 WHERE id = v_b1;
   SELECT id INTO v_y FROM public.pagos
    WHERE cliente_id = p_cli AND pedido_id IS NULL AND pago_origen_id = v_r AND pago_padre_id = v_r AND monto = 200;
+  -- Desde la T4 (#1710) un pedazo es de la caja de su padre (pagos.cobrado_por). El cruce (la raíz
+  -- de un dueño, el pedazo de otro) sigue en los pagos de antes de la T4, cuyo dueño se rellenó
+  -- con la regla de entonces fila por fila: acá se arma a mano.
+  UPDATE public.pagos SET cobrado_por = p_admin WHERE id = v_y;
   RETURN jsonb_build_object('boleta', v_b1, 'raiz', v_r, 'pedazo', v_y,
                             'raiz_monto', (SELECT monto FROM public.pagos WHERE id = v_r));
 END
@@ -563,6 +570,8 @@ BEGIN
   -- La boleta baja a 300: los 200 quedan a favor, y son del admin que los cargo.
   UPDATE public.pedidos SET total = 300 WHERE id = v_b1;
   SELECT id INTO v_q FROM public.pagos WHERE cliente_id = c AND pedido_id IS NULL AND pago_origen_id = v_r AND monto = 200;
+  -- El cruce de antes de la T4, armado a mano (ver t_cruce).
+  UPDATE public.pagos SET cobrado_por = a WHERE id = v_q;
   f := pg_temp.t_si(f, v_q IS NOT NULL AND (SELECT pago_padre_id FROM public.pagos WHERE id = v_q) IS NOT DISTINCT FROM v_r,
                     'la baja no dejo 200 a favor como pedazo del pago a cuenta');
 

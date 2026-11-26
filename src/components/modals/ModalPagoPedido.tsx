@@ -28,6 +28,8 @@ import NumberInput from '../ui/NumberInput'
 import MontoLeido from '../ui/MontoLeido'
 import { formatPrecio, fechaLocalISO, formatDateTime, getFormaPagoLabel } from '../../utils/formatters'
 import { parsePrecio } from '../../utils/calculations'
+import CampoQuienCobro, { type PersonaQueCobra } from '../rendiciones/CampoQuienCobro'
+import { cobradorDeLaEntrega } from '../../utils/quienCobro'
 import { esSaldoAFavorAplicado, notaCreditoAplicada, saldoAFavorAplicado, textoNotaCreditoAplicada, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor'
 import { FORMAS_PAGO_SELECCIONABLES, esFormaPagoNoDineraria } from '../../constants/formasPago'
 import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
@@ -73,6 +75,11 @@ export interface PagoPedidoPayload {
    * confirmar, con esto se sabe al reabrir si entró o si la boleta se movió.
    */
   pagadoAntes: number
+  /**
+   * T4 (#1710): quién cobró, sólo si lo eligió el admin (`null` = él mismo). Sin el campo, el
+   * container decide: en modo entrega, el chofer; si no, quien carga.
+   */
+  cobradoPor?: string | null
 }
 
 /** Entregar sin registrar pago: fecha de la entrega y, si faltaba, el chofer. */
@@ -137,6 +144,13 @@ export interface ModalPagoPedidoProps {
   transportistas?: PerfilDB[]
   /** "Retiró en depósito": sólo admin y encargado. */
   permitirRetiro?: boolean
+  /**
+   * T4 (#1710): con esto (sólo para el admin) se elige «Quién cobró»: de qué caja es el cobro. En
+   * modo entrega arranca en el chofer de la entrega; si no, en «Yo».
+   */
+  quienesCobran?: PersonaQueCobra[]
+  /** El id de quien carga (para no repetirlo en «Quién cobró»). */
+  yoId?: string | null
   onClose: () => void
   guardando: boolean
 }
@@ -173,6 +187,8 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   pedirChofer,
   transportistas = [],
   permitirRetiro = false,
+  quienesCobran,
+  yoId,
   onClose,
   guardando,
 }: ModalPagoPedidoProps) {
@@ -250,6 +266,13 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null)
   const [eleccionChofer, setEleccionChofer] = useState<EleccionChofer | null>(null)
   const faltaChofer = !!modoEntregaTransportista && !!pedirChofer && !eleccionChofer
+  // T4: lo que eligió el admin en «Quién cobró» (undefined: no tocó el campo).
+  const [cobradoPorElegido, setCobradoPorElegido] = useState<string | null | undefined>(undefined)
+  const cobradoPorVisible: string | null = cobradoPorElegido !== undefined
+    ? cobradoPorElegido
+    : modoEntregaTransportista
+      ? cobradorDeLaEntrega(undefined, eleccionChofer, pedido.transportista_id)
+      : null
   // pagoId en curso de edicion de forma_pago (para mostrar spinner inline).
   const [editandoPagoId, setEditandoPagoId] = useState<string | null>(null)
 
@@ -403,6 +426,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
         clientRequestIds,
         pagadoAntes: yaPagado,
         ...(eleccion ? { eleccionChofer: eleccion } : {}),
+        ...(quienesCobran ? { cobradoPor: cobradoPorVisible } : {}),
       })
       // Que resuelva no prueba que el cobro entró: la entrega con pago cierra el
       // modal sin tirar si el cobro falla. Ese camino guarda el cobro sin
@@ -649,6 +673,16 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
             permitirRetiro={permitirRetiro}
             value={eleccionChofer}
             onChange={setEleccionChofer}
+          />
+        )}
+
+        {quienesCobran && !soloAnulacion && (
+          <CampoQuienCobro
+            id="quien-cobro-pedido"
+            personas={quienesCobran}
+            value={cobradoPorVisible === yoId ? null : cobradoPorVisible}
+            yoId={yoId}
+            onChange={setCobradoPorElegido}
           />
         )}
 

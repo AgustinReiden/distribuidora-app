@@ -202,9 +202,9 @@ describe('las listas de excepciones sólo se achican', () => {
       'get_suspicious_activity(integer)',
       'imputar_credito_a_pedido_impl(bigint,bigint,numeric)',
       'marcar_entrega_y_pago_masivo_impl(bigint[],uuid,text,date)',
-      'marcar_pagos_masivo_impl(bigint[],text,date)',
-      'registrar_pago_cliente_fifo_impl(bigint,numeric,text,date,text,text)',
-      'registrar_pago_combinado_cliente_fifo_impl(bigint,jsonb,date,text,text)',
+      'marcar_pagos_masivo_impl(bigint[],text,date,uuid)',
+      'registrar_pago_cliente_fifo_impl(bigint,numeric,text,date,text,text,uuid)',
+      'registrar_pago_combinado_cliente_fifo_impl(bigint,jsonb,date,text,text,uuid)',
     ]
     for (const firma of Object.keys(impl)) expect(alNacer).toContain(firma)
   })

@@ -373,6 +373,8 @@ export interface PagoDB {
   a_cuenta?: boolean | null;
   /** Raíz del pago del que salió este pedazo (partir un pago). Con `pedido_id`, es saldo a favor aplicado. */
   pago_origen_id?: string | null;
+  /** De qué caja es el cobro (T4): lo pone el server al cobrar y no sigue a la boleta. */
+  cobrado_por?: string | null;
 }
 
 // =============================================================================
@@ -597,6 +599,11 @@ export interface PagoFormInput {
    * duplicarlo. Generarlo con `useRequestIdEstable`.
    */
   clientRequestId?: string | null;
+  /**
+   * De qué caja (rendición) es el cobro (T4, #1710). Sin él, de quien lo carga; el admin elige a
+   * cualquiera, y el encargado sólo al chofer de la boleta. `null` es «yo».
+   */
+  cobradoPor?: string | null;
 }
 
 export interface ResumenCuenta {
@@ -623,6 +630,11 @@ export interface RegistrarPagoBatchInput {
    * El cobro es una sola llamada a `registrar_pagos_pedido`: va con el primero.
    */
   clientRequestIds?: string[];
+  /**
+   * De qué caja (rendición) es el cobro (T4, #1710). Sin él, de quien lo carga; el admin elige a
+   * cualquiera, y el encargado sólo al chofer de la boleta. `null` es «yo».
+   */
+  cobradoPor?: string | null;
 }
 
 export interface PagoFifoAplicacion {
@@ -644,6 +656,11 @@ export interface RegistrarPagoFifoInput {
   notas?: string;
   /** UUID de idempotencia (mig 167). Ver `useRequestIdEstable`. */
   clientRequestId?: string;
+  /**
+   * De qué caja (rendición) es el cobro (T4, #1710). Sin él, de quien lo carga; el admin elige a
+   * cualquiera, y el encargado sólo al chofer de la boleta. `null` es «yo».
+   */
+  cobradoPor?: string | null;
 }
 
 export interface RegistrarPagoFifoResult {
@@ -678,6 +695,11 @@ export interface RegistrarPagoCombinadoFifoInput {
   notas?: string;
   /** UUID de idempotencia (mig 167). Ver `useRequestIdEstable`. */
   clientRequestId?: string;
+  /**
+   * De qué caja (rendición) es el cobro (T4, #1710). Sin él, de quien lo carga; el admin elige a
+   * cualquiera, y el encargado sólo al chofer de la boleta. `null` es «yo».
+   */
+  cobradoPor?: string | null;
 }
 
 /**

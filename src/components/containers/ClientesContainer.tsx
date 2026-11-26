@@ -4,7 +4,7 @@
  * Container que carga clientes bajo demanda usando TanStack Query.
  * Maneja estado de modales y operaciones CRUD.
  */
-import React, { Suspense, useState, useCallback, useRef } from 'react'
+import React, { Suspense, useState, useCallback, useMemo, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   useClientesOperativosQuery,
@@ -17,8 +17,10 @@ import {
   useProductosQuery,
   useCrearPedidoCambioEnRutaMutation,
   useClienteAdmiteAdelantoQuery,
+  useUsuariosQuery,
   type RegistrarCambioInput,
 } from '../../hooks/queries'
+import { quienesCobranDe } from '../../utils/quienCobro'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { usePagos } from '../../hooks/supabase'
@@ -66,6 +68,9 @@ export default function ClientesContainer(): React.ReactElement {
   const notify = useNotification()
   const queryClient = useQueryClient()
   const { registrarPago, registrarPagoFIFO, registrarPagoCombinadoFIFO, obtenerResumenCuenta } = usePagos()
+  // T4 (#1710): el admin elige «Quién cobró» en la ficha.
+  const { data: usuariosTodos = [] } = useUsuariosQuery()
+  const quienesCobran = useMemo(() => (isAdmin ? quienesCobranDe(usuariosTodos) : []), [isAdmin, usuariosTodos])
   const rol = perfil?.rol
   const puedePago = puedeRegistrarPagoCliente(rol)
   // Preventista editando un cliente existente: solo puede tocar datos de
@@ -342,6 +347,7 @@ export default function ClientesContainer(): React.ReactElement {
     notas: string
     fecha: string
     clientRequestId?: string
+    cobradoPor?: string | null
   }) => {
     const pago = await registrarPago({
       clienteId: datosPago.clienteId,
@@ -353,6 +359,7 @@ export default function ClientesContainer(): React.ReactElement {
       fecha: datosPago.fecha,
       usuarioId: user?.id ?? '',
       clientRequestId: datosPago.clientRequestId,
+      cobradoPor: datosPago.cobradoPor,
     })
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
@@ -371,6 +378,7 @@ export default function ClientesContainer(): React.ReactElement {
     referencia?: string
     notas?: string
     clientRequestId?: string
+    cobradoPor?: string | null
   }) => {
     const result = await registrarPagoFIFO(input)
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
@@ -391,6 +399,7 @@ export default function ClientesContainer(): React.ReactElement {
     referencia?: string
     notas?: string
     clientRequestId?: string
+    cobradoPor?: string | null
   }) => {
     const result = await registrarPagoCombinadoFIFO(input)
     queryClient.invalidateQueries({ queryKey: ['pedidos'] })
@@ -687,6 +696,8 @@ export default function ClientesContainer(): React.ReactElement {
             permitirAdelantoSueldo
             isAdmin={isAdmin}
             clienteEsEmpleado={clienteEsEmpleado ?? null}
+            quienesCobran={isAdmin ? quienesCobran : undefined}
+            yoId={user?.id ?? null}
           />
         </Suspense>
       )}
