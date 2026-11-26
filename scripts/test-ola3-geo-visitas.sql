@@ -1,4 +1,4 @@
--- Ensayo de la tarjeta T8 de la ola 3 (#1690, #1554, #1623; mig NNN_ola3_geo_visitas):
+-- Ensayo de la tarjeta T8 de la ola 3 (#1690, #1554, #1623; mig 549_ola3_geo_visitas):
 -- la visita con clave y el panel de Geolocalización por el día en que se cargó.
 --
 -- Corre contra prod SIN dejar rastro: un único DO que termina SIEMPRE en una excepción
