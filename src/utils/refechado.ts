@@ -38,7 +38,8 @@ export interface EtiquetaRefechado {
 
 /**
  * La etiqueta del pedido refechado, o null si no corresponde. Sólo mientras el pedido sigue
- * por entregar: entregado o dado de baja, la marca queda en la base pero ya no se muestra.
+ * por entregar. Al entregarse el server la borra (decisión del dueño del 26/11); entregado o dado
+ * de baja tampoco se muestra, por las dudas de un dato viejo.
  */
 export function etiquetaRefechado(pedido: PedidoRefechable | null | undefined): EtiquetaRefechado | null {
   if (!pedido?.entrega_refechada_desde) return null;

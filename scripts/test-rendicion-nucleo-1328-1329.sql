@@ -185,8 +185,9 @@ DECLARE
 BEGIN
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1328 R3');
   v_ped := pg_temp.t_pedido(c, a, pg_temp.t_prod(s), 1);
-  UPDATE public.pedidos SET estado = 'asignado', transportista_id = e WHERE id = v_ped;
-  PERFORM pg_temp.t_pago(c, s, v_ped, 100, v_x, a);
+  -- Lo que el encargado tiene que rendir ese día es un cobro suyo. Desde la T2 de la ola 3
+  -- (1601-b1) un pedido no se le asigna a un encargado como chofer (_actua_como_transportista).
+  PERFORM pg_temp.t_pago(c, s, NULL, 100, v_x, e);
 
   j := pg_temp.t_confirmar(e, v_x, e);
   f := pg_temp.t_si(f, pg_temp.t_rechazo(j), format('el encargado confirmo la suya: %s', j));

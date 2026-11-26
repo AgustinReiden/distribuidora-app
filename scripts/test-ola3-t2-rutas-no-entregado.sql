@@ -5,10 +5,14 @@
 -- y un chofer de la 2) y termina SIEMPRE en una excepción (ENSAYO OK / ENSAYO FALLÓ): no deja
 -- rastro. Corre sobre la base de CI sin datos. Sin la migración falla; con ella, ENSAYO OK. Usa
 -- el día argentino (`_tablero_hoy()`), nunca CURRENT_DATE. El orden de los bloqueos (#1432) lo
--- prueba scripts/concurrencia/t2-rutas-orden-de-bloqueos.sh, con dos sesiones.
+-- prueba scripts/concurrencia/t2-rutas-orden-de-bloqueos.sh, con dos sesiones. Eso incluye el
+-- FOR UPDATE de marcar_no_entregado y el estado en el WHERE de su UPDATE (VTA-06): con una sola
+-- sesión el pedido se lee siempre después de la entrega confirmada, así que sacar uno solo de
+-- los dos no se ve acá (sacar los dos, sí: V6).
 --
 -- Gente: E (encargado de la 1), ED (encargado de la 1, desactivado), choferes A, B, C y D de la
--- 1, DX (chofer de la 1 desactivado), X2 (chofer de la 2) y PV (preventista de la 1).
+-- 1, DX (chofer de la 1 desactivado), X2 (chofer de la 2), PV (preventista de la 1), F (chofer
+-- de la 1 que se desactiva con un pedido asignado), G (chofer de la 1) y AD (admin de la 1).
 --
 --   R1 · #1697: en la ruta de hoy de A, P1 (sin programada), P2 (programada ayer), P3
 --        (programada en 3 días) y P4 (programada hoy, motivo «Lo rechazó»). A los marca no
@@ -18,6 +22,10 @@
 --   R2 · P2 vuelve a hoy, sale en la ruta de B y B lo marca no entregado otra vez: mañana, y la
 --        fecha original sigue siendo la primera (ayer).
 --   R3 · La respuesta de marcar_no_entregado dice si refechó y a qué día.
+--   R4 · Decisiones del dueño del 26/11 sobre P1 (refechado en R1): E le cambia la programada a
+--        mano (actualizar_fechas_y_notas_pedido, en 2 días) y la marca sigue; se entrega y la
+--        marca queda en NULL; se revierte la entrega y sigue en NULL. (P3 ya probó que una
+--        programada futura no se adelanta: queda para su fecha.)
 --   V6 · VTA-06: marcar_no_entregado de un pedido entregado se rechaza y el pedido sigue
 --        entregado (control de lo que ya estaba).
 --   B1 · 1601-b1: E, por REST, no le pone a un pedido asignado el chofer PV (preventista), X2
@@ -25,8 +33,14 @@
 --        pedido pendiente (sin ruta) el chofer PV se rechaza.
 --   B1c · cambiar_transportista_recorrido a PV se rechaza; a D pasa y los pedidos de la ruta
 --        quedan a nombre de D.
+--   B1d · P11 está asignado a F y F se desactiva: un UPDATE de P11 que no cambia el chofer
+--        (transportista_id = transportista_id) pasa. Sólo se valida un chofer nuevo.
 --   B7 · C, por REST, no completa su ruta con una parada sin marcar (23514, con cuántas);
 --        marcada, sí. Y la ruta de A, con todas marcadas, se completa.
+--   B7b · En la ruta de G quedan paradas pendientes que G no puede marcar: P13 ya entregado (la
+--        parada quedó desfasada) y P14, que se le pasó a A. AD (un admin, que por REST ve
+--        todos los pedidos; a G la RLS ya le esconde P14) completa la ruta igual: sólo cuentan
+--        las paradas de pedidos asignados al chofer de la ruta, como en el cron.
 --   B12 · P7, entregado en la ruta de B: quitar_pedido_de_recorridos_activos (E) no le borra la
 --        parada entregada. ED (desactivado) no quita nada.
 --   G   · La columna nueva la lee authenticated y no la escribe (el PATCH da 42501).
@@ -45,6 +59,10 @@ DECLARE
   v_dx     uuid := gen_random_uuid();
   v_x2     uuid := gen_random_uuid();
   v_pv     uuid := gen_random_uuid();
+  v_f      uuid := gen_random_uuid();
+  v_g      uuid := gen_random_uuid();
+  v_ad     uuid := gen_random_uuid();
+  v_rg     bigint;
   v_cli    bigint;
   v_p      bigint[] := '{}';
   v_id     bigint;
@@ -67,7 +85,8 @@ BEGIN
                  (v_a, 'transportista', 1, 'A'), (v_b, 'transportista', 1, 'B'),
                  (v_c, 'transportista', 1, 'C'), (v_d, 'transportista', 1, 'D'),
                  (v_dx, 'transportista', 1, 'DX'), (v_x2, 'transportista', 2, 'X2'),
-                 (v_pv, 'preventista', 1, 'PV')) AS u(id, rol, suc, que);
+                 (v_pv, 'preventista', 1, 'PV'), (v_f, 'transportista', 1, 'F'),
+                 (v_g, 'transportista', 1, 'G'), (v_ad, 'admin', 1, 'AD')) AS u(id, rol, suc, que);
   -- La baja sincroniza auth.users (trg_perfiles_sync_acceso_auth): en una base sin el schema
   -- de Auth completo (la de CI), sin triggers, como test-bot-alcance-1552.
   BEGIN
@@ -81,8 +100,8 @@ BEGIN
   INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
   VALUES (v_tag, v_tag, 'Calle T2 1', 1) RETURNING id INTO v_cli;
 
-  -- P1..P10, pendientes, cargados ayer (la fecha del pedido no tiene que moverse).
-  FOR v_n IN 1..10 LOOP
+  -- P1..P14, pendientes, cargados ayer (la fecha del pedido no tiene que moverse).
+  FOR v_n IN 1..14 LOOP
     INSERT INTO pedidos (cliente_id, fecha, estado, total, monto_pagado, estado_pago, canal, usuario_id, creado_por,
                          sucursal_id, fecha_entrega_programada)
     VALUES (v_cli, v_hoy - 1, 'pendiente', 1000, 0, 'pendiente', 'app', v_e, v_e, 1,
@@ -190,6 +209,26 @@ BEGIN
     v_fallas := v_fallas || format('R2 · P2 refechado dos veces quedó %s; se esperaba mañana con la original de la primera (ayer)', pg_temp.fechas(v_p[2]));
   END IF;
 
+  -- ------------------------------------------------------------------- R4 ---
+  -- En un sub-bloque que se deshace: P1 se entrega fuera de toda ruta y se revierte.
+  BEGIN
+    v_txt := pg_temp.r(v_e, 1, format('SELECT public.actualizar_fechas_y_notas_pedido(%s, NULL, NULL, NULL, %L::date)',
+                                      v_p[1], v_hoy + 2));
+    IF v_txt <> 'PASA' OR pg_temp.fechas(v_p[1]) IS DISTINCT FROM format('%s|%s|%s', v_hoy + 2, v_hoy, v_hoy - 1) THEN
+      v_fallas := v_fallas || format('R4 · el cambio a mano de la programada no conservó la marca: %s (%s)', pg_temp.fechas(v_p[1]), v_txt);
+    END IF;
+    UPDATE pedidos SET estado = 'entregado', transportista_id = v_a, fecha_entrega = now() WHERE id = v_p[1];
+    IF (SELECT to_jsonb(p)->>'entrega_refechada_desde' FROM pedidos p WHERE id = v_p[1]) IS NOT NULL THEN
+      v_fallas := v_fallas || 'R4 · al entregarse, la marca de refechado no se borró'::text;
+    END IF;
+    UPDATE pedidos SET estado = 'asignado', fecha_entrega = NULL WHERE id = v_p[1];
+    IF (SELECT to_jsonb(p)->>'entrega_refechada_desde' FROM pedidos p WHERE id = v_p[1]) IS NOT NULL THEN
+      v_fallas := v_fallas || 'R4 · al revertir la entrega, la marca de refechado volvió'::text;
+    END IF;
+    RAISE EXCEPTION USING ERRCODE = 'ZZ0DS';
+  EXCEPTION WHEN SQLSTATE 'ZZ0DS' THEN NULL;
+  END;
+
   -- ------------------------------------------------------------- V6 y B12 ---
   v_txt := pg_temp.r(v_e, 1, format('SELECT public.marcar_entregas_masivo(ARRAY[%s]::bigint[], %L::uuid, %L::date)',
                                     v_p[7], v_b, v_hoy));
@@ -259,6 +298,39 @@ BEGIN
     v_fallas := v_fallas || ('B7 · A no pudo completar su ruta con todo marcado: ' || v_txt);
   END IF;
 
+  -- ------------------------------------------------------------------ B1d ---
+  UPDATE pedidos SET estado = 'asignado', transportista_id = v_f WHERE id = v_p[11];
+  BEGIN
+    UPDATE perfiles SET activo = false WHERE id = v_f;
+  EXCEPTION WHEN OTHERS THEN
+    SET LOCAL session_replication_role = replica;
+    UPDATE perfiles SET activo = false WHERE id = v_f;
+    SET LOCAL session_replication_role = origin;
+  END;
+  v_txt := pg_temp.r(v_e, 1, format('UPDATE public.pedidos SET transportista_id = transportista_id WHERE id = %s', v_p[11]));
+  IF v_txt <> 'PASA' THEN
+    v_fallas := v_fallas || ('B1d · un UPDATE que no cambia el chofer (desactivado) se rechazó: ' || v_txt);
+  END IF;
+
+  -- ------------------------------------------------------------------ B7b ---
+  -- En un sub-bloque que se deshace: las paradas desfasadas a propósito pondrían RUTA-A en rojo.
+  BEGIN
+    v_rg := pg_temp.v(v_e, 1, pg_temp.ruta(v_g, v_p[12:14], v_hoy))::bigint;
+    v_txt := pg_temp.r(v_g, 1, pg_temp.ne(v_p[12], 'cerrado'));
+    IF v_txt <> 'PASA' THEN v_fallas := v_fallas || ('B7b · no entregado de P12: ' || v_txt); END IF;
+    -- P13 entregado y su parada vuelta a pendiente (desfasada); P14 pasado a A.
+    UPDATE pedidos SET estado = 'entregado', fecha_entrega = now() WHERE id = v_p[13];
+    UPDATE recorrido_pedidos SET estado_entrega = 'pendiente', hora_entrega = NULL
+     WHERE recorrido_id = v_rg AND pedido_id = v_p[13];
+    UPDATE pedidos SET transportista_id = v_a WHERE id = v_p[14];
+    v_txt := pg_temp.r(v_ad, 1, format('UPDATE public.recorridos SET estado = ''completado'' WHERE id = %s', v_rg));
+    IF v_txt <> 'PASA' OR (SELECT estado FROM recorridos WHERE id = v_rg) <> 'completado' THEN
+      v_fallas := v_fallas || ('B7b · la ruta de G no se completó por paradas que G no puede marcar: ' || v_txt);
+    END IF;
+    RAISE EXCEPTION USING ERRCODE = 'ZZ0DS';
+  EXCEPTION WHEN SQLSTATE 'ZZ0DS' THEN NULL;
+  END;
+
   -- -------------------------------------------------------------------- G ---
   IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.pedidos'::regclass
                     AND attname = 'entrega_refechada_desde' AND NOT attisdropped) THEN
@@ -285,7 +357,7 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = 'ENSAYO FALLÓ · ' || array_to_string(v_fallas, ' | ');
   END IF;
   RAISE EXCEPTION USING ERRCODE = 'ZZ0OK',
-    MESSAGE = format('ENSAYO OK · R1 R2 R3 V6 B12 B1 B1c B7 G AUD (hoy %s; rutas A %s, B %s, C %s)', v_hoy, v_ra, v_rb, v_rc);
+    MESSAGE = format('ENSAYO OK · R1 R2 R3 R4 V6 B12 B1 B1c B1d B7 B7b G AUD (hoy %s; rutas A %s, B %s, C %s)', v_hoy, v_ra, v_rb, v_rc);
  END;
 END
 $ensayo$;

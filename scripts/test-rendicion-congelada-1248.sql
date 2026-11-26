@@ -213,15 +213,22 @@ RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   f text[] := '{}'; v_x date := pg_temp.t_dia(400); c bigint; v_prod bigint;
   v_p1 bigint; v_p2 bigint; v_pago_a bigint; v_rc bigint; j jsonb; v_res jsonb; v_drill jsonb;
+  tr2 uuid := gen_random_uuid();
 BEGIN
+  -- El otro chofer es un chofer de verdad de la sucursal: desde la T2 de la ola 3 (1601-b1) un
+  -- pedido no se le asigna a un admin (pedidos_entrega_con_chofer, _actua_como_transportista).
+  INSERT INTO auth.users (id, instance_id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+  VALUES (tr2, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+          'e1248-' || tr2 || '@ensayo.invalid', jsonb_build_object('rol', 'transportista', 'sucursal_id', s),
+          jsonb_build_object('nombre', 'ensayo 1248 K1 otro chofer'), now(), now());
   c := pg_temp.t_cliente(s, 'ZZ ensayo 1248 K1');
   v_prod := pg_temp.t_prod(s);
   v_p1 := pg_temp.t_pedido(c, a, v_prod, 1);
   UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id = v_p1;
-  -- La boleta de otro "chofer" (el admin) va antes que los creditos: cada cambio
+  -- La boleta de otro chofer va antes que los creditos: cada cambio
   -- de total dispara la reconciliacion, que los aplicaria antes de tiempo.
   v_p2 := pg_temp.t_pedido(c, a, v_prod, 1);
-  UPDATE public.pedidos SET estado = 'asignado', transportista_id = a, total = 30 WHERE id = v_p2;
+  UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr2, total = 30 WHERE id = v_p2;
   -- El pago de su boleta (lo cargo el admin, se le atribuye al chofer de la
   -- boleta) y un saldo a favor que cobro el chofer.
   v_pago_a := pg_temp.t_pago(c, s, v_p1, 100, v_x, a);
@@ -255,7 +262,7 @@ BEGIN
   j := pg_temp.t_detalle(a, v_x, tr);
   f := pg_temp.t_si(f, pg_temp.t_num(j, 'total') = 170 AND pg_temp.t_num(j, 'pagos') = 2,
                     format('el detalle de la rendicion cerrada cambio: %s', j));
-  j := pg_temp.t_detalle(a, v_x, a);
+  j := pg_temp.t_detalle(a, v_x, tr2);
   f := pg_temp.t_si(f, pg_temp.t_num(j, 'total') = 0,
                     format('el otro chofer recibio plata de la rendicion cerrada: %s', j));
   v_drill := pg_temp.t_rpc(a, format(
@@ -266,7 +273,7 @@ BEGIN
   j := pg_temp.t_resumen(a, v_x, tr);
   f := pg_temp.t_si(f, jsonb_typeof(j) = 'array' AND (j->0->>'general')::numeric = 170,
                     format('el resumen de la rendicion cerrada cambio: %s', j));
-  j := pg_temp.t_resumen(a, v_x, a);
+  j := pg_temp.t_resumen(a, v_x, tr2);
   f := pg_temp.t_si(f, jsonb_typeof(j) = 'array' AND COALESCE((j->0->>'general')::numeric, 0) = 0,
                     format('el resumen del otro chofer recibio plata de la cerrada: %s', j));
 

@@ -37,8 +37,9 @@
 --     scripts/rol-sin-activo-permitidas.json.
 -- 5 · Rut-B7 (decisión del dueño) · una ruta no se completa desde la app con
 --     paradas sin marcar: recorridos_estado_transicion rechaza en_curso →
---     completado por REST mientras quede una parada 'pendiente' cuyo pedido no
---     está entregado ni dado de baja, con el motivo y cuántas faltan. El
+--     completado por REST mientras quede una parada 'pendiente' de un pedido
+--     asignado al chofer de la ruta (lo que él puede marcar, y lo que mira el
+--     cron), con el motivo y cuántas faltan. El
 --     cierre del server (cerrar_recorridos_vencidos) no pasa por acá. El
 --     UPDATE de recorridos sigue concedido (un bundle viejo del PWA lo usa
 --     para completar una ruta ya marcada entera): queda en bundle_viejo.
@@ -58,9 +59,13 @@
 --     tenía o, sin programada, el día de la ruta; si se refecha otra vez,
 --     conserva la primera): la pantalla la muestra como «Refechado». La
 --     fecha del pedido (pedidos.fecha) no se toca. Respeta el rango de la
---     entrega programada (_fecha_entrega_programada_fuera_de_rango); una
---     programada que ya es futura no se adelanta. El armado se sigue borrando
---     (Rut-B9, pedidos_registrar_armado, sin cambios).
+--     entrega programada (_fecha_entrega_programada_fuera_de_rango). Una
+--     programada que ya es futura no se adelanta: queda para su fecha (decisión
+--     del dueño del 26/11). Al entregarse, la marca se borra
+--     (pedidos_entrega_con_chofer, decisión del dueño del 26/11) y no vuelve si
+--     se revierte la entrega; un cambio a mano de la programada la conserva
+--     hasta la entrega. El armado se sigue borrando (Rut-B9,
+--     pedidos_registrar_armado, sin cambios).
 --     La columna es de server: authenticated la lee (pedidos se lee por
 --     tabla) y no la escribe (pedidos.UPDATE es por columna y no se suma).
 --
@@ -131,7 +136,7 @@ $premisas$;
 ALTER TABLE public.pedidos ADD COLUMN entrega_refechada_desde date;
 
 COMMENT ON COLUMN public.pedidos.entrega_refechada_desde IS
-  '#1697: la entrega programada que tenía el pedido antes de que marcar_no_entregado la pasara al día siguiente (sin programada, el día de la ruta). NULL: nunca se refechó. Con varios refechados, la primera. La escribe sólo el server.';
+  '#1697: la entrega programada que tenía el pedido antes de que marcar_no_entregado la pasara al día siguiente (sin programada, el día de la ruta). NULL: nunca se refechó. Con varios refechados, la primera. Se borra al entregarse (no vuelve si se revierte la entrega). La escribe sólo el server.';
 
 -- ---------------------------------------------------------------------------
 -- 1 + 7 · marcar_no_entregado
@@ -652,15 +657,18 @@ BEGIN
     -- mig NNN (Rut-B7 de #1554, decisión del dueño): con paradas sin marcar no se completa.
     -- Cada una se marca entregada o no entregada, y recién ahí se cierra la ruta. Si no,
     -- marcar_no_entregado ya no las encuentra (pide la ruta en curso) y la parada queda
-    -- pendiente contando en una ruta cerrada. Cuenta como sin marcar la parada pendiente cuyo
-    -- pedido no está entregado ni dado de baja (una desfasada de un entregado no traba).
+    -- pendiente contando en una ruta cerrada. Cuenta sólo lo que el chofer de la ruta puede
+    -- marcar: la parada pendiente de un pedido asignado a él (es lo que mira el cron,
+    -- cerrar_recorridos_vencidos). Una desfasada de un entregado, la de un pedido que volvió a
+    -- pendiente o la de uno que se le pasó a otro chofer no traban.
     SELECT count(*) INTO v_sin_marcar
       FROM recorrido_pedidos rp
      WHERE rp.recorrido_id = OLD.id
        AND rp.estado_entrega = 'pendiente'
-       AND NOT EXISTS (SELECT 1 FROM pedidos p
-                        WHERE p.id = rp.pedido_id
-                          AND p.estado IN ('entregado', 'cancelado', 'anulado'));
+       AND EXISTS (SELECT 1 FROM pedidos p
+                    WHERE p.id = rp.pedido_id
+                      AND p.estado = 'asignado'
+                      AND p.transportista_id = OLD.transportista_id);
     IF v_sin_marcar > 0 THEN
       RAISE EXCEPTION 'La ruta #% tiene % parada(s) sin marcar: marcá cada una como entregada o no entregada y después cerrá la ruta.',
         OLD.id, v_sin_marcar
@@ -700,6 +708,14 @@ BEGIN
      AND NOT public.es_encargado_o_admin() THEN
     RAISE EXCEPTION 'Solo un administrador o encargado puede marcar que el cliente retiró el pedido en el depósito.'
       USING ERRCODE = '42501';
+  END IF;
+
+  -- mig NNN (#1697, decisión del dueño del 26/11): al entregarse, la marca de refechado se
+  -- borra («cuando el pedido se entrega ... se borra la etiqueta de refechado»). Si después se
+  -- revierte la entrega, no vuelve. Un cambio a mano de la entrega programada no la toca: ese
+  -- UPDATE no pasa a entregado. Va antes de la salida del vale blanco, para todo pedido.
+  IF NEW.estado = 'entregado' AND (TG_OP = 'INSERT' OR OLD.estado IS DISTINCT FROM 'entregado') THEN
+    NEW.entrega_refechada_desde := NULL;
   END IF;
 
   -- mig NNN (1601-b1 de #1601): el chofer de un pedido es un chofer de su sucursal en toda
@@ -766,8 +782,8 @@ BEGIN
     ('public._pedido_a_pendiente(bigint,bigint,text)', '84ee376ad61cfe788c7c82bb7446352f'),
     ('public.cambiar_transportista_recorrido(bigint,uuid)', 'e13b72c3b0561b002da28a1e9985253a'),
     ('public.quitar_pedido_de_recorridos_activos(bigint)', '621af18e95b1d7f6f66fb28b5f331a5c'),
-    ('public.recorridos_estado_transicion()', '0320a07ba003fa4d58d289b25ea9d1b5'),
-    ('public.pedidos_entrega_con_chofer()', 'bae7dcb40f58dc3e7d9d563ce368fdfa')
+    ('public.recorridos_estado_transicion()', 'af5ff8c70b6679e0a526d719be4af5dd'),
+    ('public.pedidos_entrega_con_chofer()', '74779d5221b0fac3f826ab805255b1d2')
   ) AS t(f, h) LOOP
     SELECT md5(prosrc) INTO v FROM pg_proc WHERE oid = r.f::regprocedure;
     IF v IS DISTINCT FROM r.h THEN
