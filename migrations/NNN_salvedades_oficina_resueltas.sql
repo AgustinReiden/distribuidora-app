@@ -1,5 +1,5 @@
 -- =========================================================================
--- NNN · LA SALVEDAD QUE CARGA LA OFICINA NACE RESUELTA, Y SE CIERRAN LAS PENDIENTES DE HOY
+-- NNN · LA SALVEDAD QUE CARGA LA OFICINA NACE RESUELTA, Y SE CIERRAN LAS PENDIENTES QUE REVISÓ EL DUEÑO
 --       (#1700, Part of #1690)
 --
 -- Ensayo: scripts/test-salvedades-oficina-1700.sql. Se aplica en LF, en una sola transacción o
@@ -36,26 +36,33 @@
 --       · Si la oficina quiere otra resolución, la hace aparte, como hoy: una nota de crédito de
 --         venta desde el pedido, o anular la salvedad (admin). resolver_salvedad() no se toca y
 --         sigue rechazando una resuelta ('Ya resuelta').
---   2 · Limpieza: se cierran TODAS las pendientes de hoy como «resuelto_otro», sin tocar
---       reportado_por ni created_at, con resolucion_fecha = la de la limpieza y una fila
---       'resolucion' en salvedad_historial (como cerrar_salvedades_en_lote):
---       · las que cargó un admin o un encargado (perfiles.rol de reportado_por, hoy): nota
+--   2 · Limpieza: se cierran las pendientes que midió y revisó el dueño (25/11), y sólo esas,
+--       como «resuelto_otro», sin tocar reportado_por ni created_at, con resolucion_fecha = la de
+--       la limpieza y una fila 'resolucion' en salvedad_historial (como cerrar_salvedades_en_lote):
+--       · las 84 que cargó un admin o un encargado (perfiles.rol de reportado_por, hoy): nota
 --         «Cargada y resuelta por la oficina», resuelto_por = quien la cargó;
---       · las otras: nota «Cerrada en la limpieza del 25/11: cargada en la calle, revisada por el
---         dueño», resuelto_por NULL (las revisó el dueño, sin un usuario de la app que lo diga;
---         la columna lo acepta y el panel no muestra «Por:»).
+--       · las 7 de la calle: las de un preventista (con el rol extra de chofer) cargadas entre el
+--         10/10 y el 17/10 de 2026, día argentino. Nota «Cerrada en la limpieza de la ola 3:
+--         cargada en la calle, revisada por el dueño», resuelto_por NULL (las revisó el dueño, sin
+--         un usuario de la app que lo diga; la columna lo acepta y el panel no muestra «Por:»).
+--       Cualquier otra pendiente (la de un chofer cargada hoy, antes de aplicar) no la vio nadie:
+--       queda pendiente. Si las de la oficina no son 84 o las de la calle no son 7, aborta; con
+--       ninguna pendiente (la base de CI, sin datos) no hace nada. La lógica la prueba
+--       scripts/test-salvedades-limpieza-1700.sql, que tiene una copia exacta de este bloque (lo
+--       fija src/test/limpiezaSalvedades1700.contract.test.ts).
 --       No mueve plata, stock ni totales: sólo escribe esas columnas. Sobre salvedades_items el
 --       UPDATE dispara sólo trigger_salvedades_updated_at (pone updated_at); el de lotes_devueltos
 --       es OF lotes_devueltos y no salta. salvedades_items no tiene auditoría (audit_logs).
 --
 -- PREMISAS: md5(prosrc) de registrar_salvedad() es el de la 548; las anclas aparecen una vez cada
--- una; hay a lo sumo 200 pendientes (en prod, 91). Reaplicarla aborta en la primera premisa.
+-- una; las pendientes que cierra son 84 de la oficina y 7 de la calle (o ninguna pendiente).
+-- Reaplicarla aborta en la primera premisa.
 -- Se parchea por ancla sobre pg_get_functiondef, que conserva SECURITY DEFINER y el
 -- SET search_path (public, pg_temp); CREATE OR REPLACE conserva los EXECUTE (postgres,
 -- authenticated, service_role; ni PUBLIC ni anon).
 --
 -- LOCKS: ninguno de tabla explícito. CREATE OR REPLACE toma la fila de pg_proc; el UPDATE de la
--- limpieza toma las filas pendientes de salvedades_items (≤ 200).
+-- limpieza toma las 91 filas que cierra.
 -- EMBEDS DE POSTGREST: no hay FK nuevas.
 -- =========================================================================
 
@@ -189,27 +196,46 @@ $post_registrar$;
 -- 2 · Limpieza: se cierran todas las pendientes de hoy
 -- -------------------------------------------------------------------------
 -- Premisa, cierre y poscondición en un solo DO: aplicada sentencia por sentencia, la cuenta de
--- antes y la de después son de la misma foto. Reaplicada sin pendientes no hace nada.
+-- antes y la de después son de la misma foto. El cuerpo entre los $limpieza$ es el mismo de
+-- scripts/test-salvedades-limpieza-1700.sql (lo fija src/test/limpiezaSalvedades1700.contract.test.ts).
 DO $limpieza$
 DECLARE
-  c_oficina CONSTANT text := 'Cargada y resuelta por la oficina';
-  c_calle   CONSTANT text := 'Cerrada en la limpieza del 25/11: cargada en la calle, revisada por el dueño';
-  v_total   int;
-  v_oficina int;
-  v_calle   int;
-  v_n       int;
+  c_oficina   CONSTANT text := 'Cargada y resuelta por la oficina';
+  c_calle     CONSTANT text := 'Cerrada en la limpieza de la ola 3: cargada en la calle, revisada por el dueño';
+  -- Lo medido en prod el 25/11 (#1700): 83 de un admin y 1 de un encargado, y 7 de preventistas
+  -- con el rol extra de chofer, cargadas del 10/10 al 17/10 (día argentino).
+  c_n_oficina CONSTANT int := 84;
+  c_n_calle   CONSTANT int := 7;
+  c_desde     CONSTANT date := DATE '2026-10-10';
+  c_hasta     CONSTANT date := DATE '2026-10-17';
+  v_total     int;
+  v_oficina   int;
+  v_calle     int;
+  v_n         int;
+  v_h_oficina int;
+  v_h_calle   int;
 BEGIN
   SELECT count(*),
          count(*) FILTER (WHERE p.rol IN ('admin', 'encargado')),
-         count(*) FILTER (WHERE p.rol IS DISTINCT FROM 'admin' AND p.rol IS DISTINCT FROM 'encargado')
+         count(*) FILTER (WHERE p.rol = 'preventista'
+                            AND (s.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                BETWEEN c_desde AND c_hasta)
     INTO v_total, v_oficina, v_calle
     FROM salvedades_items s
     LEFT JOIN perfiles p ON p.id = s.reportado_por
    WHERE s.estado_resolucion = 'pendiente';
-  IF v_total > 200 THEN
-    RAISE EXCEPTION 'premisa · hay % salvedades pendientes (se esperaban 91, a lo sumo 200): revisar antes de cerrarlas', v_total;
+  -- Sin ninguna pendiente (la base de CI, sin datos) no hay nada que cerrar.
+  IF v_total = 0 THEN
+    RAISE NOTICE 'limpieza · no hay salvedades pendientes: nada que cerrar';
+    RETURN;
+  END IF;
+  IF v_oficina <> c_n_oficina OR v_calle <> c_n_calle THEN
+    RAISE EXCEPTION 'premisa · hay % pendientes de la oficina y % de la calle del % al % (se midieron % y %): volver a medir antes de cerrarlas',
+      v_oficina, v_calle, c_desde, c_hasta, c_n_oficina, c_n_calle;
   END IF;
 
+  -- Sólo las que se midieron: una pendiente de la calle fuera de esas (la de un chofer cargada
+  -- hoy) no la revisó nadie y queda pendiente.
   WITH cerradas AS (
     UPDATE salvedades_items s SET
       estado_resolucion = 'resuelto_otro',
@@ -220,27 +246,37 @@ BEGIN
       FROM perfiles p
      WHERE p.id = s.reportado_por
        AND s.estado_resolucion = 'pendiente'
+       AND (p.rol IN ('admin', 'encargado')
+            OR (p.rol = 'preventista'
+                AND (s.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                    BETWEEN c_desde AND c_hasta))
     RETURNING s.id, s.sucursal_id, s.resolucion_notas, s.resuelto_por
+  ), historial AS (
+    INSERT INTO salvedad_historial (salvedad_id, accion, estado_anterior, estado_nuevo, notas, usuario_id, sucursal_id)
+    SELECT id, 'resolucion', 'pendiente', 'resuelto_otro', resolucion_notas, resuelto_por, sucursal_id
+      FROM cerradas
+    RETURNING notas, usuario_id
   )
-  INSERT INTO salvedad_historial (salvedad_id, accion, estado_anterior, estado_nuevo, notas, usuario_id, sucursal_id)
-  SELECT id, 'resolucion', 'pendiente', 'resuelto_otro', resolucion_notas, resuelto_por, sucursal_id
-    FROM cerradas;
-  GET DIAGNOSTICS v_n = ROW_COUNT;
+  SELECT count(*),
+         count(*) FILTER (WHERE notas = c_oficina AND usuario_id IS NOT NULL),
+         count(*) FILTER (WHERE notas = c_calle AND usuario_id IS NULL)
+    INTO v_n, v_h_oficina, v_h_calle
+    FROM historial;
 
-  IF EXISTS (SELECT 1 FROM salvedades_items WHERE estado_resolucion = 'pendiente') THEN
-    RAISE EXCEPTION 'poscondición · quedan % salvedades pendientes',
-      (SELECT count(*) FROM salvedades_items WHERE estado_resolucion = 'pendiente');
+  IF v_n <> c_n_oficina + c_n_calle OR v_h_oficina <> c_n_oficina OR v_h_calle <> c_n_calle THEN
+    RAISE EXCEPTION 'poscondición · se cerraron % (oficina %, calle %), se esperaban % y %',
+      v_n, v_h_oficina, v_h_calle, c_n_oficina, c_n_calle;
   END IF;
-  IF v_n <> v_total
-     OR (SELECT count(*) FROM salvedad_historial
-          WHERE accion = 'resolucion' AND notas = c_oficina AND created_at = NOW()
-            AND usuario_id IS NOT NULL) <> v_oficina
-     OR (SELECT count(*) FROM salvedad_historial
-          WHERE accion = 'resolucion' AND notas = c_calle AND created_at = NOW()
-            AND usuario_id IS NULL) <> v_calle THEN
-    RAISE EXCEPTION 'poscondición · se cerraron % de % (oficina %, calle %) y el historial no cuadra', v_n, v_total, v_oficina, v_calle;
+  IF EXISTS (SELECT 1 FROM salvedades_items s JOIN perfiles p ON p.id = s.reportado_por
+              WHERE s.estado_resolucion = 'pendiente'
+                AND (p.rol IN ('admin', 'encargado')
+                     OR (p.rol = 'preventista'
+                         AND (s.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                             BETWEEN c_desde AND c_hasta))) THEN
+    RAISE EXCEPTION 'poscondición · quedó pendiente una de la oficina o de la calle del % al %', c_desde, c_hasta;
   END IF;
-  RAISE NOTICE 'limpieza · % salvedades pendientes cerradas: % de la oficina y % de la calle', v_n, v_oficina, v_calle;
+  RAISE NOTICE 'limpieza · % salvedades cerradas: % de la oficina y % de la calle; quedan % pendientes',
+    v_n, v_h_oficina, v_h_calle, v_total - v_n;
 END
 $limpieza$;
 

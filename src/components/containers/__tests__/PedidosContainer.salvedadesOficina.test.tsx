@@ -65,6 +65,8 @@ const PEDIDO = {
 
 const emptyQuery = { data: [], isLoading: false, isFetching: false, refetch: vi.fn() }
 const emptyMutation = { mutateAsync: vi.fn().mockResolvedValue({}), mutate: vi.fn(), isPending: false }
+// Aparte, para poder hacer fallar una entrega.
+const cambiarEstadoMutation = { mutateAsync: vi.fn().mockResolvedValue({}), mutate: vi.fn(), isPending: false }
 
 vi.mock('../../../hooks/queries', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -72,7 +74,7 @@ vi.mock('../../../hooks/queries', async (importOriginal) => ({
   usePedidoStatsQuery: () => ({ data: undefined, isLoading: false }),
   EMPTY_PEDIDO_STATS_SUMMARY: {},
   useCrearPedidoMutation: () => emptyMutation,
-  useCambiarEstadoMutation: () => emptyMutation,
+  useCambiarEstadoMutation: () => cambiarEstadoMutation,
   useAsignarTransportistaMutation: () => emptyMutation,
   useQuitarPedidoDeRecorridosMutation: () => emptyMutation,
   useVolverPedidoAPendienteMutation: () => emptyMutation,
@@ -138,36 +140,63 @@ vi.mock('../../../hooks/usePromocionPedido', () => ({
 }))
 
 // El modal de entrega: guarda dos salvedades en un solo `onSave` y, si entraron, marca entregado.
+// «Entregar sin guardar» marca entregado sin guardar nada en este modal, y «Cerrar» lo cierra.
 vi.mock('../../modals/ModalEntregaConSalvedad', () => ({
-  default: function ModalFalso({ onSave, onMarcarEntregado }: {
+  default: function ModalFalso({ onSave, onMarcarEntregado, onClose }: {
     onSave: (s: unknown[]) => Promise<Array<{ success: boolean }>>
     onMarcarEntregado: () => Promise<void>
+    onClose: () => void
   }) {
     const salvedad = (n: number) => ({
       pedidoId: '42', pedidoItemId: String(n), cantidadAfectada: 1,
       motivo: 'danado', devolverStock: false, clientRequestId: `req-lote-${n}`,
     })
     return (
-      <button
-        type="button"
-        onClick={() => {
-          void onSave([salvedad(1), salvedad(2)]).then(r => (r.every(x => x.success) ? onMarcarEntregado() : undefined))
-        }}
-      >
-        Guardar lote
-      </button>
+      <div>
+        <button
+          type="button"
+          onClick={() => {
+            void onSave([salvedad(1), salvedad(2)]).then(r => (r.every(x => x.success) ? onMarcarEntregado() : undefined))
+          }}
+        >
+          Guardar lote
+        </button>
+        <button type="button" onClick={() => { void onMarcarEntregado() }}>Entregar sin guardar</button>
+        <button type="button" onClick={onClose}>Cerrar</button>
+      </div>
     )
   },
 }))
 
+// La vista: abre el modal de entrega, o registra una salvedad suelta (el camino de la ruta del
+// chofer, que usa el mismo guardado).
 vi.mock('../../vistas/VistaPedidos', () => ({
-  default: function VistaFalsa({ onMarcarEntregadoConSalvedad }: {
+  default: function VistaFalsa({ onMarcarEntregadoConSalvedad, onRegistrarSalvedad }: {
     onMarcarEntregadoConSalvedad?: (pedido: unknown) => void
+    onRegistrarSalvedad?: (d: {
+      pedidoId: string; pedidoItemId: string; cantidadAfectada: number
+      motivo: 'danado'; devolverStock: boolean; clientRequestId: string
+    }) => Promise<{ success: boolean }>
   }) {
+    const [hecha, setHecha] = React.useState(false)
     return (
-      <button type="button" onClick={() => onMarcarEntregadoConSalvedad?.({ id: 42 })}>
-        Abrir lote
-      </button>
+      <div>
+        <button type="button" onClick={() => onMarcarEntregadoConSalvedad?.({ id: 42 })}>
+          Abrir lote
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            void onRegistrarSalvedad?.({
+              pedidoId: '7', pedidoItemId: '70', cantidadAfectada: 1,
+              motivo: 'danado', devolverStock: false, clientRequestId: 'req-suelta',
+            }).then(() => setHecha(true))
+          }}
+        >
+          Registrar una
+        </button>
+        {hecha && <p>Suelta registrada</p>}
+      </div>
     )
   },
 }))
@@ -228,5 +257,34 @@ describe('PedidosContainer — aviso de la entrega con salvedades (#1700)', () =
   it('un server anterior a #1700 (sin estado_resolucion): el aviso de siempre', async () => {
     contestar([undefined, undefined])
     expect(await entregarConSalvedades()).toBe('Pedido entregado con salvedades registradas')
+  })
+
+  // N7 de la revisión: lo que contestó otro guardado no vale para esta entrega.
+  it('una salvedad suelta resuelta (la vista del chofer) no hace decir «resueltas» a la entrega de otro pedido', async () => {
+    contestar(['resuelto_otro'])
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: 'Registrar una' }))
+    await screen.findByText('Suelta registrada')
+    await user.click(screen.getByRole('button', { name: 'Abrir lote' }))
+    await user.click(await screen.findByRole('button', { name: 'Entregar sin guardar' }))
+    await waitFor(() => expect(notify.success).toHaveBeenCalled(), { timeout: 5000 })
+    expect(notify.success).toHaveBeenLastCalledWith('Pedido entregado con salvedades registradas')
+  })
+
+  it('si la entrega falla y el modal se cierra, la próxima entrega no usa lo que contestó aquel guardado', async () => {
+    contestar(['resuelto_otro', 'resuelto_otro'])
+    cambiarEstadoMutation.mutateAsync.mockRejectedValueOnce(new Error('Sin conexión'))
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: 'Abrir lote' }))
+    await user.click(await screen.findByRole('button', { name: 'Guardar lote' }))
+    await waitFor(() => expect(notify.error).toHaveBeenCalledWith('Sin conexión'), { timeout: 5000 })
+    expect(notify.success).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Cerrar' }))
+    await user.click(await screen.findByRole('button', { name: 'Abrir lote' }))
+    await user.click(await screen.findByRole('button', { name: 'Entregar sin guardar' }))
+    await waitFor(() => expect(notify.success).toHaveBeenCalled(), { timeout: 5000 })
+    expect(notify.success).toHaveBeenLastCalledWith('Pedido entregado con salvedades registradas')
   })
 })

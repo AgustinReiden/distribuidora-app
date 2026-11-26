@@ -1142,6 +1142,9 @@ export default function PedidosContainer(): React.ReactElement {
   }, [pedidoNotasEditando, notify, queryClient])
 
   const handleMarcarEntregadoConSalvedad = useCallback((pedido: PedidoDB) => {
+    // #1700: el aviso de esta entrega mira sólo lo que se guarde en este modal, no lo de otro
+    // pedido ni lo de una salvedad suelta (la vista del chofer usa el mismo guardado).
+    ultimasSalvedadesRef.current = []
     setPedidoParaSalvedad(pedido)
     setModalEntregaSalvedadOpen(true)
   }, [])
@@ -3336,7 +3339,7 @@ export default function PedidosContainer(): React.ReactElement {
             pedido={pedidoParaSalvedad}
             onSave={handleSaveSalvedades as Parameters<typeof ModalEntregaConSalvedad>[0]['onSave']}
             onMarcarEntregado={handleMarcarEntregadoConSalvedadConfirm}
-            onClose={() => { setModalEntregaSalvedadOpen(false); setPedidoParaSalvedad(null) }}
+            onClose={() => { setModalEntregaSalvedadOpen(false); setPedidoParaSalvedad(null); ultimasSalvedadesRef.current = [] }}
           />
         </Suspense>
       )}
