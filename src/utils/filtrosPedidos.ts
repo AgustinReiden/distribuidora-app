@@ -212,6 +212,11 @@ export interface ChipFiltro {
 
 export interface ContextoChips {
   isAdmin: boolean;
+  /**
+   * ¿El rol tiene el filtro de entrega programada? Lo usa quien arma el reparto: admin y
+   * encargado (#1697: para armar la ruta, la fecha de entrega va primero). Sin el dato, el admin.
+   */
+  puedeFiltrarEntrega?: boolean;
   transportistas?: readonly PersonaFiltro[];
   usuarios?: readonly PersonaFiltro[];
   /** Hoy en YYYY-MM-DD (TZ Argentina). Se pasa para que la función sea pura. */
@@ -297,7 +302,7 @@ export function chipsFiltrosActivos(filtros: FiltrosPedidosUI, ctx: ContextoChip
       salvedad === 'con_salvedad' ? 'warning' : 'neutral',
     ));
   }
-  if (isAdmin && filtros.fechaEntregaProgramada) {
+  if ((ctx.puedeFiltrarEntrega ?? isAdmin) && filtros.fechaEntregaProgramada) {
     chips.push(chip(
       'fechaEntregaProgramada',
       'Entrega',
@@ -331,7 +336,10 @@ export function chipsFiltrosActivos(filtros: FiltrosPedidosUI, ctx: ContextoChip
  * contara, el badge nunca estaría en cero). Tampoco lo que el rol no ve (#733),
  * con la excepción del pago 'impago' del tile.
  */
-export function contarFiltrosActivos(filtros: FiltrosPedidosUI, { isAdmin }: { isAdmin: boolean }): number {
+export function contarFiltrosActivos(
+  filtros: FiltrosPedidosUI,
+  { isAdmin, puedeFiltrarEntrega = isAdmin }: { isAdmin: boolean; puedeFiltrarEntrega?: boolean },
+): number {
   let n = 0;
   if (puesto(filtros.estado)) n++;
   if (pagoVisible(filtros.estadoPago, isAdmin)) n++;
@@ -339,8 +347,8 @@ export function contarFiltrosActivos(filtros: FiltrosPedidosUI, { isAdmin }: { i
     if (puesto(filtros.transportistaId)) n++;
     if (puesto(filtros.usuarioId)) n++;
     if (puesto(filtros.conSalvedad)) n++;
-    if (filtros.fechaEntregaProgramada) n++;
   }
+  if (puedeFiltrarEntrega && filtros.fechaEntregaProgramada) n++;
   if (filtros.verCancelados) n++;
   return n;
 }

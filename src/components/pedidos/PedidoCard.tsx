@@ -47,6 +47,7 @@ const generarReciboPedido = async (pedido: any, _empresa: any = {}, options: { f
 import { formatPrecio, formatFecha, formatHora, fechaLocalISO, parseDateSafe, getEstadoLabel, getEstadoPagoLabel, getFormaPagoLabel, getFormaPagoDisplay } from '../../utils/formatters';
 import { MOTIVOS_SALVEDAD_LABELS } from '../../lib/schemas';
 import { Badge } from '../ui/Badge';
+import EtiquetaRefechado from './EtiquetaRefechado';
 import { Button } from '../ui/Button';
 import Card from '../ui/Card';
 import { toneDeEstadoPago, toneDeEstadoPedido, type Tone } from '../../lib/estadoTones';
@@ -580,6 +581,8 @@ function PedidoCard({
                 entrega {formatFecha(pedido.fecha_entrega_programada)}
               </span>
             )}
+            {/* #1697: no se entregó en su día y la entrega pasó sola al día siguiente. */}
+            <EtiquetaRefechado pedido={pedido} />
             {mostrarEntregado && (
               // Sólo el día: `fecha_entrega` es una fecha guardada como
               // timestamptz al mediodía AR (usePedidosQuery y las RPC de

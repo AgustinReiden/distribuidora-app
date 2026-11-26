@@ -122,6 +122,17 @@ describe('contarFiltrosActivos', () => {
   it('"todos" y la entrega vacía no cuentan; los opcionales ausentes tampoco', () => {
     expect(contarFiltrosActivos({ estado: 'todos', fechaEntregaProgramada: null }, { isAdmin: true })).toBe(0)
   })
+
+  // #1697: el encargado también arma el reparto, así que ve (y cuenta) la entrega programada,
+  // y sólo eso de lo que es del admin.
+  it('el encargado (puedeFiltrarEntrega) cuenta la entrega, no el resto de lo del admin', () => {
+    expect(contarFiltrosActivos({ ...BASE, fechaEntregaProgramada: HOY }, { isAdmin: false, puedeFiltrarEntrega: true })).toBe(1)
+    expect(contarFiltrosActivos(SIETE, { isAdmin: false, puedeFiltrarEntrega: true })).toBe(3)
+    const chips = chipsFiltrosActivos({ ...BASE, fechaEntregaProgramada: HOY }, { isAdmin: false, puedeFiltrarEntrega: true, hoy: HOY })
+    expect(chips.map(c => c.id)).toContain('fechaEntregaProgramada')
+    const sinPermiso = chipsFiltrosActivos({ ...BASE, fechaEntregaProgramada: HOY }, { isAdmin: false, hoy: HOY })
+    expect(sinPermiso.map(c => c.id)).not.toContain('fechaEntregaProgramada')
+  })
 })
 
 describe('describirFiltrosActivos', () => {

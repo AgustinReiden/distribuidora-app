@@ -268,6 +268,7 @@ export default function VistaPedidos({
         transportistas={transportistas as import('../../types').Usuario[]}
         usuarios={usuarios as import('../../types').Usuario[]}
         isAdmin={isAdmin}
+        puedeFiltrarEntrega={isAdmin || isEncargado}
         onBusquedaChange={onBusquedaChange}
         onFiltrosChange={onFiltrosChange}
       />

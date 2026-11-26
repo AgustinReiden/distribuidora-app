@@ -81,4 +81,16 @@ describe('RutaActivaTransportista — «por cobrar» es lo que falta (Fr-B1)', (
     // 600 + 2.000 = 2.600 (con el total sería 3.000).
     expect(screen.getByText(/por cobrar/)).toHaveTextContent(/\$\s*2\.600,00 por cobrar/)
   })
+
+  // Rut-B7 (#1554): las tres paradas están sin marcar; el chofer lo ve antes de querer cerrar.
+  it('avisa cuántas paradas quedan sin marcar', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RutaActivaTransportista onMarcarEntregado={vi.fn()} userId="chofer-1" />
+      </QueryClientProvider>,
+    )
+    await screen.findByText('Mapa de prueba')
+    expect(screen.getByText(/Te quedan 3 paradas sin marcar/)).toHaveAttribute('role', 'status')
+  })
 })

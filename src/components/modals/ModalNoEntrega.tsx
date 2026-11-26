@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X, AlertTriangle } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { MOTIVOS_NO_ENTREGA, type MotivoNoEntrega } from '../../constants/motivosNoEntrega';
+import { seRefechaConMotivo } from '../../utils/refechado';
 
 export interface ModalNoEntregaProps {
   abierto: boolean;
@@ -100,6 +101,10 @@ export default function ModalNoEntrega({
             <p className="text-xs text-blue-800 dark:text-blue-200">
               El pedido no se cancela: vuelve a la lista para repartirlo otro día, y el
               preventista recibe el aviso con el motivo.
+              {/* #1697: el server pasa la entrega a mañana salvo con «Lo rechazó». */}
+              {motivo && (seRefechaConMotivo(motivo)
+                ? ' Si estaba para hoy o antes, su entrega pasa a mañana y queda marcado «Refechado».'
+                : ' Con «Lo rechazó» la fecha de entrega no cambia.')}
             </p>
           </div>
 
