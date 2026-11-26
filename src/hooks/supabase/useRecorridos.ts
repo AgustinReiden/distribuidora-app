@@ -1,7 +1,6 @@
 import { useState, useCallback } from 'react'
 import { supabase } from './base'
 import { fechaLocalISO } from '../../utils/formatters'
-import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import type {
   RecorridoDBExtended,
   RecorridoParada,
@@ -47,7 +46,7 @@ interface RecorridoRaw {
 const RECORRIDO_SELECT = `*,
   transportista:perfiles!transportista_id(id, nombre),
   recorrido_pedidos(id, orden_entrega, estado_entrega, hora_entrega,
-    pedido:pedidos(id, estado, estado_pago, total, monto_pagado, notas,
+    pedido:pedidos(id, estado, estado_pago, total, monto_pagado, tipo_factura, notas,
       cliente:clientes(nombre_fantasia, direccion, telefono, latitud, longitud),
       items:pedido_items(id)))`
 
@@ -134,16 +133,7 @@ export function useRecorridos(): UseRecorridosReturnExtended {
     return fetchRecorridosDeFecha(fecha)
   }, [fetchRecorridosDeFecha])
 
-  // Completar un recorrido
-  const completarRecorrido = useCallback(async (recorridoId: string): Promise<void> => {
-    const { error } = await supabase
-      .from('recorridos')
-      .update({ estado: 'completado', completed_at: new Date().toISOString() })
-      .eq('id', recorridoId)
-
-    if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el recorrido quedó completado. Revisá si quedó hecho antes de reintentar.')
-    await fetchRecorridosHoy()
-  }, [fetchRecorridosHoy])
+  // (`completarRecorrido` se fue, Fr-B13: nadie lo llamaba y escribía `recorridos.estado` por REST.)
 
   // Obtener resumen de recorridos para estadisticas.
   // useCallback: si no, su referencia cambia en cada render y dispara un loop
@@ -160,6 +150,9 @@ export function useRecorridos(): UseRecorridosReturnExtended {
           *,
           transportista:perfiles!transportista_id(id, nombre)
         `)
+        // Los cancelados no cuentan, como en la lista (`fetchRecorridosDeFecha`): dos pantallas
+        // con dos números distintos para el mismo rango (Fr-B3).
+        .neq('estado', 'cancelado')
         .gte('fecha', fechaDesde)
         .lte('fecha', fechaHasta)
 
@@ -210,7 +203,6 @@ export function useRecorridos(): UseRecorridosReturnExtended {
     error: falloLaCarga,
     fetchRecorridosHoy,
     fetchRecorridosPorFecha,
-    completarRecorrido,
     getEstadisticasRecorridos
   }
 }

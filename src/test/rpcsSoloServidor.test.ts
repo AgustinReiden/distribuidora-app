@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
  */
 const RPCS_SIN_EXECUTE_PARA_AUTHENTICATED: Record<string, string> = {
   // mig 314 (#1009): sin caller en la app.
-  crear_recorrido: 'mig 314',
+  crear_recorrido: 'mig 314, borrada en la ola 3 (Rut-B10)',
   crear_rendicion_por_fecha: 'mig 314, borrada en #1368',
   obtener_estadisticas_rendiciones: 'mig 314, borrada en #1368',
   pedido_bundle_para_promo: 'mig 314',

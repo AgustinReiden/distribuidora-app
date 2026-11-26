@@ -9,7 +9,7 @@ import { z } from 'zod'
 import ModalBase from './ModalBase'
 import { Button } from '../ui/Button'
 import { CampoNumero } from '../ui/CampoNumero'
-import { leerEntero, motivoEnteroTipeado } from '../../utils/normalizarNumero'
+import { leerEntero, motivoEnteroTipeado, numeroConMiles } from '../../utils/normalizarNumero'
 import { Badge } from '../ui/Badge'
 import Card from '../ui/Card'
 import { getErrorMessage } from '../../utils/errorHandling'
@@ -43,6 +43,11 @@ export interface ModalFichaVehiculoProps {
    */
   usadoPor?: string[]
   onRegistrarKm: (fecha: string, km: number) => Promise<void>
+  /**
+   * Corrige (fecha y km) o borra una lectura cargada a mano (GTO-5, ola 3 de #1603). Sin esto la ficha
+   * no ofrece corregir. La de una carga se corrige editando su gasto, y la del GPS no se toca.
+   */
+  onCorregirKm?: (lecturaId: number, fecha: string | null, km: number | null, borrar: boolean) => Promise<void>
   onClose: () => void
 }
 
@@ -55,13 +60,16 @@ const diaCorto = (iso: string): string => `${iso.slice(8, 10)}/${iso.slice(5, 7)
 const km = (n: number): string => n.toLocaleString('es-AR')
 
 export default function ModalFichaVehiculo({
-  vehiculo, gastos, lecturas, loading, mes, usadoPor, onRegistrarKm, onClose,
+  vehiculo, gastos, lecturas, loading, mes, usadoPor, onRegistrarKm, onCorregirKm, onClose,
 }: ModalFichaVehiculoProps): React.ReactElement {
   const ficha = useMemo(() => armarFichaVehiculo(gastos, lecturas, mes), [gastos, lecturas, mes])
   const idFecha = useId()
   const idKm = useId()
 
   const [registrando, setRegistrando] = useState(false)
+  // La lectura manual que se corrige con el mismo formulario (null: el formulario da de alta).
+  const [corrigiendo, setCorrigiendo] = useState<LecturaKm | null>(null)
+  const [borrando, setBorrando] = useState<LecturaKm | null>(null)
   const [fecha, setFecha] = useState(hoyEnTucuman)
   const [kmTxt, setKmTxt] = useState('')
   const [guardando, setGuardando] = useState(false)
@@ -88,9 +96,45 @@ export default function ModalFichaVehiculo({
     }
     setGuardando(true)
     try {
-      await onRegistrarKm(resultado.data.fecha, resultado.data.km)
+      if (corrigiendo?.id != null && onCorregirKm) {
+        await onCorregirKm(corrigiendo.id, resultado.data.fecha, resultado.data.km, false)
+      } else {
+        await onRegistrarKm(resultado.data.fecha, resultado.data.km)
+      }
       setKmTxt('')
       setRegistrando(false)
+      setCorrigiendo(null)
+    } catch (err) {
+      setError(getErrorMessage(err))
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  const abrirCorreccion = (l: LecturaKm) => {
+    setCorrigiendo(l)
+    setBorrando(null)
+    setFecha(l.fecha)
+    setKmTxt(numeroConMiles(l.km))
+    setError('')
+    setRegistrando(true)
+  }
+
+  const cerrarFormulario = () => {
+    setRegistrando(false)
+    setCorrigiendo(null)
+    setKmTxt('')
+    setFecha(hoyEnTucuman())
+    setError('')
+  }
+
+  const confirmarBorrado = async () => {
+    if (borrando?.id == null || !onCorregirKm) return
+    setError('')
+    setGuardando(true)
+    try {
+      await onCorregirKm(borrando.id, null, null, true)
+      setBorrando(null)
     } catch (err) {
       setError(getErrorMessage(err))
     } finally {
@@ -214,14 +258,18 @@ export default function ModalFichaVehiculo({
                   <button
                     type="button"
                     className="text-sm text-brand-600 dark:text-brand-400 font-medium hover:underline"
-                    onClick={() => setRegistrando(true)}
+                    onClick={() => { setCorrigiendo(null); setRegistrando(true) }}
                   >
                     + Registrar km
                   </button>
                 )}
               </div>
               {registrando && (
-                <form onSubmit={guardarLectura} className="mb-3 flex flex-wrap items-end gap-2">
+                <form
+                  onSubmit={guardarLectura}
+                  className="mb-3 flex flex-wrap items-end gap-2"
+                  aria-label={corrigiendo ? `Corregir la lectura del ${diaCorto(corrigiendo.fecha)}` : 'Registrar km'}
+                >
                   <div>
                     <label htmlFor={idFecha} className="block text-xs text-gray-500 mb-1">Fecha</label>
                     <input
@@ -244,12 +292,25 @@ export default function ModalFichaVehiculo({
                     />
                   </div>
                   <Button type="submit" variant="primary" size="sm" loading={guardando} disabled={guardando}>
-                    Guardar lectura
+                    {corrigiendo ? 'Guardar corrección' : 'Guardar lectura'}
                   </Button>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => { setRegistrando(false); setError('') }}>
+                  <Button type="button" variant="ghost" size="sm" onClick={cerrarFormulario}>
                     Cancelar
                   </Button>
                 </form>
+              )}
+              {borrando && (
+                <div role="alertdialog" aria-label="Borrar la lectura de km" className="mb-3 p-3 flex flex-wrap items-center gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                  <p className="text-sm text-amber-800 dark:text-amber-200">
+                    {`¿Borrar la lectura del ${diaCorto(borrando.fecha)} (${km(borrando.km)} km)?`}
+                  </p>
+                  <Button type="button" variant="danger" size="sm" loading={guardando} disabled={guardando} onClick={() => void confirmarBorrado()}>
+                    Sí, borrar
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setBorrando(null)}>
+                    No
+                  </Button>
+                </div>
               )}
               {error && (
                 <div className="mb-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -264,7 +325,29 @@ export default function ModalFichaVehiculo({
                     <li key={i} className="flex items-center justify-between py-1.5">
                       <span className="text-gray-700 dark:text-gray-200">{diaCorto(l.fecha)}</span>
                       <span className="tabular-nums text-gray-800 dark:text-white">{km(l.km)} km</span>
-                      <Badge tone="neutral">{ORIGEN[l.origen]}</Badge>
+                      <span className="flex items-center gap-2">
+                        <Badge tone="neutral">{ORIGEN[l.origen]}</Badge>
+                        {onCorregirKm && l.origen === 'manual' && l.id != null && (
+                          <>
+                            <button
+                              type="button"
+                              className="text-xs text-brand-600 dark:text-brand-400 hover:underline"
+                              aria-label={`Corregir la lectura del ${diaCorto(l.fecha)}`}
+                              onClick={() => abrirCorreccion(l)}
+                            >
+                              Corregir
+                            </button>
+                            <button
+                              type="button"
+                              className="text-xs text-red-600 dark:text-red-400 hover:underline"
+                              aria-label={`Borrar la lectura del ${diaCorto(l.fecha)}`}
+                              onClick={() => { setBorrando(l); setError('') }}
+                            >
+                              Borrar
+                            </button>
+                          </>
+                        )}
+                      </span>
                     </li>
                   ))}
                 </ul>

@@ -13,7 +13,7 @@
 --   D1 · Los cuatro defaults dan el día argentino.
 --   D2 · Una compra cargada a las 22 nace con el día argentino.
 --   D3 · La comanda de un canje a las 22 nace con el día argentino.
---   D4 · El recorrido nace con el día argentino.
+--   D4 · El recorrido nace con el día argentino (el default de la columna).
 --   D5 · Una boleta entregada anoche a las 22:30 tiene un día de deuda.
 --   D6 · El bot cuenta los días sin compra, y filtra, con el día argentino.
 --   D7 · La ficha del cliente y la deuda previa leen la fecha de la columna.
@@ -156,7 +156,11 @@ BEGIN
   END IF;
 
   -- ------------------------------------------------------------------- D4 ---
-  v_id := public.crear_recorrido(v_chofer, '[]'::jsonb, NULL, NULL);
+  -- crear_recorrido ya no está (la borró la ola 3, Rut-B10 de la tarjeta T3): una ruta nace
+  -- por aplicar_orden_ruta, que toma _tablero_hoy(), o con el default de la columna, que es
+  -- lo que queda por mirar acá.
+  INSERT INTO recorridos (transportista_id, estado, sucursal_id)
+  VALUES (v_chofer, 'en_curso', v_suc) RETURNING id INTO v_id;
   SELECT fecha INTO v_d FROM recorridos WHERE id = v_id;
   IF v_d IS DISTINCT FROM v_hoy THEN
     v_fallas := v_fallas || format('D4 · el recorrido nacio el %s', v_d);

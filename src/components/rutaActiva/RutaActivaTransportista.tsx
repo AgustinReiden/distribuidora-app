@@ -36,6 +36,7 @@ import type { MotivoNoEntrega } from '../../constants/motivosNoEntrega';
 import type { PedidoDB, RegistrarSalvedadResult } from '../../types';
 import { lazyWithReload } from '../../utils/lazyWithReload';
 import { errorDeSupabase } from '../../utils/errorDeSupabase';
+import { faltantePedido } from '../../utils/imputacionCredito';
 import { Button } from '../ui/Button';
 
 // Mapa con Google Maps JS (reemplaza el Leaflet; mejor reactividad y estética).
@@ -156,6 +157,9 @@ export default function RutaActivaTransportista({
         p_nota: nota || null,
       });
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que la parada quedó como no entregada. Revisá antes de reintentar.');
+      // El pedido volvió a 'pendiente' y sin chofer: además de la ruta, cambia la lista de Pedidos
+      // (un admin o encargado con el rol de chofer la sigue viendo, y quedaba con el estado de antes).
+      void queryClient.invalidateQueries({ queryKey: ['pedidos'] });
       await queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] });
     },
     [queryClient],
@@ -203,9 +207,11 @@ export default function RutaActivaTransportista({
     [pedidosOrdenados],
   );
   const completadas = entregadas + noEntregadas;
+  // Lo que falta cobrar (total menos lo ya pagado), no el total: un parcial de 1.000 con 400
+  // cobrados aporta 600. Es el mismo `faltantePedido` que usa el resto de la app (Fr-B1).
   const porCobrar = pendientes
     .filter(p => p.estado_pago !== 'pagado')
-    .reduce((sum, p) => sum + (p.total || 0), 0);
+    .reduce((sum, p) => sum + faltantePedido(p), 0);
 
   // Parada activa: la seleccionada manualmente, o la primera pendiente
   const paradaActiva = useMemo<PedidoConCliente | null>(() => {

@@ -31,6 +31,7 @@ import {
 } from 'lucide-react'
 import { fechaLocalISO, formatDateTime, formatPrecio } from '../../utils/formatters'
 import { Button } from '../ui/Button'
+import QueryErrorState from '../layout/QueryErrorState'
 import { supabase } from '../../hooks/supabase/base'
 import { useRendiciones } from '../../hooks/supabase'
 import { useQueryClient } from '@tanstack/react-query'
@@ -835,6 +836,7 @@ export default function VistaRendiciones(): React.ReactElement {
   const {
     resumenes,
     loading,
+    error: falloLaCarga,
     fetchResumen,
     confirmarRendicion,
     resolverRendicion,
@@ -1120,6 +1122,9 @@ export default function VistaRendiciones(): React.ReactElement {
           <RefreshCw className="w-8 h-8 animate-spin mx-auto text-gray-400" />
           <p className="mt-4 text-gray-500">Cargando rendiciones...</p>
         </div>
+      ) : falloLaCarga && resumenes.length === 0 ? (
+        // Un error de carga no es «no hay rendiciones» (Fr-B4): se dice y se puede reintentar.
+        <QueryErrorState onRetry={() => { void cargar() }} />
       ) : resumenesFiltrados.length === 0 ? (
         <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-lg shadow-sm">
           <Banknote className="w-12 h-12 text-gray-300 mx-auto" />

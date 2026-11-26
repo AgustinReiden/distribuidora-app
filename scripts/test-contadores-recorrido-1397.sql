@@ -17,7 +17,7 @@
 -- Solo y sin la migración tiene que dar 'ENSAYO FALLÓ', únicamente por L1.
 --
 -- Fixtures: una sucursal activa con un admin y dos transportistas base activos. El resto nace
--- en el ensayo. Las rutas y los pagos van en 2099.
+-- en el ensayo. Las rutas y los pagos van en hoy + 60 (la ruta más lejana que entra, Rut-B6).
 
 CREATE OR REPLACE FUNCTION pg_temp.t_cliente(p_suc bigint, p_nombre text)
 RETURNS bigint LANGUAGE sql AS $fn$
@@ -87,7 +87,9 @@ DECLARE
   v_r2     bigint;
   v_txt    text;
   v_fallas text[] := '{}';
-  F CONSTANT date := DATE '2099-04-10';
+  -- Rut-B6 (ola 3, T3): una ruta va de hoy a 60 días adelante. La más lejana que entra, para no
+  -- pisar una ruta real (antes iba en 2099).
+  F CONSTANT date := public._tablero_hoy() + 60;
 BEGIN
   SELECT s.id, a.usuario_id, b.usuario_id, adm.usuario_id
     INTO v_suc, v_a, v_b, v_adm

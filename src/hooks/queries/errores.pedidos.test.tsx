@@ -112,7 +112,6 @@ import {
   depositoKeys,
   destinoKeys,
 } from './useDepositoQuery'
-import { useRecorridos } from '../supabase/useRecorridos'
 import {
   useSalvedadesQuery,
   useResolverSalvedadMutation,
@@ -377,38 +376,7 @@ describe('reintento de las mutaciones idempotentes', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// HOOKS VIEJOS (src/hooks/supabase): siguen en uso en RecorridosContainer. No
-// usan react-query: se llaman directo. (`useSalvedades.resolverSalvedad` pasó a
-// `useResolverSalvedadMutation`, que está en ESCRITURAS.)
-// ---------------------------------------------------------------------------
-
-// `useRecorridos.crearRecorrido` se fue con #1019: llamaba `crear_recorrido`,
-// que desde la mig 314 no es ejecutable por authenticated (la guardia es
-// src/test/rpcsSoloServidor.test.ts).
-describe('hooks de src/hooks/supabase: completar recorrido', () => {
-  beforeEach(() => {
-    resultado = { data: null, error: null }
-  })
-
-  const casos: Array<[string, () => Promise<unknown>]> = [
-    [
-      'useRecorridos.completarRecorrido',
-      async () => {
-        const { result } = renderHook(() => useRecorridos())
-        return result.current.completarRecorrido('1')
-      },
-    ],
-  ]
-
-  describe.each(casos)('%s', (_n, correr) => {
-    it('error del servidor', async () => {
-      resultado = { data: null, error: ERROR_SERVIDOR }
-      verificarServidor(await correr().then(() => null, (e: unknown) => e))
-    })
-    it('sin red', async () => {
-      resultado = { data: null, error: ERROR_RED }
-      verificarRed(await correr().then(() => null, (e: unknown) => e))
-    })
-  })
-})
+// `useRecorridos.crearRecorrido` se fue con #1019 (llamaba `crear_recorrido`, que desde la mig 314 no
+// es ejecutable por authenticated: la guardia es src/test/rpcsSoloServidor.test.ts) y
+// `useRecorridos.completarRecorrido` con Fr-B13 de #1554 (nadie lo llamaba y escribía por REST: lo
+// fija src/hooks/supabase/useRecorridos.estadisticas.test.ts).
