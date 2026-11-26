@@ -35,6 +35,7 @@
 --   B5h · Un pedido con sólo una parada de historia (reasignado, ruta cerrada) tampoco.
 --   B5i · marcar_no_entregado no marca la parada 'reasignado' de otro chofer.
 --   B3b · cerrar_recorridos_vencidos cierra una ruta de ayer con sólo una parada 'reasignado'.
+--   B3c · y NO cierra la de una parada 'no_entregado' cuyo pedido volvió a 'asignado' (como la 548).
 --   B11 · P3 (1000) se cobra 700 en efectivo y 300 con saldo a favor aplicado, y A lo entrega:
 --         lo cobrado de la ruta de A es 700 (la plata), no 1000 (monto_pagado), en la función y
 --         en la columna de la ruta.
@@ -86,6 +87,9 @@ DECLARE
   v_x3     uuid := gen_random_uuid();
   v_y      uuid := gen_random_uuid();
   v_c2     uuid := gen_random_uuid();
+  v_c3     uuid := gen_random_uuid();
+  v_p14    bigint;
+  v_rc3    bigint;
   v_p7     bigint;
   v_p8     bigint;
   v_p9     bigint;
@@ -141,7 +145,7 @@ BEGIN
                  (v_m3, 'transportista', 1, 'M3'), (v_a2, 'transportista', 1, 'A2'),
                  (v_x1, 'transportista', 1, 'X1'), (v_x2, 'transportista', 1, 'X2'),
                  (v_x3, 'transportista', 1, 'X3'), (v_y, 'transportista', 1, 'Y'),
-                 (v_c2, 'transportista', 1, 'C2')) AS u(id, rol, suc, que);
+                 (v_c2, 'transportista', 1, 'C2'), (v_c3, 'transportista', 1, 'C3')) AS u(id, rol, suc, que);
   -- X3 también es de la sucursal 2 (tiene ahí una ruta en curso, B5f).
   INSERT INTO usuario_sucursales (usuario_id, sucursal_id) VALUES (v_x3, 2) ON CONFLICT DO NOTHING;
   -- E12 es encargado de las dos sucursales (para la clave del canje usada en la otra).
@@ -178,6 +182,11 @@ BEGIN
       ELSE v_p13 := v_num;
     END CASE;
   END LOOP;
+
+  -- B3c · el pedido de una parada 'no_entregado' que volvió a 'asignado' (lo reprogramaron).
+  INSERT INTO pedidos (cliente_id, fecha, estado, total, monto_pagado, estado_pago, canal, usuario_id, creado_por, sucursal_id,
+                       transportista_id)
+  VALUES (v_cli, v_hoy, 'asignado', 1000, 0, 'pendiente', 'app', v_enc, v_enc, 1, v_c3) RETURNING id INTO v_p14;
 
   -- ---------------------------------------------------------------- helpers -
   CREATE OR REPLACE FUNCTION pg_temp.como(p_uid uuid, p_suc bigint) RETURNS void LANGUAGE plpgsql AS $f$
@@ -498,6 +507,13 @@ BEGIN
   VALUES (v_c2, v_hoy - 1, 'en_curso', 1) RETURNING id INTO v_rc2;
   INSERT INTO recorrido_pedidos (recorrido_id, pedido_id, orden_entrega, estado_entrega, sucursal_id)
   VALUES (v_rc2, v_p12, 1, 'reasignado', 1);
+  -- B3c · la ruta de ayer de C3 tiene una parada 'no_entregado' cuyo pedido volvió a 'asignado'
+  --       (lo reprogramaron): sigue pendiente, la ruta NO se cierra (como en la 548). Un
+  --       filtro `estado_entrega IN ('pendiente','entregado')` sacaría también la no_entregado.
+  INSERT INTO recorridos (transportista_id, fecha, estado, sucursal_id)
+  VALUES (v_c3, v_hoy - 1, 'en_curso', 1) RETURNING id INTO v_rc3;
+  INSERT INTO recorrido_pedidos (recorrido_id, pedido_id, orden_entrega, estado_entrega, sucursal_id)
+  VALUES (v_rc3, v_p14, 1, 'no_entregado', 1);
   v_tz := current_setting('TimeZone');
   PERFORM set_config('TimeZone', 'UTC', true);
   PERFORM public.cerrar_recorridos_vencidos(1);
@@ -513,6 +529,10 @@ BEGIN
   IF (SELECT estado FROM recorridos WHERE id = v_rc2) <> 'completado' THEN
     v_fallas := v_fallas || format('B3b · la ruta de ayer de C2, con sólo una parada reasignada, quedó %s (se esperaba completado)',
                                    (SELECT estado FROM recorridos WHERE id = v_rc2));
+  END IF;
+  IF (SELECT estado FROM recorridos WHERE id = v_rc3) <> 'en_curso' THEN
+    v_fallas := v_fallas || format('B3c · la ruta de ayer de C3, con una parada no_entregado de un pedido asignado, quedó %s (se esperaba en_curso)',
+                                   (SELECT estado FROM recorridos WHERE id = v_rc3));
   END IF;
 
   -- ------------------------------------------------------------------- B8 ---
@@ -607,7 +627,7 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = 'ENSAYO FALLÓ · ' || array_to_string(v_fallas, ' | ');
   END IF;
   RAISE EXCEPTION USING ERRCODE = 'ZZ0OK',
-    MESSAGE = format('ENSAYO OK · B13 B4 B4a B4b B4c B5a B5b B11 B5r B5c B5v B5d B5e B5f B5g B5h B5i B6 P1 B3 B3b B8 B10 B14 AUD (hoy %s; canje %s, rutas A %s, B %s, C %s)',
+    MESSAGE = format('ENSAYO OK · B13 B4 B4a B4b B4c B5a B5b B11 B5r B5c B5v B5d B5e B5f B5g B5h B5i B6 P1 B3 B3b B3c B8 B10 B14 AUD (hoy %s; canje %s, rutas A %s, B %s, C %s)',
                      v_hoy, v_k, v_ra, v_rb, v_rc);
  END;
 END

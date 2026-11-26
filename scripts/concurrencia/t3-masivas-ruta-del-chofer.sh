@@ -11,6 +11,15 @@
 #   trigger de la entrega de T1 pide la ruta de B (la entrega se mueve ahí). Con el arreglo, T1 ya la tenía (su
 #   pre-lock suma la ruta en curso del chofer que entrega) y T2 la esperaba: pasan las dos.
 #   Control negativo: con el pre-lock de marcar_entrega_y_pago_masivo_impl sin esa ruta, 40P01.
+# Ronda 3 · dos masivas SIN pago cruzadas, con los roles invertidos. La cláusula nueva de marcar_entregas_masivo (su
+#   pre-lock suma la ruta en curso del chofer que entrega) sólo se ejerce si los pedidos NO están en esa ruta: en la
+#   ronda 1, T2 ya toma R_A por Q2. Acá cada masiva entrega un pedido de la ruta del OTRO chofer, a nombre del suyo:
+#   T1 = marcar_entregas_masivo([Q1 (de R_B)], A) y T2 = marcar_entregas_masivo([Q2 (de R_A)], B). La ruta del chofer
+#   sólo la pide el trigger (la entrega se mueve a ella), así que sin la cláusula T1 tiene R_B, T2 tiene R_A, y cada una
+#   pide la del otro. Como esta masiva no tiene dónde frenarse (no hay pago ni cliente), el ensayo le mete un
+#   pg_sleep justo después del pre-lock (las dos corren la MISMA función, con la espera puesta) para que la carrera sea
+#   determinista: con la cláusula, la primera toma las dos rutas por id y la otra espera; sin ella, 40P01.
+#   Control negativo: la misma función con la espera y sin la cláusula.
 # Ronda 2 · la ruta de B cambia de chofer mientras la entrega espera su lock. S0 = cambiar_transportista_recorrido(R_B, C)
 #   y espera antes del COMMIT. T1 entrega P (de la ruta de A) a nombre de B: el trigger ve R_B como de B, espera el
 #   lock y, cuando S0 confirma, R_B ya es de C. Con el arreglo la vuelve a mirar y sigue como «B sin ruta»: P queda
@@ -107,6 +116,61 @@ END $m$;
 SQL
 ronda1
 restaurar 'public.marcar_entrega_y_pago_masivo_impl(bigint[],uuid,text,date)' impl
+if [ "$DEADLOCK" = "1" ]; then echo "   OK (control): sin el arreglo, 40P01"; else echo "   FALLA el control: no hubo deadlock (pasaron $OKS)"; FALLA=1; fi
+
+# --------------------------------------------------------------------- ronda 3
+# Aplica a marcar_entregas_masivo una espera de $SLEEP s después de su pre-lock de rutas y, con $1 = sin_clausula,
+# además le saca la ruta del chofer del pre-lock.
+mutar_masivo() {
+  sed -e "s/__SLEEP__/$SLEEP/" -e "s/__MODO__/$1/" <<'SQL' | psqlc >/dev/null
+DO $m$
+DECLARE v text := pg_get_functiondef('public.marcar_entregas_masivo(bigint[],uuid,date)'::regprocedure);
+        n text;
+BEGIN
+  n := v;
+  IF '__MODO__' = 'sin_clausula' THEN
+    n := regexp_replace(n, '\n\s*-- mig NNN \(Rut-B5, revisión\): y la ruta en curso.*?AND estado = ''en_curso'' AND fecha = p_fecha\)', '');
+    IF n = v THEN RAISE EXCEPTION 'el control no encontró la cláusula'; END IF;
+  END IF;
+  v := n;
+  n := replace(n, E'\n  -- #1342: con las rendiciones y los pedidos tomados.', E'\n  PERFORM pg_sleep(__SLEEP__);\n  -- #1342: con las rendiciones y los pedidos tomados.');
+  IF n = v THEN RAISE EXCEPTION 'el control no encontró dónde poner la espera'; END IF;
+  EXECUTE n;
+END $m$;
+SQL
+}
+
+ronda3() {
+  fixtures r3
+  local rb ra
+  rb=$(ruta "$B" "[{\"pedido_id\": $Q1, \"orden_entrega\": 1}]")
+  ra=$(ruta "$A" "[{\"pedido_id\": $Q2, \"orden_entrega\": 1}]")
+  ( como "$E" "SELECT 'T1 ' || public.marcar_entregas_masivo(ARRAY[$Q1]::bigint[], '$A'::uuid, public._tablero_hoy())" 0 \
+      > "$TMP/t3m-r3-t1.out" 2>&1 ) &
+  sleep 1
+  como "$E" "SELECT 'T2 ' || public.marcar_entregas_masivo(ARRAY[$Q2]::bigint[], '$B'::uuid, public._tablero_hoy())" 0 \
+    > "$TMP/t3m-r3-t2.out" 2>&1
+  wait
+  grep -h -E "^T[12] |ERROR|deadlock" "$TMP/t3m-r3-t1.out" "$TMP/t3m-r3-t2.out" | sed 's/^/   /'
+  DEADLOCK=0; grep -q -i "deadlock" "$TMP/t3m-r3-t1.out" "$TMP/t3m-r3-t2.out" && DEADLOCK=1
+  OKS=$(cat "$TMP/t3m-r3-t1.out" "$TMP/t3m-r3-t2.out" | grep -c -E "^T[12] ")
+  ENTREGADOS=$(psqlc -c "SELECT count(*) FROM pedidos WHERE id IN ($Q1, $Q2) AND estado = 'entregado'")
+  echo "   rutas: B #$rb, A #$ra; entregados: $ENTREGADOS"
+}
+
+echo "== ronda 3 · dos masivas sin pago cruzadas, cada una con un pedido de la ruta del otro (con el arreglo, y la espera)"
+guardar 'public.marcar_entregas_masivo(bigint[],uuid,date)' masivo
+mutar_masivo con_clausula
+ronda3
+restaurar 'public.marcar_entregas_masivo(bigint[],uuid,date)' masivo
+if [ "$DEADLOCK" = "0" ] && [ "$OKS" = "2" ] && [ "$ENTREGADOS" = "2" ]; then
+  echo "   OK: pasaron las dos, sin deadlock, los dos pedidos entregados"
+else echo "   FALLA: deadlock $DEADLOCK, pasaron $OKS, entregados $ENTREGADOS"; FALLA=1; fi
+
+echo "== ronda 3 · control negativo: marcar_entregas_masivo sin la ruta del chofer en su pre-lock"
+mutar_masivo sin_clausula
+ronda3
+restaurar 'public.marcar_entregas_masivo(bigint[],uuid,date)' masivo
 if [ "$DEADLOCK" = "1" ]; then echo "   OK (control): sin el arreglo, 40P01"; else echo "   FALLA el control: no hubo deadlock (pasaron $OKS)"; FALLA=1; fi
 
 # --------------------------------------------------------------------- ronda 2

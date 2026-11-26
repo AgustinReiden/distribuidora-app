@@ -156,9 +156,11 @@ BEGIN
              JOIN pedidos p ON p.id = rp.pedido_id
              WHERE rp.recorrido_id = r.id
                AND p.estado = 'asignado'
-               -- mig NNN (Rut-B5, revisión): sólo una parada viva. Una 'reasignado' (el
-               -- pedido se entregó o sale en otra ruta) no traba la ruta vieja en curso.
-               AND rp.estado_entrega IN ('pendiente', 'entregado')
+               -- mig NNN (Rut-B5, revisión): una parada 'reasignado' (el pedido se entregó o
+               -- sale en otra ruta) no traba la ruta vieja en curso. Sólo ella: una
+               -- 'no_entregado' cuyo pedido volvió a 'asignado' (lo reprogramaron) sigue
+               -- trabando, como en la 548.
+               AND rp.estado_entrega <> 'reasignado'
            ) AS tiene_pendientes
     FROM recorridos r
     WHERE r.estado = 'en_curso'
