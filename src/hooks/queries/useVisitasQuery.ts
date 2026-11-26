@@ -17,7 +17,7 @@ import { geolocalizacionKeys } from './useGeolocalizacionPreventistasQuery'
 import type { GpsStatus } from './useGeolocalizacionPreventistasQuery'
 import { rpcGpsConDiagnostico } from '../useRegistrarGeolocalizacionPedido'
 import type { DiagnosticoGps } from '../../utils/ubicacionEquipo'
-import { useRequestIdEstable } from '../useRequestIdEstable'
+import { useRequestIdPersistente } from '../useRequestIdPersistente'
 
 export interface VisitaHoy {
   visita_id: number
@@ -103,12 +103,15 @@ export function useRegistrarVisitaMutation() {
   // Var-B1 (T8 de la ola 3): una clave por visita a un cliente. El reintento (la respuesta se
   // perdió y se vuelve a tocar el cliente) lleva la misma aunque el GPS se haya vuelto a capturar:
   // es la misma visita. Después de una que salió bien, la próxima a ese cliente es otra visita.
-  const claveVisita = useRequestIdEstable()
+  // Persistente (como los cobros, #1410) y no `useRequestIdEstable`: este hook vive dentro de
+  // `ModalMarcarVisita`, que se desmonta al cerrarse, y con el aviso «revisá las visitas de hoy
+  // antes de reintentar» el preventista lo cierra y lo vuelve a abrir: la clave tiene que seguir.
+  const { requestId: claveVisita, olvidar: olvidarClave } = useRequestIdPersistente()
   return useMutation({
     mutationFn: async (input: RegistrarVisitaInput): Promise<RegistrarVisitaResponse> => {
       const huella = `${currentSucursalId ?? ''}|${input.clienteId}`
       const res = await registrarVisita(input, claveVisita(huella))
-      if (res?.success) claveVisita.olvidar([huella])
+      if (res?.success) olvidarClave([huella])
       return res
     },
     onSuccess: () => {

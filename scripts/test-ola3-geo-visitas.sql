@@ -18,7 +18,8 @@
 --        con esa clave registra la visita.
 --   G1 · Var-B3: un pedido cargado hoy con fecha de ayer aparece hoy; uno cargado ayer con
 --        fecha de hoy aparece ayer y no hoy; uno cargado ayer a las 23:30 (02:30 UTC de hoy)
---        es de ayer.
+--        es de ayer. Y el borde de la medianoche: uno cargado a las 00:00:00 argentinas de hoy
+--        aparece hoy (el «desde» del día es inclusivo) y uno a las 23:59:59 de ayer es de ayer.
 --   G2 · Var-B2: un pedido cancelado cargado hoy no cuenta (ni en el total ni «sin GPS»)
 --        y no sale en el detalle.
 --   G3 · #1623: un preventista con visitas y sin pedidos aparece en el resumen del día,
@@ -37,6 +38,8 @@ DECLARE
   v_x      bigint;  -- cargado hoy, fecha de ayer, con GPS
   v_y      bigint;  -- cargado ayer, fecha de hoy, con GPS
   v_w      bigint;  -- cargado ayer 23:30 (AR), fecha de ayer, con GPS
+  v_m0     bigint;  -- cargado hoy a las 00:00:00 (AR) justo, con GPS: el primer instante de hoy
+  v_m1     bigint;  -- cargado ayer a las 23:59:59 (AR), con GPS: el último instante de ayer
   v_z      bigint;  -- cargado hoy, fecha de hoy, cancelado, sin GPS
   v_clave  uuid := gen_random_uuid();
   v_clave3 uuid := gen_random_uuid();
@@ -109,6 +112,19 @@ BEGIN
           (v_ayer + time '23:30') AT TIME ZONE 'America/Argentina/Buenos_Aires', 'ok', -26.8, -65.2,
           (v_ayer + time '23:30') AT TIME ZONE 'America/Argentina/Buenos_Aires')
   RETURNING id INTO v_w;
+  -- El borde de la medianoche: el 00:00:00 de hoy es de hoy (`>=` en el «desde»), el 23:59:59 de ayer no.
+  INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, created_at,
+                       gps_status, gps_lat, gps_lng, gps_capturado_at)
+  VALUES (v_cli, v_suc, v_p1, 1000, 'pendiente', v_hoy,
+          v_hoy::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires', 'ok', -26.8, -65.2,
+          v_hoy::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires')
+  RETURNING id INTO v_m0;
+  INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, created_at,
+                       gps_status, gps_lat, gps_lng, gps_capturado_at)
+  VALUES (v_cli, v_suc, v_p1, 1000, 'pendiente', v_ayer,
+          (v_ayer + time '23:59:59') AT TIME ZONE 'America/Argentina/Buenos_Aires', 'ok', -26.8, -65.2,
+          (v_ayer + time '23:59:59') AT TIME ZONE 'America/Argentina/Buenos_Aires')
+  RETURNING id INTO v_m1;
   INSERT INTO pedidos (cliente_id, sucursal_id, usuario_id, total, estado, fecha, created_at, motivo_cancelacion)
   VALUES (v_cli, v_suc, v_p1, 0, 'cancelado', v_hoy, now(), 'ensayo T8')
   RETURNING id INTO v_z;
@@ -220,19 +236,23 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_geo->'pedidos') e WHERE (e->>'pedido_id')::bigint = v_x) THEN
     v_fallas := v_fallas || format('G1 · el pedido %s, cargado hoy con fecha de ayer, no aparece hoy', v_x)::text;
   END IF;
-  IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_geo->'pedidos') e WHERE (e->>'pedido_id')::bigint IN (v_y, v_w)) THEN
-    v_fallas := v_fallas || format('G1 · un pedido cargado ayer (%s, %s) aparece hoy', v_y, v_w)::text;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_geo->'pedidos') e WHERE (e->>'pedido_id')::bigint IN (v_y, v_w, v_m1)) THEN
+    v_fallas := v_fallas || format('G1 · un pedido cargado ayer (%s, %s, %s) aparece hoy', v_y, v_w, v_m1)::text;
   END IF;
-  IF (SELECT count(*) FROM jsonb_array_elements(v_geo_ay->'pedidos') e WHERE (e->>'pedido_id')::bigint IN (v_y, v_w)) <> 2
-     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_geo_ay->'pedidos') e WHERE (e->>'pedido_id')::bigint = v_x) THEN
-    v_fallas := v_fallas || format('G1 · ayer no muestra los dos cargados ayer (%s, %s) o muestra el de hoy (%s)', v_y, v_w, v_x)::text;
+  IF (SELECT count(*) FROM jsonb_array_elements(v_geo_ay->'pedidos') e WHERE (e->>'pedido_id')::bigint IN (v_y, v_w, v_m1)) <> 3
+     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_geo_ay->'pedidos') e WHERE (e->>'pedido_id')::bigint IN (v_x, v_m0)) THEN
+    v_fallas := v_fallas || format('G1 · ayer no muestra los tres cargados ayer (%s, %s, %s) o muestra uno de hoy (%s, %s)', v_y, v_w, v_m1, v_x, v_m0)::text;
+  END IF;
+  -- El borde: el pedido de las 00:00:00 de hoy es de hoy (con `>` en el «desde» se caía).
+  IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_geo->'pedidos') e WHERE (e->>'pedido_id')::bigint = v_m0) THEN
+    v_fallas := v_fallas || format('G1 · el pedido %s, cargado a las 00:00:00 de hoy, no aparece hoy', v_m0)::text;
   END IF;
 
   -- ------------------------------------------------------------------- G2 ---
   SELECT e INTO v_res FROM jsonb_array_elements(v_geo->'preventistas') e WHERE e->>'preventista_id' = v_p1::text;
-  IF v_res IS NULL OR (v_res->>'total_pedidos')::int <> 1 OR (v_res->>'pedidos_sin_gps')::int <> 0
-     OR (v_res->>'pedidos_con_gps')::int <> 1 THEN
-    v_fallas := v_fallas || format('G2 · el resumen de hoy del primer preventista no es 1 pedido con GPS y 0 sin GPS: %s', v_res)::text;
+  IF v_res IS NULL OR (v_res->>'total_pedidos')::int <> 2 OR (v_res->>'pedidos_sin_gps')::int <> 0
+     OR (v_res->>'pedidos_con_gps')::int <> 2 THEN
+    v_fallas := v_fallas || format('G2 · el resumen de hoy del primer preventista no es 2 pedidos con GPS (el de hoy y el de las 00:00:00) y 0 sin GPS: %s', v_res)::text;
   END IF;
   IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_geo->'pedidos') e WHERE (e->>'pedido_id')::bigint = v_z) THEN
     v_fallas := v_fallas || format('G2 · el pedido cancelado %s sale en el detalle', v_z)::text;
@@ -255,8 +275,8 @@ BEGIN
       MESSAGE = 'ENSAYO FALLO · ' || array_to_string(v_fallas, ' | ');
   END IF;
   RAISE EXCEPTION USING ERRCODE = 'ZZ0OK',
-    MESSAGE = format('ENSAYO OK · V0–V3, G1–G3 (sucursal %s, día %s; pedidos %s, %s, %s y %s)',
-                     v_suc, v_hoy, v_x, v_y, v_w, v_z);
+    MESSAGE = format('ENSAYO OK · V0–V3, G1–G3 (sucursal %s, día %s; pedidos %s, %s, %s, %s, %s y %s)',
+                     v_suc, v_hoy, v_x, v_y, v_w, v_m0, v_m1, v_z);
  END;
 END
 $ensayo$;
