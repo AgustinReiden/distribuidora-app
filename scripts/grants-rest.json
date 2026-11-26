@@ -42,7 +42,8 @@
     "perfil_roles.DELETE": "los roles extra por guardar_roles_extra (C4b de #1603, 1561-b12); revocar cuando no queden bundles de antes",
     "promocion_productos.INSERT": "el alta de una promo por crear_promocion (C4b de #1603, 1561-b12); revocar cuando no queden bundles de antes",
     "promocion_reglas.INSERT": "el alta de una promo por crear_promocion (C4b de #1603, 1561-b12); revocar cuando no queden bundles de antes",
-    "promociones.INSERT": "el alta de una promo por crear_promocion (C4b de #1603, 1561-b12); revocar cuando no queden bundles de antes"
+    "promociones.INSERT": "el alta de una promo por crear_promocion (C4b de #1603, 1561-b12); revocar cuando no queden bundles de antes",
+    "recorridos.UPDATE": "useRecorridos.completarRecorrido (Fr-B13 de #1554, T14 de #1690): el front de hoy ya no lo tiene, un bundle viejo del PWA sí; revocar cuando no queden bundles de antes (SQL, fuera de T14)"
   },
   "secuencias": [
     "cliente_descuentos_categoria_id_seq",

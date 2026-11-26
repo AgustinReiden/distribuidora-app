@@ -360,14 +360,17 @@ describe('VistaRendiciones — carga inicial', () => {
     expect(await screen.findByText('No hay rendiciones en el rango seleccionado')).toBeInTheDocument()
   })
 
-  it('si la RPC falla no rompe: muestra el vacío', async () => {
+  // Antes decía «no hay rendiciones» (el error se veía como lista vacía); ahora lo dice y deja
+  // reintentar (Fr-B4, más abajo).
+  it('si la RPC falla no rompe: muestra el error, no el vacío', async () => {
     rpcMock.mockImplementation((nombre: string) =>
       nombre === 'obtener_resumen_rendiciones'
         ? Promise.resolve({ data: null, error: { message: 'boom', code: 'XX000' } })
         : Promise.resolve({ data: null, error: null }),
     )
     await renderVista()
-    expect(await screen.findByText('No hay rendiciones en el rango seleccionado')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Reintentar' })).toBeInTheDocument()
+    expect(screen.queryByText('No hay rendiciones en el rango seleccionado')).toBeNull()
   })
 })
 
@@ -1327,5 +1330,49 @@ describe('VistaRendiciones — faltantes de la rendición (gastos 6)', () => {
     expect(within(t).queryByText(/faltantes a cargo de empleados/)).toBeNull()
     expect(within(t).queryByText('De la resolución de la diferencia')).toBeNull()
     expect(within(t).getByText('Efectivo a entregar').parentElement).toHaveTextContent(/450\.000,00/)
+  })
+})
+
+describe('VistaRendiciones — un error de carga no es «no hay rendiciones» (Fr-B4)', () => {
+  const ERROR_DE_RED = { message: 'TypeError: Failed to fetch', details: '', hint: '', code: '' }
+
+  it('si el resumen no carga, muestra el error con «Reintentar» y no el aviso de lista vacía', async () => {
+    rpcMock.mockImplementation((nombre: string) => {
+      if (nombre === 'obtener_resumen_rendiciones') return Promise.resolve({ data: null, error: ERROR_DE_RED })
+      return Promise.resolve({ data: [], error: null })
+    })
+    await renderVista()
+
+    expect(await screen.findByRole('button', { name: 'Reintentar' })).toBeInTheDocument()
+    expect(screen.queryByText(/No hay rendiciones en el rango seleccionado/)).toBeNull()
+  })
+
+  it('«Reintentar» vuelve a pedir el mismo rango y, si sale bien, muestra la lista', async () => {
+    let falla = true
+    rpcMock.mockImplementation((nombre: string) => {
+      if (nombre === 'obtener_resumen_rendiciones') {
+        return Promise.resolve(falla ? { data: null, error: ERROR_DE_RED } : { data: [PENDIENTE], error: null })
+      }
+      return Promise.resolve({ data: [], error: null })
+    })
+    const user = userEvent.setup()
+    await renderVista()
+    const reintentar = await screen.findByRole('button', { name: 'Reintentar' })
+
+    falla = false
+    await user.click(reintentar)
+
+    await screen.findByText('Tito Transportista', { selector: 'span' })
+    expect(screen.queryByRole('button', { name: 'Reintentar' })).toBeNull()
+    const [primera, segunda] = llamadas('obtener_resumen_rendiciones').map(c => c[1])
+    expect(segunda).toEqual(primera)
+  })
+
+  it('un rango sin rendiciones sigue diciendo que no hay, sin error', async () => {
+    resumenes = []
+    await renderVista()
+
+    expect(await screen.findByText(/No hay rendiciones en el rango seleccionado/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reintentar' })).toBeNull()
   })
 })

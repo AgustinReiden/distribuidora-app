@@ -2,7 +2,7 @@
  * Hook para gestión de rendiciones (resumen auto-calculado + control diario)
  * @module hooks/supabase/useRendiciones
  */
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { supabase, notifyError, getSucursalHeader } from './base'
 import { errorDeSupabase, type ErrorDeSupabase } from '../../utils/errorDeSupabase'
 import { fechaLocalISO } from '../../utils/formatters'
@@ -47,6 +47,11 @@ function errorNotificado(error: unknown, prefijo: string, mensajeSinConexion: st
 export function useRendiciones(): UseRendicionesReturn {
   const [resumenes, setResumenes] = useState<ResumenRendicionDiaria[]>([])
   const [loading, setLoading] = useState<boolean>(false)
+  // La última carga falló: la lista vacía no significa «no hay rendiciones» (Fr-B4 de #1554).
+  const [falloLaCarga, setFalloLaCarga] = useState<boolean>(false)
+  // Número de la última carga pedida. Cambiar el rango dos veces seguidas lanza dos cargas y la
+  // respuesta de la primera puede llegar después de la segunda: sólo la última pedida pinta.
+  const ultimoPedido = useRef(0)
   const [ultimoRango, setUltimoRango] = useState<{
     desde: string
     hasta: string
@@ -58,6 +63,8 @@ export function useRendiciones(): UseRendicionesReturn {
     fechaHasta: string,
     transportistaId?: string | null
   ): Promise<ResumenRendicionDiaria[]> => {
+    const pedido = ++ultimoPedido.current
+    const esLaUltima = (): boolean => pedido === ultimoPedido.current
     setLoading(true)
     try {
       const rango = {
@@ -125,6 +132,9 @@ export function useRendiciones(): UseRendicionesReturn {
         resuelta_por_nombre: (r.resuelta_por_nombre as string) || null
       })) as ResumenRendicionDiaria[]
 
+      // Llegó tarde: ya hay otra carga pedida después, y es la que manda.
+      if (!esLaUltima()) return resumen
+      setFalloLaCarga(false)
       setResumenes(resumen)
       setUltimoRango({
         desde: fechaDesde,
@@ -133,13 +143,21 @@ export function useRendiciones(): UseRendicionesReturn {
       })
       return resumen
     } catch (error) {
+      if (!esLaUltima()) return []
       notifyError('Error al cargar rendiciones: ' + (error as Error).message)
+      setFalloLaCarga(true)
       setResumenes([])
       return []
     } finally {
-      setLoading(false)
+      if (esLaUltima()) setLoading(false)
     }
   }, [])
+
+  /** Recarga el último rango (si hay) y devuelve el error tal cual, para que el que llama lo lance. */
+  const recargarConFallo = useCallback(async (fallo: ErrorDeSupabase): Promise<ErrorDeSupabase> => {
+    if (ultimoRango) await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
+    return fallo
+  }, [ultimoRango, fetchResumen])
 
   const marcarControlada = useCallback(async (
     fecha: string,
@@ -151,13 +169,14 @@ export function useRendiciones(): UseRendicionesReturn {
     })
 
     if (error) {
-      throw errorNotificado(error, 'Error al marcar como controlada', 'Sin conexión: no se pudo confirmar el control de la rendición. Revisá su estado antes de reintentar.')
+      // La llamada pudo haber llegado aunque la respuesta se perdió: la tarjeta tiene que mostrar lo que hay.
+      throw await recargarConFallo(errorNotificado(error, 'Error al marcar como controlada', 'Sin conexión: no se pudo confirmar el control de la rendición. Revisá su estado antes de reintentar.'))
     }
 
     if (ultimoRango) {
       await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
     }
-  }, [ultimoRango, fetchResumen])
+  }, [ultimoRango, fetchResumen, recargarConFallo])
 
   const desmarcarControlada = useCallback(async (
     fecha: string,
@@ -169,13 +188,13 @@ export function useRendiciones(): UseRendicionesReturn {
     })
 
     if (error) {
-      throw errorNotificado(error, 'Error al reabrir el control', 'Sin conexión: no se pudo reabrir el control de la rendición. Revisá su estado antes de reintentar.')
+      throw await recargarConFallo(errorNotificado(error, 'Error al reabrir el control', 'Sin conexión: no se pudo reabrir el control de la rendición. Revisá su estado antes de reintentar.'))
     }
 
     if (ultimoRango) {
       await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
     }
-  }, [ultimoRango, fetchResumen])
+  }, [ultimoRango, fetchResumen, recargarConFallo])
 
   const confirmarRendicion = useCallback(async (
     fecha: string,
@@ -193,19 +212,13 @@ export function useRendiciones(): UseRendicionesReturn {
     })
 
     if (error) {
-      throw errorNotificado(error, 'Error al cerrar rendición', 'Sin conexión: no se pudo confirmar el cierre de la rendición. Revisá su estado antes de reintentar.')
+      throw await recargarConFallo(errorNotificado(error, 'Error al cerrar rendición', 'Sin conexión: no se pudo confirmar el cierre de la rendición. Revisá su estado antes de reintentar.'))
     }
 
     if (ultimoRango) {
       await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
     }
-  }, [ultimoRango, fetchResumen])
-
-  /** Recarga el último rango (si hay) y devuelve el error tal cual, para que el que llama lo lance. */
-  const recargarConFallo = useCallback(async (fallo: ErrorDeSupabase): Promise<ErrorDeSupabase> => {
-    if (ultimoRango) await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
-    return fallo
-  }, [ultimoRango, fetchResumen])
+  }, [ultimoRango, fetchResumen, recargarConFallo])
 
   const resolverRendicion = useCallback(async (
     fecha: string,
@@ -298,6 +311,7 @@ export function useRendiciones(): UseRendicionesReturn {
   return {
     resumenes,
     loading,
+    error: falloLaCarga,
     fetchResumen,
     marcarControlada,
     desmarcarControlada,
