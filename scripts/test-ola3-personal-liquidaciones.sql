@@ -35,10 +35,12 @@
 --     coincide (la cerrada se rechaza, la abierta entra).
 -- 7 · m3 anular la liquidación de E1 después de pasarle su usuario a E2 dejaba los pedidos sin
 --     dueño: ahora se rechaza con el motivo. La de un empleado sin comisiones liquidadas se anula
---     aunque le hayan vinculado un usuario después.
+--     aunque le hayan vinculado un usuario después. 7b y 7c: sólo cuentan las comisiones
+--     iniciales; un ajuste del usuario viejo vuelve a la ficha por empleado_id y no traba.
 -- 8 · m4 (decisión del dueño, 25/11) un empleado con $ 2.000 de comisión sin liquidar no se pasa
 --     de sucursal ni a «las dos»: el mensaje dice el monto y la sucursal. La pantalla lo ve antes
---     (comision_sin_liquidar_empleado). Liquidado, se pasa.
+--     (comision_sin_liquidar_empleado). Liquidado, se pasa. 8b: con el período en curso ya
+--     liquidado y una venta entregada hoy, el motivo dice desde qué lunes se puede liquidar.
 -- 9 · m5 una liquidación sin movimientos (sueldo 0, sin comisión, sin pago) adelanta el corte: el
 --     ajuste de $ 1.000 que ya liquidó no vuelve a salir en la vista previa siguiente, que lo
 --     cuenta en el saldo anterior.
@@ -78,6 +80,9 @@ DECLARE
   e7c      bigint;
   e8       bigint;
   e9       bigint;
+  e7d      bigint;
+  v_q1     uuid;
+  v_q2     uuid;
   v_ped    bigint;
   v_liq    bigint;
   v_liq2   bigint;
@@ -496,6 +501,55 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('7 · error: %s', SQLERRM);
   END;
 
+  -- ===== 7b · m3 con usuarios mezclados: la inicial del usuario nuevo y el ajuste del viejo
+  -- E liquida S1 con U1 (P de $ 100.000: $ 2.000). Pasa a U2, que vende $ 50.000 en S2, y P baja a
+  -- $ 50.000: L2 queda con inicial:U2 (+1.000) y ajuste:U1 (-1.000). El ajuste vuelve a la ficha
+  -- por empleado_id: L2 se anula con U2 vinculado, y no con U1 (la inicial de U2 quedaría sin dueño).
+  BEGIN
+    v_q1 := pg_temp.u('preventista', v_s1);
+    v_q2 := pg_temp.u('preventista', v_s1);
+    e7d := pg_temp.alta(jsonb_build_object('usuario_id', v_q1), 0, true);
+    v_ped := pg_temp.pedido(v_q1, v_l + 2, 100000);
+    PERFORM pg_temp.lq(e7d, 2000);
+    PERFORM pg_temp.como(pg_temp.edicion(e7d, jsonb_build_object('usuario_id', v_q2)));
+    PERFORM pg_temp.pedido(v_q2, v_l + 8, 50000);
+    UPDATE pedido_items SET cantidad = 500, subtotal = 50000 WHERE pedido_id = v_ped;
+    UPDATE pedidos SET total = 50000 WHERE id = v_ped;
+    v_liq2 := pg_temp.lq(e7d, 0);
+    v_fallas := v_fallas || pg_temp.chk(
+      (SELECT string_agg(tipo || ':' || CASE WHEN usuario_id = v_q1 THEN 'U1' WHEN usuario_id = v_q2 THEN 'U2' ELSE '?' END
+                         || ':' || round(comision, 2), ',' ORDER BY tipo)
+         FROM empleado_liquidacion_lineas WHERE liquidacion_id = v_liq2) = 'ajuste:U1:-1000.00,inicial:U2:1000.00',
+      '7b el armado: L2 no quedó con inicial:U2 y ajuste:U1');
+    PERFORM pg_temp.como(pg_temp.edicion(e7d, jsonb_build_object('usuario_id', v_q1)));
+    v_fallas := v_fallas || pg_temp.falla('7b anular con U1 de vuelta (la inicial de U2 sin dueño)', pg_temp.an(v_liq2),
+                  'ya no es el de este empleado');
+    PERFORM pg_temp.como(pg_temp.edicion(e7d, jsonb_build_object('usuario_id', v_q2)));
+    v_fallas := v_fallas || pg_temp.anda('7b anular con U2 vinculado', pg_temp.an(v_liq2));
+  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('7b · error: %s', SQLERRM);
+  END;
+
+  -- ===== 7c · m3 con sólo el ajuste del usuario viejo: se anula, y el ajuste vuelve a la ficha
+  BEGIN
+    v_q1 := pg_temp.u('preventista', v_s1);
+    v_q2 := pg_temp.u('preventista', v_s1);
+    e7d := pg_temp.alta(jsonb_build_object('usuario_id', v_q1), 0, true);
+    v_ped := pg_temp.pedido(v_q1, v_l + 2, 100000);
+    PERFORM pg_temp.lq(e7d, 2000);
+    PERFORM pg_temp.como(pg_temp.edicion(e7d, jsonb_build_object('usuario_id', v_q2)));
+    UPDATE pedido_items SET cantidad = 500, subtotal = 50000 WHERE pedido_id = v_ped;
+    UPDATE pedidos SET total = 50000 WHERE id = v_ped;
+    v_liq2 := pg_temp.lq(e7d, 0);
+    v_fallas := v_fallas || pg_temp.chk(
+      (SELECT string_agg(tipo || ':' || round(comision, 2), ',') FROM empleado_liquidacion_lineas WHERE liquidacion_id = v_liq2)
+        = 'ajuste:-1000.00', '7c el armado: L2 no quedó con sólo el ajuste de -$ 1.000');
+    v_fallas := v_fallas || pg_temp.anda('7c anular con sólo el ajuste del usuario viejo', pg_temp.an(v_liq2));
+    v_fallas := v_fallas || pg_temp.chk(
+      (SELECT string_agg(l.tipo || ':' || round(l.comision, 2), ',') FROM empleados e, public._liquidacion_lineas(e, v_hoy) l
+        WHERE e.id = e7d) = 'ajuste:-1000.00', '7c el ajuste no volvió a la ficha');
+  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('7c · error: %s', SQLERRM);
+  END;
+
   -- ============================= 8 · m4 lo pendiente no se arrastra de una sucursal a otra ===
   BEGIN
     v_p8 := pg_temp.u('preventista', v_s1);
@@ -507,8 +561,11 @@ BEGIN
     v_fallas := v_fallas || pg_temp.chk(to_regprocedure('public.comision_sin_liquidar_empleado(bigint)') IS NOT NULL,
                   '8 no existe comision_sin_liquidar_empleado (la pantalla no puede avisar antes)');
     IF to_regprocedure('public.comision_sin_liquidar_empleado(bigint)') IS NOT NULL THEN
-      v_m := pg_temp.como(format('SELECT public.comision_sin_liquidar_empleado(p_empleado_id => %s)', e8))::numeric;
-      v_fallas := v_fallas || pg_temp.chk(v_m = 2000, format('8 la pantalla ve %s y no $ 2.000', v_m));
+      v_x := pg_temp.como(format('SELECT public.comision_sin_liquidar_empleado(p_empleado_id => %s)', e8))::jsonb;
+      v_fallas := v_fallas || pg_temp.chk((v_x->>'monto')::numeric = 2000
+                    AND v_x->>'aviso' = format('Tiene $ 2.000,00 de comisión sin liquidar en %s: liquidalo antes de pasarlo de sucursal',
+                                               (SELECT nombre FROM sucursales WHERE id = v_s1)),
+                    format('8 la pantalla ve %s y no $ 2.000 con el motivo del server', v_x));
       v_fallas := v_fallas || pg_temp.chk(
         has_function_privilege('authenticated', 'public.comision_sin_liquidar_empleado(bigint)', 'EXECUTE')
         AND NOT has_function_privilege('anon', 'public.comision_sin_liquidar_empleado(bigint)', 'EXECUTE')
@@ -527,10 +584,37 @@ BEGIN
                   '8 la ficha se movió con la comisión sin liquidar');
     v_fallas := v_fallas || pg_temp.anda('8 editar sin moverlo', pg_temp.edicion(e8, '{"telefono":"381 555 0001"}'));
     PERFORM pg_temp.lq(e8, 2000);
+    v_x := pg_temp.como(format('SELECT public.comision_sin_liquidar_empleado(p_empleado_id => %s)', e8))::jsonb;
+    v_fallas := v_fallas || pg_temp.chk((v_x->>'monto')::numeric = 0 AND v_x->'aviso' = 'null'::jsonb,
+                  format('8 liquidado la pantalla ve %s', v_x));
     v_fallas := v_fallas || pg_temp.anda('8 liquidado, se pasa',
                   pg_temp.edicion(e8, jsonb_build_object('sucursal_id', (SELECT min(id) FROM sucursales WHERE activa AND id <> v_s1))));
     v_fallas := v_fallas || pg_temp.chk((SELECT sucursal_id <> v_s1 FROM empleados WHERE id = e8), '8 liquidado no se movió');
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('8 · error: %s', SQLERRM);
+  END;
+
+  -- ===== 8b · m4 con el período en curso ya liquidado: el motivo dice desde cuándo se puede liquidar
+  BEGIN
+    v_p8 := pg_temp.u('preventista', v_s1);
+    INSERT INTO usuario_sucursales (usuario_id, sucursal_id, es_default)
+    SELECT v_p8, s.id, false FROM sucursales s WHERE s.activa AND s.id <> v_s1 ORDER BY s.id LIMIT 1;
+    -- El arreglo arranca este lunes: el período en curso se liquida hoy, sin nada.
+    e8 := pg_temp.alta(jsonb_build_object('usuario_id', v_p8, 'arreglo', jsonb_build_object(
+            'vigente_desde', v_l + 14, 'sueldo', 0, 'frecuencia', 'semanal', 'comisiona', true)), 0, true);
+    v_liq := pg_temp.lq(e8, 0);
+    -- Hoy se entrega una venta de $ 100.000: $ 2.000 que entran en la semana que viene.
+    PERFORM pg_temp.pedido(v_p8, v_hoy, 100000);
+    v_fallas := v_fallas || pg_temp.chk((SELECT desde FROM empleado_liquidaciones WHERE id = v_liq) = v_l + 14,
+                  '8b el armado: no se liquidó la semana en curso');
+    v_fallas := v_fallas || pg_temp.falla('8b liquidar ya', pg_temp.lqs(e8, pg_temp.lqj(e8, 0)), 'El período todavía no empezó');
+    v_fallas := v_fallas || pg_temp.falla('8b pasarlo a la otra sucursal',
+                  pg_temp.edicion(e8, jsonb_build_object('sucursal_id', (SELECT min(id) FROM sucursales WHERE activa AND id <> v_s1))),
+                  format('Tiene $ 2.000,00 de comisión sin liquidar en %s, de esta semana: se puede liquidar desde el lunes %s; pasalo de sucursal después',
+                         (SELECT nombre FROM sucursales WHERE id = v_s1), to_char(v_l + 21, 'FMDD/FMMM')));
+    v_x := pg_temp.como(format('SELECT public.comision_sin_liquidar_empleado(p_empleado_id => %s)', e8))::jsonb;
+    v_fallas := v_fallas || pg_temp.chk(v_x->>'aviso' LIKE '%se puede liquidar desde el lunes ' || to_char(v_l + 21, 'FMDD/FMMM') || '%',
+                  format('8b la pantalla no dice desde cuándo: %s', v_x));
+  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('8b · error: %s', SQLERRM);
   END;
 
   -- ===================================== 9 · m5 la liquidación sin movimientos adelanta el corte ===
@@ -566,7 +650,7 @@ BEGIN
   END;
 
   IF cardinality(v_fallas) = 0 THEN
-    RAISE EXCEPTION 'ENSAYO OK · t6 personal y liquidaciones: 1 a 10';
+    RAISE EXCEPTION 'ENSAYO OK · t6 personal y liquidaciones: 1 a 10, con 7b, 7c y 8b';
   END IF;
   RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' | ');
 END

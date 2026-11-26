@@ -103,25 +103,26 @@ SQL
 liq() { echo "public.liquidar_empleado(p_empleado_id => $1, p_liquidacion => '$2'::jsonb, p_clave => '$3'::uuid)"; }
 liqs() { echo "SELECT count(*) FROM empleado_liquidaciones WHERE empleado_id = $1 AND anulada_at IS NULL"; }
 uuid() { psqlc -c "SELECT gen_random_uuid()"; }
+# Las claves que usa el guion, todas acá: al final se borran sólo ésas (el alta del empleado va sin clave).
+K1=$(uuid); K2=$(uuid); K3=$(uuid); K4=$(uuid); K5=$(uuid); K6=$(uuid)
 
-E=$(empleado | tail -1); CREADOS+=("$E"); K=$(uuid)
-escenario P1-pago-misma-clave "$(mov "$E" "$K")" "$(mov "$E" "$K")" "$(pagos "$E")" 1
 E=$(empleado | tail -1); CREADOS+=("$E")
-escenario P0-control-dos-claves "$(mov "$E" "$(uuid)")" "$(mov "$E" "$(uuid)")" "$(pagos "$E")" 2
-E=$(empleado | tail -1); CREADOS+=("$E"); K=$(uuid); J=$(lqj "$E")
-escenario L1-liquidacion-misma-clave "$(liq "$E" "$J" "$K")" "$(liq "$E" "$J" "$K")" "$(liqs "$E")" 1
+escenario P1-pago-misma-clave "$(mov "$E" "$K1")" "$(mov "$E" "$K1")" "$(pagos "$E")" 1
+E=$(empleado | tail -1); CREADOS+=("$E")
+escenario P0-control-dos-claves "$(mov "$E" "$K2")" "$(mov "$E" "$K3")" "$(pagos "$E")" 2
+E=$(empleado | tail -1); CREADOS+=("$E"); J=$(lqj "$E")
+escenario L1-liquidacion-misma-clave "$(liq "$E" "$J" "$K4")" "$(liq "$E" "$J" "$K4")" "$(liqs "$E")" 1
 if grep -q "^S2 id " "$TMP/t6c-L1-liquidacion-misma-clave-s2.out"; then :; else
   echo "   FALLA: en L1 S2 tenía que devolver la liquidación de S1, no rechazarse"; FALLAS=$((FALLAS + 1)); fi
 E=$(empleado | tail -1); CREADOS+=("$E"); J=$(lqj "$E")
-escenario L0-control-dos-claves "$(liq "$E" "$J" "$(uuid)")" "$(liq "$E" "$J" "$(uuid)")" "$(liqs "$E")" 1
+escenario L0-control-dos-claves "$(liq "$E" "$J" "$K5")" "$(liq "$E" "$J" "$K6")" "$(liqs "$E")" 1
 grep -q "ya no es el próximo" "$TMP/t6c-L0-control-dos-claves-s2.out" \
   || { echo "   FALLA: en L0 S2 tenía que rechazarse por el período (es otra liquidación, no un reintento)"; FALLAS=$((FALLAS + 1)); }
 
 IDS=$(IFS=,; echo "${CREADOS[*]}")
 psqlc >/dev/null 2>&1 <<SQL
 SET session_replication_role = replica;
-DELETE FROM altas_por_clave WHERE usuario_id = '$ADMIN' AND operacion IN ('movimiento_empleado', 'liquidacion_empleado', 'empleado')
-   AND created_at > now() - interval '1 hour';
+DELETE FROM altas_por_clave WHERE clave IN ('$K1', '$K2', '$K3', '$K4', '$K5', '$K6');
 DELETE FROM empleado_movimientos WHERE empleado_id IN ($IDS);
 DELETE FROM empleado_liquidacion_conceptos WHERE liquidacion_id IN (SELECT id FROM empleado_liquidaciones WHERE empleado_id IN ($IDS));
 DELETE FROM empleado_liquidacion_lineas WHERE empleado_id IN ($IDS);

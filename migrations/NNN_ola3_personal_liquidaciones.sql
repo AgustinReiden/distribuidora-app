@@ -41,8 +41,11 @@
 --     escritura REST), y la sucursal del usuario (usuario_sucursales) no entra
 --     en la cuenta de la comisión de la ficha. Lo pendiente sale de
 --     _liquidacion_lineas (la cuenta de previsualizar_liquidacion, sobre
---     _comision_lineas, que no se toca), en _empleado_comision_sin_liquidar; la
---     pantalla lo pide por comision_sin_liquidar_empleado (sólo admin).
+--     _comision_lineas, que no se toca), en _empleado_comision_sin_liquidar; el
+--     motivo es uno (_empleado_aviso_comision_sin_liquidar), y si lo pendiente
+--     entra en un período que todavía no empezó (se liquidó el período en curso
+--     y hoy se entregó algo más) dice desde cuándo se puede liquidar. La pantalla
+--     lo pide por comision_sin_liquidar_empleado (sólo admin).
 -- 8 · m5: una liquidación guarda su corte (corte_movimiento_id: el último
 --     movimiento del empleado al liquidar). Sin movimientos propios (sueldo 0,
 --     sin comisión, sin pago) no adelantaba el corte, y lo ya liquidado volvía
@@ -103,6 +106,7 @@ BEGIN
      OR to_regprocedure('public.liquidar_empleado(bigint,jsonb,uuid)') IS NOT NULL
      OR to_regprocedure('public.comision_sin_liquidar_empleado(bigint)') IS NOT NULL
      OR to_regprocedure('public._empleado_comision_sin_liquidar(public.empleados)') IS NOT NULL
+     OR to_regprocedure('public._empleado_aviso_comision_sin_liquidar(public.empleados)') IS NOT NULL
      OR to_regprocedure('public._empleado_corte_movimientos(bigint)') IS NOT NULL THEN
     RAISE EXCEPTION 'mig NNN · ya está aplicada (existen las funciones nuevas)';
   END IF;
@@ -380,6 +384,9 @@ $r$    RAISE EXCEPTION 'Tu propia cuenta la maneja otro admin: no podés cambiar
         RAISE EXCEPTION 'Este movimiento ya se había registrado con el intento anterior y no se encuentra: revisá la cuenta del empleado.'
           USING ERRCODE = '22023';
       END IF;
+      -- Un reintento del movimiento que en el medio se revirtió devuelve igual su id,
+      -- sin registrarlo de nuevo: es el mismo intento, y la cuenta muestra que está
+      -- revertido. Uno nuevo lleva otra clave (el front la cambia al salir bien).
       RETURN v_previa.entidad_id;
     END IF;
   END IF;
@@ -440,8 +447,13 @@ $a$    'rendicion', (SELECT jsonb_build_object('transportista_nombre', tr.nombre
 $a$,
 $r$    -- m2 (#1392): «cerrada» es la regla con la que revertir_movimiento_empleado y
     -- anular_liquidacion la miran (control_rendicion_cerrado). Esa función rechaza
-    -- una sucursal que no es de quien llama: ahí revertir tampoco anda, y va true.
+    -- una sucursal que no es de quien llama: ahí revertir tampoco anda, va true y
+    -- «de_otra_sucursal» dice por qué.
     'rendicion', (SELECT jsonb_build_object('transportista_nombre', tr.nombre, 'fecha', p_m.rendicion_fecha,
+                                            'de_otra_sucursal', auth.uid() IS NOT NULL
+                                                              AND NOT EXISTS (SELECT 1 FROM usuario_sucursales us
+                                                                               WHERE us.usuario_id = auth.uid()
+                                                                                 AND us.sucursal_id = p_m.rendicion_sucursal_id),
                                             'cerrada', CASE WHEN auth.uid() IS NULL
                                                               OR EXISTS (SELECT 1 FROM usuario_sucursales us
                                                                           WHERE us.usuario_id = auth.uid()
@@ -470,12 +482,16 @@ $a$,
 $r$  IF p_motivo IS NULL OR btrim(p_motivo) = '' THEN
     RAISE EXCEPTION 'Escribí por qué se anula';
   END IF;
-  -- m3 (#1392): las comisiones vuelven a quedar pendientes del usuario con el que
-  -- se calcularon, y las toma la ficha que hoy lo tiene. Si ya no es este
-  -- empleado (se lo pasaron a otra ficha, o se lo sacaron), las boletas quedaban
-  -- sin dueño o para el otro: se rechaza.
+  -- m3 (#1392): las comisiones iniciales vuelven a quedar pendientes del usuario
+  -- con el que se calcularon, y las toma la ficha que hoy lo tiene. Si ya no es
+  -- este empleado (se lo pasaron a otra ficha, o se lo sacaron), esas boletas
+  -- quedaban sin dueño o para el otro: se rechaza. Sólo las 'inicial': un
+  -- 'ajuste' o una 'linea_nueva' vuelve a la ficha por empleado_id, sea cual sea
+  -- su usuario (si no, la liquidación con un ajuste del usuario viejo no se podía
+  -- anular nunca, ni las anteriores).
   IF EXISTS (SELECT 1 FROM empleado_liquidacion_lineas l
-              WHERE l.liquidacion_id = v_l.id AND l.usuario_id IS DISTINCT FROM v_e.usuario_id) THEN
+              WHERE l.liquidacion_id = v_l.id AND l.tipo = 'inicial'
+                AND l.usuario_id IS DISTINCT FROM v_e.usuario_id) THEN
     RAISE EXCEPTION 'No se puede anular: el usuario con el que se calcularon sus comisiones ya no es el de este empleado. Volvé a vincularle ese usuario para anularla, o corregí la diferencia con un ajuste';
   END IF;
 $r$, 1, 'anular_liquidacion (usuario de las comisiones)');
@@ -501,15 +517,53 @@ AS $function$
 $function$;
 REVOKE ALL ON FUNCTION public._empleado_comision_sin_liquidar(public.empleados) FROM PUBLIC, anon, authenticated;
 
+-- El motivo por el que no se lo pasa de sucursal (NULL: no tiene nada pendiente).
+-- Una sola redacción: la usan guardar_empleado y la ficha (comision_sin_liquidar_empleado).
+CREATE FUNCTION public._empleado_aviso_comision_sin_liquidar(p_e public.empleados)
+RETURNS text
+LANGUAGE plpgsql
+STABLE
+SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_pend  numeric := public._empleado_comision_sin_liquidar(p_e);
+  v_desde date;
+  v_frec  text;
+  v_plata text;
+  v_suc   text;
+BEGIN
+  IF v_pend = 0 THEN
+    RETURN NULL;
+  END IF;
+  v_plata := CASE WHEN v_pend < 0 THEN '-' ELSE '' END || '$ '
+             || translate(to_char(abs(v_pend), 'FM999,999,999,990.00'), ',.', '.,');
+  v_suc := CASE WHEN p_e.de_las_dos THEN 'las dos sucursales'
+                ELSE COALESCE((SELECT s.nombre FROM sucursales s WHERE s.id = p_e.sucursal_id), 'su sucursal') END;
+  SELECT ps.desde, ps.frecuencia INTO v_desde, v_frec FROM public._empleado_periodo_siguiente(p_e) ps;
+  -- Ya se liquidó el período en curso y hoy se entregó algo más: eso entra en el
+  -- próximo, que liquidar_empleado no deja liquidar antes de que empiece. Se dice
+  -- desde cuándo, para que el «liquidalo antes» no quede sin salida.
+  IF v_desde > public._tablero_hoy() THEN
+    RETURN format('Tiene %s de comisión sin liquidar en %s, de %s: se puede liquidar desde el %s %s; pasalo de sucursal después',
+                  v_plata, v_suc, CASE WHEN v_frec = 'mensual' THEN 'este mes' ELSE 'esta semana' END,
+                  (ARRAY['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'])[extract(isodow FROM v_desde)::int],
+                  to_char(v_desde, 'FMDD/FMMM'));
+  END IF;
+  RETURN format('Tiene %s de comisión sin liquidar en %s: liquidalo antes de pasarlo de sucursal', v_plata, v_suc);
+END
+$function$;
+REVOKE ALL ON FUNCTION public._empleado_aviso_comision_sin_liquidar(public.empleados) FROM PUBLIC, anon, authenticated;
+
 CREATE FUNCTION public.comision_sin_liquidar_empleado(p_empleado_id bigint)
-RETURNS numeric
+RETURNS jsonb
 LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
 -- m4 (#1392): para que la ficha avise antes de cambiar de sucursal a un empleado
--- con comisión sin liquidar (guardar_empleado lo rechaza con el mismo número).
+-- con comisión sin liquidar: el monto y el mismo motivo con que guardar_empleado lo
+-- rechaza (aviso NULL: se puede mover).
 DECLARE
   v_e empleados%ROWTYPE;
 BEGIN
@@ -520,7 +574,8 @@ BEGIN
   IF NOT FOUND OR NOT public._empleado_visible(v_e.sucursal_id, v_e.de_las_dos) THEN
     RAISE EXCEPTION 'Ese empleado no existe o no lo podés ver';
   END IF;
-  RETURN public._empleado_comision_sin_liquidar(v_e);
+  RETURN jsonb_build_object('monto', public._empleado_comision_sin_liquidar(v_e),
+                            'aviso', public._empleado_aviso_comision_sin_liquidar(v_e));
 END
 $function$;
 REVOKE ALL ON FUNCTION public.comision_sin_liquidar_empleado(bigint) FROM PUBLIC, anon;
@@ -539,8 +594,8 @@ $a$  v_previa    public.altas_por_clave%ROWTYPE;
 BEGIN
 $a$,
 $r$  v_previa    public.altas_por_clave%ROWTYPE;
-  -- m4 (#1392): la comisión sin liquidar al cambiar de sucursal.
-  v_pend      numeric;
+  -- m4 (#1392): el motivo por el que no se lo cambia de sucursal.
+  v_aviso     text;
 BEGIN
 $r$, 1, 'guardar_empleado (declaraciones)');
   v_def := pg_temp.parche(v_def,
@@ -556,13 +611,9 @@ $r$  IF v_mueve AND NOT public._tiene_todas_las_sucursales() THEN
   -- sin liquidar (en la sucursal de hoy, o en las dos) no se cambia: primero se
   -- liquida. La ficha lo avisa antes con comision_sin_liquidar_empleado.
   IF v_mueve THEN
-    v_pend := public._empleado_comision_sin_liquidar(v_viejo);
-    IF v_pend <> 0 THEN
-      RAISE EXCEPTION 'Tiene %$ % de comisión sin liquidar en %: liquidalo antes de pasarlo de sucursal',
-        CASE WHEN v_pend < 0 THEN '-' ELSE '' END,
-        translate(to_char(abs(v_pend), 'FM999,999,999,990.00'), ',.', '.,'),
-        CASE WHEN v_viejo.de_las_dos THEN 'las dos sucursales'
-             ELSE COALESCE((SELECT s.nombre FROM sucursales s WHERE s.id = v_viejo.sucursal_id), 'su sucursal') END;
+    v_aviso := public._empleado_aviso_comision_sin_liquidar(v_viejo);
+    IF v_aviso IS NOT NULL THEN
+      RAISE EXCEPTION '%', v_aviso;
     END IF;
   END IF;
 $r$, 1, 'guardar_empleado (m4)');
@@ -597,17 +648,18 @@ BEGIN
   END IF;
   -- Los cuerpos que deja esta migración.
   FOR r IN SELECT * FROM (VALUES
-    ('public.registrar_movimiento_empleado(bigint,jsonb,uuid)', '890f8316c6423deb209fc451d9834832'),
+    ('public.registrar_movimiento_empleado(bigint,jsonb,uuid)', '9b31925ab82d19d6b64b409677d24c4a'),
     ('public.liquidar_empleado(bigint,jsonb,uuid)', 'eeecb4cc3602c310ca26ecbe7ba327a5'),
-    ('public.anular_liquidacion(bigint,text)', 'c84aa92da1c4365c4383d642b459be85'),
-    ('public.guardar_empleado(jsonb)', '29ce189d1e24946622fbd5b71000fdd8'),
+    ('public.anular_liquidacion(bigint,text)', '4b82927bd1086c7b369dddac50d0a142'),
+    ('public.guardar_empleado(jsonb)', '6f1977a9807a00accafe217550fb07c4'),
     ('public._empleado_json(public.empleados)', '05d767c3dab2a4b218d92802c37615ee'),
     ('public._liquidacion_json(public.empleados,date,date,numeric)', '91f898e4be9e37699c73dc61b26b2fb7'),
-    ('public._movimiento_origen_json(public.empleado_movimientos)', '45a1692bf72777e6cf3a0ca442a20b5c'),
+    ('public._movimiento_origen_json(public.empleado_movimientos)', '4e6026a6c51ac095a4d8030f3ba30a60'),
     ('public.gastos_cuenta_empleado()', 'cb2e72fc8d088ba4c51a7920b009386e'),
     ('public._empleado_corte_movimientos(bigint)', 'da9efdc59f183da5d1e718994d2b6b67'),
     ('public._empleado_comision_sin_liquidar(public.empleados)', '7078278b5f20c22850036bf658d5737d'),
-    ('public.comision_sin_liquidar_empleado(bigint)', '53f93227a93676d21ea963bfca95819d')
+    ('public._empleado_aviso_comision_sin_liquidar(public.empleados)', '2c3f71e88603ce27b513337002794c93'),
+    ('public.comision_sin_liquidar_empleado(bigint)', 'f42df3b0ac0eaf82fdd4bc244c3326d3')
   ) AS t(f, h) LOOP
     SELECT md5(prosrc) INTO v FROM pg_proc WHERE oid = r.f::regprocedure;
     IF v IS DISTINCT FROM r.h THEN
@@ -624,6 +676,7 @@ BEGIN
     ('public.guardar_empleado(jsonb)', true),
     ('public._empleado_corte_movimientos(bigint)', false),
     ('public._empleado_comision_sin_liquidar(public.empleados)', false),
+    ('public._empleado_aviso_comision_sin_liquidar(public.empleados)', false),
     ('public._empleado_json(public.empleados)', false),
     ('public._liquidacion_json(public.empleados,date,date,numeric)', false),
     ('public._movimiento_origen_json(public.empleado_movimientos)', false)

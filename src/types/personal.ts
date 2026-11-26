@@ -46,6 +46,14 @@ export interface RendicionDelPago {
    * venía (`undefined`), y el server igual rechaza.
    */
   cerrada?: boolean
+  /** La rendición es de una sucursal que no es de quien mira: revertir el pago lo hace un admin de esa sucursal. */
+  de_otra_sucursal?: boolean
+}
+
+/** m4 (#1392): la comisión sin liquidar de una ficha y el motivo del server para no moverla (null: se puede). */
+export interface ComisionSinLiquidar {
+  monto: number
+  aviso: string | null
 }
 
 /**

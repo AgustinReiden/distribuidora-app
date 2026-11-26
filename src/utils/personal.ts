@@ -557,17 +557,9 @@ export function opcionesDePlata(
 
 /** m2 (#1392): por qué un movimiento que se revertiría no se revierte. `null` si nada lo impide. */
 export function motivoSinReversion(m: Pick<MovimientoEmpleado, 'tipo' | 'rendicion'>): string | null {
-  return m.tipo === 'pago' && m.rendicion?.cerrada === true
-    ? 'Salió de una rendición ya cerrada: corregilo con un ajuste'
-    : null
-}
-
-/**
- * m4 (#1392, decisión del dueño del 25/11): lo pendiente no se arrastra de una sucursal a otra. El
- * mismo mensaje con que `guardar_empleado` lo rechaza. `null` si no tiene comisión sin liquidar.
- */
-export function avisoComisionSinLiquidar(monto: number, sucursal: string): string | null {
-  if (Math.abs(monto) < 0.005) return null
-  const plata = formatPrecio(Math.abs(monto))
-  return `Tiene ${monto < 0 ? '-' : ''}${plata} de comisión sin liquidar en ${sucursal}: liquidalo antes de pasarlo de sucursal`
+  if (m.tipo !== 'pago' || m.rendicion?.cerrada !== true) return null
+  // El server no deja mirar si está cerrada una rendición de otra sucursal: revertir tampoco anda.
+  return m.rendicion.de_otra_sucursal === true
+    ? 'Salió de una rendición de otra sucursal: lo revierte un admin de esa sucursal'
+    : 'Salió de una rendición ya cerrada: corregilo con un ajuste'
 }

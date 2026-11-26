@@ -32,7 +32,6 @@ import {
   parseMonto,
   textoArregloLargo,
   topeDeArreglo,
-  avisoComisionSinLiquidar,
 } from '../../utils/personal'
 import { useComisionSinLiquidarQuery } from '../../hooks/queries/usePersonalQuery'
 import type {
@@ -282,10 +281,9 @@ export default function ModalEmpleado({
   // con el mismo mensaje que guardar_empleado, y no se manda.
   const sucursalOriginal: number | 'dos' | null = empleado ? (empleado.de_las_dos ? 'dos' : empleado.sucursal_id) : null
   const mueve = edicion && tieneTodasLasSucursales && sucursalSel !== sucursalOriginal
+  // El motivo lo redacta el server (dice desde cuándo se puede liquidar si todavía no se puede).
   const { data: comisionSinLiquidar } = useComisionSinLiquidarQuery(empleado?.id ?? null, mueve)
-  const avisoPendiente = mueve && comisionSinLiquidar != null
-    ? avisoComisionSinLiquidar(comisionSinLiquidar, empleado?.de_las_dos ? 'las dos sucursales' : nombreSucursalFija)
-    : null
+  const avisoPendiente = mueve ? (comisionSinLiquidar?.aviso ?? null) : null
 
   const handleEscapeKeyDown = (event: KeyboardEvent) => {
     // Radix escucha Escape en captura, antes que el buscador: con la lista

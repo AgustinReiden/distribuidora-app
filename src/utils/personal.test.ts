@@ -34,7 +34,6 @@ import {
   rendicionesDelDia,
   opcionesDePlata,
   motivoSinReversion,
-  avisoComisionSinLiquidar,
 } from './personal'
 import { formatPrecio } from './formatters'
 import type {
@@ -917,14 +916,8 @@ describe('motivoSinReversion', () => {
     expect(motivoSinReversion({ tipo: 'pago', rendicion })).toBeNull()
     expect(motivoSinReversion({ tipo: 'pago', rendicion: null })).toBeNull()
   })
-})
-
-// m4 (#1392, decisión del dueño del 25/11): el mismo mensaje que guardar_empleado.
-describe('avisoComisionSinLiquidar', () => {
-  it('dice el monto y la sucursal; sin pendiente, nada', () => {
-    expect(avisoComisionSinLiquidar(2000, 'Tucumán'))
-      .toBe(`Tiene ${formatPrecio(2000)} de comisión sin liquidar en Tucumán: liquidalo antes de pasarlo de sucursal`)
-    expect(avisoComisionSinLiquidar(-500, 'las dos sucursales')).toContain(`-${formatPrecio(500)} de comisión sin liquidar`)
-    expect(avisoComisionSinLiquidar(0.004, 'Tucumán')).toBeNull()
+  it('la de otra sucursal lo dice, en lugar de «ya cerrada»', () => {
+    expect(motivoSinReversion({ tipo: 'pago', rendicion: { ...rendicion, cerrada: true, de_otra_sucursal: true } }))
+      .toBe('Salió de una rendición de otra sucursal: lo revierte un admin de esa sucursal')
   })
 })

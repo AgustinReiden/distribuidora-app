@@ -10,16 +10,19 @@ import { reiniciarAtrasModales } from '../../utils/atrasModales'
 import userEvent from '@testing-library/user-event'
 
 // m4 (#1392): la comisión sin liquidar de la ficha, que el modal pide sólo si se la cambia de sucursal.
+// El motivo lo redacta el server (comision_sin_liquidar_empleado): el modal lo muestra tal cual.
 const comision = vi.hoisted(() => ({
-  pendiente: 0 as number | undefined,
+  respuesta: { monto: 0, aviso: null } as { monto: number; aviso: string | null } | undefined,
   pedida: [] as Array<{ empleadoId: number | null; enabled: boolean }>,
 }))
 vi.mock('../../hooks/queries/usePersonalQuery', () => ({
   useComisionSinLiquidarQuery: (empleadoId: number | null, enabled = true) => {
     comision.pedida.push({ empleadoId, enabled })
-    return { data: enabled ? comision.pendiente : undefined }
+    return { data: enabled ? comision.respuesta : undefined }
   },
 }))
+const AVISO_2000 = 'Tiene $ 2.000,00 de comisión sin liquidar en Tucuman: liquidalo antes de pasarlo de sucursal'
+const AVISO_LUNES = 'Tiene $ 2.000,00 de comisión sin liquidar en Tucuman, de esta semana: se puede liquidar desde el lunes 1/12; pasalo de sucursal después'
 
 import ModalEmpleado, { modalEmpleadoSchema, type ModalEmpleadoProps } from './ModalEmpleado'
 import { formatPrecio } from '../../utils/formatters'
@@ -418,16 +421,14 @@ describe('ModalEmpleado', () => {
       comision.pedida.length = 0
     })
 
-    it('avisa con el monto y la sucursal, y no guarda', async () => {
-      comision.pendiente = 2000
+    it('avisa con el motivo del server, y no guarda', async () => {
+      comision.respuesta = { monto: 2000, aviso: AVISO_2000 }
       const { onSave, user } = renderModal({
         empleado: EMPLEADO, sucursalesUsuario: [TUCUMAN, TACO_POZO], tieneTodasLasSucursales: true,
       })
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
       await user.click(screen.getByRole('button', { name: 'Taco Pozo' }))
-      const aviso = `Tiene ${formatPrecio(2000)} de comisión sin liquidar en Tucumán: liquidalo antes de pasarlo de sucursal`
-        .replace(/\s/g, ' ')
-      expect(screen.getByRole('alert').textContent?.replace(/\s/g, ' ')).toBe(aviso)
+      expect(screen.getByRole('alert')).toHaveTextContent(AVISO_2000)
       expect(comision.pedida).toContainEqual({ empleadoId: 42, enabled: true })
       await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
       expect(onSave).not.toHaveBeenCalled()
@@ -440,18 +441,30 @@ describe('ModalEmpleado', () => {
     })
 
     it('a «Las dos» también', async () => {
-      comision.pendiente = 2000
+      comision.respuesta = { monto: 2000, aviso: AVISO_2000 }
       const { onSave, user } = renderModal({
         empleado: EMPLEADO, sucursalesUsuario: [TUCUMAN, TACO_POZO], tieneTodasLasSucursales: true,
       })
       await user.click(screen.getByRole('button', { name: 'Las dos' }))
-      expect(screen.getByRole('alert')).toHaveTextContent('de comisión sin liquidar en Tucumán')
+      expect(screen.getByRole('alert')).toHaveTextContent(AVISO_2000)
+      await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+      expect(onSave).not.toHaveBeenCalled()
+    })
+
+    // El período en curso ya se liquidó: el motivo dice desde cuándo se puede liquidar.
+    it('con lo pendiente en un período que todavía no empezó, dice desde cuándo', async () => {
+      comision.respuesta = { monto: 2000, aviso: AVISO_LUNES }
+      const { onSave, user } = renderModal({
+        empleado: EMPLEADO, sucursalesUsuario: [TUCUMAN, TACO_POZO], tieneTodasLasSucursales: true,
+      })
+      await user.click(screen.getByRole('button', { name: 'Taco Pozo' }))
+      expect(screen.getByRole('alert')).toHaveTextContent('se puede liquidar desde el lunes 1/12; pasalo de sucursal después')
       await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
       expect(onSave).not.toHaveBeenCalled()
     })
 
     it('sin comisión pendiente se pasa', async () => {
-      comision.pendiente = 0
+      comision.respuesta = { monto: 0, aviso: null }
       const { onSave, user } = renderModal({
         empleado: EMPLEADO, sucursalesUsuario: [TUCUMAN, TACO_POZO], tieneTodasLasSucursales: true,
       })
@@ -462,7 +475,7 @@ describe('ModalEmpleado', () => {
     })
 
     it('sin moverlo no pregunta la comisión', () => {
-      comision.pendiente = 2000
+      comision.respuesta = { monto: 2000, aviso: AVISO_2000 }
       renderModal({ empleado: EMPLEADO, sucursalesUsuario: [TUCUMAN, TACO_POZO], tieneTodasLasSucursales: true })
       expect(comision.pedida.every(p => !p.enabled)).toBe(true)
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()

@@ -16,6 +16,7 @@ import { useRequestIdEstable } from '../useRequestIdEstable'
 import { huellaDeAlta } from '../../utils/huellaDeAlta'
 import { rendicionesDelDia, type FilaResumenRendicion } from '../../utils/personal'
 import type {
+  ComisionSinLiquidar,
   RendicionDelDia,
   Empleado,
   CuentaEmpleado,
@@ -139,15 +140,20 @@ export function useRendicionesDelDiaQuery(fecha: string | null) {
   })
 }
 
-/** m4 (#1392): la comisión que todavía no se le liquidó (con ella no se lo cambia de sucursal). */
+/**
+ * m4 (#1392): la comisión que todavía no se le liquidó, y el motivo con que guardar_empleado rechaza
+ * cambiarlo de sucursal (`aviso` null: se puede mover). El motivo lo redacta el server: dice desde
+ * cuándo se puede liquidar si lo pendiente entra en un período que todavía no empezó.
+ */
 export function useComisionSinLiquidarQuery(empleadoId: number | null, enabled = true) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
     queryKey: personalKeys.comisionSinLiquidar(currentSucursalId, empleadoId as number),
-    queryFn: async (): Promise<number> => {
+    queryFn: async (): Promise<ComisionSinLiquidar> => {
       const { data, error } = await supabase.rpc('comision_sin_liquidar_empleado', { p_empleado_id: empleadoId as number })
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo saber si tiene comisión sin liquidar. Revisá la señal e intentá de nuevo.')
-      return Number(data) || 0
+      const fila = (data ?? {}) as { monto?: number | string | null; aviso?: string | null }
+      return { monto: Number(fila.monto) || 0, aviso: fila.aviso ?? null }
     },
     enabled: enabled && currentSucursalId != null && empleadoId != null,
     staleTime: 0,
