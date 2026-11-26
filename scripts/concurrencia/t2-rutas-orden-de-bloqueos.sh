@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # El orden de los bloqueos de las rutas (pedidos → rutas → paradas, #1406) en los tres caminos que no lo seguían
 # (#1432, ola 3, tarjeta T2 de #1677). Sesiones psql reales contra una base DESCARTABLE de Docker con la migración
-# NNN_ola3_t2_rutas_no_entregado. NUNCA contra prod.
+# 554_ola3_t2_rutas_no_entregado. NUNCA contra prod.
 #
 #   CONTENEDOR=<contenedor> bash scripts/concurrencia/t2-rutas-orden-de-bloqueos.sh
 #

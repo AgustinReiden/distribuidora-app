@@ -1,4 +1,4 @@
--- Ensayo de la migración NNN_ola3_t2_rutas_no_entregado (tarjeta T2 de la ola 3, #1677;
+-- Ensayo de la migración 554_ola3_t2_rutas_no_entregado (tarjeta T2 de la ola 3, #1677;
 -- #1432, VTA-06 de #1522, Rut-B7 y Rut-B12 de #1554, 1601-b1 de #1601 y #1697).
 --
 -- Un único DO que arma sus propios datos (gente, un cliente y pedidos nuevos en la sucursal 1,
