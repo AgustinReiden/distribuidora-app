@@ -786,7 +786,7 @@ BEGIN
   PERFORM pg_temp.er_reset();
   f := pg_temp.er_si(f, NOT pg_temp.er_ok(v_res) AND v_res->>'codigo' = 'caja_cerrada',
                      format('anular con la caja cerrada dio %s, esperado el rechazo', v_res));
-  f := pg_temp.er_si(f, (SELECT estado_resolucion FROM public.salvedades_items WHERE id = v_s1) = 'pendiente',
+  f := pg_temp.er_si(f, (SELECT estado_resolucion FROM public.salvedades_items WHERE id = v_s1) = 'resuelto_otro', -- #1700: la cargó el admin, nació resuelta
                      'el rechazo anulo la salvedad');
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END

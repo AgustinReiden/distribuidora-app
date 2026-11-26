@@ -1751,6 +1751,11 @@ export interface RegistrarSalvedadResult {
   nuevo_total_pedido?: number;
   /** Lo que el total subió (o bajó) por rehacer el combo (#1192); null sin combo. */
   recargo_combo?: number | null;
+  /**
+   * Con qué estado quedó (#1700): la que carga la oficina (admin o encargado) nace
+   * `resuelto_otro`; la del chofer, `pendiente`. Sin dato, un server anterior a #1700.
+   */
+  estado_resolucion?: string;
 }
 
 /**

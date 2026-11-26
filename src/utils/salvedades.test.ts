@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { calcularEstadisticasSalvedades, esSalvedadAnulada, salvedadesVigentes, totalRecargoCombos } from './salvedades'
+import {
+  calcularEstadisticasSalvedades, esSalvedadAnulada, salvedadesVigentes, totalRecargoCombos,
+  mensajeEntregaConSalvedades, MENSAJE_ENTREGA_CON_SALVEDADES, MENSAJE_ENTREGA_CON_SALVEDADES_RESUELTAS,
+} from './salvedades'
 import type { SalvedadItemDBExtended } from '../types'
 
 function salvedad(overrides: Partial<SalvedadItemDBExtended> = {}): SalvedadItemDBExtended {
@@ -108,5 +111,38 @@ describe('totalRecargoCombos (#1192)', () => {
     expect(totalRecargoCombos(undefined)).toBe(0)
     expect(totalRecargoCombos(null)).toBe(0)
     expect(totalRecargoCombos([])).toBe(0)
+  })
+})
+
+describe('mensajeEntregaConSalvedades (#1700)', () => {
+  it('si todas las que entraron nacieron resueltas (las cargó la oficina), lo dice', () => {
+    expect(mensajeEntregaConSalvedades([
+      { success: true, estado_resolucion: 'resuelto_otro' },
+      { success: true, estado_resolucion: 'resuelto_otro' },
+    ])).toBe(MENSAJE_ENTREGA_CON_SALVEDADES_RESUELTAS)
+    expect(MENSAJE_ENTREGA_CON_SALVEDADES_RESUELTAS).toMatch(/resueltas por la oficina/)
+  })
+
+  it('una que falló no cuenta: el aviso es de las que entraron', () => {
+    expect(mensajeEntregaConSalvedades([
+      { success: true, estado_resolucion: 'resuelto_otro' },
+      { success: false },
+    ])).toBe(MENSAJE_ENTREGA_CON_SALVEDADES_RESUELTAS)
+  })
+
+  it('si alguna quedó pendiente (la cargó el chofer), el aviso de siempre', () => {
+    expect(mensajeEntregaConSalvedades([
+      { success: true, estado_resolucion: 'resuelto_otro' },
+      { success: true, estado_resolucion: 'pendiente' },
+    ])).toBe(MENSAJE_ENTREGA_CON_SALVEDADES)
+  })
+
+  it('sin el dato (un server anterior a #1700), sin resultados o sin ninguna que entrara, el aviso de siempre', () => {
+    expect(mensajeEntregaConSalvedades([{ success: true }])).toBe(MENSAJE_ENTREGA_CON_SALVEDADES)
+    expect(mensajeEntregaConSalvedades([])).toBe(MENSAJE_ENTREGA_CON_SALVEDADES)
+    expect(mensajeEntregaConSalvedades(undefined)).toBe(MENSAJE_ENTREGA_CON_SALVEDADES)
+    expect(mensajeEntregaConSalvedades([{ success: false, estado_resolucion: 'resuelto_otro' }]))
+      .toBe(MENSAJE_ENTREGA_CON_SALVEDADES)
+    expect(MENSAJE_ENTREGA_CON_SALVEDADES).toBe('Pedido entregado con salvedades registradas')
   })
 })
