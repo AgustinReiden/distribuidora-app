@@ -1,4 +1,4 @@
--- Ensayo de la migración NNN_ola3_personal_liquidaciones (ola 3, tarjeta T6 de #1677: personal y
+-- Ensayo de la migración 552_ola3_personal_liquidaciones (ola 3, tarjeta T6 de #1677: personal y
 -- liquidaciones; #1534, Com-B3, Com-B4 y Com-B5 de #1554/#1551, m2, m3, m4 y m5 de #1392).
 --
 -- No deja rastro (salvo valores de secuencia): un único DO que termina SIEMPRE en una excepción.

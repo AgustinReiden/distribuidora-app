@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # El doble toque de un pago al personal y de una liquidación, en dos sesiones a la vez (Com-B3 de #1554, ola 3,
 # tarjeta T6 de #1677). Dos sesiones psql reales contra una base DESCARTABLE de Docker con la migración
-# NNN_ola3_personal_liquidaciones. NUNCA contra prod.
+# 552_ola3_personal_liquidaciones. NUNCA contra prod.
 #
 #   CONTENEDOR=<contenedor> bash scripts/concurrencia/t6-clave-movimiento-empleado.sh
 #
