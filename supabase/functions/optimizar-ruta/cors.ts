@@ -41,3 +41,28 @@ export function configCors(appOrigin: string | undefined | null): ConfigCors {
   }
   return { ok: true, headers: crearCors(origenes.join(",")) };
 }
+
+/**
+ * El handler con los headers de CORS en toda respuesta, según el Origin del request.
+ * Si `atender` tira una excepción que no atrapó, contesta un 500 con los mismos headers: sin
+ * ellos el navegador muestra un error de CORS en vez del 500 (revisión de Rut-B14).
+ */
+export function envolverConCors(
+  cors: ConfigCors,
+  atender: (req: Request) => Promise<Response>,
+): (req: Request) => Promise<Response> {
+  return async (req) => {
+    let res: Response;
+    try {
+      res = await atender(req);
+    } catch (e) {
+      console.error("[optimizar-ruta] error sin atrapar:", (e as Error)?.message ?? e);
+      res = new Response(
+        JSON.stringify({ success: false, error: "Error interno", mensaje: "No se pudo optimizar la ruta. Probá de nuevo en un rato" }),
+        { status: 500, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    for (const [k, v] of Object.entries(cors.headers(req))) res.headers.set(k, v);
+    return res;
+  };
+}

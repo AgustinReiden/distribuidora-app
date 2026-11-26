@@ -2,7 +2,7 @@
 // cada usuario tiene un cupo de llamadas por minuto y por día. Sin red: el cupo recibe la
 // llamada a la RPC inyectada.
 import { assertEquals, assertStringIncludes } from "std/assert/mod.ts";
-import { configCors } from "../optimizar-ruta/cors.ts";
+import { configCors, envolverConCors } from "../optimizar-ruta/cors.ts";
 import {
   consumirCupoRuta,
   CUPO_RUTA_POR_DIA,
@@ -49,6 +49,32 @@ Deno.test('CORS: APP_ORIGIN con "*", solo o en la lista, también falla cerrado'
     assertEquals(c.ok, false);
     assertEquals("Access-Control-Allow-Origin" in c.headers(desde("https://malo.test")), false);
   }
+});
+
+Deno.test("CORS: una excepción sin atrapar sale como 500 con los headers de CORS", async () => {
+  const errorOriginal = console.error;
+  console.error = () => {};
+  try {
+    const handler = envolverConCors(configCors("https://app.ejemplo.test"), () => Promise.reject(new Error("boom")));
+    const res = await handler(desde("https://app.ejemplo.test"));
+    assertEquals(res.status, 500);
+    assertEquals(res.headers.get("Access-Control-Allow-Origin"), "https://app.ejemplo.test");
+    assertEquals(res.headers.get("Vary"), "Origin");
+    assertEquals((await res.json()).success, false);
+  } finally {
+    console.error = errorOriginal;
+  }
+});
+
+Deno.test("CORS: el wrapper le pone los headers a la respuesta del handler", async () => {
+  const handler = envolverConCors(configCors("https://app.ejemplo.test"), () => Promise.resolve(new Response(null, { status: 204 })));
+  const res = await handler(desde("https://app.ejemplo.test"));
+  assertEquals(res.status, 204);
+  assertEquals(res.headers.get("Access-Control-Allow-Origin"), "https://app.ejemplo.test");
+  // Sin APP_ORIGIN, ni en el 500 hay Allow-Origin.
+  const cerrado = await envolverConCors(configCors(undefined), () => Promise.reject(new Error("x")))(desde("https://a.test"))
+    .catch(() => null);
+  assertEquals(cerrado?.headers.get("Access-Control-Allow-Origin") ?? null, null);
 });
 
 Deno.test("CORS: los espacios del secret no entran al header", () => {

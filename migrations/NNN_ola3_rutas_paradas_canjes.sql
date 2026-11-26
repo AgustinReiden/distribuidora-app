@@ -22,6 +22,12 @@
 --     queda entregada, como en la 547. Revertir una entrega que no dejó parada
 --     viva vuelve a 'pendiente' la 'reasignado' de la ruta en curso, y el ON
 --     CONFLICT de aplicar_orden_ruta reabre una 'reasignado' de la misma ruta.
+--     La ruta del chofer que entrega se vuelve a mirar con el lock tomado, y sólo
+--     se mueve un pedido con una parada viva en una ruta en curso. Las dos
+--     masivas (marcar_entregas_masivo y marcar_entrega_y_pago_masivo_impl) suman
+--     esa ruta a su pre-lock por id (sin eso, dos masivas cruzadas daban 40P01).
+--     cerrar_recorridos_vencidos no cuenta una 'reasignado' como pendiente, y
+--     marcar_no_entregado no la marca (cambio mínimo: la función es de T2).
 -- 4 · Rut-B6: aplicar_orden_ruta aceptaba cualquier fecha. Ahora la de la
 --     entrega programada: de hoy a 60 días adelante (1559-b6, D21).
 -- 5 · Rut-B8: registrar_cambio_producto recibe p_clave (uuid, DEFAULT NULL) con
@@ -31,7 +37,9 @@
 --     esta misma migración: no quedan dos sobrecargas (PGRST203), y PostgREST
 --     resuelve los siete parámetros por nombre de un bundle viejo contra la
 --     nueva. Única DDL de tabla existente: el CHECK de altas_por_clave (su LOCK
---     va al principio, NOWAIT).
+--     va al principio, NOWAIT). El CHECK se arma sobre la lista VIGENTE de
+--     operaciones más 'cambio_producto' (T8 suma 'visita' y T6 quizá otra): no
+--     se pisa la de otra migración, en el orden que se apliquen.
 -- 6 · Rut-B10: crear_recorrido se borra. Sin EXECUTE para la app desde la 314,
 --     y nada la llama: ni src/, ni supabase/functions/, ni scripts/ (sólo dos
 --     ensayos, que se corrigen en el mismo PR), ni otra función, vista o policy.
@@ -47,10 +55,10 @@
 --     sesión del que llama (la edge ya la usa para preguntar el rol).
 -- 10 · permisos-B1: recalcular_recorrido acota la ruta a la sucursal activa.
 --
--- No toca (son de otra tarjeta): marcar_no_entregado, _pedido_a_pendiente,
+-- No toca (son de otra tarjeta, T2): _pedido_a_pendiente,
 -- cambiar_transportista_recorrido, quitar_pedido_de_recorridos_activos,
 -- recorridos_estado_transicion, pedidos_registrar_armado ni
--- pedidos_proteger_columnas.
+-- pedidos_proteger_columnas. De marcar_no_entregado, sólo el filtro de la 3c.
 -- =========================================================================
 
 BEGIN;
@@ -86,7 +94,10 @@ BEGIN
     ('public.crear_recorrido(uuid,jsonb,numeric,integer)', '607e7a05ff0e29553674a8725f33b204'),
     ('public._recorrido_contadores(bigint)', 'f82f8e32b56c5c03f998d54ea1a4f1f8'),
     ('public.crear_pedido_cambio_en_ruta(integer,bigint,integer,bigint,integer,text,text)', '42b01dbb1bb1fc38a42926cd9c776ed7'),
-    ('public.recalcular_recorrido(bigint)', '02fb88f3e4ca09188833d260c0bc502c')
+    ('public.recalcular_recorrido(bigint)', '02fb88f3e4ca09188833d260c0bc502c'),
+    ('public.marcar_entregas_masivo(bigint[],uuid,date)', '96f7658823eb86bfc0483259ba7f3789'),
+    ('public.marcar_entrega_y_pago_masivo_impl(bigint[],uuid,text,date)', '3511891988c0193f2fdcf89cd1803fbe'),
+    ('public.marcar_no_entregado(bigint,character varying,text)', '7ca8e27aefa489e20a612a9a5591bd21')
   ) AS t(f, h) LOOP
     IF to_regprocedure(r.f) IS NULL THEN
       RAISE EXCEPTION 'mig NNN · % no existe: rehacer sobre lo vigente', r.f;
@@ -100,10 +111,15 @@ BEGIN
          AND proname = 'registrar_cambio_producto') <> 1 THEN
     RAISE EXCEPTION 'mig NNN · registrar_cambio_producto tiene más de una firma: rehacer sobre lo vigente';
   END IF;
+  -- El CHECK de las operaciones de altas_por_clave: tiene que tener al menos las cinco de la
+  -- 542. Otras migraciones de la ola 3 le suman la suya (T8 'visita'): por eso se lee la lista
+  -- vigente y no se exige una fija.
   SELECT pg_get_constraintdef(oid) INTO v FROM pg_constraint
    WHERE conrelid = 'public.altas_por_clave'::regclass AND conname = 'altas_por_clave_operacion_check';
-  IF v IS DISTINCT FROM $c$CHECK ((operacion = ANY (ARRAY['condicion_mayorista'::text, 'promocion'::text, 'cliente'::text, 'gasto'::text, 'empleado'::text])))$c$ THEN
-    RAISE EXCEPTION 'mig NNN · el CHECK de altas_por_clave no es el de la 542 (%): rehacer sobre lo vigente', v;
+  IF v IS NULL OR v !~ '^CHECK \(\(operacion = ANY \(ARRAY\[' OR EXISTS (
+       SELECT 1 FROM unnest(ARRAY['condicion_mayorista', 'promocion', 'cliente', 'gasto', 'empleado']) o
+        WHERE strpos(v, quote_literal(o) || '::text') = 0) THEN
+    RAISE EXCEPTION 'mig NNN · el CHECK de altas_por_clave no tiene las cinco operaciones de la 542 (%): rehacer sobre lo vigente', v;
   END IF;
   IF to_regclass('public.optimizar_ruta_cupo_uso') IS NOT NULL
      OR to_regproc('public.optimizar_ruta_consumir_cupo') IS NOT NULL THEN
@@ -140,6 +156,9 @@ BEGIN
              JOIN pedidos p ON p.id = rp.pedido_id
              WHERE rp.recorrido_id = r.id
                AND p.estado = 'asignado'
+               -- mig NNN (Rut-B5, revisión): sólo una parada viva. Una 'reasignado' (el
+               -- pedido se entregó o sale en otra ruta) no traba la ruta vieja en curso.
+               AND rp.estado_entrega IN ('pendiente', 'entregado')
            ) AS tiene_pendientes
     FROM recorridos r
     WHERE r.estado = 'en_curso'
@@ -331,20 +350,24 @@ DECLARE
   v_ruta_chofer  BIGINT;  -- mig NNN (Rut-B5)
   v_mueve        BOOLEAN := false;  -- mig NNN (Rut-B5)
   v_estado_otra  TEXT;  -- mig NNN (Rut-B5)
+  v_dia          DATE;  -- mig NNN (Rut-B5)
 BEGIN
   -- mig NNN (Rut-B5, T3 de la ola 3; decisión del dueño, escrita en #1554): una entrega a
   -- nombre de un chofer B mueve la parada SÓLO si B tiene una ruta en curso el día de la
   -- entrega. Ésa es v_ruta_chofer, y se busca antes de los locks para tomarla junto con las
-  -- rutas del pedido, por id (si no, tomarla después invertiría el orden de la 439).
+  -- rutas del pedido, por id (si no, tomarla después invertiría el orden de la 439). Las dos
+  -- masivas ya la toman en su pre-lock de rutas, con la misma regla (chofer, sucursal, en
+  -- curso y el día de la entrega).
   IF NEW.estado = 'entregado' AND OLD.estado IS DISTINCT FROM 'entregado'
      AND NEW.transportista_id IS NOT NULL THEN
+    v_dia := COALESCE((NEW.fecha_entrega AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,
+                      public._tablero_hoy());
     SELECT r.id INTO v_ruta_chofer
       FROM recorridos r
      WHERE r.transportista_id = NEW.transportista_id
        AND r.sucursal_id = NEW.sucursal_id
        AND r.estado = 'en_curso'
-       AND r.fecha = COALESCE((NEW.fecha_entrega AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,
-                              public._tablero_hoy())
+       AND r.fecha = v_dia
      ORDER BY r.created_at DESC, r.id DESC
      LIMIT 1;
   END IF;
@@ -371,6 +394,19 @@ BEGIN
     ORDER BY r.id
       FOR NO KEY UPDATE;
 
+  -- mig NNN (Rut-B5): con la ruta tomada se vuelve a mirar. Si mientras se esperaba el lock
+  -- dejó de ser de ese chofer (cambiar_transportista_recorrido), de ese día o en curso, se
+  -- sigue como si no tuviera ruta. No se busca otra: tomarla ahora invertiría el orden.
+  IF v_ruta_chofer IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM recorridos r
+        WHERE r.id = v_ruta_chofer
+          AND r.transportista_id = NEW.transportista_id
+          AND r.sucursal_id = NEW.sucursal_id
+          AND r.estado = 'en_curso'
+          AND r.fecha = v_dia) THEN
+    v_ruta_chofer := NULL;
+  END IF;
+
   -- La parada del pedido (#1313): la viva (pendiente o entregada), de la ruta
   -- en curso primero y si no la mas reciente. Entre vivas sólo hay más de una
   -- con datos de antes de la mig 419. Sin filtro de fecha: el guard
@@ -389,19 +425,25 @@ BEGIN
     -- mig NNN (Rut-B5): quién se queda con la entrega.
     --   1 · Si la parada viva es de una ruta de quien entrega, esa (como siempre).
     --   2 · Si no, quien entrega tiene ruta en curso ese día (v_ruta_chofer) y el pedido está
-    --       en alguna ruta: su parada de esa ruta, la que haya (no entregada o reasignada
-    --       antes) o una nueva, y las paradas pendientes del pedido en otras rutas pasan a
-    --       'reasignado' (historia: se entregó en otra ruta, como lo entienden
-    --       _recorrido_contadores y RUTA-A). Pedro con ruta entrega un pedido de la ruta de
-    --       Juan: cuenta en la de Pedro y Juan queda 9 de 9. Un pedido que no está en ninguna
-    --       ruta no entra a la de Pedro, como antes.
+    --       en una ruta (una parada viva en una ruta en curso): su parada de esa ruta, la que
+    --       haya (no entregada o reasignada antes) o una nueva, y las paradas pendientes del
+    --       pedido en otras rutas pasan a 'reasignado' (historia: se entregó en otra ruta,
+    --       como lo entienden _recorrido_contadores y RUTA-A). Pedro con ruta entrega un
+    --       pedido de la ruta de Juan: cuenta en la de Pedro y Juan queda 9 de 9. Un pedido
+    --       que no está en ninguna ruta, o que sólo tiene paradas de historia (una ruta
+    --       cerrada, una no entregada), no entra a la de Pedro, como en la 547.
     --   3 · Si no tiene ruta ese día, como en la 547: la parada viva (sea de quien sea) queda
     --       entregada. Pedro sin ruta entrega un pedido de la ruta de Juan: Juan, 10 de 10.
     IF v_ruta_chofer IS NOT NULL
        AND NOT (v_parada IS NOT NULL
                 AND (SELECT r.transportista_id FROM recorridos r WHERE r.id = v_recorrido_id)
                     IS NOT DISTINCT FROM NEW.transportista_id) THEN
-      v_mueve := EXISTS (SELECT 1 FROM recorrido_pedidos rp WHERE rp.pedido_id = NEW.id);
+      v_mueve := EXISTS (SELECT 1
+                           FROM recorrido_pedidos rp
+                           JOIN recorridos r ON r.id = rp.recorrido_id
+                          WHERE rp.pedido_id = NEW.id
+                            AND rp.estado_entrega IN ('pendiente', 'entregado')
+                            AND r.estado = 'en_curso');
     END IF;
 
     IF v_mueve THEN
@@ -506,6 +548,497 @@ BEGIN
   END LOOP;
 
   RETURN NEW;
+END;
+$function$;
+
+-- 3b · Las dos masivas toman también la ruta en curso del chofer que entrega
+--      (la del trigger), en su pre-lock por id.
+CREATE OR REPLACE FUNCTION public.marcar_entregas_masivo(p_pedido_ids bigint[], p_transportista_id uuid, p_fecha date DEFAULT ((now() AT TIME ZONE 'America/Argentina/Buenos_Aires'::text))::date)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_sucursal_id BIGINT;
+  v_affected INTEGER;
+  v_fecha_ts TIMESTAMPTZ;
+  v_claves bigint[]; -- #1342
+  v_clave bigint;
+  v_par RECORD;
+BEGIN
+  v_sucursal_id := current_sucursal_id();
+  IF v_sucursal_id IS NULL THEN
+    RAISE EXCEPTION 'No hay sucursal activa' USING ERRCODE = '42501';
+  END IF;
+
+  IF NOT es_encargado_o_admin() THEN
+    RAISE EXCEPTION 'Solo encargado o admin pueden marcar entregas masivas'
+      USING ERRCODE = '42501';
+  END IF;
+
+  -- #1548 (RUT-4): sin fecha, hoy (su default). Con NULL el entregado quedaba sin
+  -- fecha_entrega y fuera de toda rendición; ahora lo frena el CHECK pedidos_entregado_con_fecha.
+  p_fecha := COALESCE(p_fecha, public._tablero_hoy());
+
+  -- GTO-15 (#1597) y 1598-b2: la fecha de entrega va de hoy hasta los días atrás de la
+  -- política (el admin, 60). Sin piso, una entrega de 2016 fabricaba la rendición que exime
+  -- al gasto de ese día de su piso. Los pedidos de acá no están entregados: la fecha es nueva.
+  DECLARE
+    v_motivo_fecha text := public._fecha_entrega_fuera_de_rango(p_fecha, v_sucursal_id, public.es_admin());
+  BEGIN
+    IF v_motivo_fecha IS NOT NULL THEN
+      RAISE EXCEPTION '%', v_motivo_fecha USING ERRCODE = '22023';
+    END IF;
+  END;
+
+  IF p_pedido_ids IS NULL OR array_length(p_pedido_ids, 1) IS NULL THEN
+    RETURN 0;
+  END IF;
+
+  -- #1318 (REN-1): entregar con la fecha de un día ya controlado reabría ese
+  -- control como efecto secundario (trg_pedidos_anular_control lo borra con su
+  -- foto). Un día cerrado se reabre a propósito, desde la rendición. Mira los
+  -- dos lados que borra el trigger: el día nuevo del chofer nuevo, y el día que
+  -- ya tuviera anotado el pedido.
+  -- #1342: las rendiciones que toca, antes que los pedidos: es el orden de
+  -- confirmar_rendicion (la rendición, y después pagos y pedidos). Compartidas: la
+  -- confirmación las toma exclusivas y espera, pero otra entrega del mismo chofer y
+  -- día no. Ordenadas, como _rendicion_bloquear. El chequeo va más abajo, con todo
+  -- tomado: mirado antes, una confirmación que entraba en el medio se borraba igual
+  -- por el trigger.
+  v_claves := ARRAY(
+    SELECT public._rendicion_clave(x.chofer, x.dia, v_sucursal_id)
+      FROM (SELECT p_transportista_id AS chofer, p_fecha AS dia
+            UNION ALL
+            SELECT p.transportista_id, (p.fecha_entrega AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+              FROM pedidos p
+             WHERE p.id = ANY(p_pedido_ids)
+               AND p.sucursal_id = v_sucursal_id
+               AND COALESCE(p.estado, '') NOT IN ('entregado', 'cancelado', 'anulado')
+               AND COALESCE(p.tipo_factura, 'ZZ') <> 'VB'
+               AND p.canal IS DISTINCT FROM 'cambio'
+               AND p.fecha_entrega IS NOT NULL) x
+     WHERE x.chofer IS NOT NULL);
+  FOR v_clave IN SELECT DISTINCT c FROM unnest(v_claves) AS c WHERE c IS NOT NULL ORDER BY c LOOP
+    PERFORM pg_advisory_xact_lock_shared(v_clave);
+  END LOOP;
+
+  v_fecha_ts := (p_fecha::text || ' 12:00:00 America/Argentina/Buenos_Aires')::timestamptz;
+
+  -- #1375: el orden de aplicar_orden_ruta, pedidos por id y después recorridos
+  -- por id. Sin esto el UPDATE sigue el orden físico y los triggers por fila
+  -- toman las rutas en el orden de sus filas.
+  PERFORM 1
+     FROM pedidos
+    WHERE id = ANY(p_pedido_ids)
+      AND sucursal_id = v_sucursal_id
+    ORDER BY id
+      FOR NO KEY UPDATE;
+
+  PERFORM 1
+     FROM recorridos
+    WHERE id IN (SELECT rp.recorrido_id
+                   FROM recorrido_pedidos rp
+                  WHERE rp.pedido_id = ANY(p_pedido_ids))
+       -- mig NNN (Rut-B5, revisión): y la ruta en curso del chofer que entrega, de esta
+       -- sucursal y del día de la entrega (la que toma el trigger), en el mismo orden por id.
+       OR (transportista_id = p_transportista_id AND sucursal_id = v_sucursal_id
+           AND estado = 'en_curso' AND fecha = p_fecha)
+    ORDER BY id
+      FOR NO KEY UPDATE;
+
+  -- #1342: con las rendiciones y los pedidos tomados. Si un pedido cambió de
+  -- chofer o de día desde que se tomaron, la suya no está tomada, y tomarla ahora
+  -- invertiría el orden: se rechaza para que se vuelva a intentar.
+  FOR v_par IN
+    SELECT x.chofer, x.dia
+      FROM (SELECT p_transportista_id AS chofer, p_fecha AS dia
+            UNION ALL
+            SELECT p.transportista_id, (p.fecha_entrega AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+              FROM pedidos p
+             WHERE p.id = ANY(p_pedido_ids)
+               AND p.sucursal_id = v_sucursal_id
+               AND COALESCE(p.estado, '') NOT IN ('entregado', 'cancelado', 'anulado')
+               AND COALESCE(p.tipo_factura, 'ZZ') <> 'VB'
+               AND p.canal IS DISTINCT FROM 'cambio'
+               AND p.fecha_entrega IS NOT NULL) x
+     WHERE x.chofer IS NOT NULL
+  LOOP
+    IF public._rendicion_clave(v_par.chofer, v_par.dia, v_sucursal_id) <> ALL (v_claves) THEN
+      RAISE EXCEPTION 'Un pedido cambió de chofer o de fecha mientras se entregaba: volvé a intentar.'
+        USING ERRCODE = '40001';
+    END IF;
+    IF public.control_rendicion_cerrado(v_par.chofer, v_sucursal_id, v_par.dia) THEN
+      RAISE EXCEPTION 'La rendición del % de % ya fue controlada: esta entrega la reabriría. Elegí otra fecha, o reabrí primero el control de ese día.',
+        to_char(v_par.dia, 'DD/MM/YYYY'),
+        COALESCE((SELECT nombre FROM perfiles WHERE id = v_par.chofer), 'ese chofer')
+        USING ERRCODE = '42501';
+    END IF;
+  END LOOP;
+
+  UPDATE pedidos
+     SET estado = 'entregado',
+         fecha_entrega = v_fecha_ts,
+         transportista_id = p_transportista_id,
+         updated_at = now()
+   WHERE id = ANY(p_pedido_ids)
+     AND sucursal_id = v_sucursal_id
+     -- mig 181: el unico guard vivia en el filtro de la query del front, y la
+     -- ventana es todo el tiempo que el modal queda abierto (sin realtime sobre
+     -- pedidos ni revalidacion al confirmar).
+     AND COALESCE(estado, '') NOT IN ('entregado', 'cancelado', 'anulado')
+     AND COALESCE(tipo_factura, 'ZZ') <> 'VB'  -- mig 3XA
+     -- #1318: la comanda de un canje se entrega desde el pedido, que aplica el
+     -- cambio (aplicar_cambio_de_parada) antes de cerrarla.
+     AND canal IS DISTINCT FROM 'cambio';
+
+  GET DIAGNOSTICS v_affected = ROW_COUNT;
+  RETURN v_affected;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.marcar_entrega_y_pago_masivo_impl(p_pedido_ids bigint[], p_transportista_id uuid, p_forma_pago text, p_fecha date DEFAULT ((now() AT TIME ZONE 'America/Argentina/Buenos_Aires'::text))::date)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_sucursal_id BIGINT;
+  v_affected INTEGER;
+  v_pedido RECORD;
+  v_rol TEXT;
+  v_fecha_ts TIMESTAMPTZ;
+  v_claves bigint[]; -- #1342
+  v_clave bigint;
+  v_par RECORD;
+  -- cobros-B2 (tanda 6 de #1603): las boletas que este lote cobró.
+  v_cobrados BIGINT[] := '{}';
+BEGIN
+  v_sucursal_id := current_sucursal_id();
+  IF v_sucursal_id IS NULL THEN
+    RAISE EXCEPTION 'No hay sucursal activa' USING ERRCODE = '42501';
+  END IF;
+
+  IF NOT es_encargado_o_admin() THEN
+    RAISE EXCEPTION 'Solo encargado o admin pueden marcar entrega y pago masivos'
+      USING ERRCODE = '42501';
+  END IF;
+
+  -- #1249: antes no se validaba; ademas escribe pedidos.forma_pago.
+  p_forma_pago := public._forma_pago_de_cobro(p_forma_pago, true);
+
+  -- #1548 (RUT-4): sin fecha, hoy (su default). Con NULL no frenaban ni el tope de futuro ni
+  -- el "sólo hoy" del encargado, y con todo ya pagado el entregado quedaba sin fecha_entrega.
+  p_fecha := COALESCE(p_fecha, public._tablero_hoy());
+
+  -- GTO-15 (#1597): la fecha de entrega va de hoy hasta los días atrás de la política (el
+  -- admin, 60), como en marcar_entregas_masivo. El encargado sigue además en "sólo hoy" (la
+  -- regla del cobro, abajo).
+  DECLARE
+    v_motivo_fecha text := public._fecha_entrega_fuera_de_rango(p_fecha, v_sucursal_id, public.es_admin());
+  BEGIN
+    IF v_motivo_fecha IS NOT NULL THEN
+      RAISE EXCEPTION '%', v_motivo_fecha USING ERRCODE = '22023';
+    END IF;
+  END;
+
+  -- Mismo gate de rendición que marcar_pagos_masivo (esta RPC registra pagos)
+  -- SEG-1 (#1545): un desactivado no tiene rol aunque su token siga vivo.
+  SELECT rol INTO v_rol FROM perfiles WHERE id = auth.uid() AND COALESCE(activo, true);
+  -- #1440: la fecha nunca es futura, como en registrar_pagos_pedido_impl.
+  IF p_fecha > public._tablero_hoy() THEN
+    RAISE EXCEPTION 'La fecha del pago (%) no puede ser futura', to_char(p_fecha, 'DD/MM/YYYY')
+      USING ERRCODE = '22023';
+  END IF;
+
+  IF v_rol = 'encargado' THEN
+    -- mig 230: la base corre en UTC. Comparar contra CURRENT_DATE entre las
+    -- 21:00 y las 24:00 ART rechazaba justo la fecha correcta.
+    IF p_fecha <> (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date THEN
+      RAISE EXCEPTION 'Encargado solo puede registrar pagos con fecha de hoy'
+        USING ERRCODE = '42501';
+    END IF;
+    IF public.rendicion_dia_cerrada(p_fecha, v_sucursal_id) THEN
+      RAISE EXCEPTION 'Rendicion ya cerrada para esta fecha. Pedi a un admin.'
+        USING ERRCODE = '42501';
+    END IF;
+  END IF;
+
+  IF p_pedido_ids IS NULL OR array_length(p_pedido_ids, 1) IS NULL THEN
+    RETURN 0;
+  END IF;
+
+  -- #1318 (REN-1): el mismo corte que marcar_entregas_masivo. Va antes del
+  -- cobro: si la entrega no entra, el cobro tampoco.
+  -- #1342: las rendiciones que toca, antes que los pedidos: es el orden de
+  -- confirmar_rendicion (la rendición, y después pagos y pedidos). Compartidas: la
+  -- confirmación las toma exclusivas y espera, pero otra entrega del mismo chofer y
+  -- día no. Ordenadas, como _rendicion_bloquear. El chequeo va más abajo, con todo
+  -- tomado: mirado antes, una confirmación que entraba en el medio se borraba igual
+  -- por el trigger.
+  v_claves := ARRAY(
+    SELECT public._rendicion_clave(x.chofer, x.dia, v_sucursal_id)
+      FROM (SELECT p_transportista_id AS chofer, p_fecha AS dia
+            UNION ALL
+            SELECT p.transportista_id, (p.fecha_entrega AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+              FROM pedidos p
+             WHERE p.id = ANY(p_pedido_ids)
+               AND p.sucursal_id = v_sucursal_id
+               AND COALESCE(p.estado, '') NOT IN ('entregado', 'cancelado', 'anulado')
+               AND COALESCE(p.tipo_factura, 'ZZ') <> 'VB'
+               AND p.canal IS DISTINCT FROM 'cambio'
+               AND p.fecha_entrega IS NOT NULL) x
+     WHERE x.chofer IS NOT NULL);
+  FOR v_clave IN SELECT DISTINCT c FROM unnest(v_claves) AS c WHERE c IS NOT NULL ORDER BY c LOOP
+    PERFORM pg_advisory_xact_lock_shared(v_clave);
+  END LOOP;
+
+  v_fecha_ts := (p_fecha::text || ' 12:00:00 America/Argentina/Buenos_Aires')::timestamptz;
+
+  -- #1375: el orden de aplicar_orden_ruta, pedidos por id y después recorridos
+  -- por id, antes del primer pago: cada INSERT llega a la ruta por el trigger de
+  -- monto_pagado, y el FOR UPDATE del bucle no alcanza a los que ya estan pagados,
+  -- que el UPDATE de abajo tambien toca. Va FOR UPDATE, el del bucle: tomar uno
+  -- menor y subirlo despues puede cruzarse con una FK.
+  PERFORM 1
+     FROM pedidos
+    WHERE id = ANY(p_pedido_ids)
+      AND sucursal_id = v_sucursal_id
+    ORDER BY id
+      FOR UPDATE;
+
+  PERFORM 1
+     FROM recorridos
+    WHERE id IN (SELECT rp.recorrido_id
+                   FROM recorrido_pedidos rp
+                  WHERE rp.pedido_id = ANY(p_pedido_ids))
+       -- mig NNN (Rut-B5, revisión): y la ruta en curso del chofer que entrega, de esta
+       -- sucursal y del día de la entrega (la que toma el trigger), en el mismo orden por id.
+       OR (transportista_id = p_transportista_id AND sucursal_id = v_sucursal_id
+           AND estado = 'en_curso' AND fecha = p_fecha)
+    ORDER BY id
+      FOR NO KEY UPDATE;
+
+  -- #1342: con las rendiciones y los pedidos tomados. Si un pedido cambió de
+  -- chofer o de día desde que se tomaron, la suya no está tomada, y tomarla ahora
+  -- invertiría el orden: se rechaza para que se vuelva a intentar.
+  FOR v_par IN
+    SELECT x.chofer, x.dia
+      FROM (SELECT p_transportista_id AS chofer, p_fecha AS dia
+            UNION ALL
+            SELECT p.transportista_id, (p.fecha_entrega AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+              FROM pedidos p
+             WHERE p.id = ANY(p_pedido_ids)
+               AND p.sucursal_id = v_sucursal_id
+               AND COALESCE(p.estado, '') NOT IN ('entregado', 'cancelado', 'anulado')
+               AND COALESCE(p.tipo_factura, 'ZZ') <> 'VB'
+               AND p.canal IS DISTINCT FROM 'cambio'
+               AND p.fecha_entrega IS NOT NULL) x
+     WHERE x.chofer IS NOT NULL
+  LOOP
+    IF public._rendicion_clave(v_par.chofer, v_par.dia, v_sucursal_id) <> ALL (v_claves) THEN
+      RAISE EXCEPTION 'Un pedido cambió de chofer o de fecha mientras se entregaba: volvé a intentar.'
+        USING ERRCODE = '40001';
+    END IF;
+    IF public.control_rendicion_cerrado(v_par.chofer, v_sucursal_id, v_par.dia) THEN
+      RAISE EXCEPTION 'La rendición del % de % ya fue controlada: esta entrega la reabriría. Elegí otra fecha, o reabrí primero el control de ese día.',
+        to_char(v_par.dia, 'DD/MM/YYYY'),
+        COALESCE((SELECT nombre FROM perfiles WHERE id = v_par.chofer), 'ese chofer')
+        USING ERRCODE = '42501';
+    END IF;
+  END LOOP;
+
+  -- 1) Registrar pago por el saldo pendiente (solo pedidos NO pagados)
+  FOR v_pedido IN
+    SELECT id, cliente_id, total, COALESCE(monto_pagado, 0) AS ya_pagado
+    FROM pedidos
+    WHERE id = ANY(p_pedido_ids)
+      AND sucursal_id = v_sucursal_id
+      AND COALESCE(estado_pago, 'pendiente') <> 'pagado'
+      -- #1318 (PED-3): un entregado no se vuelve a entregar, como en la 181.
+      AND COALESCE(estado, '') NOT IN ('entregado', 'cancelado', 'anulado')
+      AND canal IS DISTINCT FROM 'cambio'
+      AND total > COALESCE(monto_pagado, 0)
+      AND COALESCE(tipo_factura, 'ZZ') <> 'VB'  -- mig 3XA
+    ORDER BY id
+    FOR UPDATE
+  LOOP
+    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id)
+    VALUES (
+      v_pedido.cliente_id,
+      v_pedido.id,
+      v_pedido.total - v_pedido.ya_pagado,
+      p_forma_pago,
+      p_fecha,
+      auth.uid(),
+      v_sucursal_id
+    );
+    v_cobrados := v_cobrados || v_pedido.id;
+  END LOOP;
+
+  -- 2) Entregar + saldar en un solo UPDATE (transportista_id SE asigna)
+  -- mig 181: no revivir un pedido cancelado como entregado y pagado.
+  UPDATE pedidos
+     SET estado = 'entregado',
+         fecha_entrega = v_fecha_ts,
+         transportista_id = p_transportista_id,
+         -- mig 230: ya NO se escribe monto_pagado = total, igual que la 181 en
+         -- marcar_pagos_masivo_impl. El INSERT en pagos de arriba dispara
+         -- recalcular_monto_pagado_pedido, que lo deriva de SUM(pagos). Este
+         -- UPDATE alcanza a TODOS los ids del lote -- tambien los que el bucle
+         -- salteo por ya estar pagados -- asi que fijarlo a mano tapaba un
+         -- cobro concurrente y dejaba el pedido saldado con dos pagos encima.
+         -- cobros-B2 (tanda 6 de #1603), gemelo de 1559-b11: la forma de pago va sólo en
+         -- las boletas que este lote cobró. A una que ya estaba cobrada le pisaba la
+         -- forma con la del lote.
+         forma_pago = CASE WHEN id = ANY(v_cobrados) THEN p_forma_pago ELSE forma_pago END,
+         updated_at = now()
+   WHERE id = ANY(p_pedido_ids)
+     AND sucursal_id = v_sucursal_id
+     -- #1318 (PED-3): un entregado no se vuelve a entregar: le pisaba el
+     -- chofer y la fecha, y el trigger le borraba el control del día viejo.
+     AND COALESCE(estado, '') NOT IN ('entregado', 'cancelado', 'anulado')
+     AND COALESCE(tipo_factura, 'ZZ') <> 'VB'  -- mig 3XA
+     -- #1318: la comanda de un canje se entrega desde el pedido, que aplica el
+     -- cambio (aplicar_cambio_de_parada) antes de cerrarla.
+     AND canal IS DISTINCT FROM 'cambio';
+
+  GET DIAGNOSTICS v_affected = ROW_COUNT;
+  RETURN v_affected;
+END;
+$function$;
+
+-- 3c · marcar_no_entregado no marca la parada 'reasignado' de otro chofer.
+CREATE OR REPLACE FUNCTION public.marcar_no_entregado(p_pedido_id bigint, p_motivo character varying, p_nota text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_sucursal      bigint := current_sucursal_id();
+  v_rol           text;
+  v_uid           uuid := auth.uid();
+  v_transportista uuid;
+  v_usuario_id    uuid;
+  v_estado        text;
+  v_cliente       text;
+  v_paradas       int;
+BEGIN
+  IF v_sucursal IS NULL THEN
+    RAISE EXCEPTION 'No hay sucursal activa' USING ERRCODE = '42501';
+  END IF;
+
+  IF p_motivo IS NULL OR p_motivo NOT IN (
+    'cerrado', 'sin_dinero', 'cliente_rechaza', 'ausente',
+    'direccion_incorrecta', 'clima', 'otro'
+  ) THEN
+    RAISE EXCEPTION 'Motivo de no entrega inválido: %', COALESCE(p_motivo, '(vacío)');
+  END IF;
+
+  -- "otro" sin explicación no sirve para nada: es el que después nadie entiende.
+  IF p_motivo = 'otro' AND (p_nota IS NULL OR length(trim(p_nota)) < 3) THEN
+    RAISE EXCEPTION 'Si el motivo es "otro" hay que escribir qué pasó';
+  END IF;
+
+  SELECT p.transportista_id, p.usuario_id, p.estado, c.nombre_fantasia
+    INTO v_transportista, v_usuario_id, v_estado, v_cliente
+  FROM pedidos p
+  LEFT JOIN clientes c ON c.id = p.cliente_id
+  WHERE p.id = p_pedido_id AND p.sucursal_id = v_sucursal;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Pedido % no encontrado en esta sucursal', p_pedido_id;
+  END IF;
+
+  IF v_estado = 'entregado' THEN
+    RAISE EXCEPTION 'El pedido % ya figura entregado', p_pedido_id;
+  END IF;
+
+  -- Mig 243: un cancelado/anulado ya tiene el stock devuelto, el total en 0 y
+  -- los pagos desimputados (mig 235). Volverlo a 'pendiente' lo resucita como
+  -- venta viva de $0, que es lo que la compra mínima no puede validar después
+  -- (se valida al crear, trampa 8). Si hay que re-entregarlo, se crea uno nuevo
+  -- — la misma salida que da `actualizar_pedido_items` desde la 181.
+  IF v_estado IN ('cancelado', 'anulado') THEN
+    RAISE EXCEPTION 'El pedido % está % y no se puede reabrir desde el reparto: creá uno nuevo',
+      p_pedido_id, v_estado
+      USING ERRCODE = '42501';
+  END IF;
+
+  -- Lo puede marcar el chofer al que se le asignó, o un admin/encargado.
+  -- SEG-1 (#1601): sin chofer (transportista_id NULL, como lo deja esta misma función) la
+  -- comparación daba NULL, el NOT también, y el IF no cortaba: pasaba cualquier rol de la
+  -- sucursal. Un NULL no autoriza a nadie más que a admin y encargado, que se miran con su
+  -- helper (activo incluido, #1490).
+  IF NOT (COALESCE(v_transportista = v_uid, false) OR public.es_encargado_o_admin()) THEN
+    RAISE EXCEPTION 'Solo el transportista asignado o un encargado puede marcar la no entrega'
+      USING ERRCODE = '42501';
+  END IF;
+
+  -- 1) Queda el registro del intento fallido en la ruta.
+  UPDATE recorrido_pedidos rp
+  SET estado_entrega    = 'no_entregado',
+      motivo_no_entrega = p_motivo,
+      nota_no_entrega   = NULLIF(trim(COALESCE(p_nota, '')), ''),
+      hora_entrega      = now()
+  FROM recorridos r
+  WHERE rp.recorrido_id = r.id
+    AND rp.pedido_id = p_pedido_id
+    AND rp.sucursal_id = v_sucursal
+    AND r.estado = 'en_curso'
+    -- mig NNN (Rut-B5, revisión de T3; el cambio mínimo, la tarjeta T2 parte de acá): no la
+    -- parada 'reasignado' de una ruta en curso, que es de otro chofer que ya no la tiene.
+    AND rp.estado_entrega <> 'reasignado';
+  GET DIAGNOSTICS v_paradas = ROW_COUNT;
+
+  -- Mig 243: sin parada marcada no hay nada que registrar, y liberar el pedido
+  -- igual deja el intento fallido sin rastro (que es lo que la 144 vino a medir)
+  -- devolviendo success: true. Aborta en vez de seguir de largo.
+  IF v_paradas = 0 THEN
+    RAISE EXCEPTION 'El pedido % no es una parada de ninguna hoja de ruta en curso de esta sucursal: no hay no-entrega que registrar',
+      p_pedido_id
+      USING ERRCODE = '42501';
+  END IF;
+
+  -- 2) Se libera el pedido para poder re-rutearlo. No se cancela.
+  UPDATE pedidos
+  SET estado           = 'pendiente',
+      transportista_id = NULL,
+      orden_entrega    = NULL
+  WHERE id = p_pedido_id AND sucursal_id = v_sucursal;
+
+  -- 3) Aviso al preventista dueño de la venta, con el motivo.
+  IF v_usuario_id IS NOT NULL AND v_usuario_id <> v_uid THEN
+    INSERT INTO notificaciones (
+      usuario_id, sucursal_id, tipo, titulo, mensaje, entidad_tipo, entidad_id, payload
+    ) VALUES (
+      v_usuario_id, v_sucursal, 'pedido_no_entregado',
+      'Pedido no entregado',
+      format('El pedido #%s de %s no se pudo entregar: %s',
+             p_pedido_id, COALESCE(v_cliente, 'cliente'),
+             CASE p_motivo
+               WHEN 'cerrado'              THEN 'el local estaba cerrado'
+               WHEN 'sin_dinero'           THEN 'el cliente no tenía dinero'
+               WHEN 'cliente_rechaza'      THEN 'el cliente rechazó el pedido'
+               WHEN 'ausente'              THEN 'no había nadie'
+               WHEN 'direccion_incorrecta' THEN 'la dirección es incorrecta'
+               WHEN 'clima'                THEN 'por el clima'
+               ELSE COALESCE(NULLIF(trim(COALESCE(p_nota, '')), ''), 'otro motivo')
+             END),
+      'pedido', p_pedido_id,
+      jsonb_build_object('pedido_id', p_pedido_id, 'motivo', p_motivo, 'nota', p_nota)
+    );
+  END IF;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'pedido_id', p_pedido_id,
+    'motivo', p_motivo,
+    'paradas_marcadas', v_paradas
+  );
 END;
 $function$;
 
@@ -769,10 +1302,30 @@ $function$;
 -- =========================================================================
 -- 5 · Rut-B8: registrar_cambio_producto con clave (altas_por_clave)
 -- =========================================================================
-ALTER TABLE public.altas_por_clave DROP CONSTRAINT altas_por_clave_operacion_check;
-ALTER TABLE public.altas_por_clave ADD CONSTRAINT altas_por_clave_operacion_check
-  CHECK (operacion = ANY (ARRAY['condicion_mayorista'::text, 'promocion'::text, 'cliente'::text,
-                                'gasto'::text, 'empleado'::text, 'cambio_producto'::text]));
+-- El CHECK sobre la lista VIGENTE (cruce con T8 y T6, que suman las suyas): si
+-- 'cambio_producto' ya está, nada; si no, el CHECK de hoy más 'cambio_producto'. Lo que
+-- había queda anotado en mig_nnn_t3.ops_antes para la poscondición.
+DO $ops$
+DECLARE
+  v_def text;
+  v_ops text[];
+BEGIN
+  SELECT pg_get_constraintdef(oid) INTO v_def FROM pg_constraint
+   WHERE conrelid = 'public.altas_por_clave'::regclass AND conname = 'altas_por_clave_operacion_check';
+  SELECT array_agg(m[1] ORDER BY n) INTO v_ops
+    FROM regexp_matches(v_def, '''([^'']+)''::text', 'g') WITH ORDINALITY AS x(m, n);
+  PERFORM set_config('mig_nnn_t3.ops_antes', array_to_string(v_ops, ','), true);
+  IF 'cambio_producto' = ANY (v_ops) THEN
+    RAISE NOTICE 'mig NNN · altas_por_clave ya admite cambio_producto: el CHECK queda como está';
+    RETURN;
+  END IF;
+  ALTER TABLE public.altas_por_clave DROP CONSTRAINT altas_por_clave_operacion_check;
+  EXECUTE format('ALTER TABLE public.altas_por_clave ADD CONSTRAINT altas_por_clave_operacion_check '
+                 'CHECK (operacion = ANY (ARRAY[%s]))',
+                 (SELECT string_agg(quote_literal(o) || '::text', ', ' ORDER BY n)
+                    FROM unnest(v_ops || 'cambio_producto'::text) WITH ORDINALITY AS u(o, n)));
+END
+$ops$;
 
 DROP FUNCTION public.registrar_cambio_producto(integer, bigint, integer, bigint, integer, text, text);
 
@@ -1191,7 +1744,10 @@ BEGIN
       ('public._recorrido_contadores(bigint)', 'Rut-B11', false),
       ('public.crear_pedido_cambio_en_ruta(integer,bigint,integer,bigint,integer,text,text)', 'Rut-B13', true),
       ('public.optimizar_ruta_consumir_cupo(integer,integer)', 'Rut-B14', true),
-      ('public.recalcular_recorrido(bigint)', 'permisos-B1', true)
+      ('public.recalcular_recorrido(bigint)', 'permisos-B1', true),
+      ('public.marcar_entregas_masivo(bigint[],uuid,date)', 'Rut-B5', true),
+      ('public.marcar_entrega_y_pago_masivo_impl(bigint[],uuid,text,date)', 'Rut-B5', false),
+      ('public.marcar_no_entregado(bigint,character varying,text)', 'Rut-B5', true)
     ) AS t(f, marca, api) LOOP
     IF to_regprocedure(r.f) IS NULL THEN
       RAISE EXCEPTION 'mig NNN · % no quedó', r.f;
@@ -1217,7 +1773,10 @@ BEGIN
       ('public.aplicar_orden_ruta(uuid,jsonb,numeric,integer,jsonb,date)', '8023195a7078920efc376f2ed675c125'),
       ('public._recorrido_contadores(bigint)', 'f82f8e32b56c5c03f998d54ea1a4f1f8'),
       ('public.crear_pedido_cambio_en_ruta(integer,bigint,integer,bigint,integer,text,text)', '42b01dbb1bb1fc38a42926cd9c776ed7'),
-      ('public.recalcular_recorrido(bigint)', '02fb88f3e4ca09188833d260c0bc502c')
+      ('public.recalcular_recorrido(bigint)', '02fb88f3e4ca09188833d260c0bc502c'),
+      ('public.marcar_entregas_masivo(bigint[],uuid,date)', '96f7658823eb86bfc0483259ba7f3789'),
+      ('public.marcar_entrega_y_pago_masivo_impl(bigint[],uuid,text,date)', '3511891988c0193f2fdcf89cd1803fbe'),
+      ('public.marcar_no_entregado(bigint,character varying,text)', '7ca8e27aefa489e20a612a9a5591bd21')
     ) AS t(f, h) LOOP
     IF (SELECT md5(prosrc) FROM pg_proc WHERE oid = r.f::regprocedure) = r.h THEN
       RAISE EXCEPTION 'mig NNN · % quedó como estaba', r.f;
@@ -1244,10 +1803,15 @@ BEGIN
                  OR COALESCE(x.total_cobrado, 0) IS DISTINCT FROM c.total_cobrado) THEN
     RAISE EXCEPTION 'mig NNN · quedan rutas con los contadores distintos de _recorrido_contadores (RUTA-B)';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                  WHERE conrelid = 'public.altas_por_clave'::regclass AND conname = 'altas_por_clave_operacion_check'
-                    AND pg_get_constraintdef(oid) LIKE '%''cambio_producto''::text%') THEN
-    RAISE EXCEPTION 'mig NNN · el CHECK de altas_por_clave no quedó con cambio_producto';
+  -- El CHECK de altas_por_clave: las operaciones de antes (las de la 542 y las que hayan
+  -- sumado otras migraciones), más cambio_producto. Ninguna se perdió.
+  SELECT pg_get_constraintdef(oid) INTO v FROM pg_constraint
+   WHERE conrelid = 'public.altas_por_clave'::regclass AND conname = 'altas_por_clave_operacion_check';
+  IF v IS NULL OR EXISTS (
+       SELECT 1 FROM unnest(string_to_array(current_setting('mig_nnn_t3.ops_antes'), ',') || 'cambio_producto'::text) o
+        WHERE strpos(v, quote_literal(o) || '::text') = 0) THEN
+    RAISE EXCEPTION 'mig NNN · el CHECK de altas_por_clave no quedó con las de antes (%) más cambio_producto: %',
+      current_setting('mig_nnn_t3.ops_antes'), v;
   END IF;
   -- La tabla del cupo: RLS y sin grants para la API.
   IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.optimizar_ruta_cupo_uso'::regclass)
@@ -1259,7 +1823,7 @@ BEGIN
   END IF;
   -- SEG-A no ve ninguna de las funciones de esta migración (lee sólo el catálogo).
   IF EXISTS (SELECT 1 FROM public.auditoria_definer_sin_rol() x
-              WHERE x.firma ~ '(cerrar_recorridos_vencidos|aplicar_cambio_de_parada|actualizar_recorrido_entrega|aplicar_orden_ruta|registrar_cambio_producto|crear_pedido_cambio_en_ruta|optimizar_ruta_consumir_cupo|recalcular_recorrido)\(') THEN
+              WHERE x.firma ~ '(cerrar_recorridos_vencidos|aplicar_cambio_de_parada|actualizar_recorrido_entrega|aplicar_orden_ruta|registrar_cambio_producto|crear_pedido_cambio_en_ruta|optimizar_ruta_consumir_cupo|recalcular_recorrido|marcar_entregas_masivo|marcar_entrega_y_pago_masivo_impl|marcar_no_entregado)\(') THEN
     RAISE EXCEPTION 'mig NNN · SEG-A ve una función de esta migración';
   END IF;
 END

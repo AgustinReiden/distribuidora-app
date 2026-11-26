@@ -54,7 +54,7 @@ import {
 import { navegarTramo } from "./navegar-tramo.ts";
 import { autorizarCaller, crearDepsAutorizacion, crearLlamarCupo } from "./auth.ts";
 import { validarLimites } from "./limites.ts";
-import { configCors } from "./cors.ts";
+import { configCors, envolverConCors } from "./cors.ts";
 import { consumirCupoRuta, mensajeCupoRutaAgotado } from "./cupo.ts";
 
 // Rut-B14 (ola 3): sin APP_ORIGIN (o con "*") no hay CORS para nadie: falla cerrado. Con
@@ -233,12 +233,9 @@ async function viaComputeRoutesPorBarridas(
   };
 }
 
-// Rut-B14 (ola 3): los headers de CORS van en toda respuesta, según el Origin del request.
-serve(async (req: Request) => {
-  const res = await atender(req);
-  for (const [k, v] of Object.entries(CORS.headers(req))) res.headers.set(k, v);
-  return res;
-});
+// Rut-B14 (ola 3): los headers de CORS van en toda respuesta, según el Origin del request,
+// también en el 500 de una excepción que atender() no atrapó (envolverConCors).
+serve(envolverConCors(CORS, atender));
 
 async function atender(req: Request): Promise<Response> {
   // Rut-B14 (ola 3): sin el origen del front configurado no se contesta nada útil, ni el
