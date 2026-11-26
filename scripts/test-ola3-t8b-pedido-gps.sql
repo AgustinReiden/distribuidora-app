@@ -1,4 +1,4 @@
--- Ensayo de la tanda T8b de la ola 3 (#1690, permisos-B4 de #1677; mig NNN_ola3_t8b_pedido_gps):
+-- Ensayo de la tanda T8b de la ola 3 (#1690, permisos-B4 de #1677; mig 555_ola3_t8b_pedido_gps):
 -- el GPS del pedido vive en pedido_gps, que el chofer no lee.
 --
 -- Corre contra prod SIN dejar rastro: un único DO que termina SIEMPRE en una excepción

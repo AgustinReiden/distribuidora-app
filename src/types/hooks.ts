@@ -311,7 +311,7 @@ export interface PedidoDB {
   updated_at?: string;
   deleted_at?: string | null;
   // El GPS del check-in ya no viene en el pedido: vive en `pedido_gps` (PedidoGps), que lee
-  // sólo el admin (permisos-B4, mig NNN_ola3_t8b_pedido_gps).
+  // sólo el admin (permisos-B4, mig 555_ola3_t8b_pedido_gps).
   // Canal de origen del pedido. 'cambio' marca una parada de cambio/devolución
   // (pedido especial total=0; mig 089), no una venta.
   canal?: string;
@@ -322,7 +322,7 @@ export interface PedidoDB {
 
 /**
  * El check-in GPS del preventista al confirmar un pedido: una fila de `pedido_gps`
- * (permisos-B4, mig NNN_ola3_t8b_pedido_gps). La lee sólo el admin de la sucursal; sin fila,
+ * (permisos-B4, mig 555_ola3_t8b_pedido_gps). La lee sólo el admin de la sucursal; sin fila,
  * el pedido no tiene check-in (previo a la mig 040, o de un rol que no captura GPS).
  */
 export interface PedidoGps {

@@ -1,5 +1,5 @@
 /**
- * El check-in GPS de los pedidos (permisos-B4, decisión del dueño D10; mig NNN_ola3_t8b_pedido_gps).
+ * El check-in GPS de los pedidos (permisos-B4, decisión del dueño D10; mig 555_ola3_t8b_pedido_gps).
  *
  * El GPS del preventista ya no viene en la fila de `pedidos`, que el chofer lee: vive en
  * `pedido_gps`, una fila por pedido con check-in, que por RLS lee sólo el admin de la sucursal

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# El GPS del alta y el de la cola, a la vez (permisos-B4, ola 3, tanda T8b de #1690; mig NNN_ola3_t8b_pedido_gps).
+# El GPS del alta y el de la cola, a la vez (permisos-B4, ola 3, tanda T8b de #1690; mig 555_ola3_t8b_pedido_gps).
 # Sesiones psql reales contra una base DESCARTABLE de Docker con la migración aplicada. NUNCA contra prod.
 #
 #   CONTENEDOR=<contenedor> bash scripts/concurrencia/t8b-gps-alta-y-cola.sh
