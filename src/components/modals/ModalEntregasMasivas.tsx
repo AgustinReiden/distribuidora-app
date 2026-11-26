@@ -37,7 +37,9 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
   isAdmin = false,
 }: ModalEntregasMasivasProps) {
   const [selectedTransportista, setSelectedTransportista] = useState('')
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  // Lo que el usuario tildó, se vea o no. Lo que vale (se cuenta, se confirma y se manda) es
+  // `selectedIds`, que más abajo se acota a lo que el filtro deja ver (Fr-B6, como 1598-b8 en pagos).
+  const [tildados, setSelectedIds] = useState<Set<string>>(new Set())
   const [busqueda, setBusqueda] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
@@ -60,6 +62,11 @@ const ModalEntregasMasivas = memo(function ModalEntregasMasivas({
     }
     return resultado
   }, [pedidos, busqueda, fechaDesde, fechaHasta])
+
+  const selectedIds = useMemo(() => {
+    const visibles = new Set(pedidosFiltrados.map(p => p.id))
+    return new Set([...tildados].filter(id => visibles.has(id)))
+  }, [tildados, pedidosFiltrados])
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
