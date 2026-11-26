@@ -12,8 +12,10 @@
 --        dice estado_resolucion = resuelto_otro, y el reintento con la misma clave también. No
 --        nace una nota de crédito ni un cargo a un empleado.
 --   L2 · El encargado carga una: nace resuelta igual.
---   L3 · Un encargado con el rol extra de chofer, sobre un pedido que él reparte: es la oficina
---        (la regla es por el rol de quien la carga), nace resuelta.
+--   L3 · Un encargado con el rol extra de chofer: es la oficina (la regla es por el rol de quien
+--        la carga), nace resuelta. Va sobre el pedido de un chofer: desde la T2 de la ola 3
+--        (1601-b1) un pedido no se le asigna a un encargado (_actua_como_transportista no cuenta
+--        el extra de admin ni encargado, como al entregar desde #1548).
 --   L4 · El chofer carga una sobre su pedido: nace pendiente, sin nota ni resuelto_por, y la
 --        respuesta dice estado_resolucion = pendiente.
 --   L5 · Un preventista con el rol extra de chofer, sobre un pedido que él reparte: nace pendiente.
@@ -207,7 +209,7 @@ BEGIN
 END
 $fn$;
 
--- L3 · encargado con el rol extra de chofer, sobre un pedido que él reparte
+-- L3 · encargado con el rol extra de chofer
 CREATE OR REPLACE FUNCTION pg_temp.so_caso_l3(r jsonb)
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
@@ -219,12 +221,10 @@ BEGIN
   PERFORM set_config('request.jwt.claims', '', true);
   INSERT INTO public.perfil_roles (usuario_id, sucursal_id, rol) VALUES (v_enc, v_suc, 'transportista')
   ON CONFLICT DO NOTHING;
-  x := pg_temp.so_pedido((r->>'cli')::bigint, (r->>'adm')::uuid, v_suc, v_enc);
-  f := pg_temp.so_si(f, (SELECT transportista_id FROM public.pedidos WHERE id = (x->>'pedido')::bigint) = v_enc,
-         'el pedido no quedó repartido por el encargado');
+  x := pg_temp.so_pedido((r->>'cli')::bigint, (r->>'adm')::uuid, v_suc, (r->>'tra')::uuid);
   f := pg_temp.so_nacio_resuelta(f,
          pg_temp.so_salvedad(v_enc, v_suc, (x->>'pedido')::bigint, (x->>'item')::bigint, gen_random_uuid()),
-         v_enc, (x->>'pedido')::bigint, 'del encargado que reparte');
+         v_enc, (x->>'pedido')::bigint, 'del encargado con el extra de chofer');
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
 $fn$;

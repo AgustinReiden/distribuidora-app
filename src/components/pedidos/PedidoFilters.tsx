@@ -44,6 +44,11 @@ export interface PedidoFiltersProps {
   transportistas?: Usuario[];
   usuarios?: Usuario[];
   isAdmin: boolean;
+  /**
+   * ¿Ve el filtro de entrega programada? Quien arma el reparto (admin y encargado, #1697).
+   * Sin el dato, el admin, como antes.
+   */
+  puedeFiltrarEntrega?: boolean;
   onBusquedaChange: (value: string) => void;
   onFiltrosChange: (filtros: ParcheFiltrosPedidos) => void;
 }
@@ -83,6 +88,7 @@ function PedidoFilters({
   transportistas = [],
   usuarios = [],
   isAdmin,
+  puedeFiltrarEntrega = isAdmin,
   onBusquedaChange,
   onFiltrosChange,
 }: PedidoFiltersProps): React.ReactElement {
@@ -101,8 +107,8 @@ function PedidoFilters({
   const idTitulo = useId();
   const idDescripcion = useId();
 
-  const activosCount = contarFiltrosActivos(filtros, { isAdmin });
-  const chips = chipsFiltrosActivos(filtros, { isAdmin, transportistas, usuarios, hoy: fechaLocalISO() });
+  const activosCount = contarFiltrosActivos(filtros, { isAdmin, puedeFiltrarEntrega });
+  const chips = chipsFiltrosActivos(filtros, { isAdmin, puedeFiltrarEntrega, transportistas, usuarios, hoy: fechaLocalISO() });
 
   const trigger = (
     <Button
@@ -152,7 +158,7 @@ function PedidoFilters({
         {/* Entrega programada (sólo admin): a la vista en escritorio, fuera del
             popover. En celular vive sólo en el sheet, como antes de WP-44: si
             también estuviera en la fila, el admin la vería dos veces. */}
-        {isAdmin && (
+        {puedeFiltrarEntrega && (
           <div className="hidden sm:block">
             <ControlEntregaProgramada
               variante="fila"
@@ -201,6 +207,7 @@ function PedidoFilters({
               transportistas={transportistas}
               usuarios={usuarios}
               isAdmin={isAdmin}
+              puedeFiltrarEntrega={puedeFiltrarEntrega}
               activosCount={activosCount}
               onFiltrosChange={onFiltrosChange}
               onClose={() => setAbierto(false)}

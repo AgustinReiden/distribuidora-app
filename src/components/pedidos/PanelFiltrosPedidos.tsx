@@ -62,6 +62,8 @@ export interface PanelFiltrosPedidosProps {
    * defecto sí.
    */
   mostrarEntrega?: boolean;
+  /** ¿El rol tiene el filtro de entrega programada? Admin y encargado (#1697). Sin el dato, el admin. */
+  puedeFiltrarEntrega?: boolean;
   onFiltrosChange: (parche: ParcheFiltrosPedidos) => void;
 }
 
@@ -318,6 +320,7 @@ export default function PanelFiltrosPedidos({
   usuarios = [],
   isAdmin,
   mostrarEntrega = true,
+  puedeFiltrarEntrega = isAdmin,
   onFiltrosChange,
 }: PanelFiltrosPedidosProps): React.ReactElement {
   return (
@@ -409,8 +412,9 @@ export default function PanelFiltrosPedidos({
         </Section>
       )}
 
-      {/* Entrega programada (admin) */}
-      {isAdmin && mostrarEntrega && (
+      {/* Entrega programada (quien arma el reparto: admin y encargado). Va antes que la fecha
+          de carga: para armar la ruta manda la de entrega (#1697). */}
+      {puedeFiltrarEntrega && mostrarEntrega && (
         <Section label="Entrega programada">
           <ControlEntregaProgramada
             variante="panel"

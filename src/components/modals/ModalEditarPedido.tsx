@@ -10,6 +10,7 @@ import { fechaReferenciaPromo as fechaReferenciaPromoDe } from '../../utils/fech
 import { fechaPedidoFueraDeRango, mensajeFechaAnteriorAlPiso, pisoFechaPedido } from '../../utils/fechaPedido';
 import { errorDeFechaEntrega, rangoFechaEntrega } from '../../utils/fechaEntrega';
 import { techoFechaEntregaProgramada } from '../../utils/fechaEntregaProgramada';
+import EtiquetaRefechado from '../pedidos/EtiquetaRefechado';
 import { useZodValidation } from '../../hooks/useZodValidation';
 import { usePromocionPedido, type RegaloOverride } from '../../hooks/usePromocionPedido';
 import { construirOrigenPrecioItems, type OrigenPrecioItem } from '../../utils/origenPrecio';
@@ -2160,6 +2161,8 @@ const ModalEditarPedido = memo(function ModalEditarPedido({
                 Se actualizará la fecha estimada de entrega del pedido.
               </p>
             )}
+            {/* #1697: la entrega ya pasó sola al día siguiente por una no entrega. */}
+            <EtiquetaRefechado pedido={pedido} className="mt-2" />
           </div>
         )}
 

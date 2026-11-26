@@ -151,6 +151,8 @@ export interface Pedido extends BaseEntity {
   notas?: string;
   fecha_entrega?: string;
   fecha_entrega_programada?: string;
+  /** #1697: la entrega programada original de un pedido refechado (ver `utils/refechado.ts`). */
+  entrega_refechada_desde?: string | null;
   orden_entrega?: number;
   items?: PedidoItem[];
 }

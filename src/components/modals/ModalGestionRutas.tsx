@@ -25,6 +25,7 @@ import type { PedidoDB, PerfilDB, ClienteDB, ProductoDB } from '../../types';
 import { CampoNumero } from '../ui/CampoNumero'
 import { numeroEditable } from '../../utils/calculations';
 import { leerDecimalSinMiles, leerEntero } from '../../utils/normalizarNumero';
+import EtiquetaRefechado from '../pedidos/EtiquetaRefechado';
 
 /** Una coordenada tipeada (B20, D17): sin miles, con menos; la tecla del punto es la coma. */
 const leerCoordenada = (texto: string): number => leerDecimalSinMiles(texto) ?? NaN;
@@ -1054,19 +1055,20 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                 </label>
                 {/* Selector de columna: por fecha de pedido o de entrega programada */}
                 <div className="inline-flex rounded-lg border border-gray-200 p-0.5 mb-3">
-                  <button
-                    type="button"
-                    onClick={() => setFiltroTipoFecha('pedido')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md ${filtroTipoFecha === 'pedido' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
-                  >
-                    Fecha de pedido
-                  </button>
+                  {/* #1697: la fecha de entrega primero; la del pedido queda como segunda opción. */}
                   <button
                     type="button"
                     onClick={() => setFiltroTipoFecha('entrega')}
                     className={`px-3 py-1.5 text-xs font-medium rounded-md ${filtroTipoFecha === 'entrega' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
                   >
                     Fecha de entrega
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFiltroTipoFecha('pedido')}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md ${filtroTipoFecha === 'pedido' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                  >
+                    Fecha de pedido
                   </button>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1609,19 +1611,21 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                                   )}
                                 </p>
                                 <p className="text-sm text-gray-500 truncate">{pedido.cliente?.direccion}</p>
+                                {/* #1697: no se entregó en su día y la entrega pasó sola al día siguiente. */}
+                                <EtiquetaRefechado pedido={pedido} className="mt-0.5" />
                                 <p className="text-xs text-gray-400">
-                                  <span
-                                    className={columnaFiltrada === 'pedido' ? resaltar : undefined}
-                                    title={columnaFiltrada === 'pedido' ? 'Aparece por esta fecha' : undefined}
-                                  >
-                                    Pedido: {pedido.fecha || '—'}
-                                  </span>
-                                  {' · '}
                                   <span
                                     className={columnaFiltrada === 'entrega' ? resaltar : undefined}
                                     title={columnaFiltrada === 'entrega' ? 'Aparece por esta fecha' : undefined}
                                   >
                                     Entrega: {pedido.fecha_entrega_programada || '—'}
+                                  </span>
+                                  {' · '}
+                                  <span
+                                    className={columnaFiltrada === 'pedido' ? resaltar : undefined}
+                                    title={columnaFiltrada === 'pedido' ? 'Aparece por esta fecha' : undefined}
+                                  >
+                                    Pedido: {pedido.fecha || '—'}
                                   </span>
                                 </p>
                               </div>

@@ -23,6 +23,8 @@ export interface ModalFiltrosPedidosProps {
   transportistas?: Usuario[];
   usuarios?: Usuario[];
   isAdmin: boolean;
+  /** ¿Ve el filtro de entrega programada? Admin y encargado (#1697). Sin el dato, el admin. */
+  puedeFiltrarEntrega?: boolean;
   activosCount: number;
   onFiltrosChange: (f: ParcheFiltrosPedidos) => void;
   onClose: () => void;
@@ -34,6 +36,7 @@ export default function ModalFiltrosPedidos({
   transportistas = [],
   usuarios = [],
   isAdmin,
+  puedeFiltrarEntrega = isAdmin,
   activosCount,
   onFiltrosChange,
   onClose,
@@ -57,6 +60,7 @@ export default function ModalFiltrosPedidos({
         transportistas={transportistas}
         usuarios={usuarios}
         isAdmin={isAdmin}
+        puedeFiltrarEntrega={puedeFiltrarEntrega}
         onFiltrosChange={onFiltrosChange}
       />
     </BottomSheet>

@@ -37,6 +37,7 @@ import type { PedidoDB, RegistrarSalvedadResult } from '../../types';
 import { lazyWithReload } from '../../utils/lazyWithReload';
 import { errorDeSupabase } from '../../utils/errorDeSupabase';
 import { faltantePedido } from '../../utils/imputacionCredito';
+import { avisoParadasSinMarcar } from '../../utils/paradasSinMarcar';
 import { Button } from '../ui/Button';
 
 // Mapa con Google Maps JS (reemplaza el Leaflet; mejor reactividad y estética).
@@ -207,6 +208,7 @@ export default function RutaActivaTransportista({
     [pedidosOrdenados],
   );
   const completadas = entregadas + noEntregadas;
+  const avisoSinMarcar = avisoParadasSinMarcar(pendientes.length);
   // Lo que falta cobrar (total menos lo ya pagado), no el total: un parcial de 1.000 con 400
   // cobrados aporta 600. Es el mismo `faltantePedido` que usa el resto de la app (Fr-B1).
   const porCobrar = pendientes
@@ -491,6 +493,12 @@ export default function RutaActivaTransportista({
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 {formatPrecio(porCobrar)} por cobrar
               </p>
+              {/* Rut-B7 (#1554): la ruta no se cierra con paradas sin marcar; se avisa antes. */}
+              {avisoSinMarcar && (
+                <p role="status" className="mt-1 max-w-[15rem] text-xs text-amber-700 dark:text-amber-400">
+                  {avisoSinMarcar}
+                </p>
+              )}
             </div>
           </div>
         )}
