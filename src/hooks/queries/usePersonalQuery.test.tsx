@@ -53,6 +53,8 @@ import {
   useLiquidacionQuery,
   useLiquidarEmpleadoMutation,
   useAnularLiquidacionMutation,
+  useRendicionesDelDiaQuery,
+  useComisionSinLiquidarQuery,
 } from './usePersonalQuery'
 import type {
   Empleado,
@@ -405,11 +407,32 @@ describe('useRegistrarMovimientoEmpleadoMutation', () => {
     await result.current.mutateAsync({ empleadoId: 7, movimiento: MOVIMIENTO })
 
     expect(rpcCalls).toEqual([
-      { fn: 'registrar_movimiento_empleado', args: { p_empleado_id: 7, p_movimiento: MOVIMIENTO } },
+      // Com-B3 (#1554): cambió de regla. Lleva la clave del intento (un uuid).
+      { fn: 'registrar_movimiento_empleado', args: { p_empleado_id: 7, p_movimiento: MOVIMIENTO, p_clave: expect.stringMatching(UUID) } },
     ])
     await waitFor(() => expect(invalidar).toHaveBeenCalled())
     const keys = invalidar.mock.calls.map(c => (c[0] as { queryKey: unknown[] }).queryKey)
     expect(keys).toContainEqual(['personal', 1])
+  })
+
+  // Com-B3 (#1554): el doble toque (la respuesta se perdió y se vuelve a mandar lo mismo) no duplica.
+  it('el reintento del mismo movimiento después de un error manda la misma clave; otro movimiento, otra', async () => {
+    rpcResult = { data: null, error: ERROR_DE_RED }
+    const { result } = renderHook(() => useRegistrarMovimientoEmpleadoMutation(), { wrapper: makeWrapper(nuevoCliente()) })
+
+    await result.current.mutateAsync({ empleadoId: 7, movimiento: MOVIMIENTO }).catch(() => undefined)
+    rpcResult = { data: 55, error: null }
+    await result.current.mutateAsync({ empleadoId: 7, movimiento: { ...MOVIMIENTO } })
+    // Salió bien: el mismo contenido otra vez es otro movimiento.
+    await result.current.mutateAsync({ empleadoId: 7, movimiento: { ...MOVIMIENTO } })
+    // Otro monto u otro empleado, otra clave.
+    await result.current.mutateAsync({ empleadoId: 7, movimiento: { ...MOVIMIENTO, monto: 20001 } })
+    await result.current.mutateAsync({ empleadoId: 8, movimiento: { ...MOVIMIENTO } })
+
+    const claves = rpcCalls.map(c => c.args?.p_clave as string)
+    expect(claves[0]).toMatch(UUID)
+    expect(claves[1]).toBe(claves[0])
+    expect(new Set(claves.slice(1)).size).toBe(4)
   })
 
   it('un error de red da el mensaje "Sin conexión" de registrar el movimiento', async () => {
@@ -540,10 +563,28 @@ describe('useLiquidarEmpleadoMutation', () => {
 
     expect(id).toBe(31)
     expect(rpcCalls).toEqual([
-      { fn: 'liquidar_empleado', args: { p_empleado_id: 7, p_liquidacion: LIQUIDACION } },
+      // Com-B3 (#1554): cambió de regla. Lleva la clave del intento (un uuid).
+      { fn: 'liquidar_empleado', args: { p_empleado_id: 7, p_liquidacion: LIQUIDACION, p_clave: expect.stringMatching(UUID) } },
     ])
     await waitFor(() => expect(invalidar).toHaveBeenCalled())
     expect(clavesInvalidadas(invalidar)).toContainEqual(['personal', 1])
+  })
+
+  // Com-B3 (#1554): la misma liquidación reintentada lleva la misma clave; el server devuelve la del primero.
+  it('el reintento de la misma liquidación después de un error manda la misma clave', async () => {
+    rpcResult = { data: null, error: ERROR_DE_RED }
+    const { result } = renderHook(() => useLiquidarEmpleadoMutation(), { wrapper: makeWrapper(nuevoCliente()) })
+
+    await result.current.mutateAsync({ empleadoId: 7, liquidacion: LIQUIDACION }).catch(() => undefined)
+    rpcResult = { data: 31, error: null }
+    await result.current.mutateAsync({ empleadoId: 7, liquidacion: { ...LIQUIDACION } })
+    await result.current.mutateAsync({ empleadoId: 7, liquidacion: { ...LIQUIDACION, pago: LIQUIDACION.pago - 1 } })
+
+    const claves = rpcCalls.map(c => c.args?.p_clave as string)
+    expect(claves[0]).toMatch(UUID)
+    expect(claves[1]).toBe(claves[0])
+    expect(claves[2]).toMatch(UUID)
+    expect(claves[2]).not.toBe(claves[0])
   })
 
   it('con la plata de la oficina no toca las rendiciones', async () => {
@@ -745,5 +786,49 @@ describe('las mutations de plata invalidan también cuando fallan', () => {
     await waitFor(() => expect(invalidar).toHaveBeenCalled())
     expect(claves(invalidar)).toContainEqual(['personal', 1])
     expect(claves(invalidar)).toContainEqual(['gastos', 1])
+  })
+})
+
+// #1534 y m7 (#1392): las rendiciones de un día, con el efectivo que les queda (la cuenta de la grilla).
+describe('useRendicionesDelDiaQuery', () => {
+  it('pide obtener_resumen_rendiciones de ese día y calcula el efectivo a entregar', async () => {
+    rpcResult = {
+      data: [{
+        fecha: '2026-10-30', transportista_id: 'u-enc', transportista_nombre: 'Encargada Ana', total_efectivo: 8000,
+        total_gastos: 1000, total_pagos_personal: 2000, total_faltantes_empleados: 0, estado: 'pendiente',
+      }],
+      error: null,
+    }
+    const { result } = renderHook(() => useRendicionesDelDiaQuery('2026-10-30'), { wrapper: makeWrapper(nuevoCliente()) })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(rpcCalls).toEqual([{
+      fn: 'obtener_resumen_rendiciones',
+      args: { p_fecha_desde: '2026-10-30', p_fecha_hasta: '2026-10-30', p_transportista_id: null },
+    }])
+    expect(result.current.data).toEqual([
+      { transportista_id: 'u-enc', transportista_nombre: 'Encargada Ana', efectivo_a_entregar: 5000, cerrada: false },
+    ])
+  })
+
+  it('sin día no pide nada', () => {
+    renderHook(() => useRendicionesDelDiaQuery(null), { wrapper: makeWrapper(nuevoCliente()) })
+    expect(rpcCalls).toHaveLength(0)
+  })
+})
+
+// m4 (#1392): la comisión sin liquidar de una ficha, para avisar antes de cambiarla de sucursal.
+describe('useComisionSinLiquidarQuery', () => {
+  it('pide comision_sin_liquidar_empleado sólo cuando se lo habilita', async () => {
+    rpcResult = { data: 2000, error: null }
+    const qc = nuevoCliente()
+    renderHook(() => useComisionSinLiquidarQuery(7, false), { wrapper: makeWrapper(qc) })
+    expect(rpcCalls).toHaveLength(0)
+
+    const { result } = renderHook(() => useComisionSinLiquidarQuery(7, true), { wrapper: makeWrapper(qc) })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toBe(2000)
+    expect(rpcCalls).toEqual([{ fn: 'comision_sin_liquidar_empleado', args: { p_empleado_id: 7 } }])
   })
 })

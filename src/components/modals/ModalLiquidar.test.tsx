@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { VistaPreviaLiquidacion } from '../../types/personal'
+import type { RendicionDelDia, VistaPreviaLiquidacion } from '../../types/personal'
 import { formatPrecio } from '../../utils/formatters'
 
 /** El DOM normaliza el espacio duro que trae `formatPrecio` después del `$`. */
@@ -19,6 +19,8 @@ const estado = vi.hoisted(() => ({
   vista: null as VistaPreviaLiquidacion | null,
   isLoading: false,
   isError: false,
+  // #1534 y m7: las rendiciones del día que trae el server (undefined: todavía no cargaron).
+  delDia: undefined as RendicionDelDia[] | undefined,
 }))
 
 vi.mock('../../hooks/queries/usePersonalQuery', () => ({
@@ -26,6 +28,7 @@ vi.mock('../../hooks/queries/usePersonalQuery', () => ({
     data: estado.vista, isLoading: estado.isLoading, isError: estado.isError, refetch: mockRefetch,
   }),
   useLiquidarEmpleadoMutation: () => ({ mutateAsync: mockLiquidar }),
+  useRendicionesDelDiaQuery: (fecha: string | null) => ({ data: fecha ? estado.delDia : undefined }),
 }))
 
 vi.mock('../../contexts/NotificationContext', () => ({
@@ -95,8 +98,61 @@ describe('ModalLiquidar', () => {
     vi.clearAllMocks()
     estado.isLoading = false
     estado.isError = false
+    estado.delDia = undefined
     mockLiquidar.mockResolvedValue(31)
     cargar()
+  })
+
+  // #1534: de una rendición no sale más efectivo del que le queda por entregar (el tope del server).
+  it('con la rendición muestra el efectivo que le queda y no deja pagar un centavo más', async () => {
+    estado.delDia = [{ transportista_id: 'u-9', transportista_nombre: 'Martín Sosa', efectivo_a_entregar: 5000, cerrada: false }]
+    const { user } = renderModal()
+    await user.click(screen.getByRole('button', { name: 'Con la plata de una rendición' }))
+    await user.click(screen.getByRole('combobox', { name: 'Transportista' }))
+    await user.click(screen.getByRole('option', { name: 'Martín Sosa' }))
+    await user.clear(campoPago())
+    await user.type(campoPago(), '5000,01')
+
+    expect(screen.getByTestId('efectivo-rendicion').textContent?.replace(/\s/g, ' '))
+      .toBe(`A esa rendición le quedan ${plata(5000)} de efectivo por entregar: el pago lo supera.`)
+    await user.click(screen.getByRole('button', { name: 'Confirmar y registrar el pago' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('El pago supera el efectivo que le queda por entregar a esa rendición')
+    expect(mockLiquidar).not.toHaveBeenCalled()
+
+    await user.clear(campoPago())
+    await user.type(campoPago(), '5000')
+    expect(screen.getByTestId('efectivo-rendicion').textContent?.replace(/\s/g, ' '))
+      .toBe(`A esa rendición le quedan ${plata(5000)} de efectivo por entregar.`)
+    await user.click(screen.getByRole('button', { name: 'Confirmar y registrar el pago' }))
+    expect(mockLiquidar).toHaveBeenCalledWith({
+      empleadoId: 7,
+      liquidacion: expect.objectContaining({ pago: 5000, origen_pago: 'rendicion', rendicion_transportista_id: 'u-9' }),
+    })
+  })
+
+  it('un chofer sin rendición ese día no tiene efectivo: no deja pagar desde ahí', async () => {
+    estado.delDia = []
+    const { user } = renderModal()
+    await user.click(screen.getByRole('button', { name: 'Con la plata de una rendición' }))
+    await user.click(screen.getByRole('combobox', { name: 'Transportista' }))
+    await user.click(screen.getByRole('option', { name: 'Pablo Ríos' }))
+    await user.click(screen.getByRole('button', { name: 'Confirmar y registrar el pago' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('El pago supera el efectivo que le queda por entregar a esa rendición')
+    expect(mockLiquidar).not.toHaveBeenCalled()
+  })
+
+  // m7 (#1392): un encargado que cobró él mismo tiene rendición, y se elige aunque no sea chofer.
+  it('ofrece a quien tiene rendición ese día aunque no sea transportista', async () => {
+    estado.delDia = [{ transportista_id: 'u-enc', transportista_nombre: 'Ana Encargada', efectivo_a_entregar: 994560, cerrada: false }]
+    const { user } = renderModal()
+    await user.click(screen.getByRole('button', { name: 'Con la plata de una rendición' }))
+    await user.click(screen.getByRole('combobox', { name: 'Transportista' }))
+    await user.click(screen.getByRole('option', { name: 'Ana Encargada' }))
+    await user.click(screen.getByRole('button', { name: 'Confirmar y registrar el pago' }))
+    expect(mockLiquidar).toHaveBeenCalledWith({
+      empleadoId: 7,
+      liquidacion: expect.objectContaining({ origen_pago: 'rendicion', rendicion_transportista_id: 'u-enc' }),
+    })
   })
 
   it('muestra sueldo, comisiones, ajuste, movimiento, saldo anterior y a pagar', () => {
@@ -461,6 +517,13 @@ describe('ModalLiquidar', () => {
     expect(modalLiquidarSchema.safeParse({ ...base, sueldo: '' }).success).toBe(false)
     expect(modalLiquidarSchema.safeParse({ ...base, pago: '999.999' }).success).toBe(false)
     expect(modalLiquidarSchema.safeParse({ ...base, fecha_pago: '2026-10-31' }).success).toBe(false)
+    // #1534: el tope del efectivo de la rendición.
+    const deRendicion = {
+      ...base, pago: '5.000,01', origen_pago: 'rendicion' as const, rendicion_transportista_id: 'u-9', rendicion_fecha: HOY,
+    }
+    expect(modalLiquidarSchema.safeParse({ ...deRendicion, efectivo_rendicion: 5000 }).success).toBe(false)
+    expect(modalLiquidarSchema.safeParse({ ...deRendicion, pago: '5.000,00', efectivo_rendicion: 5000 }).success).toBe(true)
+    expect(modalLiquidarSchema.safeParse({ ...deRendicion, efectivo_rendicion: null }).success).toBe(true)
   })
 })
 
@@ -471,6 +534,7 @@ describe('ModalLiquidar: período, pago y confirmación', () => {
     vi.clearAllMocks()
     estado.isLoading = false
     estado.isError = false
+    estado.delDia = undefined
     mockLiquidar.mockResolvedValue(31)
     cargar()
   })

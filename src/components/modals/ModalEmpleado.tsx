@@ -32,7 +32,9 @@ import {
   parseMonto,
   textoArregloLargo,
   topeDeArreglo,
+  avisoComisionSinLiquidar,
 } from '../../utils/personal'
+import { useComisionSinLiquidarQuery } from '../../hooks/queries/usePersonalQuery'
 import type {
   Empleado,
   FrecuenciaSueldo,
@@ -275,6 +277,16 @@ export default function ModalEmpleado({
     return nombreDe
   })()
 
+  // m4 (#1392, decisión del dueño del 25/11): lo pendiente no se arrastra de una sucursal a otra. Con
+  // comisión sin liquidar no se lo cambia de sucursal (ni a «las dos», ni desde ahí): se avisa antes,
+  // con el mismo mensaje que guardar_empleado, y no se manda.
+  const sucursalOriginal: number | 'dos' | null = empleado ? (empleado.de_las_dos ? 'dos' : empleado.sucursal_id) : null
+  const mueve = edicion && tieneTodasLasSucursales && sucursalSel !== sucursalOriginal
+  const { data: comisionSinLiquidar } = useComisionSinLiquidarQuery(empleado?.id ?? null, mueve)
+  const avisoPendiente = mueve && comisionSinLiquidar != null
+    ? avisoComisionSinLiquidar(comisionSinLiquidar, empleado?.de_las_dos ? 'las dos sucursales' : nombreSucursalFija)
+    : null
+
   const handleEscapeKeyDown = (event: KeyboardEvent) => {
     // Radix escucha Escape en captura, antes que el buscador: con la lista
     // abierta, Escape tiene que cerrar sólo la lista (ver ModalCompra).
@@ -294,6 +306,8 @@ export default function ModalEmpleado({
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError('')
+    // El aviso ya está en rojo junto a la sucursal: no se manda.
+    if (avisoPendiente) return
 
     // Con todas las sucursales se elige; si no, la ficha queda donde está (o en la actual, en el alta).
     const sucursalId = tieneTodasLasSucursales
@@ -425,6 +439,9 @@ export default function ModalEmpleado({
               ))}
               <Pastilla activa={sucursalSel === 'dos'} onClick={() => setSucursalSel('dos')}>Las dos</Pastilla>
             </div>
+            {avisoPendiente && (
+              <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">{avisoPendiente}</p>
+            )}
           </div>
         ) : (
           <p className="text-sm text-gray-700 dark:text-gray-300">
@@ -504,7 +521,10 @@ export default function ModalEmpleado({
             valor={clienteVisible}
             onChange={setClienteId}
             nombreActual={empleado?.cliente ? empleado.cliente.nombre_fantasia : null}
-            disabled={vinculosBloqueados}
+            // Com-B5 (decisión del dueño del 25/11): la ficha de cliente de la cuenta propia tampoco
+            // (guardar_empleado lo rechaza).
+            disabled={vinculosBloqueados || empleado?.es_propio === true}
+            nota={empleado?.es_propio ? 'Tu ficha de cliente la cambia otro admin.' : undefined}
             ayuda="Lo que se lleve pagando con “adelanto de sueldo” se le descuenta en esta cuenta."
           />
           <CampoVinculo

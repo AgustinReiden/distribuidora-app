@@ -41,6 +41,7 @@ import {
   etiquetaPuesto,
   fechaCompleta,
   formatCuil,
+  motivoSinReversion,
   textoArregloAnterior,
   textoArregloLargo,
   textoPeriodo,
@@ -103,12 +104,14 @@ const colorImporte = (n: number): string =>
  * mercadería y el reintegro tienen su propio origen, y lo de una liquidación viva (sueldo, comisión,
  * su pago) se deshace anulándola; la rotura de una salvedad, anulando la salvedad. El pago que
  * sobrevivió a la anulación de su liquidación (porque su rendición ya estaba cerrada) se revierte
- * como uno suelto (#1521).
+ * como uno suelto (#1521). Uno que salió de una rendición ya cerrada no se revierte (m2 de #1392: la
+ * misma regla que el server, que lo rechaza): se dice por qué en lugar del botón.
  */
-const sePuedeRevertir = (m: MovimientoEmpleado): boolean =>
+const esReversible = (m: MovimientoEmpleado): boolean =>
   (m.tipo === 'adelanto' || m.tipo === 'ajuste' || (m.tipo === 'pago' && (m.liquidacion === null || m.liquidacion.anulada))
     || (m.tipo === 'rotura' && m.merma_id !== null))
   && !m.revertido && m.revierte_id === null
+const sePuedeRevertir = (m: MovimientoEmpleado): boolean => esReversible(m) && motivoSinReversion(m) === null
 
 /** 'Pagado $X el dd/mm/aaaa', más «de $Y» si se pagó menos y de qué rendición salió. */
 function textoPagado(l: LiquidacionResumen): string {
@@ -420,6 +423,10 @@ export default function ModalCuentaEmpleado({
                                     >
                                       Revertir
                                     </button>
+                                  )}
+                                  {/* m2 (#1392): el pago de una rendición cerrada no se revierte; el server lo rechaza. */}
+                                  {!propio && esReversible(m) && motivoSinReversion(m) && (
+                                    <span className="text-xs text-gray-500">{motivoSinReversion(m)}</span>
                                   )}
                                   {/* Un faltante de rendición no se revierte suelto: se deshace con la resolución entera. */}
                                   {!propio && m.tipo === 'faltante' && !m.revertido && m.revierte_id === null && (

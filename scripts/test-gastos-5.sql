@@ -80,7 +80,7 @@ DECLARE
 BEGIN
   SET LOCAL lock_timeout = '5s';
 
-  IF to_regprocedure('public.liquidar_empleado(bigint,jsonb)') IS NULL OR to_regclass('public.empleado_liquidaciones') IS NULL THEN
+  IF to_regprocedure('public.liquidar_empleado(bigint,jsonb,uuid)') IS NULL OR to_regclass('public.empleado_liquidaciones') IS NULL THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · no existen liquidar_empleado ni empleado_liquidaciones (falta la migracion gastos_5)';
   END IF;
 
@@ -346,6 +346,15 @@ BEGIN
   CREATE FUNCTION pg_temp.plata(p_t uuid, p_d date)
   RETURNS jsonb LANGUAGE sql AS $f$
     SELECT jsonb_build_object('origen_pago', 'rendicion', 'rendicion_transportista_id', p_t, 'rendicion_fecha', p_d);
+  $f$;
+
+  -- #1534 (ola 3, T6): un cobro en efectivo del chofer ese día (a cuenta del cliente), para que la
+  -- rendición tenga de dónde pagarle al personal: desde la 488 (el pago suelto) y la NNN de T6 (la
+  -- liquidación), lo pagado de una rendición tiene tope en su efectivo a entregar.
+  CREATE FUNCTION pg_temp.efectivo(p_t uuid, p_suc bigint, p_d date, p_monto numeric, p_cli bigint)
+  RETURNS void LANGUAGE sql AS $f$
+    INSERT INTO pagos (cliente_id, monto, forma_pago, fecha, usuario_id, sucursal_id)
+    VALUES (p_cli, p_monto, 'efectivo', p_d, p_t, p_suc);
   $f$;
 
   CREATE FUNCTION pg_temp.audit(p_adm uuid, p_suc bigint)
@@ -898,13 +907,15 @@ BEGIN
   -- ======================================================= 15 · pago suelto ===
   BEGIN
     e := pg_temp.a(NULL, v_l, false);
+    -- Desde la 488 un pago suelto salda lo que se le debe, nunca más: primero se le debe $ 1.000.
+    PERFORM pg_temp.como(v_a1, v_t, pg_temp.mov(e, '{"tipo":"ajuste","monto":1000,"observacion":"ensayo g5"}'));
     v_mov := pg_temp.como(v_a1, v_t, pg_temp.mov(e, '{"tipo":"pago","monto":1000}'))::bigint;
     SELECT * INTO g FROM empleado_movimientos WHERE id = v_mov;
     v_fallas := v_fallas || pg_temp.chk(g.monto = -1000 AND g.tipo = 'pago' AND g.observacion IS NULL AND g.rendicion_fecha IS NULL, format('15 %s', to_jsonb(g)));
     v_fallas := v_fallas || pg_temp.falla('15 cero', v_a1, v_t, pg_temp.mov(e, '{"tipo":"pago","monto":0}'), 'mayor a cero');
     v_fallas := v_fallas || pg_temp.falla('15 otro tipo', v_a1, v_t, pg_temp.mov(e, '{"tipo":"sueldo","monto":10}'), 'un adelanto en efectivo, un pago o un ajuste');
     PERFORM pg_temp.como(v_a1, v_t, pg_temp.rev(v_mov));
-    v_fallas := v_fallas || pg_temp.chk(pg_temp.saldo(e) = 0 AND (SELECT tipo FROM empleado_movimientos WHERE revierte_id = v_mov) = 'pago', '15 reversion');
+    v_fallas := v_fallas || pg_temp.chk(pg_temp.saldo(e) = 1000 AND (SELECT tipo FROM empleado_movimientos WHERE revierte_id = v_mov) = 'pago', '15 reversion');
     v_liq := pg_temp.lq(e, '{"pago":1000}');
     v_fallas := v_fallas || pg_temp.falla('15 de una liquidacion', v_a1, v_t,
                   pg_temp.rev((SELECT id FROM empleado_movimientos WHERE liquidacion_id = v_liq AND tipo = 'pago')), 'se revierte anulando la liquidación');
@@ -945,13 +956,26 @@ BEGIN
 
   -- ========================================================= 17 · rendicion ===
   BEGIN
+    -- #1534 (ola 3, T6): cada rendición de este caso cobra en efectivo lo que después le paga al
+    -- personal (antes pagaba sin efectivo, y la 488 y la NNN de T6 lo rechazan).
+    PERFORM pg_temp.adm();
+    PERFORM pg_temp.efectivo(v_tr, v_t, v_hoy, 60000, c1);
+    PERFORM pg_temp.efectivo(v_tr3, v_t, v_hoy, 5000, c1);
+    PERFORM pg_temp.efectivo(v_tr, v_t, v_hoy - 2, 1000, c1);
+    PERFORM pg_temp.efectivo(v_tr, v_t, v_hoy - 3, 100000, c1);
+    PERFORM pg_temp.efectivo(v_tr, v_t, v_hoy - 4, 1000, c1);
+    PERFORM pg_temp.efectivo(v_tr3, v_t, v_hoy - 5, 100000, c1);
+    -- El de Taco Pozo, como el admin de las dos (el guard de la caja cerrada mira la sucursal de quien carga).
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_ad, 'role', 'authenticated')::text, true);
+    PERFORM pg_temp.efectivo(v_tr2, v_tp, v_hoy, 1500, c2);
+    PERFORM pg_temp.adm();
     e := pg_temp.a(NULL, v_l, false);
     v_liq := pg_temp.lq(e, '{"pago":60000}'::jsonb || pg_temp.plata(v_tr, v_hoy));
     SELECT * INTO g FROM empleado_movimientos WHERE liquidacion_id = v_liq AND tipo = 'pago';
     v_fallas := v_fallas || pg_temp.chk(g.rendicion_transportista_id = v_tr AND g.rendicion_fecha = v_hoy AND g.rendicion_sucursal_id = v_t AND g.monto = -60000, format('17 movimiento: %s', to_jsonb(g)));
     v_fallas := v_fallas || pg_temp.chk(pg_temp.tpp(v_t, v_hoy, v_tr) = 60000, format('17 total: %s', pg_temp.tpp(v_t, v_hoy, v_tr)));
     v_j := pg_temp.res(v_a1, v_t, v_hoy, v_tr);
-    v_fallas := v_fallas || pg_temp.chk(jsonb_array_length(v_j) = 1 AND (v_j#>>'{0,total_efectivo}')::numeric = 0, format('17 grilla: %s', v_j));
+    v_fallas := v_fallas || pg_temp.chk(jsonb_array_length(v_j) = 1 AND (v_j#>>'{0,total_efectivo}')::numeric = 60000, format('17 grilla: %s', v_j));
     v_k := pg_temp.como(v_a1, v_t, format('SELECT public.obtener_cuenta_empleado(p_empleado_id => %s)', e))::jsonb;
     v_fallas := v_fallas || pg_temp.chk(v_k#>>'{liquidaciones,0,rendicion,fecha}' = v_hoy::text AND v_k#>>'{liquidaciones,0,rendicion,transportista_nombre}' IS NOT NULL
                                         AND (SELECT x#>>'{rendicion,fecha}' FROM jsonb_array_elements(v_k->'movimientos') x WHERE x->>'tipo' = 'pago') = v_hoy::text,
@@ -973,6 +997,8 @@ BEGIN
     v_fallas := v_fallas || pg_temp.falla('17 otro origen', v_a1, v_t, pg_temp.mov(e, '{"tipo":"pago","monto":10,"origen_pago":"x"}'), 'formato inválido');
 
     -- Un pago suelto suma, y su fecha es la de la rendicion; el adelanto no acepta rendicion.
+    -- Desde la 488 el pago suelto salda lo que se le debe: primero se le debe $ 1.000.
+    PERFORM pg_temp.como(v_a1, v_t, pg_temp.mov(e, '{"tipo":"ajuste","monto":1000,"observacion":"ensayo g5"}'));
     v_mov := pg_temp.como(v_a1, v_t, pg_temp.mov(e, '{"tipo":"pago","monto":1000}'::jsonb || pg_temp.plata(v_tr, v_hoy - 2)))::bigint;
     v_fallas := v_fallas || pg_temp.chk(pg_temp.tpp(v_t, v_hoy - 2, v_tr) = 1000 AND (SELECT fecha FROM empleado_movimientos WHERE id = v_mov) = v_hoy - 2, '17 suelto');
     v_k := (SELECT x FROM jsonb_array_elements(pg_temp.pv(e)->'movimientos') x WHERE (x->>'id')::bigint = v_mov);
@@ -981,7 +1007,7 @@ BEGIN
     v_n := pg_temp.como(v_a1, v_t, pg_temp.mov(e, '{"tipo":"adelanto","monto":10}'::jsonb || pg_temp.plata(v_tr, v_hoy)))::bigint;
     v_fallas := v_fallas || pg_temp.chk((SELECT rendicion_fecha FROM empleado_movimientos WHERE id = v_n) IS NULL, '17 el adelanto tomo la rendicion');
     PERFORM pg_temp.como(v_a1, v_t, pg_temp.rev(v_mov));
-    v_fallas := v_fallas || pg_temp.chk(pg_temp.tpp(v_t, v_hoy - 2, v_tr) = 0 AND jsonb_array_length(pg_temp.res(v_a1, v_t, v_hoy - 2, v_tr)) = 0, '17 revertir devuelve la plata');
+    v_fallas := v_fallas || pg_temp.chk(pg_temp.tpp(v_t, v_hoy - 2, v_tr) = 0 AND (pg_temp.res(v_a1, v_t, v_hoy - 2, v_tr)#>>'{0,total_efectivo}')::numeric = 1000, '17 revertir devuelve la plata');
 
     -- Anular con la rendicion pendiente: el total vuelve a 0.
     PERFORM pg_temp.como(v_a1, v_t, pg_temp.an(v_liq));
@@ -1011,6 +1037,8 @@ BEGIN
     v_fallas := v_fallas || pg_temp.chk(NOT pg_temp.tiene_mov(v_j, 'pago'), '17 el pago sigue en la vista previa');
 
     v_d := v_hoy - 4;
+    -- Desde la 488 el pago suelto salda lo que se le debe: primero se le debe $ 1.000.
+    PERFORM pg_temp.como(v_a1, v_t, pg_temp.mov(e, '{"tipo":"ajuste","monto":1000,"observacion":"ensayo g5"}'));
     v_mov := pg_temp.como(v_a1, v_t, pg_temp.mov(e, '{"tipo":"pago","monto":1000}'::jsonb || pg_temp.plata(v_tr, v_d)))::bigint;
     INSERT INTO rendiciones_control (fecha, transportista_id, sucursal_id, estado, controlada_por) VALUES (v_d, v_tr, v_t, 'confirmada', v_a1);
     v_lc := v_lc + 1000;
@@ -1073,7 +1101,7 @@ BEGIN
       END IF;
     END LOOP;
     FOR g IN SELECT f FROM unnest(ARRAY[
-               'public.previsualizar_liquidacion(bigint)', 'public.liquidar_empleado(bigint,jsonb)',
+               'public.previsualizar_liquidacion(bigint)', 'public.liquidar_empleado(bigint,jsonb,uuid)',
                'public.anular_liquidacion(bigint,text)', 'public.obtener_liquidacion(bigint)',
                'public.obtener_resumen_rendiciones(date,date,uuid)',
                'public.confirmar_rendicion(date,uuid,text,jsonb,text)']) f LOOP

@@ -602,7 +602,12 @@ suelta en `sucursales`.
   El alta de un gasto y la de un empleado llevan `clave` en el JSON (`altas_por_clave`, la pone el
   hook con `useRequestIdEstable` por contenido): la misma clave con lo mismo devuelve el del primer
   intento; sin clave (un PWA de antes), como siempre (reportes-R3). La edición de un empleado
-  conserva lo que el JSON no trae, y un null explícito lo borra (reportes-R2).
+  conserva lo que el JSON no trae, y un null explícito lo borra (reportes-R2). Un movimiento a mano
+  y una liquidación llevan `p_clave` (el mismo patrón; Com-B3, ola 3). Un pago al personal que sale
+  de una rendición, suelto o de una liquidación, tiene tope en `_rendicion_efectivo_a_entregar`
+  (#1534). Un empleado con comisión sin liquidar no cambia de sucursal (decisión del dueño del 25/11:
+  cada sucursal paga lo que se vendió en ella): un camino nuevo que mueva la ficha mira
+  `_empleado_comision_sin_liquidar`.
 - **Un vale blanco está saldado por naturaleza** (migs 317/318): `tipo_factura = 'VB'` ⇒
   `monto_pagado = total`, `estado_pago = 'pagado'` y **cero** filas en `pagos` (lo fuerza
   `actualizar_estado_pago_pedido` y el CHECK `pedidos_vb_coherente`). No es deuda, no se

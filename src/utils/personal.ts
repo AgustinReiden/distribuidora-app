@@ -18,12 +18,14 @@ import type {
   PeriodoPendiente,
   PlataDelPago,
   PuestoEmpleado,
+  RendicionDelDia,
   VistaPreviaLiquidacion,
 } from '../types/personal'
 import { formatPrecio } from './formatters'
 import { leerNumero } from './normalizarNumero'
 import { redondear } from './calculations'
 import { normalizarBusqueda } from './filtrarOpciones'
+import { efectivoAEntregar } from './rendicionGastos'
 
 export const PUESTOS: ReadonlyArray<{ valor: PuestoEmpleado; etiqueta: string }> = [
   { valor: 'preventista', etiqueta: 'Preventista' },
@@ -491,3 +493,81 @@ export const PLATA_OFICINA: PlataDelPago = {
 }
 
 export const MENSAJE_SIN_RENDICION_DEL_PAGO = 'Elegí de qué rendición sale la plata: el transportista y el día'
+
+/** #1534: el mismo mensaje con que `liquidar_empleado` y `registrar_movimiento_empleado` lo rechazan. */
+export const MENSAJE_SUPERA_EFECTIVO = 'El pago supera el efectivo que le queda por entregar a esa rendición'
+
+/**
+ * #1534: de una rendición no sale más efectivo del que le queda por entregar (el tope del server,
+ * `_rendicion_efectivo_a_entregar`, con la cuenta de la grilla de rendiciones). `null` si entra o si
+ * todavía no se sabe el efectivo (el server lo vuelve a mirar con la rendición bloqueada).
+ */
+export function errorDePagoDeRendicion(pago: number, efectivo: number | null): string | null {
+  if (efectivo === null) return null
+  return pago > efectivo + 0.005 ? MENSAJE_SUPERA_EFECTIVO : null
+}
+
+/** Una fila de `obtener_resumen_rendiciones`, con lo que hace falta para pagar con su plata. */
+export interface FilaResumenRendicion {
+  transportista_id: string | null
+  transportista_nombre: string | null
+  total_efectivo: number | string | null
+  total_gastos: number | string | null
+  total_pagos_personal: number | string | null
+  total_faltantes_empleados: number | string | null
+  estado: string | null
+}
+
+/**
+ * Las rendiciones de un día (#1534, m7 de #1392): quién tiene rendición, con la regla del server (la
+ * grilla de rendiciones: cobró, entregó o pagó con esa plata ese día, sea chofer o encargado), y el
+ * efectivo que le queda por entregar, con la misma cuenta del cierre (`efectivoAEntregar`).
+ */
+export function rendicionesDelDia(filas: ReadonlyArray<FilaResumenRendicion> | null | undefined): RendicionDelDia[] {
+  return (filas ?? []).flatMap(f => (f.transportista_id
+    ? [{
+      transportista_id: f.transportista_id,
+      transportista_nombre: f.transportista_nombre || 'Sin nombre',
+      efectivo_a_entregar: efectivoAEntregar(
+        Number(f.total_efectivo) || 0,
+        Number(f.total_gastos) || 0,
+        Number(f.total_pagos_personal) || 0,
+        Number(f.total_faltantes_empleados) || 0,
+      ),
+      cerrada: f.estado === 'confirmada' || f.estado === 'resuelta',
+    }]
+    : []))
+}
+
+/**
+ * m7 (#1392): los que se pueden elegir como «la plata de una rendición». Los transportistas (los de
+ * siempre) más quien tiene rendición ese día aunque no sea chofer (un encargado que cobró él mismo),
+ * sin repetir, por nombre.
+ */
+export function opcionesDePlata(
+  transportistas: ReadonlyArray<{ id: string; nombre: string }>,
+  delDia: ReadonlyArray<RendicionDelDia>,
+): Array<{ id: string; nombre: string }> {
+  const vistos = new Set(transportistas.map(t => t.id))
+  const extra = delDia
+    .filter(r => !vistos.has(r.transportista_id))
+    .map(r => ({ id: r.transportista_id, nombre: r.transportista_nombre }))
+  return [...transportistas, ...extra].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+}
+
+/** m2 (#1392): por qué un movimiento que se revertiría no se revierte. `null` si nada lo impide. */
+export function motivoSinReversion(m: Pick<MovimientoEmpleado, 'tipo' | 'rendicion'>): string | null {
+  return m.tipo === 'pago' && m.rendicion?.cerrada === true
+    ? 'Salió de una rendición ya cerrada: corregilo con un ajuste'
+    : null
+}
+
+/**
+ * m4 (#1392, decisión del dueño del 25/11): lo pendiente no se arrastra de una sucursal a otra. El
+ * mismo mensaje con que `guardar_empleado` lo rechaza. `null` si no tiene comisión sin liquidar.
+ */
+export function avisoComisionSinLiquidar(monto: number, sucursal: string): string | null {
+  if (Math.abs(monto) < 0.005) return null
+  const plata = formatPrecio(Math.abs(monto))
+  return `Tiene ${monto < 0 ? '-' : ''}${plata} de comisión sin liquidar en ${sucursal}: liquidalo antes de pasarlo de sucursal`
+}

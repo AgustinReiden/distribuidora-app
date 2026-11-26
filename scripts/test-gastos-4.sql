@@ -998,7 +998,7 @@ BEGIN
                'public.listar_personal()', 'public.obtener_cuenta_empleado(bigint)', 'public.empleados_para_elegir()',
                'public.cliente_admite_adelanto_sueldo(bigint)', 'public.guardar_empleado(jsonb)',
                'public.guardar_arreglo_empleado(bigint,jsonb)', 'public.dar_de_baja_empleado(bigint,date)',
-               'public.reactivar_empleado(bigint)', 'public.registrar_movimiento_empleado(bigint,jsonb)',
+               'public.reactivar_empleado(bigint)', 'public.registrar_movimiento_empleado(bigint,jsonb,uuid)',
                'public.revertir_movimiento_empleado(bigint,text)']) f LOOP
       IF has_function_privilege('anon', g.f, 'EXECUTE') THEN
         v_fallas := v_fallas || format('13 anon ejecuta %s', g.f);

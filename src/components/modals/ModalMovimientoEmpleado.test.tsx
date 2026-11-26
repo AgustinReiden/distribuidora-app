@@ -4,6 +4,12 @@
 import { describe, it, expect, vi, type Mock } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+
+// SelectorPlata pide las rendiciones del día (m7 de #1392): acá, ninguna más que los choferes de siempre.
+vi.mock('../../hooks/queries/usePersonalQuery', () => ({
+  useRendicionesDelDiaQuery: () => ({ data: undefined }),
+}))
+
 import ModalMovimientoEmpleado from './ModalMovimientoEmpleado'
 import type { MovimientoManualPayload } from '../../types/personal'
 
