@@ -16,7 +16,8 @@ import {
   type PedidoConGps,
   type VisitaConGps,
 } from '../../hooks/queries'
-import { fechaLocalISO, fechaHaceDias } from '../../utils/formatters'
+import { sumarDiasAFechaISO } from '../../utils/formatters'
+import { useDiaArgentino } from '../../hooks/useDiaArgentino'
 import { ANOMALIA_DISTANCIA_METROS } from '../../utils/geo'
 import { Button } from '../ui/Button'
 import { PeriodPicker } from '../ui/PeriodPicker'
@@ -34,24 +35,20 @@ interface Rango {
   preset: RangoPreset
 }
 
-function buildRangoDefault(): Rango {
-  const hoy = fechaLocalISO()
-  return { desde: hoy, hasta: hoy, preset: 'hoy' }
-}
-
-function rangoFromPreset(preset: Exclude<RangoPreset, 'custom'>): Rango {
-  if (preset === 'hoy') {
-    const hoy = fechaLocalISO()
-    return { desde: hoy, hasta: hoy, preset }
-  }
+/**
+ * El rango de un preset para el día argentino `hoy` (YYYY-MM-DD). Fr-B11 (T8 de la ola 3): los
+ * presets se calculan contra el día de HOY en cada render, no contra el del montaje: con la
+ * pantalla abierta pasada la medianoche, «Hoy» pasa al día nuevo solo (`useDiaArgentino`).
+ * Restar sobre el día argentino, no sobre `toISOString()` (UTC): «ayer» a las 21:30 ya era hoy.
+ */
+function rangoFromPreset(preset: Exclude<RangoPreset, 'custom'>, hoy: string): Rango {
+  if (preset === 'hoy') return { desde: hoy, hasta: hoy, preset }
   if (preset === 'ayer') {
-    // fechaHaceDias resta días en TZ Argentina: con `new Date().toISOString()`
-    // (UTC) "ayer" a las 21:30 hora Argentina ya muestra hoy.
-    const ayer = fechaHaceDias(1)
+    const ayer = sumarDiasAFechaISO(hoy, -1)
     return { desde: ayer, hasta: ayer, preset }
   }
   // semana: últimos 7 días incluyendo hoy
-  return { desde: fechaHaceDias(6), hasta: fechaLocalISO(), preset }
+  return { desde: sumarDiasAFechaISO(hoy, -6), hasta: hoy, preset }
 }
 
 const PRESET_LABELS: Record<Exclude<RangoPreset, 'custom'>, string> = {
@@ -66,13 +63,16 @@ const PRESETS = (Object.keys(PRESET_LABELS) as Array<Exclude<RangoPreset, 'custo
 }))
 
 export default function VistaGeolocalizacion(): React.ReactElement {
-  const [rango, setRango] = useState<Rango>(buildRangoDefault)
+  const hoy = useDiaArgentino()
+  // Un preset guarda sólo cuál es; sus fechas salen del día de hoy. Las fechas a mano, tal cual.
+  const [rangoElegido, setRangoElegido] = useState<Rango>(() => rangoFromPreset('hoy', hoy))
+  const rango = rangoElegido.preset === 'custom' ? rangoElegido : rangoFromPreset(rangoElegido.preset, hoy)
   const [preventistaSelectedId, setPreventistaSelectedId] = useState<string | null>(null)
   const [pedidoSelectedId, setPedidoSelectedId] = useState<number | null>(null)
   const [tab, setTab] = useState<'timeline' | 'anomalias'>('timeline')
 
   // Auto-refresh solo si el rango incluye hoy.
-  const autoRefresh = rango.hasta === fechaLocalISO()
+  const autoRefresh = rango.hasta === hoy
 
   const { data, isLoading, isFetching, error, refetch } = useGeolocalizacionPreventistasQuery(
     rango.desde,
@@ -116,7 +116,7 @@ export default function VistaGeolocalizacion(): React.ReactElement {
 
   // Handlers
   const setPreset = (preset: Exclude<RangoPreset, 'custom'>) => {
-    setRango(rangoFromPreset(preset))
+    setRangoElegido(rangoFromPreset(preset, hoy))
     setPreventistaSelectedId(null)
     setPedidoSelectedId(null)
   }
@@ -153,8 +153,8 @@ export default function VistaGeolocalizacion(): React.ReactElement {
             onSelectPreset={setPreset}
             desde={rango.desde}
             hasta={rango.hasta}
-            onDesdeChange={desde => setRango(r => ({ ...r, desde, preset: 'custom' }))}
-            onHastaChange={hasta => setRango(r => ({ ...r, hasta, preset: 'custom' }))}
+            onDesdeChange={desde => setRangoElegido({ ...rango, desde, preset: 'custom' })}
+            onHastaChange={hasta => setRangoElegido({ ...rango, hasta, preset: 'custom' })}
             desdeMax={rango.hasta}
             hastaMin={rango.desde}
             etiqueta="Presets de periodo"
