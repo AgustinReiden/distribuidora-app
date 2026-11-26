@@ -15,9 +15,11 @@
 --   ROLLBACK;
 --
 -- Las RPCs se llaman COMO EL FRONT (pg_temp.como, rol authenticated). El
--- producto, el pedido y las salvedades se arman como postgres con los claims
--- del admin. a1 es un admin real de Tucuman, ad uno de las dos; el encargado lo
--- crea el ensayo.
+-- producto y el pedido se arman como postgres con los claims del admin; el
+-- pedido sale a reparto con un chofer, y las tres salvedades las carga el chofer
+-- (con sus claims): la que carga la oficina nace resuelta (#1700) y no se podria
+-- resolver con cargo. a1 es un admin real de Tucuman, ad uno de las dos; el
+-- encargado y el chofer los crea el ensayo.
 --
 --   1  merma con dos cargos          8  bundle viejo de resolver
 --   2  merma sin cargo               9  revertir la de salvedad: no
@@ -26,6 +28,7 @@
 --   5  salvedad con cargo            12 anular la que te cargo a vos: no
 --   6  ya resuelta                   13 la cuenta ve merma_id y salvedad_id
 --   7  cliente_rechaza no se carga   14 invariantes y auditoria
+--   15 la que carga la oficina nace resuelta y no se carga a nadie (#1700)
 
 DO $ensayo$
 DECLARE
@@ -35,6 +38,8 @@ DECLARE
   v_a1     uuid;
   v_ad     uuid;
   v_en     uuid;
+  v_ch     uuid;
+  s_ofi    bigint;
   v_cli    bigint;
   v_prod   bigint;
   v_ped    bigint;
@@ -184,7 +189,8 @@ BEGIN
 
   -- ----------------------------------------------------------- armado ---
   v_en := pg_temp.u('encargado', v_t);
-  e1 := pg_temp.alta(v_a1, v_t);
+  v_ch := pg_temp.u('transportista', v_t);
+  e1 :=pg_temp.alta(v_a1, v_t);
   e2 := pg_temp.alta(v_a1, v_t);
   e_baja := pg_temp.alta(v_a1, v_t);
   e_tp := pg_temp.alta(v_ad, v_tp);
@@ -215,15 +221,21 @@ BEGIN
   END IF;
   v_ped := (v_res->>'pedido_id')::bigint;
   SELECT id INTO STRICT v_item FROM pedido_items WHERE pedido_id = v_ped AND producto_id = v_prod;
+  -- Una salvedad va sobre un pedido en camino (1595-b5), y la carga el chofer: la
+  -- de la oficina nace resuelta (#1700) y estas se resuelven despues, con cargo.
+  UPDATE pedidos SET estado = 'asignado', transportista_id = v_ch WHERE id = v_ped;
+  PERFORM pg_temp.claims(v_ch, v_t);
   v_res := public.registrar_salvedad(v_ped, v_item, 2, 'producto_danado', 'ensayo g7 dañado', NULL, true, NULL);
   s_dan := (v_res->>'salvedad_id')::bigint;
   v_res := public.registrar_salvedad(v_ped, v_item, 1, 'producto_vencido', 'ensayo g7 vencido', NULL, true, NULL);
   s_ven := (v_res->>'salvedad_id')::bigint;
   v_res := public.registrar_salvedad(v_ped, v_item, 1, 'cliente_rechaza', 'ensayo g7 rechazo', NULL, true, NULL);
   s_rech := (v_res->>'salvedad_id')::bigint;
+  PERFORM pg_temp.claims(v_a1, v_t);
   IF s_dan IS NULL OR s_ven IS NULL OR s_rech IS NULL
-     OR NOT EXISTS (SELECT 1 FROM mermas_stock WHERE salvedad_id = s_dan AND anulada_at IS NULL) THEN
-    RAISE EXCEPTION 'ENSAYO FALLÓ · el armado no dejo las tres salvedades (%, %, %) y la merma de la dañada: %',
+     OR NOT EXISTS (SELECT 1 FROM mermas_stock WHERE salvedad_id = s_dan AND anulada_at IS NULL)
+     OR (SELECT count(*) FROM salvedades_items WHERE id IN (s_dan, s_ven, s_rech) AND estado_resolucion = 'pendiente') <> 3 THEN
+    RAISE EXCEPTION 'ENSAYO FALLÓ · el armado no dejo las tres salvedades pendientes (%, %, %) y la merma de la dañada: %',
       s_dan, s_ven, s_rech, v_res;
   END IF;
 
@@ -419,6 +431,30 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('13 · error: %s', SQLERRM);
   END;
 
+  -- ------------ 15 · la que carga la oficina nace resuelta (#1700) ---
+  -- Decision del dueño (26/11): la salvedad que cargo la oficina nacio
+  -- «resuelto_otro» y queda cerrada; nadie, ni un admin, la pasa despues a
+  -- «A cargo de empleados» ni a otra resolucion.
+  BEGIN
+    PERFORM pg_temp.claims(v_a1, v_t);
+    v_res := public.registrar_salvedad(v_ped, v_item, 1, 'producto_danado', 'ensayo g7 oficina', NULL, true, NULL);
+    s_ofi := (v_res->>'salvedad_id')::bigint;
+    v_fallas := v_fallas || pg_temp.chk(s_ofi IS NOT NULL
+                                        AND (SELECT estado_resolucion = 'resuelto_otro'
+                                                    AND resolucion_notas = 'Cargada y resuelta por la oficina'
+                                                    AND resuelto_por = v_a1
+                                               FROM salvedades_items WHERE id = s_ofi),
+                  format('15 la del admin no nacio resuelto_otro: %s', v_res));
+    v_j := pg_temp.como(v_a1, v_t, pg_temp.rs(s_ofi, 'descuento_transportista', jsonb_build_array(pg_temp.lc(e2, 500))))::jsonb;
+    v_fallas := v_fallas || pg_temp.chk(v_j->>'error' = 'Ya resuelta', format('15 a cargo de empleados: %s', v_j));
+    v_j := pg_temp.como(v_ad, v_t, pg_temp.rs(s_ofi, 'absorcion_empresa', NULL))::jsonb;
+    v_fallas := v_fallas || pg_temp.chk(v_j->>'error' = 'Ya resuelta', format('15 otra resolucion: %s', v_j));
+    v_fallas := v_fallas || pg_temp.chk((SELECT estado_resolucion FROM salvedades_items WHERE id = s_ofi) = 'resuelto_otro'
+                                        AND NOT EXISTS (SELECT 1 FROM empleado_movimientos WHERE salvedad_id = s_ofi),
+                  '15 la de la oficina cambio de resolucion o le cargo una rotura a alguien');
+  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('15 · error: %s', SQLERRM);
+  END;
+
   -- ------------------------------------- 14 · invariantes y auditoria ---
   BEGIN
     SELECT count(*) INTO v_n FROM empleado_movimientos
@@ -448,7 +484,7 @@ BEGIN
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' | ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · gastos 7 (roturas %, revertidas %): casos 1 a 14; critical_high_en_rojo % al empezar y % al final',
+  RAISE EXCEPTION 'ENSAYO OK · gastos 7 (roturas %, revertidas %): casos 1 a 15; critical_high_en_rojo % al empezar y % al final',
     (SELECT count(*) FROM empleado_movimientos WHERE tipo = 'rotura' AND revierte_id IS NULL),
     (SELECT count(*) FROM empleado_movimientos WHERE tipo = 'rotura' AND revierte_id IS NOT NULL),
     v_ch_ini, v_ch_fin;

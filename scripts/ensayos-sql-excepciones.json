@@ -69,10 +69,6 @@
       "firma": "ENSAYO FALLÓ · N · error: No se le puede pagar más de lo que se le debe: si le adelantás plata, cargá un adelanto | N-N · error: Los pagos al personal de esta rendición cambiaron mientras la resolvías: tocá Refrescar y volvé a abrir | N revertir: fallo con otro mensaje: syntax error at or near \",\" (",
       "motivo": "falla al nacer el gate, sobre la base de CI"
     },
-    "test-gastos-7.sql": {
-      "firma": "ENSAYO FALLÓ · el armado no dejo las tres salvedades (<NULL>, <NULL>, <NULL>) y la merma de la dañada: {\"error\": \"El pedido #N todavía no salió a reparto: una salvedad se registra sólo sobre un pedido en camino o entregado. Si hay que sacar algo, editá el pedido.\", \"codigo\": \"pedido_sin_salir\", \"suc",
-      "motivo": "falla al nacer el gate, sobre la base de CI"
-    },
     "test-gastos-rendicion-e-iva-1562.sql": {
       "firma": "ENSAYO FALLÓ · RN cerrar vacía una rendición de hace N días: tenía que andar y falló: No hay nada que rendir de ese transportista el N/N/N en esta sucursal: ni entregas, ni cobros, ni gastos || RN confirmar_rendicion no dejó la fila de control || RN «Editar cierre» con un gasto de ese día: falló con",
       "motivo": "falla al nacer el gate, sobre la base de CI"
