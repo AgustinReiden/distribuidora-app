@@ -4,13 +4,15 @@
  * La oficina, o el efectivo de una rendición (transportista y día). Lo usan `ModalLiquidar` y
  * `ModalMovimientoEmpleado` (el pago suelto). El día de la rendición reemplaza a la fecha del
  * pago: el server toma ese día. El encargado y el chofer ven de esa rendición sólo un total, sin
- * el nombre del empleado.
+ * el nombre del empleado. Se elige entre los transportistas y quien tenga rendición ese día aunque
+ * no sea chofer (m7 de #1392).
  */
-import React, { useId } from 'react'
+import React, { useId, useMemo } from 'react'
 import { Building2, Truck } from 'lucide-react'
 import { Combobox } from '../ui/Combobox'
 import { cn } from '../../lib/utils'
-import { PLATA_OFICINA } from '../../utils/personal'
+import { PLATA_OFICINA, opcionesDePlata } from '../../utils/personal'
+import { useRendicionesDelDiaQuery } from '../../hooks/queries/usePersonalQuery'
 import type { PlataDelPago } from '../../types/personal'
 
 export interface SelectorPlataProps {
@@ -49,6 +51,10 @@ export default function SelectorPlata({
 }: SelectorPlataProps): React.ReactElement {
   const id = useId()
   const conRendicion = valor.origen_pago === 'rendicion'
+  // m7 (#1392): además de los choferes, quien tiene rendición ese día con la regla del server (un
+  // encargado que cobró él mismo también rinde).
+  const { data: delDia } = useRendicionesDelDiaQuery(conRendicion ? valor.rendicion_fecha : null)
+  const opciones = useMemo(() => opcionesDePlata(transportistas, delDia ?? []), [transportistas, delDia])
 
   return (
     <div>
@@ -82,7 +88,7 @@ export default function SelectorPlata({
             <div>
               <Combobox
                 aria-label="Transportista"
-                opciones={transportistas}
+                opciones={opciones}
                 getKey={t => t.id}
                 getLabel={t => t.nombre}
                 valor={valor.rendicion_transportista_id}

@@ -22,6 +22,7 @@ import { InputMonto } from '../ui/InputMonto'
 import { cn } from '../../lib/utils'
 import {
   useLiquidarEmpleadoMutation,
+  useRendicionesDelDiaQuery,
   useVistaPreviaLiquidacionQuery,
 } from '../../hooks/queries/usePersonalQuery'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -36,6 +37,7 @@ import {
   aPagar,
   conceptoDeMovimiento,
   errorDePago,
+  errorDePagoDeRendicion,
   errorDeSueldo,
   etiquetaPuesto,
   fechaCompleta,
@@ -72,6 +74,8 @@ export const modalLiquidarSchema = z
     hoy: z.string(),
     propuesto: z.number(),
     vista: z.custom<Parameters<typeof aPagar>[0]>(v => typeof v === 'object' && v !== null),
+    // #1534: el efectivo que le queda por entregar a la rendición elegida (null: todavía no se sabe).
+    efectivo_rendicion: z.number().nullable().optional(),
   })
   .superRefine((f, ctx) => {
     const sueldo = f.sueldo.trim() ? parseMonto(f.sueldo) : null
@@ -104,6 +108,10 @@ export const modalLiquidarSchema = z
         ctx.addIssue({ code: 'custom', message: MENSAJE_SIN_RENDICION_DEL_PAGO, path: ['rendicion_transportista_id'] })
       } else if (f.rendicion_fecha > f.hoy) {
         ctx.addIssue({ code: 'custom', message: MENSAJE_RENDICION_FUTURA, path: ['rendicion_fecha'] })
+      } else {
+        // #1534: el tope del server (liquidar_empleado), con el mismo mensaje.
+        const errorDeEfectivo = errorDePagoDeRendicion(pago, f.efectivo_rendicion ?? null)
+        if (errorDeEfectivo) ctx.addIssue({ code: 'custom', message: errorDeEfectivo, path: ['pago'] })
       }
     }
   })
@@ -179,6 +187,12 @@ export default function ModalLiquidar({
   }
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
+  // #1534: el efectivo que le queda por entregar a la rendición elegida (la cuenta de la grilla de
+  // rendiciones). Sin rendición ese día, 0, como el server. `null` mientras no se sabe.
+  const { data: delDia } = useRendicionesDelDiaQuery(plata.origen_pago === 'rendicion' ? plata.rendicion_fecha : null)
+  const efectivoRendicion = plata.origen_pago === 'rendicion' && plata.rendicion_transportista_id && delDia
+    ? (delDia.find(r => r.transportista_id === plata.rendicion_transportista_id)?.efectivo_a_entregar ?? 0)
+    : null
 
   let cuerpo: ReactNode
   if (isLoading) {
@@ -237,6 +251,7 @@ export default function ModalLiquidar({
         hoy,
         propuesto,
         vista: v,
+        efectivo_rendicion: efectivoRendicion,
       })
       if (!resultado.success) {
         setError(resultado.error.issues[0]?.message ?? 'Revisá los datos de la liquidación')
@@ -481,6 +496,17 @@ export default function ModalLiquidar({
 
           {hayPago && (
             <SelectorPlata valor={plata} onChange={setPlata} transportistas={transportistas} hoy={hoy} />
+          )}
+          {hayPago && efectivoRendicion !== null && (
+            <p
+              data-testid="efectivo-rendicion"
+              className={cn('-mt-2 text-xs', errorDePagoDeRendicion(pagoLeido ?? 0, efectivoRendicion)
+                ? 'text-red-600 dark:text-red-400 font-medium'
+                : 'text-gray-500')}
+            >
+              {`A esa rendición le quedan ${formatPrecio(efectivoRendicion)} de efectivo por entregar`
+                + (errorDePagoDeRendicion(pagoLeido ?? 0, efectivoRendicion) ? ': el pago lo supera.' : '.')}
+            </p>
           )}
 
           {hayPedidos && (

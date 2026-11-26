@@ -68,6 +68,12 @@ export default function ModalMarcarVisita({
   const [search, setSearch] = useState('')
   const [pendienteId, setPendienteId] = useState<string | null>(null)
   const [motivoPending, setMotivoPending] = useState<MotivoPending | null>(null)
+  // Fr-B7 (T8 de la ola 3): el doble toque. Dos toques que llegan antes de que React vuelva a
+  // pintar ven el estado de antes (`pendienteId` todavía null, el botón todavía habilitado): la
+  // marca se toma en el primer toque y se suelta cuando la visita termina o se cancela.
+  const ocupadoRef = useRef(false)
+  const confirmandoRef = useRef(false)
+  const [confirmando, setConfirmando] = useState(false)
   const capturarGps = useGeolocationCapture()
   const registrar = useRegistrarVisitaMutation()
   const notify = useNotification()
@@ -125,7 +131,8 @@ export default function ModalMarcarVisita({
   }
 
   const handleMarcar = async (cliente: ClienteDB) => {
-    if (pendienteId || motivoPending) return
+    if (ocupadoRef.current || pendienteId || motivoPending) return
+    ocupadoRef.current = true
     setPendienteId(cliente.id)
     // `motivoPending` en el `finally` es el de este closure (el de cuando se
     // llamó a handleMarcar), no el que acaba de setear `setMotivoPending`:
@@ -163,23 +170,36 @@ export default function ModalMarcarVisita({
       setMotivoPending({ cliente, status: gps.status, gps })
     } finally {
       // Si quedó esperando motivo, no liberamos aún para que el listado no quede clickeable.
-      if (!esperandoMotivo) setPendienteId(null)
+      if (!esperandoMotivo) {
+        setPendienteId(null)
+        ocupadoRef.current = false
+      }
     }
   }
 
   const handleConfirmarMotivo = async (motivo: string) => {
-    if (!motivoPending) return
+    if (!motivoPending || confirmandoRef.current) return
+    confirmandoRef.current = true
+    setConfirmando(true)
     const { cliente, gps } = motivoPending
-    recordarMotivoSinGps(gps.status, motivo)
-    const ok = await persistir(cliente, gps, motivo)
-    setMotivoPending(null)
-    setPendienteId(null)
-    if (ok) onClose()
+    try {
+      recordarMotivoSinGps(gps.status, motivo)
+      const ok = await persistir(cliente, gps, motivo)
+      setMotivoPending(null)
+      setPendienteId(null)
+      ocupadoRef.current = false
+      if (ok) onClose()
+    } finally {
+      confirmandoRef.current = false
+      setConfirmando(false)
+    }
   }
 
   const handleCancelarMotivo = () => {
+    if (confirmandoRef.current) return
     setMotivoPending(null)
     setPendienteId(null)
+    ocupadoRef.current = false
   }
 
   return (
@@ -256,7 +276,7 @@ export default function ModalMarcarVisita({
       {motivoPending && (
         <ModalMotivoSinGps
           status={motivoPending.status}
-          guardando={registrar.isPending}
+          guardando={registrar.isPending || confirmando}
           onConfirm={handleConfirmarMotivo}
           onCancel={handleCancelarMotivo}
         />

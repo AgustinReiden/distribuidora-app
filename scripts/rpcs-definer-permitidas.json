@@ -16,7 +16,6 @@
   "tablas": {
     "bot_admin_guardar_aviso_atrasados(uuid,boolean,integer,integer[])": "se acota al perfil, no a la sucursal: pide bot_admin_puede_gestionar(auth.uid(), p_perfil_id) antes de leer bot_usuarios y de escribir la configuración de ese perfil",
     "marcar_notificacion_leida(bigint)": "se acota al que llama: sólo escribe sus notificaciones (usuario_id = auth.uid())",
-    "marcar_todas_notificaciones_leidas()": "se acota al que llama: sólo escribe sus notificaciones (usuario_id = auth.uid())",
-    "recalcular_recorrido(bigint)": "encargado o admin; no cambia ningún dato de negocio: realinea las paradas de la ruta con el estado de sus pedidos y rehace los contadores desde las paradas, o sea que sólo corrige lo que está desalineado"
+    "marcar_todas_notificaciones_leidas()": "se acota al que llama: sólo escribe sus notificaciones (usuario_id = auth.uid())"
   }
 }

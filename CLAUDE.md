@@ -559,7 +559,10 @@ suelta en `sucursales`.
   Una línea congelada se identifica por producto + combo + origen (`clave`), nunca por
   `pedido_items.id`: `actualizar_pedido_items` borra y reinserta las líneas. Lo pagado es la foto
   (`empleado_liquidacion_lineas`, un libro de deltas, con el vendedor de cada línea: si cambia
-  `pedidos.usuario_id`, al anterior le sale como ajuste). `calcular_comisiones` es un cálculo y va
+  `pedidos.usuario_id`, al anterior le sale como ajuste). Desde la migración de la T9 (ola 3), el
+  vendedor de un pedido entregado no se cambia (`actualizar_preventista_pedido` sólo acepta pendiente,
+  en preparación y asignado): el camino es revertir la entrega, cambiar el vendedor y volver a
+  entregar. `calcular_comisiones` es un cálculo y va
   por `pedidos.fecha`, así que su total puede no coincidir con lo liquidado.
   **La nota de crédito que le descuenta al vendedor resta de la comisión** (B16, #1545; decisiones
   del dueño del 16/11 y del 17/11): `_comision_lineas` baja cada clave por lo que acreditan las notas
@@ -602,7 +605,13 @@ suelta en `sucursales`.
   El alta de un gasto y la de un empleado llevan `clave` en el JSON (`altas_por_clave`, la pone el
   hook con `useRequestIdEstable` por contenido): la misma clave con lo mismo devuelve el del primer
   intento; sin clave (un PWA de antes), como siempre (reportes-R3). La edición de un empleado
-  conserva lo que el JSON no trae, y un null explícito lo borra (reportes-R2).
+  conserva lo que el JSON no trae, y un null explícito lo borra (reportes-R2). Un movimiento a mano
+  y una liquidación llevan `p_clave` (el mismo patrón; Com-B3, ola 3). Un pago al personal que sale
+  de una rendición, suelto o de una liquidación, tiene tope en `_rendicion_efectivo_a_entregar`
+  (#1534). Un empleado con comisión sin liquidar no cambia de sucursal (decisión del dueño del 25/11:
+  cada sucursal paga lo que se vendió en ella), ni se le saca o se le cambia el usuario (26/11: lo
+  pendiente quedaría sin ficha que lo liquide): un camino nuevo que mueva la ficha o su usuario mira
+  `_empleado_comision_sin_liquidar`.
 - **Un vale blanco está saldado por naturaleza** (migs 317/318): `tipo_factura = 'VB'` ⇒
   `monto_pagado = total`, `estado_pago = 'pagado'` y **cero** filas en `pagos` (lo fuerza
   `actualizar_estado_pago_pedido` y el CHECK `pedidos_vb_coherente`). No es deuda, no se
@@ -721,7 +730,9 @@ suelta en `sucursales`.
   y `bot_metricas_admin_dia`. Una pantalla o un reporte nuevo de stock bajo usa una de ellas.
 - **La compra mínima del pedido la cambia sólo el admin, hasta $ 99.999.999** (1561-b9 y 1596-b3,
   decisiones del dueño), y el mínimo de venta, hasta 99.999.999 u. Los rubros son únicos sin mirar
-  mayúsculas ni espacios de los bordes (`upper(btrim(nombre))`, por sucursal y rubro padre).
+  mayúsculas ni espacios de los bordes (`upper(btrim(nombre))`, por sucursal y rubro padre), y las
+  zonas y las patentes de los vehículos también, por sucursal (D13 y Var-B6; espejo de zonas en
+  `src/utils/nombreZona.ts`).
 - **La cadena de sustituciones de un regalo es de la LÍNEA, no de la promo** → `migrations/CLAUDE.md`.
 - **La asignación de un cliente tiene TRES estados, no dos**: sin asignar / asignado a X /
   `reservado_admin` (mig 214). Son excluyentes. Cuidado con que "sin asignar" significa
@@ -752,8 +763,10 @@ suelta en `sucursales`.
   Desde la 378 (#1182/#1183), el que reparte un pedido (sin VB) ve su cliente sin poder
   operarlo, y sólo quien actúa como preventista en la sucursal (`_actua_como_preventista`) puede
   tener clientes asignados: el trigger de `cliente_preventistas` frena al transportista y al
-  encargado; el admin y el server no pasan por ahí. El admin sí tiene que elegir a alguien de la
-  sucursal del cliente (#1374); el server y la reasignación por zona, no.
+  encargado; el admin y el server no pasan por ahí. El admin sí tiene que elegir a quien actúa como
+  preventista activo en la sucursal del cliente (#1374 y D12, la regla de ASG-B:
+  `_preventista_activo_de_sucursal`), por REST y por `guardar_cliente`; el server y la reasignación
+  por zona, no.
 - **La zona manda la asignación** (mig 359). Cada zona tiene a lo sumo **un** preventista
   (`preventista_zonas`, UNIQUE por zona) y sus clientes son de él. Linkear la zona o cambiar
   el dueño pasa **todos** sus clientes al dueño (`asignar_preventista_zona`). Cambiarle la

@@ -8,6 +8,24 @@ import { asentar, atras } from '../../test/atrasHelpers'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { reiniciarAtrasModales } from '../../utils/atrasModales'
 import userEvent from '@testing-library/user-event'
+
+// m4 (#1392): la comisión sin liquidar de la ficha, que el modal pide sólo si se la cambia de sucursal.
+// El motivo lo redacta el server (comision_sin_liquidar_empleado): el modal lo muestra tal cual.
+const comision = vi.hoisted(() => ({
+  respuesta: { monto: 0, aviso: null, avisoUsuario: null } as
+    { monto: number; aviso: string | null; avisoUsuario?: string | null } | undefined,
+  pedida: [] as Array<{ empleadoId: number | null; enabled: boolean }>,
+}))
+vi.mock('../../hooks/queries/usePersonalQuery', () => ({
+  useComisionSinLiquidarQuery: (empleadoId: number | null, enabled = true) => {
+    comision.pedida.push({ empleadoId, enabled })
+    return { data: enabled ? comision.respuesta : undefined }
+  },
+}))
+const AVISO_2000 = 'Tiene $ 2.000,00 de comisión sin liquidar en Tucuman: liquidalo antes de pasarlo de sucursal'
+const AVISO_LUNES = 'Tiene $ 2.000,00 de comisión sin liquidar en Tucuman, de esta semana: se puede liquidar desde el lunes 1/12; pasalo de sucursal después'
+const AVISO_USUARIO = 'Tiene $ 2.000,00 de comisión sin liquidar en Tucuman: liquidalo antes de cambiarle o sacarle el usuario'
+
 import ModalEmpleado, { modalEmpleadoSchema, type ModalEmpleadoProps } from './ModalEmpleado'
 import { formatPrecio } from '../../utils/formatters'
 import type { Empleado } from '../../types/personal'
@@ -380,6 +398,145 @@ describe('ModalEmpleado', () => {
     renderModal({ empleado: EMPLEADO })
     expect(screen.getByLabelText('Usuario de la app')).toBeEnabled()
     expect(screen.queryByText('Tu vínculo de usuario lo cambia otro admin.')).not.toBeInTheDocument()
+  })
+
+  // Com-B5 (decisión del dueño del 25/11): tampoco la ficha de cliente de la cuenta propia.
+  it('la cuenta propia no deja cambiar la ficha de cliente, y la conserva al guardar', async () => {
+    const { onSave, user } = renderModal({
+      empleado: { ...EMPLEADO, es_propio: true, cliente: { id: 10, nombre_fantasia: 'Kiosco Norte', activo: true } },
+    })
+    expect(screen.getByLabelText('Ficha de cliente')).toBeDisabled()
+    expect(screen.getByText('Tu ficha de cliente la cambia otro admin.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ cliente_id: 10 })
+  })
+
+  it('una cuenta ajena deja cambiar la ficha de cliente', () => {
+    renderModal({ empleado: EMPLEADO })
+    expect(screen.getByLabelText('Ficha de cliente')).toBeEnabled()
+    expect(screen.queryByText('Tu ficha de cliente la cambia otro admin.')).not.toBeInTheDocument()
+  })
+
+  // m4 (#1392, decisión del dueño del 25/11): con comisión sin liquidar no se lo cambia de sucursal.
+  describe('cambiar de sucursal con comisión sin liquidar', () => {
+    beforeEach(() => {
+      comision.pedida.length = 0
+    })
+
+    it('avisa con el motivo del server, y no guarda', async () => {
+      comision.respuesta = { monto: 2000, aviso: AVISO_2000 }
+      const { onSave, user } = renderModal({
+        empleado: EMPLEADO, sucursalesUsuario: [TUCUMAN, TACO_POZO], tieneTodasLasSucursales: true,
+      })
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Taco Pozo' }))
+      expect(screen.getByRole('alert')).toHaveTextContent(AVISO_2000)
+      expect(comision.pedida).toContainEqual({ empleadoId: 42, enabled: true })
+      await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+      expect(onSave).not.toHaveBeenCalled()
+
+      // Volver a la suya saca el aviso y guarda.
+      await user.click(screen.getByRole('button', { name: 'Tucumán' }))
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+      expect(onSave).toHaveBeenCalledTimes(1)
+    })
+
+    it('a «Las dos» también', async () => {
+      comision.respuesta = { monto: 2000, aviso: AVISO_2000 }
+      const { onSave, user } = renderModal({
+        empleado: EMPLEADO, sucursalesUsuario: [TUCUMAN, TACO_POZO], tieneTodasLasSucursales: true,
+      })
+      await user.click(screen.getByRole('button', { name: 'Las dos' }))
+      expect(screen.getByRole('alert')).toHaveTextContent(AVISO_2000)
+      await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+      expect(onSave).not.toHaveBeenCalled()
+    })
+
+    // El período en curso ya se liquidó: el motivo dice desde cuándo se puede liquidar.
+    it('con lo pendiente en un período que todavía no empezó, dice desde cuándo', async () => {
+      comision.respuesta = { monto: 2000, aviso: AVISO_LUNES }
+      const { onSave, user } = renderModal({
+        empleado: EMPLEADO, sucursalesUsuario: [TUCUMAN, TACO_POZO], tieneTodasLasSucursales: true,
+      })
+      await user.click(screen.getByRole('button', { name: 'Taco Pozo' }))
+      expect(screen.getByRole('alert')).toHaveTextContent('se puede liquidar desde el lunes 1/12; pasalo de sucursal después')
+      await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+      expect(onSave).not.toHaveBeenCalled()
+    })
+
+    it('sin comisión pendiente se pasa', async () => {
+      comision.respuesta = { monto: 0, aviso: null }
+      const { onSave, user } = renderModal({
+        empleado: EMPLEADO, sucursalesUsuario: [TUCUMAN, TACO_POZO], tieneTodasLasSucursales: true,
+      })
+      await user.click(screen.getByRole('button', { name: 'Taco Pozo' }))
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+      expect(onSave.mock.calls[0][0]).toMatchObject({ sucursal_id: 2, de_las_dos: false })
+    })
+
+    it('sin moverlo no pregunta la comisión', () => {
+      comision.respuesta = { monto: 2000, aviso: AVISO_2000 }
+      renderModal({ empleado: EMPLEADO, sucursalesUsuario: [TUCUMAN, TACO_POZO], tieneTodasLasSucursales: true })
+      expect(comision.pedida.every(p => !p.enabled)).toBe(true)
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+  })
+
+  // Decisión del dueño del 26/11: con comisión sin liquidar tampoco se le saca el usuario ni se le pasa otro.
+  describe('cambiar o sacar el usuario con comisión sin liquidar', () => {
+    beforeEach(() => {
+      comision.pedida.length = 0
+      comision.respuesta = { monto: 2000, aviso: AVISO_2000, avisoUsuario: AVISO_USUARIO }
+    })
+
+    it('sacarle el usuario avisa con el motivo del server, y no guarda', async () => {
+      const { onSave, user } = renderModal({ empleado: EMPLEADO })
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      await user.click(screen.getByLabelText('Usuario de la app'))
+      await user.click(screen.getByRole('option', { name: 'Sin vínculo' }))
+      expect(screen.getByRole('alert')).toHaveTextContent(AVISO_USUARIO)
+      expect(comision.pedida).toContainEqual({ empleadoId: 42, enabled: true })
+      await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+      expect(onSave).not.toHaveBeenCalled()
+
+      // Volver a su usuario saca el aviso y guarda.
+      await user.click(screen.getByLabelText('Usuario de la app'))
+      await user.click(screen.getByRole('option', { name: 'Martín Sosa' }))
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+      expect(onSave.mock.calls[0][0]).toMatchObject({ usuario_id: 'u-2' })
+    })
+
+    it('pasarle otro usuario también', async () => {
+      const { onSave, user } = renderModal({ empleado: EMPLEADO })
+      await user.click(screen.getByLabelText('Usuario de la app'))
+      await user.click(screen.getByRole('option', { name: 'Pablo Ríos' }))
+      expect(screen.getByRole('alert')).toHaveTextContent(AVISO_USUARIO)
+      await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+      expect(onSave).not.toHaveBeenCalled()
+    })
+
+    it('sin comisión pendiente se le cambia', async () => {
+      comision.respuesta = { monto: 0, aviso: null, avisoUsuario: null }
+      const { onSave, user } = renderModal({ empleado: EMPLEADO })
+      await user.click(screen.getByLabelText('Usuario de la app'))
+      await user.click(screen.getByRole('option', { name: 'Pablo Ríos' }))
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+      expect(onSave.mock.calls[0][0]).toMatchObject({ usuario_id: 'u-1' })
+    })
+
+    it('vincularle usuario a una ficha que no tenía no pregunta la comisión', async () => {
+      const { onSave, user } = renderModal({ empleado: { ...EMPLEADO, usuario: null } })
+      await user.click(screen.getByLabelText('Usuario de la app'))
+      await user.click(screen.getByRole('option', { name: 'Pablo Ríos' }))
+      expect(comision.pedida.every(p => !p.enabled)).toBe(true)
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+      expect(onSave.mock.calls[0][0]).toMatchObject({ usuario_id: 'u-1' })
+    })
   })
 
   describe('vínculos desde otra sucursal', () => {

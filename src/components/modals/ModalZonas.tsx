@@ -28,6 +28,7 @@ import {
 } from '../../hooks/queries';
 import type { ZonaDB, ResultadoAsignacionZona } from '../../hooks/queries/useZonasQuery';
 import { textoConfirmacionLinkZona } from '../../utils/zonasPreventista';
+import { mensajeZonaRepetida, zonaConMismoNombre } from '../../utils/nombreZona';
 
 interface LinkPendiente {
   zona: ZonaDB;
@@ -76,8 +77,10 @@ const ModalZonas = memo(function ModalZonas({ onClose }: ModalZonasProps) {
       setError('Ingresá un nombre');
       return;
     }
-    if (entries.some(e => e.nombre.toLowerCase() === nombre.toLowerCase())) {
-      setError(`Ya existe una zona "${nombre}"`);
+    // D13: sin mirar mayúsculas ni los espacios de los bordes, como el server; el aviso nombra la que ya está.
+    const repetida = zonaConMismoNombre(entries, nombre);
+    if (repetida) {
+      setError(mensajeZonaRepetida(repetida));
       return;
     }
     setError('');
@@ -111,8 +114,9 @@ const ModalZonas = memo(function ModalZonas({ onClose }: ModalZonasProps) {
       handleCancelarRename();
       return;
     }
-    if (entries.some(e => e.nombre.toLowerCase() === nuevo.toLowerCase() && e.nombre !== entry.nombre)) {
-      setError(`Ya existe una zona "${nuevo}"`);
+    const repetida = zonaConMismoNombre(entries, nuevo, entry.id);
+    if (repetida) {
+      setError(mensajeZonaRepetida(repetida));
       return;
     }
     setError('');

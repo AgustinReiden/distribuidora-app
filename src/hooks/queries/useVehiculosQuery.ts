@@ -79,6 +79,33 @@ export function useRegistrarKmMutation() {
   })
 }
 
+/**
+ * Corrige o borra una lectura de km cargada a mano (GTO-5, ola 3 de #1603): admin o encargado de la
+ * sucursal. La de una carga se corrige editando su gasto; la del GPS no se toca. La corrección pasa por
+ * las mismas reglas que el alta (sin fecha futura, sin km que bajan, sin repetir).
+ */
+export function useCorregirLecturaKmMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+  return useMutation({
+    mutationFn: async ({ lecturaId, fecha, km, borrar = false }: {
+      lecturaId: number; fecha: string | null; km: number | null; borrar?: boolean
+    }): Promise<number> => {
+      const { data, error } = await supabase.rpc('corregir_lectura_km', {
+        p_lectura_id: lecturaId,
+        p_fecha: fecha,
+        p_km: km,
+        p_borrar: borrar,
+      })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la corrección de la lectura. Revisá la ficha antes de reintentar, puede haber quedado hecha.')
+      return data as number
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: vehiculosKeys.all(currentSucursalId) })
+    },
+  })
+}
+
 export interface FichaVehiculoDatos {
   /** Gastos del vehículo que tocan los últimos 12 meses, sin anulados. */
   gastos: Gasto[]
@@ -110,7 +137,7 @@ export function useVehiculoFichaQuery(vehiculoId: number) {
           .order('fecha', { ascending: false }),
         supabase
           .from('vehiculo_km')
-          .select('fecha,km,origen,gasto_id')
+          .select('id,fecha,km,origen,gasto_id')
           .eq('vehiculo_id', vehiculoId)
           .gte('fecha', desde)
           .order('fecha', { ascending: false }),

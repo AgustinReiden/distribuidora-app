@@ -606,6 +606,7 @@ export {
   useVehiculosQuery,
   useGuardarVehiculoMutation,
   useRegistrarKmMutation,
+  useCorregirLecturaKmMutation,
   useVehiculoFichaQuery,
 } from './useVehiculosQuery'
 export type { GuardarVehiculoInput, FichaVehiculoDatos } from './useVehiculosQuery'

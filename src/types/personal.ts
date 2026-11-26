@@ -40,6 +40,34 @@ export interface PeriodoPendiente extends PeriodoLiquidacion {
 export interface RendicionDelPago {
   transportista_nombre: string
   fecha: string
+  /**
+   * m2 (#1392): la rendición ya está cerrada (la regla del server, `control_rendicion_cerrado`): un pago
+   * que salió de ella no se revierte. Lo trae la cuenta del empleado desde la migración de T6; antes no
+   * venía (`undefined`), y el server igual rechaza.
+   */
+  cerrada?: boolean
+  /** La rendición es de una sucursal que no es de quien mira: revertir el pago lo hace un admin de esa sucursal. */
+  de_otra_sucursal?: boolean
+}
+
+/** m4 (#1392): la comisión sin liquidar de una ficha y el motivo del server para no moverla (null: se puede). */
+export interface ComisionSinLiquidar {
+  monto: number
+  aviso: string | null
+  /** Lo mismo para cambiarle o sacarle el usuario (decisión del dueño del 26/11; null: se puede). */
+  avisoUsuario: string | null
+}
+
+/**
+ * Una rendición de un día, como la ve la grilla de rendiciones (`obtener_resumen_rendiciones`): quién la
+ * tiene (la regla del server: el que cobró o entregó ese día, también un encargado) y el efectivo que le
+ * queda por entregar, que es el tope de lo que se le paga al personal con esa plata (#1534).
+ */
+export interface RendicionDelDia {
+  transportista_id: string
+  transportista_nombre: string
+  efectivo_a_entregar: number
+  cerrada: boolean
 }
 
 export interface ArregloEmpleado {

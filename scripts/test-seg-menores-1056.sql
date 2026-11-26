@@ -53,7 +53,7 @@ BEGIN
   -- fabrica sin tocar la tabla. Se mira el cuerpo.
   FOR r IN SELECT * FROM (VALUES
       ('obtener_geolocalizacion_preventistas(date,date)'),
-      ('registrar_visita_cliente(bigint,text,numeric,numeric,numeric,timestamp with time zone,text,jsonb)'),
+      ('registrar_visita_cliente(bigint,text,numeric,numeric,numeric,timestamp with time zone,text,jsonb,uuid)'),
       ('sustituir_regalo_pedido(bigint,bigint,numeric,text,bigint,uuid)')) t(firma) LOOP
     SELECT prosrc INTO v_src FROM pg_proc WHERE oid = ('public.' || r.firma)::regprocedure;
     IF v_src ~ 'IF\s+v_user_role\s+(<>|NOT\s+IN)' THEN

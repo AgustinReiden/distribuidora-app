@@ -63,6 +63,8 @@ export function costoPorKm(costo: number, km: number): number | null {
 // ---------------------------------------------------------------------------
 
 export interface LecturaKm {
+  /** La fila de vehiculo_km: con ella se corrige o se borra una lectura manual (corregir_lectura_km). */
+  id?: number
   fecha: string
   km: number
   origen: 'manual' | 'carga' | 'gps'

@@ -17,6 +17,7 @@ vi.mock('../../hooks/queries', () => ({
   useGastosDelMesQuery: () => ({ data: [] }),
   useGuardarVehiculoMutation: () => ({ mutateAsync: vi.fn() }),
   useRegistrarKmMutation: () => ({ mutateAsync: vi.fn() }),
+  useCorregirLecturaKmMutation: () => ({ mutateAsync: vi.fn() }),
   useVehiculoFichaQuery: () => ({ data: { gastos: [], lecturas: [] }, isLoading: false }),
   useVehiculosQuery: () => ({ data: [VEHICULO], isLoading: false }),
   useEmpleadosParaElegirQuery: () => estado.empleados,

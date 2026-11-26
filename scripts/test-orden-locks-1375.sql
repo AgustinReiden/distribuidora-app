@@ -22,7 +22,8 @@
 -- Solo y sin la migración tiene que dar 'ENSAYO FALLÓ', únicamente por L1.
 --
 -- Fixtures: una sucursal activa con un admin y dos transportistas base activos. El resto (clientes,
--- producto, pedidos) nace en el ensayo. Las rutas y los pagos de R1, R2, P1 y P2 van en 2099,
+-- producto, pedidos) nace en el ensayo. Las rutas de R1 y R2 van en hoy + 60 (la más lejana que
+-- entra, Rut-B6) y los pagos de P1 y P2 en fechas futuras (F y G, que sigue en 2099),
 -- para no chocar con uq_recorrido_vigente ni con una caja cerrada. R3 y R4 entregan de verdad, y
 -- desde #1597 (mig 505) una entrega va de hoy hasta los días atrás de la política: van en un día
 -- libre de la última semana, y cortan con 'ENSAYO SIN DATOS' si el chofer no tiene ninguno.
@@ -101,7 +102,9 @@ DECLARE
   v_j      jsonb;
   v_ped    public.pedidos%ROWTYPE;
   v_fallas text[] := '{}';
-  F CONSTANT date := DATE '2099-03-10';
+  -- Rut-B6 (ola 3, T3): una ruta va de hoy a 60 días adelante. La más lejana que entra, para no
+  -- pisar una ruta real (antes iba en 2099). G sigue en 2099: sólo fecha pagos.
+  F CONSTANT date := public._tablero_hoy() + 60;
   G CONSTANT date := DATE '2099-03-11';
   v_hoy    date := public._tablero_hoy();
   v_dia    date; -- R3 y R4: una entrega real, de un día del rango de hoy

@@ -304,6 +304,9 @@ BEGIN
   PERFORM pg_temp.cobro(v_trb, d8, 15000);
   PERFORM pg_temp.cobro(v_trb, d8, 7000, 'transferencia');
   PERFORM pg_temp.cobro(v_trc, d9, 10000);
+  -- #1534 (ola 3, T6): la liquidación del caso 5 paga desde la rendición de v_tra, que desde la NNN
+  -- de T6 tiene tope en su efectivo: la rendición cobra antes lo que después paga (y le sobra).
+  PERFORM pg_temp.cobro(v_tra, d4, 100000);
 
   -- ============================================== 1 · GTO-3 el tope del alta ===
   BEGIN
@@ -396,7 +399,7 @@ BEGIN
     SELECT * INTO g FROM empleado_movimientos WHERE id = v_n;
     v_fallas := v_fallas || pg_temp.chk(g.revierte_id = v_mov AND g.monto = v_m AND g.tipo = 'pago'
                   AND g.rendicion_transportista_id = v_tra AND g.rendicion_fecha = d4 AND pg_temp.saldo(e4) = 0
-                  AND public._rendicion_efectivo_a_entregar(v_t, v_tra, d4) = 0, format('5 reabierta se revierte: %s', to_jsonb(g)));
+                  AND public._rendicion_efectivo_a_entregar(v_t, v_tra, d4) = 100000, format('5 reabierta se revierte: %s', to_jsonb(g)));
     v_fallas := v_fallas || pg_temp.falla('5 dos veces', v_a1, v_t, pg_temp.rev(v_mov), 'Ese movimiento ya está revertido');
 
     -- El pago de una liquidacion viva se sigue revirtiendo anulandola.

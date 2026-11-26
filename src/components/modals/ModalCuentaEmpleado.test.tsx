@@ -283,6 +283,32 @@ describe('ModalCuentaEmpleado', () => {
     })
   })
 
+  // m2 (#1392): la misma regla que el server (revertir_movimiento_empleado lo rechaza).
+  describe('el pago que salió de una rendición', () => {
+    const RENDICION = { transportista_nombre: 'Tito Transportista', fecha: '2026-10-24' }
+
+    it('de una rendición cerrada no ofrece Revertir y dice por qué', () => {
+      cargar({}, [mov({ id: 60, tipo: 'pago', monto: -3000, saldo: -3000, rendicion: { ...RENDICION, cerrada: true } })])
+      renderCuenta()
+      expect(screen.queryByRole('button', { name: /Revertir/ })).not.toBeInTheDocument()
+      expect(screen.getByText('Salió de una rendición ya cerrada: corregilo con un ajuste')).toBeInTheDocument()
+    })
+
+    it('de una rendición de otra sucursal lo dice, en lugar de «ya cerrada»', () => {
+      cargar({}, [mov({ id: 62, tipo: 'pago', monto: -3000, saldo: -3000, rendicion: { ...RENDICION, cerrada: true, de_otra_sucursal: true } })])
+      renderCuenta()
+      expect(screen.queryByRole('button', { name: /Revertir/ })).not.toBeInTheDocument()
+      expect(screen.getByText('Salió de una rendición de otra sucursal: lo revierte un admin de esa sucursal')).toBeInTheDocument()
+    })
+
+    it('de una rendición abierta se revierte', () => {
+      cargar({}, [mov({ id: 61, tipo: 'pago', monto: -3000, saldo: -3000, rendicion: { ...RENDICION, cerrada: false } })])
+      renderCuenta()
+      expect(screen.getByRole('button', { name: /^Revertir Pago/ })).toBeInTheDocument()
+      expect(screen.queryByText('Salió de una rendición ya cerrada: corregilo con un ajuste')).not.toBeInTheDocument()
+    })
+  })
+
   it('una rotura de una baja de stock se puede revertir', () => {
     cargar({}, [mov({ id: 40, tipo: 'rotura', monto: -700, saldo: -700, merma_id: 926, observacion: 'Rotura: 7 u. de Aceite' })])
     renderCuenta()

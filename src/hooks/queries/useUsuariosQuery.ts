@@ -27,6 +27,8 @@ export const usuariosKeys = {
   transportistas: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'transportistas'] as const,
   preventistas: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'preventistas'] as const,
   preventistasAsignables: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'preventistasAsignables'] as const,
+  preventistasAsignablesConExtra: (sucursalId: number | null) =>
+    [...usuariosKeys.preventistasAsignables(sucursalId), 'conExtraPreventista'] as const,
   vendedoresComisionables: (sucursalId: number | null) => [...usuariosKeys.all(sucursalId), 'vendedoresComisionables'] as const,
   rolesExtra: (sucursalId: number | null, id: string) =>
     [...usuariosKeys.all(sucursalId), 'rolesExtra', id] as const,
@@ -162,7 +164,14 @@ async function fetchPreventistas(sucursalId: number | null): Promise<PerfilDB[]>
 // Lista de usuarios que pueden ser asignados como preventista de un pedido:
 // admin + preventista. Usada por admin para asignar quien "tomo" el pedido
 // (etiquetas, estadisticas, comisiones).
-async function fetchPreventistasAsignables(sucursalId: number | null): Promise<PerfilDB[]> {
+//
+// Con `conExtraPreventista` suma a quien actúa como preventista en la sucursal por el rol extra
+// (perfil_roles, sin ser admin ni encargado): es la regla con la que actualizar_preventista_pedido
+// acepta el destino desde la ola 3 (T9, _preventista_activo_de_sucursal). Va aparte y sólo para el
+// cambio de vendedor de la edición: el alta (crear_pedido_completo) todavía exige rol base admin o
+// preventista, y ofrecerlo en ModalPedido daría un rechazo. Sin embed a perfil_roles: tiene dos FKs a
+// perfiles (usuario_id y created_by) y el embed sería ambiguo (PGRST201).
+async function fetchPreventistasAsignables(sucursalId: number | null, conExtraPreventista = false): Promise<PerfilDB[]> {
   if (!sucursalId) return []
   const { data, error } = await supabase
     .from('perfiles')
@@ -173,7 +182,29 @@ async function fetchPreventistasAsignables(sucursalId: number | null): Promise<P
     .order('nombre')
 
   if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo cargar los preventistas. Revisá la señal e intentá de nuevo.')
-  return (data as PerfilDB[]) || []
+  const base = (data as PerfilDB[]) || []
+  if (!conExtraPreventista) return base
+
+  const extras = await supabase
+    .from('perfil_roles')
+    .select('usuario_id')
+    .eq('sucursal_id', sucursalId)
+    .eq('rol', 'preventista')
+  if (extras.error) throw errorDeSupabase(extras.error, 'Sin conexión: no se pudo cargar los preventistas. Revisá la señal e intentá de nuevo.')
+  const ids = [...new Set((extras.data ?? []).map(r => String((r as { usuario_id: string }).usuario_id)))]
+    .filter(id => !base.some(p => p.id === id))
+  if (ids.length === 0) return base
+
+  const conExtra = await supabase
+    .from('perfiles')
+    .select(`${PERFIL_COLUMNAS}, usuario_sucursales!inner(sucursal_id)`)
+    .in('id', ids)
+    .not('rol', 'in', '(admin,encargado)')
+    .eq('activo', true)
+    .eq('usuario_sucursales.sucursal_id', sucursalId)
+  if (conExtra.error) throw errorDeSupabase(conExtra.error, 'Sin conexión: no se pudo cargar los preventistas. Revisá la señal e intentá de nuevo.')
+  return [...base, ...((conExtra.data as PerfilDB[]) || [])]
+    .sort((a, b) => (a.nombre ?? '').localeCompare(b.nombre ?? ''))
 }
 
 // Padron de quienes PUEDEN vender, para las reglas de comision.
@@ -354,11 +385,13 @@ export function usePreventistasQuery() {
  * Hook para obtener todos los usuarios que pueden ser asignados como
  * preventista de un pedido (admin + preventista activos).
  */
-export function usePreventistasAsignablesQuery() {
+export function usePreventistasAsignablesQuery({ conExtraPreventista = false }: { conExtraPreventista?: boolean } = {}) {
   const { currentSucursalId } = useSucursal()
   return useQuery({
-    queryKey: usuariosKeys.preventistasAsignables(currentSucursalId),
-    queryFn: () => fetchPreventistasAsignables(currentSucursalId),
+    queryKey: conExtraPreventista
+      ? usuariosKeys.preventistasAsignablesConExtra(currentSucursalId)
+      : usuariosKeys.preventistasAsignables(currentSucursalId),
+    queryFn: () => fetchPreventistasAsignables(currentSucursalId, conExtraPreventista),
     enabled: !!currentSucursalId,
     staleTime: 10 * 60 * 1000,
   })

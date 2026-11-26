@@ -26,7 +26,7 @@
 -- en una excepción, y cada caso en un sub-bloque que se revierte.
 --
 -- Fixtures: una sucursal activa con un admin, un preventista y un transportista base activos. El
--- resto nace en el ensayo. Las rutas van en 2099, y los montos superan el mínimo y el envío gratis.
+-- resto nace en el ensayo. Las rutas van en hoy + 60 (la más lejana que entra, Rut-B6), y los montos superan el mínimo y el envío gratis.
 
 CREATE OR REPLACE FUNCTION pg_temp.t_como(p_uid uuid, p_suc bigint)
 RETURNS void LANGUAGE plpgsql AS $fn$
@@ -132,7 +132,9 @@ DECLARE
   v_r2     text := '';
   v_z2     text := '';
   v_fallas text[] := '{}';
-  F CONSTANT date := DATE '2099-05-11';
+  -- Rut-B6 (ola 3, T3): una ruta va de hoy a 60 días adelante. La más lejana que entra, para no
+  -- pisar una ruta real (antes iba en 2099).
+  F CONSTANT date := public._tablero_hoy() + 60;
   -- La programada que se edita va dentro del rango (hoy a 60 días, 1559-b6 de la ola 2 del
   -- plan #1603): con F + 1 (2099) la edición se rechaza. Cambió de regla.
   P CONSTANT date := public._tablero_hoy() + 5;
