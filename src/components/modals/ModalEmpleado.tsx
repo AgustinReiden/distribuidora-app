@@ -146,7 +146,7 @@ interface OpcionVinculo {
 
 /** Un combo de vínculo: con valor, la primera opción lo quita ("Sin vínculo"). */
 function CampoVinculo({
-  id, etiqueta, ayuda, placeholder, opciones, valor, onChange, nombreActual, disabled, nota,
+  id, etiqueta, ayuda, placeholder, opciones, valor, onChange, nombreActual, disabled, nota, alerta,
 }: {
   id: string
   etiqueta: string
@@ -159,6 +159,8 @@ function CampoVinculo({
   nombreActual: string | null
   disabled?: boolean
   nota?: string
+  /** Por qué no se guarda este cambio (en rojo, debajo del campo). */
+  alerta?: string | null
 }) {
   const conSinVinculo = useMemo<OpcionVinculo[]>(
     () => (valor ? [{ key: '', label: SIN_VINCULO, textos: [SIN_VINCULO] }, ...opciones] : opciones),
@@ -184,6 +186,7 @@ function CampoVinculo({
         disabled={disabled}
         inputClassName="py-1.5 text-sm"
       />
+      {alerta ? <p role="alert" className="mt-1 text-sm text-red-600 dark:text-red-400">{alerta}</p> : null}
       {nota ? <p className={CLASE_AYUDA}>{nota}</p> : null}
       {ayuda ? <p className={CLASE_AYUDA}>{ayuda}</p> : null}
     </div>
@@ -281,9 +284,14 @@ export default function ModalEmpleado({
   // con el mismo mensaje que guardar_empleado, y no se manda.
   const sucursalOriginal: number | 'dos' | null = empleado ? (empleado.de_las_dos ? 'dos' : empleado.sucursal_id) : null
   const mueve = edicion && tieneTodasLasSucursales && sucursalSel !== sucursalOriginal
+  // Decisión del dueño del 26/11: tampoco se le saca el usuario ni se le pasa otro (lo pendiente es de
+  // su usuario y quedaría sin ficha que lo liquide). Vincularle uno a una ficha que no tenía, sí.
+  const usuarioOriginal = empleado?.usuario?.id ?? ''
+  const cambiaUsuario = edicion && usuarioOriginal !== '' && usuarioVisible !== usuarioOriginal
   // El motivo lo redacta el server (dice desde cuándo se puede liquidar si todavía no se puede).
-  const { data: comisionSinLiquidar } = useComisionSinLiquidarQuery(empleado?.id ?? null, mueve)
+  const { data: comisionSinLiquidar } = useComisionSinLiquidarQuery(empleado?.id ?? null, mueve || cambiaUsuario)
   const avisoPendiente = mueve ? (comisionSinLiquidar?.aviso ?? null) : null
+  const avisoUsuario = cambiaUsuario ? (comisionSinLiquidar?.avisoUsuario ?? null) : null
 
   const handleEscapeKeyDown = (event: KeyboardEvent) => {
     // Radix escucha Escape en captura, antes que el buscador: con la lista
@@ -304,8 +312,8 @@ export default function ModalEmpleado({
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError('')
-    // El aviso ya está en rojo junto a la sucursal: no se manda.
-    if (avisoPendiente) return
+    // El aviso ya está en rojo junto a la sucursal o al usuario: no se manda.
+    if (avisoPendiente || avisoUsuario) return
 
     // Con todas las sucursales se elige; si no, la ficha queda donde está (o en la actual, en el alta).
     const sucursalId = tieneTodasLasSucursales
@@ -510,6 +518,7 @@ export default function ModalEmpleado({
             disabled={vinculosBloqueados || empleado?.es_propio === true}
             nota={empleado?.es_propio ? 'Tu vínculo de usuario lo cambia otro admin.' : undefined}
             ayuda="Con usuario, los pedidos que carga comisionan para esta cuenta si su arreglo comisiona."
+            alerta={avisoUsuario}
           />
           <CampoVinculo
             id={`${id}-cliente`}

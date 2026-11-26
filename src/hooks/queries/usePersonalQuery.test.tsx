@@ -822,14 +822,15 @@ describe('useRendicionesDelDiaQuery', () => {
 describe('useComisionSinLiquidarQuery', () => {
   it('pide comision_sin_liquidar_empleado sólo cuando se lo habilita', async () => {
     const aviso = 'Tiene $ 2.000,00 de comisión sin liquidar en Tucuman: liquidalo antes de pasarlo de sucursal'
-    rpcResult = { data: { monto: '2000.00', aviso }, error: null }
+    const avisoUsuario = 'Tiene $ 2.000,00 de comisión sin liquidar en Tucuman: liquidalo antes de cambiarle o sacarle el usuario'
+    rpcResult = { data: { monto: '2000.00', aviso, aviso_usuario: avisoUsuario }, error: null }
     const qc = nuevoCliente()
     renderHook(() => useComisionSinLiquidarQuery(7, false), { wrapper: makeWrapper(qc) })
     expect(rpcCalls).toHaveLength(0)
 
     const { result } = renderHook(() => useComisionSinLiquidarQuery(7, true), { wrapper: makeWrapper(qc) })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(result.current.data).toEqual({ monto: 2000, aviso })
+    expect(result.current.data).toEqual({ monto: 2000, aviso, avisoUsuario })
     expect(rpcCalls).toEqual([{ fn: 'comision_sin_liquidar_empleado', args: { p_empleado_id: 7 } }])
   })
 })

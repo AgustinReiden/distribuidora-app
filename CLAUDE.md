@@ -606,7 +606,8 @@ suelta en `sucursales`.
   y una liquidación llevan `p_clave` (el mismo patrón; Com-B3, ola 3). Un pago al personal que sale
   de una rendición, suelto o de una liquidación, tiene tope en `_rendicion_efectivo_a_entregar`
   (#1534). Un empleado con comisión sin liquidar no cambia de sucursal (decisión del dueño del 25/11:
-  cada sucursal paga lo que se vendió en ella): un camino nuevo que mueva la ficha mira
+  cada sucursal paga lo que se vendió en ella), ni se le saca o se le cambia el usuario (26/11: lo
+  pendiente quedaría sin ficha que lo liquide): un camino nuevo que mueva la ficha o su usuario mira
   `_empleado_comision_sin_liquidar`.
 - **Un vale blanco está saldado por naturaleza** (migs 317/318): `tipo_factura = 'VB'` ⇒
   `monto_pagado = total`, `estado_pago = 'pagado'` y **cero** filas en `pagos` (lo fuerza

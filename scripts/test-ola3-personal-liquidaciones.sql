@@ -41,6 +41,9 @@
 --     de sucursal ni a «las dos»: el mensaje dice el monto y la sucursal. La pantalla lo ve antes
 --     (comision_sin_liquidar_empleado). Liquidado, se pasa. 8b: con el período en curso ya
 --     liquidado y una venta entregada hoy, el motivo dice desde qué lunes se puede liquidar.
+--     8c (decisión del dueño, 26/11): con los mismos $ 2.000 tampoco se le saca el usuario a la
+--     ficha ni se le pasa otro, con el motivo; la pantalla lo ve antes (aviso_usuario). Sí se
+--     edita lo demás y se le vincula usuario a una ficha que no tenía; liquidado, se le cambia.
 -- 9 · m5 una liquidación sin movimientos (sueldo 0, sin comisión, sin pago) adelanta el corte: el
 --     ajuste de $ 1.000 que ya liquidó no vuelve a salir en la vista previa siguiente, que lo
 --     cuenta en el saldo anterior.
@@ -79,6 +82,8 @@ DECLARE
   e7b      bigint;
   e7c      bigint;
   e8       bigint;
+  e8c      bigint;
+  v_p8c    uuid;
   e9       bigint;
   e7d      bigint;
   v_q1     uuid;
@@ -614,7 +619,42 @@ BEGIN
     v_x := pg_temp.como(format('SELECT public.comision_sin_liquidar_empleado(p_empleado_id => %s)', e8))::jsonb;
     v_fallas := v_fallas || pg_temp.chk(v_x->>'aviso' LIKE '%se puede liquidar desde el lunes ' || to_char(v_l + 21, 'FMDD/FMMM') || '%',
                   format('8b la pantalla no dice desde cuándo: %s', v_x));
+    v_fallas := v_fallas || pg_temp.falla('8b sacarle el usuario', pg_temp.edicion(e8, '{"usuario_id":null}'),
+                  format('se puede liquidar desde el lunes %s; cambiale o sacale el usuario después', to_char(v_l + 21, 'FMDD/FMMM')));
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('8b · error: %s', SQLERRM);
+  END;
+
+  -- ===== 8c · m4 (decisión del dueño, 26/11) con comisión sin liquidar no se le cambia ni se le saca el usuario
+  BEGIN
+    v_p8 := pg_temp.u('preventista', v_s1);
+    v_p8c := pg_temp.u('preventista', v_s1);
+    e8 := pg_temp.alta(jsonb_build_object('usuario_id', v_p8), 0, true);
+    PERFORM pg_temp.pedido(v_p8, v_l + 2, 100000);
+    v_x := pg_temp.como(format('SELECT public.comision_sin_liquidar_empleado(p_empleado_id => %s)', e8))::jsonb;
+    v_fallas := v_fallas || pg_temp.chk((v_x->>'monto')::numeric = 2000
+                  AND v_x->>'aviso_usuario' = format('Tiene $ 2.000,00 de comisión sin liquidar en %s: liquidalo antes de cambiarle o sacarle el usuario',
+                                                     (SELECT nombre FROM sucursales WHERE id = v_s1)),
+                  format('8c la pantalla ve %s y no el motivo del usuario', v_x));
+    v_fallas := v_fallas || pg_temp.falla('8c sacarle el usuario', pg_temp.edicion(e8, '{"usuario_id":null}'),
+                  format('Tiene $ 2.000,00 de comisión sin liquidar en %s: liquidalo antes de cambiarle o sacarle el usuario',
+                         (SELECT nombre FROM sucursales WHERE id = v_s1)));
+    v_fallas := v_fallas || pg_temp.falla('8c pasarle otro usuario', pg_temp.edicion(e8, jsonb_build_object('usuario_id', v_p8c)),
+                  'liquidalo antes de cambiarle o sacarle el usuario');
+    v_fallas := v_fallas || pg_temp.chk((SELECT usuario_id FROM empleados WHERE id = e8) = v_p8,
+                  '8c la ficha cambió de usuario con la comisión sin liquidar');
+    v_fallas := v_fallas || pg_temp.anda('8c editar sin tocar el usuario', pg_temp.edicion(e8, '{"telefono":"381 555 0002"}'));
+    -- Vincularle usuario a una ficha que no tenía no se frena (aunque comisione).
+    e8c := pg_temp.alta('{}', 0, true);
+    v_fallas := v_fallas || pg_temp.anda('8c vincular usuario a una ficha sin usuario',
+                  pg_temp.edicion(e8c, jsonb_build_object('usuario_id', v_p8c)));
+    v_fallas := v_fallas || pg_temp.chk((SELECT usuario_id FROM empleados WHERE id = e8c) = v_p8c, '8c la ficha sin usuario no quedó vinculada');
+    -- Liquidado (pendiente 0), se le cambia.
+    PERFORM pg_temp.lq(e8, 2000);
+    v_x := pg_temp.como(format('SELECT public.comision_sin_liquidar_empleado(p_empleado_id => %s)', e8))::jsonb;
+    v_fallas := v_fallas || pg_temp.chk(v_x->'aviso_usuario' = 'null'::jsonb, format('8c liquidado la pantalla ve %s', v_x));
+    v_fallas := v_fallas || pg_temp.anda('8c liquidado, se le saca el usuario', pg_temp.edicion(e8, '{"usuario_id":null}'));
+    v_fallas := v_fallas || pg_temp.chk((SELECT usuario_id FROM empleados WHERE id = e8) IS NULL, '8c liquidado no se le sacó el usuario');
+  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('8c · error: %s', SQLERRM);
   END;
 
   -- ===================================== 9 · m5 la liquidación sin movimientos adelanta el corte ===
@@ -650,7 +690,7 @@ BEGIN
   END;
 
   IF cardinality(v_fallas) = 0 THEN
-    RAISE EXCEPTION 'ENSAYO OK · t6 personal y liquidaciones: 1 a 10, con 7b, 7c y 8b';
+    RAISE EXCEPTION 'ENSAYO OK · t6 personal y liquidaciones: 1 a 10, con 7b, 7c, 8b y 8c';
   END IF;
   RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' | ');
 END

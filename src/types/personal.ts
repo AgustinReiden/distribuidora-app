@@ -54,6 +54,8 @@ export interface RendicionDelPago {
 export interface ComisionSinLiquidar {
   monto: number
   aviso: string | null
+  /** Lo mismo para cambiarle o sacarle el usuario (decisión del dueño del 26/11; null: se puede). */
+  avisoUsuario: string | null
 }
 
 /**
