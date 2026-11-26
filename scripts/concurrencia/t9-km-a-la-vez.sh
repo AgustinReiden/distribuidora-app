@@ -5,7 +5,7 @@
 #   CONTENEDOR=<contenedor> bash scripts/concurrencia/t9-km-a-la-vez.sh
 #
 # K1 · S1 (admin) registra la lectura de ayer del vehículo V y espera antes del COMMIT; S2 (admin) registra la
-#      misma. Con la migración (NNN_ola3_zonas_cartera_vehiculos) registrar_km_vehiculo toma el vehículo
+#      misma. Con la migración (551_ola3_zonas_cartera_vehiculos) registrar_km_vehiculo toma el vehículo
 #      (FOR NO KEY UPDATE) antes de mirar la serie: S2 espera a S1, ve su lectura y se rechaza («ya está
 #      cargada»); queda UNA. Sin la migración, o sin ese lock, las dos entran: S2 no ve lo que S1 no confirmó.
 #

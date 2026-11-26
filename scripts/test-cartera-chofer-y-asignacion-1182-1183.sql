@@ -48,7 +48,7 @@
 --   D4b · PXT le asigna H a T → 42501 'Solo un administrador…'
 --   D5  · ENC se asigna H → 42501 'Sólo un preventista…' (cambio declarado de la 378)
 --   D6  · ADM le asigna H a T → 22023 'No se le puede asignar…' (D12, cambio declarado de
---         NNN_ola3_zonas_cartera_vehiculos: antes PASABA)
+--         551_ola3_zonas_cartera_vehiculos: antes PASABA)
 --   D6b · ADM le asigna H a PX → PASA
 --   D7  · server, sin claims, le asigna H a T → PASA (el fixture C_T de la 1179)
 --   D8  · T con el extra 'preventista' en S se asigna H → PASA (levanta
@@ -444,7 +444,7 @@ BEGIN
     WHEN OTHERS THEN v_fallas := v_fallas || ('D5 · error inesperado: ' || SQLERRM);
   END;
 
-  -- D6 · el admin tampoco le asigna un cliente a un chofer (D12, mig NNN_ola3_zonas_cartera_vehiculos:
+  -- D6 · el admin tampoco le asigna un cliente a un chofer (D12, mig 551_ola3_zonas_cartera_vehiculos:
   --      sólo a quien actúa como preventista activo en la sucursal del cliente); a un preventista, sí (D6b)
   BEGIN
     PERFORM pg_temp.como(v_adm, v_suc);

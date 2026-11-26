@@ -6,7 +6,7 @@
 #   CONTENEDOR=<contenedor> bash scripts/concurrencia/t9-zona-y-cliente.sh
 #
 # Z1 · S1 (admin) le pasa la zona Z de P0 a P1 y espera antes del COMMIT; S2 (admin) mete en Z, por REST, un
-#      cliente X que estaba fuera. Con la migración (NNN_ola3_zonas_cartera_vehiculos) S1 tiene la zona tomada:
+#      cliente X que estaba fuera. Con la migración (551_ola3_zonas_cartera_vehiculos) S1 tiene la zona tomada:
 #      la FK de X espera, y el trigger del cambio de zona ve el dueño nuevo; X queda de P1. Sin ella, X queda
 #      de P0 en una zona que es de P1 (ASG-A rojo).
 # Z2 · S1 le pasa la zona a P1 y espera; S2 se la pasa a P2. Con la migración S2 espera la zona y gana: la

@@ -1,4 +1,4 @@
--- Ensayo de la migración NNN_ola3_zonas_cartera_vehiculos (ola 3 de #1603, tarjeta T9: zonas,
+-- Ensayo de la migración 551_ola3_zonas_cartera_vehiculos (ola 3 de #1603, tarjeta T9: zonas,
 -- cartera, vehículos y tablero; #1554, #1522 y #1690).
 --
 -- No deja rastro (salvo valores de secuencia): un único DO que termina SIEMPRE en una excepción.

@@ -18,7 +18,7 @@
 -- (salvedad, edicion, cancelacion, volver a pendiente) y el cierre de una
 -- rendicion se arman como postgres sobre las tablas: lo que importa es lo que
 -- ve la comision. actualizar_preventista_pedido es la real hasta que la mig
--- NNN_ola3_zonas_cartera_vehiculos (Var-B5) dejo de cambiar el vendedor de un pedido
+-- 551_ola3_zonas_cartera_vehiculos (Var-B5) dejo de cambiar el vendedor de un pedido
 -- entregado: 8i lo afirma y hace el cambio sobre la tabla (el que llega cuando se
 -- revierte la entrega, se cambia el vendedor y se vuelve a entregar).
 --
