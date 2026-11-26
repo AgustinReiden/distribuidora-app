@@ -29,6 +29,7 @@ import {
 import type { PedidoDB } from '../types';
 import { esPedidoDeBaja } from './pedidoDeBaja';
 import { preventistaPuedeEditar } from './permisosPedido';
+import { puedeRevertirCancelacion } from './revertirCancelacion';
 import { esTipoVB } from './valeBlanco';
 
 /**
@@ -50,6 +51,7 @@ export type AccionPedidoId =
   | 'entrega_con_salvedad'
   | 'revertir_entrega'
   | 'nota_credito_venta'
+  | 'revertir_cancelacion'
   | 'cancelar';
 
 export interface AccionItem {
@@ -82,6 +84,8 @@ export interface HandlersAccionesPedido {
   onEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onRevertir?: (pedido: PedidoDB) => void;
   onCancelarPedido?: (pedido: PedidoDB) => void;
+  /** Revertir la cancelación (sólo admin, mig NNN_revertir_cancelacion). */
+  onRevertirCancelacion?: (pedido: PedidoDB) => void;
   onRegistrarPago?: (pedido: PedidoDB) => void;
   onImprimirComanda?: (pedido: PedidoDB) => void;
   /** Nota de crédito de venta sobre un pedido entregado (#833). */
@@ -105,6 +109,7 @@ export function construirAccionesPedido(
     onEntregadoConSalvedad,
     onRevertir,
     onCancelarPedido,
+    onRevertirCancelacion,
     onRegistrarPago,
     onImprimirComanda,
     onNotaCreditoVenta,
@@ -285,6 +290,20 @@ export function construirAccionesPedido(
       icon: FileMinus,
       onClick: () => onNotaCreditoVenta(pedido),
       className: 'text-teal-700 dark:text-teal-400'
+    });
+  }
+
+  // Solo admin revierte una cancelación, y no la del cambio de cliente, un canje ni
+  // un pedido con fecha de entrega (revertir_cancelacion_pedido lo valida de nuevo).
+  // Un vale blanco no llega acá: tiene su menú, y el suyo no la ofrece.
+  if (puedeRevertirCancelacion(pedido, isAdmin) && onRevertirCancelacion) {
+    items.push({
+      id: 'revertir_cancelacion',
+      label: 'Revertir cancelación',
+      icon: RotateCcw,
+      onClick: () => onRevertirCancelacion(pedido),
+      className: 'text-amber-700 dark:text-amber-400',
+      divider: true
     });
   }
 

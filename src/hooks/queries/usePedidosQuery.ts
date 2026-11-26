@@ -28,6 +28,7 @@ import { PEDIDO_ITEM_COLUMNAS } from '../../lib/pedidoItemColumnas'
 import { camposComboRPC, type CamposCombo } from '../../utils/combosPedido'
 import { mismoTotalDelAlta } from '../../utils/totalDelAlta'
 import { invalidarMora, invalidarNotasCreditoYMora } from './invalidacionesDeuda'
+import type { ResultadoRevertirCancelacion } from '../../utils/revertirCancelacion'
 
 // Query keys
 export const pedidosKeys = {
@@ -1209,6 +1210,60 @@ export function useCancelarPedidoMutation() {
       queryClient.invalidateQueries({ queryKey: ['recorridos-hoja-ruta'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-activo'] })
       queryClient.invalidateQueries({ queryKey: ['recorrido-existente'] })
+    },
+  })
+}
+
+// =========================================================================
+// Revertir la cancelación (mig NNN_revertir_cancelacion)
+// =========================================================================
+
+async function revertirCancelacionPedido(
+  pedidoId: string,
+  usuarioId?: string,
+): Promise<ResultadoRevertirCancelacion> {
+  const { data, error } = await supabase.rpc('revertir_cancelacion_pedido', {
+    p_pedido_id: pedidoId,
+    p_usuario_id: usuarioId || null,
+  })
+
+  if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar si se revirtió la cancelación. Revisá el pedido antes de reintentar.')
+
+  const result = data as ResultadoRevertirCancelacion | { success: false; error?: string }
+  if (!result.success) {
+    throw new Error(result.error || 'No se pudo revertir la cancelación')
+  }
+  return result
+}
+
+/**
+ * Hook para que el admin revierta la cancelación de un pedido: vuelve a
+ * pendiente, vuelve a descontar el stock, anula las mermas de la falta de stock,
+ * puede sacar un regalo sin cupo y le devuelve los cobros que siguen sueltos.
+ * Invalida lo mismo que cancelar.
+ */
+export function useRevertirCancelacionMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: ({ pedidoId, usuarioId }: { pedidoId: string; usuarioId?: string }) =>
+      revertirCancelacionPedido(pedidoId, usuarioId),
+    onSuccess: (resultado) => {
+      queryClient.invalidateQueries({ queryKey: pedidosKeys.all(currentSucursalId) })
+      queryClient.invalidateQueries({ queryKey: productosKeys.all(currentSucursalId) })
+      // El regalo vuelve a ocupar su cupo (o se saca si no lo hay).
+      void invalidarCuposPromo(queryClient)
+      // La bajada vuelve a consumir de los lotes (trigger de stock).
+      queryClient.invalidateQueries({ queryKey: ['lotes', currentSucursalId] })
+      // La boleta vuelve a la deuda y lo suelto vuelve a ella.
+      queryClient.invalidateQueries({ queryKey: clientesKeys.all(currentSucursalId) })
+      invalidarNotasCreditoYMora(queryClient)
+      if (Number(resultado.mermas_anuladas ?? 0) > 0) {
+        // Literales, como en la cancelación: ver el comentario de useCancelarPedidoMutation.
+        queryClient.invalidateQueries({ queryKey: ['mermas'] })
+        queryClient.invalidateQueries({ queryKey: ['reporte-mermas'] })
+      }
     },
   })
 }

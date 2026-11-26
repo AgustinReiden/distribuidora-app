@@ -283,3 +283,42 @@ describe('construirAccionesPedido — ids', () => {
     expect(handlers.onRegistrarPago).toHaveBeenCalledTimes(3)
   })
 })
+
+// =============================================================================
+// REVERTIR CANCELACIÓN (mig NNN_revertir_cancelacion)
+// =============================================================================
+
+describe('construirAccionesPedido — Revertir cancelación', () => {
+  const conRevertir = () => ({ ...crearHandlers(), onRevertirCancelacion: vi.fn() })
+
+  it('el admin la ve sobre un cancelado, llama a su handler y no sale afuera', () => {
+    const handlers = conRevertir()
+    const pedido = crearPedido({ estado: 'cancelado' })
+    const { acciones, elegida } = elegir(PERFILES.admin, pedido, handlers)
+    const item = acciones.find(a => a.id === 'revertir_cancelacion')
+    expect(item?.label).toBe('Revertir cancelación')
+    expect(acciones.map(a => a.id)).not.toContain('cancelar')
+    expect(elegida).toBeNull()
+    item?.onClick()
+    expect(handlers.onRevertirCancelacion).toHaveBeenCalledWith(pedido)
+  })
+
+  it('nadie más la ve, y el admin no la ve fuera de un cancelado', () => {
+    for (const nombre of Object.keys(PERFILES) as NombrePerfil[]) {
+      if (nombre === 'admin') continue
+      const { acciones } = elegir(PERFILES[nombre], crearPedido({ estado: 'cancelado' }), conRevertir())
+      expect(acciones.map(a => a.id)).not.toContain('revertir_cancelacion')
+    }
+    for (const estado of ['pendiente', 'en_preparacion', 'asignado', 'entregado'] as const) {
+      const { acciones } = elegir(PERFILES.admin, crearPedido({ estado }), conRevertir())
+      expect(acciones.map(a => a.id)).not.toContain('revertir_cancelacion')
+    }
+  })
+
+  it('no la ofrece en la cancelación del cambio de cliente, ni en un vale blanco', () => {
+    const cambio = { ...crearPedido({ estado: 'cancelado' }), motivo_cancelacion_tipo: 'cambio_de_cliente' } as PedidoDB
+    expect(elegir(PERFILES.admin, cambio, conRevertir()).acciones.map(a => a.id)).not.toContain('revertir_cancelacion')
+    const vb = { ...crearPedido({ estado: 'cancelado' }), tipo_factura: 'VB' } as PedidoDB
+    expect(elegir(PERFILES.admin, vb, conRevertir()).acciones.map(a => a.id)).not.toContain('revertir_cancelacion')
+  })
+})

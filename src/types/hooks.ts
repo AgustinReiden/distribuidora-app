@@ -288,6 +288,8 @@ export interface PedidoDB {
   monto_pagado?: number;
   notas?: string | null;
   motivo_cancelacion?: string | null;
+  /** El motivo tipificado de la baja (mig 143): 'cambio_de_cliente', 'falta_stock', etc. */
+  motivo_cancelacion_tipo?: string | null;
   orden_entrega?: number | null;
   items?: PedidoItemDB[];
   salvedades?: PedidoSalvedadResumen[];
