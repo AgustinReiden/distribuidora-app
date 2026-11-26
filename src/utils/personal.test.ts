@@ -30,6 +30,10 @@ import {
   textoArregloCorto,
   textoArregloLargo,
   textoPeriodo,
+  errorDePagoDeRendicion,
+  rendicionesDelDia,
+  opcionesDePlata,
+  motivoSinReversion,
 } from './personal'
 import { formatPrecio } from './formatters'
 import type {
@@ -860,3 +864,60 @@ describe('errorDePago', () => {
   })
 })
 
+
+// #1534: el tope del server (liquidar_empleado y el pago suelto), con el mismo mensaje.
+describe('errorDePagoDeRendicion', () => {
+  it('con $ 5.000 de efectivo, $ 5.000 entra y $ 5.000,01 no', () => {
+    expect(errorDePagoDeRendicion(5000, 5000)).toBeNull()
+    expect(errorDePagoDeRendicion(5000.01, 5000)).toBe('El pago supera el efectivo que le queda por entregar a esa rendición')
+  })
+  it('sin efectivo (0), un peso no entra; sin saber el efectivo no se frena', () => {
+    expect(errorDePagoDeRendicion(1, 0)).not.toBeNull()
+    expect(errorDePagoDeRendicion(1000000, null)).toBeNull()
+  })
+})
+
+describe('rendicionesDelDia', () => {
+  it('calcula el efectivo a entregar como el cierre y marca la cerrada', () => {
+    expect(rendicionesDelDia([
+      { transportista_id: 'u-1', transportista_nombre: 'Tito', total_efectivo: '10000.00', total_gastos: '1500',
+        total_pagos_personal: 2000, total_faltantes_empleados: 500, estado: 'confirmada' },
+      { transportista_id: 'u-2', transportista_nombre: null, total_efectivo: 300, total_gastos: null,
+        total_pagos_personal: null, total_faltantes_empleados: null, estado: 'pendiente' },
+      { transportista_id: null, transportista_nombre: 'Nadie', total_efectivo: 1, total_gastos: 0,
+        total_pagos_personal: 0, total_faltantes_empleados: 0, estado: null },
+    ])).toEqual([
+      { transportista_id: 'u-1', transportista_nombre: 'Tito', efectivo_a_entregar: 6000, cerrada: true },
+      { transportista_id: 'u-2', transportista_nombre: 'Sin nombre', efectivo_a_entregar: 300, cerrada: false },
+    ])
+    expect(rendicionesDelDia(null)).toEqual([])
+  })
+})
+
+// m7 (#1392): quien tiene rendición ese día se elige aunque no sea chofer.
+describe('opcionesDePlata', () => {
+  it('suma a quien tiene rendición sin repetir a los choferes, por nombre', () => {
+    const choferes = [{ id: 'u-9', nombre: 'Martín Sosa' }]
+    expect(opcionesDePlata(choferes, [
+      { transportista_id: 'u-9', transportista_nombre: 'Martín Sosa', efectivo_a_entregar: 100, cerrada: false },
+      { transportista_id: 'u-enc', transportista_nombre: 'Ana Encargada', efectivo_a_entregar: 50, cerrada: false },
+    ])).toEqual([{ id: 'u-enc', nombre: 'Ana Encargada' }, { id: 'u-9', nombre: 'Martín Sosa' }])
+    expect(opcionesDePlata(choferes, [])).toEqual(choferes)
+  })
+})
+
+// m2 (#1392): la regla del server para revertir el pago de una rendición.
+describe('motivoSinReversion', () => {
+  const rendicion = { transportista_nombre: 'Tito', fecha: '2026-10-24' }
+  it('el pago de una rendición cerrada no se revierte; la abierta y la de antes (sin el dato) sí', () => {
+    expect(motivoSinReversion({ tipo: 'pago', rendicion: { ...rendicion, cerrada: true } }))
+      .toBe('Salió de una rendición ya cerrada: corregilo con un ajuste')
+    expect(motivoSinReversion({ tipo: 'pago', rendicion: { ...rendicion, cerrada: false } })).toBeNull()
+    expect(motivoSinReversion({ tipo: 'pago', rendicion })).toBeNull()
+    expect(motivoSinReversion({ tipo: 'pago', rendicion: null })).toBeNull()
+  })
+  it('la de otra sucursal lo dice, en lugar de «ya cerrada»', () => {
+    expect(motivoSinReversion({ tipo: 'pago', rendicion: { ...rendicion, cerrada: true, de_otra_sucursal: true } }))
+      .toBe('Salió de una rendición de otra sucursal: lo revierte un admin de esa sucursal')
+  })
+})

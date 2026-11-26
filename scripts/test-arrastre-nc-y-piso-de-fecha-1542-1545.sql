@@ -486,10 +486,10 @@ BEGIN
   v_fallas := v_fallas || pg_temp.chk(
     NOT has_function_privilege('authenticated', 'public._cpp_arrastrar(bigint,bigint,bigint,timestamp with time zone,integer,numeric,numeric)', 'EXECUTE')
     AND NOT has_function_privilege('authenticated', 'public._guardar_gasto(jsonb,boolean)', 'EXECUTE')
-    AND has_function_privilege('authenticated', 'public.registrar_movimiento_empleado(bigint,jsonb)', 'EXECUTE')
-    AND has_function_privilege('authenticated', 'public.liquidar_empleado(bigint,jsonb)', 'EXECUTE')
-    AND NOT has_function_privilege('anon', 'public.registrar_movimiento_empleado(bigint,jsonb)', 'EXECUTE')
-    AND NOT has_function_privilege('anon', 'public.liquidar_empleado(bigint,jsonb)', 'EXECUTE'),
+    AND has_function_privilege('authenticated', 'public.registrar_movimiento_empleado(bigint,jsonb,uuid)', 'EXECUTE')
+    AND has_function_privilege('authenticated', 'public.liquidar_empleado(bigint,jsonb,uuid)', 'EXECUTE')
+    AND NOT has_function_privilege('anon', 'public.registrar_movimiento_empleado(bigint,jsonb,uuid)', 'EXECUTE')
+    AND NOT has_function_privilege('anon', 'public.liquidar_empleado(bigint,jsonb,uuid)', 'EXECUTE'),
     'L1 los permisos de las funciones cambiaron');
 
   IF cardinality(v_fallas) > 0 THEN

@@ -14,7 +14,10 @@ import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { gastosKeys } from './useGastosQuery'
 import { useRequestIdEstable } from '../useRequestIdEstable'
 import { huellaDeAlta } from '../../utils/huellaDeAlta'
+import { rendicionesDelDia, type FilaResumenRendicion } from '../../utils/personal'
 import type {
+  ComisionSinLiquidar,
+  RendicionDelDia,
   Empleado,
   CuentaEmpleado,
   EmpleadoParaElegir,
@@ -38,6 +41,25 @@ export const personalKeys = {
     [...personalKeys.all(sucursalId), 'vista-previa', empleadoId] as const,
   liquidacion: (sucursalId: number | null, liquidacionId: number) =>
     [...personalKeys.all(sucursalId), 'liquidacion', liquidacionId] as const,
+  rendicionesDelDia: (sucursalId: number | null, fecha: string) =>
+    [...personalKeys.all(sucursalId), 'rendiciones-del-dia', fecha] as const,
+  comisionSinLiquidar: (sucursalId: number | null, empleadoId: number) =>
+    [...personalKeys.all(sucursalId), 'comision-sin-liquidar', empleadoId] as const,
+}
+
+/**
+ * Com-B3 (#1554): la huella de un pago o una liquidación, para pedir con `useRequestIdEstable` la
+ * misma clave mientras no cambie. El reintento (la respuesta se perdió y se vuelve a tocar) manda lo
+ * mismo: el server devuelve lo del primer intento. Otro monto, otra fecha u otra plata es otra
+ * escritura, con otra clave.
+ */
+export function huellaDeEscrituraEmpleado(
+  sucursalId: number | null,
+  operacion: 'movimiento' | 'liquidacion',
+  empleadoId: number,
+  contenido: object,
+): string {
+  return `${sucursalId ?? ''}|${operacion}|${empleadoId}|${JSON.stringify(contenido)}`
 }
 
 /**
@@ -91,6 +113,50 @@ export function useVistaPreviaLiquidacionQuery(empleadoId: number | null) {
     },
     enabled: currentSucursalId != null && empleadoId != null,
     // Como la cuenta: los pagos mueven el saldo sin invalidar, y confirmar con un número viejo lo rechaza el server.
+    staleTime: 0,
+  })
+}
+
+/**
+ * Las rendiciones de un día en la sucursal activa (#1534 y m7 de #1392): quién tiene rendición, con la
+ * regla del server (la grilla de rendiciones, `obtener_resumen_rendiciones`), y el efectivo que le
+ * queda por entregar, que es el tope de un pago al personal con esa plata.
+ */
+export function useRendicionesDelDiaQuery(fecha: string | null) {
+  const { currentSucursalId } = useSucursal()
+  const dia = fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha) ? fecha : null
+  return useQuery({
+    queryKey: personalKeys.rendicionesDelDia(currentSucursalId, dia ?? ''),
+    queryFn: async (): Promise<RendicionDelDia[]> => {
+      const { data, error } = await supabase.rpc('obtener_resumen_rendiciones', {
+        p_fecha_desde: dia as string, p_fecha_hasta: dia as string, p_transportista_id: null,
+      })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudieron cargar las rendiciones de ese día. Revisá la señal e intentá de nuevo.')
+      return rendicionesDelDia(data as unknown as FilaResumenRendicion[] | null)
+    },
+    enabled: currentSucursalId != null && dia != null,
+    // Un gasto o un cobro de la rendición mueve el efectivo sin invalidar personalKeys.
+    staleTime: 0,
+  })
+}
+
+/**
+ * m4 (#1392): la comisión que todavía no se le liquidó, y el motivo con que guardar_empleado rechaza
+ * cambiarlo de sucursal (`aviso` null: se puede mover) o cambiarle o sacarle el usuario
+ * (`avisoUsuario`, decisión del dueño del 26/11). El motivo lo redacta el server: dice desde
+ * cuándo se puede liquidar si lo pendiente entra en un período que todavía no empezó.
+ */
+export function useComisionSinLiquidarQuery(empleadoId: number | null, enabled = true) {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: personalKeys.comisionSinLiquidar(currentSucursalId, empleadoId as number),
+    queryFn: async (): Promise<ComisionSinLiquidar> => {
+      const { data, error } = await supabase.rpc('comision_sin_liquidar_empleado', { p_empleado_id: empleadoId as number })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo saber si tiene comisión sin liquidar. Revisá la señal e intentá de nuevo.')
+      const fila = (data ?? {}) as { monto?: number | string | null; aviso?: string | null; aviso_usuario?: string | null }
+      return { monto: Number(fila.monto) || 0, aviso: fila.aviso ?? null, avisoUsuario: fila.aviso_usuario ?? null }
+    },
+    enabled: enabled && currentSucursalId != null && empleadoId != null,
     staleTime: 0,
   })
 }
@@ -209,11 +275,18 @@ export function useReactivarEmpleadoMutation() {
 export function useRegistrarMovimientoEmpleadoMutation() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
+  // Com-B3 (#1554): una clave estable por contenido. Si la respuesta se perdió y se reintenta lo
+  // mismo, el server devuelve el movimiento del primer intento en vez de registrarlo dos veces.
+  const clave = useRequestIdEstable()
   return useMutation({
     mutationFn: async ({ empleadoId, movimiento }: { empleadoId: number; movimiento: MovimientoManualPayload }): Promise<void> => {
-      const { error } = await supabase.rpc('registrar_movimiento_empleado', { p_empleado_id: empleadoId, p_movimiento: movimiento })
-      // No es idempotente: si la respuesta se perdió, reintentar a ciegas duplica el movimiento.
+      const huella = huellaDeEscrituraEmpleado(currentSucursalId, 'movimiento', empleadoId, movimiento)
+      const { error } = await supabase.rpc('registrar_movimiento_empleado', {
+        p_empleado_id: empleadoId, p_movimiento: movimiento, p_clave: clave(huella),
+      })
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo registrar el movimiento. Revisá la cuenta del empleado antes de reintentar, puede haber quedado registrado.')
+      // Salió bien: el próximo movimiento igual es otro, con otra clave.
+      clave.olvidar([huella])
     },
     // onSettled, no onSuccess: si la respuesta se perdió, el movimiento pudo quedar registrado y la cuenta
     // tiene que volver a pedirse para que quien reintenta vea qué pasó.
@@ -243,11 +316,17 @@ export function useRevertirMovimientoEmpleadoMutation() {
 export function useLiquidarEmpleadoMutation() {
   const queryClient = useQueryClient()
   const { currentSucursalId } = useSucursal()
+  // Com-B3 (#1554): como el movimiento. El reintento de la misma liquidación devuelve la del primer
+  // intento; sin clave chocaría con «ese período ya no es el próximo».
+  const clave = useRequestIdEstable()
   return useMutation({
     mutationFn: async ({ empleadoId, liquidacion }: { empleadoId: number; liquidacion: LiquidarPayload }): Promise<number> => {
-      const { data, error } = await supabase.rpc('liquidar_empleado', { p_empleado_id: empleadoId, p_liquidacion: liquidacion })
-      // No es idempotente en la red: si la respuesta se perdió, el período ya pudo quedar liquidado.
+      const huella = huellaDeEscrituraEmpleado(currentSucursalId, 'liquidacion', empleadoId, liquidacion)
+      const { data, error } = await supabase.rpc('liquidar_empleado', {
+        p_empleado_id: empleadoId, p_liquidacion: liquidacion, p_clave: clave(huella),
+      })
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar la liquidación. Revisá la cuenta del empleado antes de reintentar, puede haber quedado registrada.')
+      clave.olvidar([huella])
       return data as unknown as number
     },
     onSettled: (_data, _error, { liquidacion }) => {
