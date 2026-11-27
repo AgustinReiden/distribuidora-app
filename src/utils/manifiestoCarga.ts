@@ -6,7 +6,7 @@
  * dibuja; acá no hay nada de layout.
  */
 import { formatAclaracionBulto } from '../lib/pdf/utils/formatBulto'
-import { esRegaloSustituido, nombreDeLaLinea, nombreSinConteo, unidadDelRegalo, type ItemImpresion } from '../lib/pdf/utils/lineaItem'
+import { nombreDeLaLinea, nombreSinConteo, unidadDelRegalo, type ItemImpresion } from '../lib/pdf/utils/lineaItem'
 import { esCantidadEnSubunidades, factorDeLaLinea } from './unidadesRegalo'
 
 /**
@@ -180,10 +180,9 @@ export function consolidarCarga(pedidos: PedidoParaCarga[], opciones: OpcionesMa
       // mueve stock) → 1. Con el vivo, subir el factor de una promo de 6 a 12
       // convertía 392 botellas ya vendidas en 32 fardos en vez de 65.
       const factor = factorDeLaLinea(item)
-      // Sustituido: la descripción nombra el producto ORIGINAL; la fila lleva la
-      // unidad de la promo con el nombre del sustituto, igual que la tarjeta.
-      const sustituido = esRegaloSustituido(item)
-      const desc = sustituido ? nombreDeLaLinea(item) : nombreSinConteo(item.descripcion_regalo)
+      // El regalo lleva el producto real de la línea con la unidad de la promo
+      // (nombreDeLaLinea): la misma fuente que la hoja de ruta y la comanda.
+      const desc = item.es_bonificacion ? nombreDeLaLinea(item) : ''
       const grupo = grupoDeProducto(
         // El catalogo vivo manda: donde esta el producto hoy en el deposito.
         (catalogoPorId.get(String(item.producto_id ?? item.producto?.id)) ?? item.producto) as ProductoCatalogoManifiesto | undefined,
@@ -219,7 +218,7 @@ export function consolidarCarga(pedidos: PedidoParaCarga[], opciones: OpcionesMa
             grupo,
             // Sin unidad que pluralizar: un sustituto cuya promo no la nombra, o
             // un regalo sin descripción, que cae al nombre del producto (#938).
-            sinUnidad: sustituido ? !unidadDelRegalo(item.descripcion_regalo) : !desc,
+            sinUnidad: item.producto?.nombre?.trim() ? !unidadDelRegalo(item.descripcion_regalo) : !desc,
           }
         }
         totalesBonifFraccion[fkey].subunidades += cantidad
