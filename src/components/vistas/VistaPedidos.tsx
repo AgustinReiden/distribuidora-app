@@ -102,6 +102,8 @@ export interface VistaPedidosProps {
   /** Nota de crédito de venta sobre un pedido entregado (#833). */
   onNotaCreditoVenta?: (pedido: PedidoDB) => void;
   onCancelarPedido?: (pedido: PedidoDB) => void;
+  /** Revertir la cancelación (sólo admin). */
+  onRevertirCancelacion?: (pedido: PedidoDB) => void;
   onEntregasMasivas?: () => void;
   onPagosMasivos?: () => void;
   onEntregaYPagoMasivos?: () => void;
@@ -183,6 +185,7 @@ export default function VistaPedidos({
   onDesmarcarEntregado,
   onNotaCreditoVenta,
   onCancelarPedido,
+  onRevertirCancelacion,
   onEntregasMasivas,
   onPagosMasivos,
   onEntregaYPagoMasivos,
@@ -325,6 +328,7 @@ export default function VistaPedidos({
                   onMarcarEntregadoConSalvedad={onMarcarEntregadoConSalvedad}
                   onDesmarcarEntregado={onDesmarcarEntregado}
                   onCancelarPedido={onCancelarPedido}
+                  onRevertirCancelacion={onRevertirCancelacion}
                   onRegistrarPago={onAbrirPagoPedido}
                   onNotaCreditoVenta={onNotaCreditoVenta}
                   gps={gpsPorPedido?.get(String(pedido.id))}

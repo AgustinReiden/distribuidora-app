@@ -41,6 +41,7 @@ export interface AccionesDropdownProps {
   onEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onRevertir?: (pedido: PedidoDB) => void;
   onCancelarPedido?: (pedido: PedidoDB) => void;
+  onRevertirCancelacion?: (pedido: PedidoDB) => void;
   onRegistrarPago?: (pedido: PedidoDB) => void;
   onImprimirComanda?: (pedido: PedidoDB) => void;
   onNotaCreditoVenta?: (pedido: PedidoDB) => void;
@@ -66,6 +67,7 @@ function AccionesDropdown({
   onEntregadoConSalvedad,
   onRevertir,
   onCancelarPedido,
+  onRevertirCancelacion,
   onRegistrarPago,
   onImprimirComanda,
   onNotaCreditoVenta,
@@ -86,12 +88,13 @@ function AccionesDropdown({
         onEntregadoConSalvedad,
         onRevertir,
         onCancelarPedido,
+        onRevertirCancelacion,
         onRegistrarPago,
         onImprimirComanda,
         onNotaCreditoVenta,
       },
     ),
-    [pedido, isAdmin, isPreventista, isTransportista, isEncargado, currentUserId, onHistorial, onEditar, onEditarNotas, onPreparar, onVolverAPendiente, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido, onRegistrarPago, onImprimirComanda, onNotaCreditoVenta],
+    [pedido, isAdmin, isPreventista, isTransportista, isEncargado, currentUserId, onHistorial, onEditar, onEditarNotas, onPreparar, onVolverAPendiente, onEntregado, onEntregadoConSalvedad, onRevertir, onCancelarPedido, onRevertirCancelacion, onRegistrarPago, onImprimirComanda, onNotaCreditoVenta],
   );
 
   return (

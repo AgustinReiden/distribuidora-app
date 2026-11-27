@@ -103,6 +103,8 @@ export interface PedidoCardProps {
   onMarcarEntregadoConSalvedad?: (pedido: PedidoDB) => void;
   onDesmarcarEntregado?: (pedido: PedidoDB) => void;
   onCancelarPedido?: (pedido: PedidoDB) => void;
+  /** Revertir la cancelación (sólo admin). */
+  onRevertirCancelacion?: (pedido: PedidoDB) => void;
   onRegistrarPago?: (pedido: PedidoDB) => void;
   /** Nota de crédito de venta sobre un pedido entregado (#833). */
   onNotaCreditoVenta?: (pedido: PedidoDB) => void;
@@ -410,6 +412,7 @@ function PedidoCard({
   onMarcarEntregadoConSalvedad,
   onDesmarcarEntregado,
   onCancelarPedido,
+  onRevertirCancelacion,
   onRegistrarPago,
   onNotaCreditoVenta,
   saldoActualizadoAt,
@@ -472,6 +475,7 @@ function PedidoCard({
     onEntregadoConSalvedad: onMarcarEntregadoConSalvedad,
     onRevertir: onDesmarcarEntregado,
     onCancelarPedido,
+    onRevertirCancelacion,
     onRegistrarPago,
     onImprimirComanda: handleImprimirComanda,
     onNotaCreditoVenta,
