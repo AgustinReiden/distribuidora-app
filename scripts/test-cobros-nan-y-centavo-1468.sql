@@ -185,14 +185,14 @@ BEGIN
                                   AND conname = 'pagos_monto_no_nan' AND convalidated),
                     'falta CHECK pagos_monto_no_nan (VALID)');
   FOREACH v_firma IN ARRAY ARRAY[
-    'public.registrar_pago_cliente_fifo_impl(bigint,numeric,text,date,text,text)',
-    'public.registrar_pago_combinado_cliente_fifo_impl(bigint,jsonb,date,text,text)',
-    'public.registrar_pagos_pedido_impl(bigint,jsonb,date,text,text)',
+    'public.registrar_pago_cliente_fifo_impl(bigint,numeric,text,date,text,text,uuid)',
+    'public.registrar_pago_combinado_cliente_fifo_impl(bigint,jsonb,date,text,text,uuid)',
+    'public.registrar_pagos_pedido_impl(bigint,jsonb,date,text,text,uuid)',
     'public.imputar_credito_a_pedido_impl(bigint,bigint,numeric)'] LOOP
     f := pg_temp.t_si(f, pg_get_functiondef(v_firma::regprocedure) ~ '_monto_de_cobro\(',
                       format('%s no pasa el monto por _monto_de_cobro', v_firma));
   END LOOP;
-  f := pg_temp.t_si(f, pg_get_functiondef('public.registrar_pagos_pedido_impl(bigint,jsonb,date,text,text)'::regprocedure)
+  f := pg_temp.t_si(f, pg_get_functiondef('public.registrar_pagos_pedido_impl(bigint,jsonb,date,text,text,uuid)'::regprocedure)
                          !~ 'v_falta \+ 0\.005',
                     'registrar_pagos_pedido_impl sigue con la tolerancia de 0,005');
   FOREACH v_firma IN ARRAY ARRAY['public.obtener_resumen_cuenta_cliente(integer)',

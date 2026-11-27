@@ -1,4 +1,5 @@
 import React, { useState, useRef, FormEvent, ChangeEvent } from 'react'
+import CampoQuienCobro, { type PersonaQueCobra } from '../rendiciones/CampoQuienCobro'
 import { z } from 'zod'
 import { X, DollarSign, FileText, AlertCircle, Check, Plus, Trash2, Calendar } from 'lucide-react'
 import { formatPrecio as formatCurrency, fechaLocalISO } from '../../utils/formatters'
@@ -68,6 +69,8 @@ const FORMAS_PAGO_BASE: FormaPagoOption[] = FORMAS_PAGO_SELECCIONABLES.map(m => 
 const FORMA_ADELANTO_SUELDO: FormaPagoOption = { value: 'adelanto_sueldo', label: 'Adelanto de sueldo' }
 
 interface PagoData {
+  /** T4 (#1710): de qué caja es el cobro, si lo eligió el admin (`null` = él mismo). */
+  cobradoPor?: string | null;
   clienteId: string;
   pedidoId: string | null;
   monto: number;
@@ -88,6 +91,8 @@ interface PagoData {
  * llamada a `registrar_pagos_pedido`, con una sola clave (#1476, COB-F-3).
  */
 export interface PagoDivididoPedidoData {
+  /** T4 (#1710): de qué caja es el cobro, si lo eligió el admin. */
+  cobradoPor?: string | null;
   clienteId: string;
   pedidoId: string;
   pagos: Array<{ formaPago: string; monto: number }>;
@@ -178,6 +183,13 @@ export interface ModalRegistrarPagoProps {
    * `null`/`undefined` es «todavía comprobando» y también bloquea.
    */
   clienteEsEmpleado?: boolean | null;
+  /**
+   * T4 (#1710): con esto (sólo para el admin) se elige «Quién cobró»: de qué caja es el cobro.
+   * Sin elegir, es de quien lo carga.
+   */
+  quienesCobran?: PersonaQueCobra[];
+  /** El id de quien carga (para no repetirlo en «Quién cobró»). */
+  yoId?: string | null;
 }
 
 const AVISO_NO_ES_EMPLEADO =
@@ -286,7 +298,9 @@ export default function ModalRegistrarPago({
   pedidoIdFijo,
   permitirAdelantoSueldo = false,
   isAdmin = false,
-  clienteEsEmpleado
+  clienteEsEmpleado,
+  quienesCobran,
+  yoId
 }: ModalRegistrarPagoProps): React.ReactElement | null {
   // B20: los campos de número en rojo frenan el guardado.
   const ilegibles = useRegistroIlegibles()
@@ -294,6 +308,9 @@ export default function ModalRegistrarPago({
   const { validate, getFirstError } = useZodValidation(modalPagoSchema)
 
   const [monto, setMonto] = useState<string>('')
+  // T4: «Quién cobró» (sólo el admin). null = yo.
+  const [cobradoPor, setCobradoPor] = useState<string | null>(null)
+  const quienCobro = quienesCobran && isAdmin ? { cobradoPor } : {}
   // N10 y N11 de la segunda pasada: un preset (Total, 50 %) limpia el borrador en rojo aunque el
   // monto ya fuera ése (vuelve a montar el campo), y «Se registra» no muestra el monto de antes
   // mientras el campo está en rojo.
@@ -491,6 +508,7 @@ export default function ModalRegistrarPago({
           referencia: referencia || undefined,
           notas: notas || undefined,
           clientRequestId: requestId(huella),
+          ...quienCobro,
         })
         olvidar([huella])
         setResultadoFIFO(result)
@@ -529,6 +547,7 @@ export default function ModalRegistrarPago({
             fecha,
             notas: notas || undefined,
             clientRequestId: requestId(`combo|${huellaDividido}`),
+            ...quienCobro,
           })
           olvidar([`combo|${huellaDividido}`])
           setResultadoFIFO(result)
@@ -562,6 +581,7 @@ export default function ModalRegistrarPago({
           notas: notas ? `${notas} (pago dividido)` : 'Pago dividido',
           fecha,
           clientRequestId: requestId(huellaBoleta),
+          ...quienCobro,
         })
         olvidar([huellaBoleta])
         setIntentoSinConfirmar(null)
@@ -601,6 +621,7 @@ export default function ModalRegistrarPago({
           notas,
           fecha,
           clientRequestId: requestId(huella),
+          ...quienCobro,
         })
         olvidar([huella])
         setIntentoSinConfirmar(null)
@@ -794,6 +815,16 @@ export default function ModalRegistrarPago({
             <AlertCircle className="w-4 h-4" />
             {error}
           </div>
+        )}
+
+        {quienesCobran && isAdmin && (
+          <CampoQuienCobro
+            id="quien-cobro-ficha"
+            personas={quienesCobran}
+            value={cobradoPor}
+            yoId={yoId}
+            onChange={setCobradoPor}
+          />
         )}
 
         {/* Fecha contable del pago */}

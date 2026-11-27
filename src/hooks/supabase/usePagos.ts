@@ -17,6 +17,7 @@ import type {
   UsePagosReturnExtended
 } from '../../types'
 import { traerTodo } from '../../utils/paginacion'
+import { argQuienCobro } from '../../utils/quienCobro'
 
 interface CobroPedidoInput {
   pedidoId: string
@@ -25,6 +26,8 @@ interface CobroPedidoInput {
   notas?: string | null
   referencia?: string | null
   clientRequestId?: string | null
+  /** T4 (#1710): de qué caja es el cobro; sin él, de quien lo carga. */
+  cobradoPor?: string | null
 }
 
 /**
@@ -54,6 +57,7 @@ async function cobrarPedido(input: CobroPedidoInput): Promise<{ pagos: PagoDBWit
       p_notas: input.notas || null,
       p_referencia: input.referencia || null,
       p_client_request_id: input.clientRequestId || null,
+      ...argQuienCobro(input.cobradoPor),
     }).abortSignal(signal)
     if (error) throw errorDeSupabase(error, MENSAJE_PAGO_SIN_CONFIRMAR)
     return data
@@ -163,6 +167,7 @@ export function usePagos(): UsePagosReturnExtended {
       notas: pago.notas,
       referencia: pago.referencia,
       clientRequestId: pago.clientRequestId,
+      cobradoPor: pago.cobradoPor,
     })
     if (!pagoData) {
       throw new Error('El pago no se pudo confirmar. Revisá la cuenta del cliente antes de cargarlo de nuevo.')
@@ -201,6 +206,7 @@ export function usePagos(): UsePagosReturnExtended {
         fecha: input.fecha,
         notas: input.observaciones,
         clientRequestId: input.clientRequestIds?.find(Boolean) ?? null,
+        cobradoPor: input.cobradoPor,
       })
 
       setPagos(prev => [...cobro.pagos, ...prev])
@@ -239,6 +245,7 @@ export function usePagos(): UsePagosReturnExtended {
           p_referencia: input.referencia ?? null,
           p_notas: input.notas ?? null,
           p_client_request_id: input.clientRequestId ?? null,
+          ...argQuienCobro(input.cobradoPor),
         }).abortSignal(signal)
         if (error) throw errorDeSupabase(error, MENSAJE_PAGO_SIN_CONFIRMAR)
         return data
@@ -297,6 +304,7 @@ export function usePagos(): UsePagosReturnExtended {
           p_referencia: input.referencia ?? null,
           p_notas: input.notas ?? null,
           p_client_request_id: input.clientRequestId ?? null,
+          ...argQuienCobro(input.cobradoPor),
         }).abortSignal(signal)
         if (error) throw errorDeSupabase(error, MENSAJE_PAGO_SIN_CONFIRMAR)
         return data

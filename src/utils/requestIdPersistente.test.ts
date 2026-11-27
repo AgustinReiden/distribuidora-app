@@ -224,6 +224,22 @@ describe('cobrarRecordandoSinConfirmar', () => {
     expect(m.leerCobroSinConfirmar('4625')).toBeNull()
   })
 
+  // T4 (#1710): de qué caja era es parte de la solicitud. Sin guardarlo, el reintento iba sin
+  // p_cobrado_por: el server lo rechazaba (22023, otro contenido) o lo cobraba en otra caja.
+  it('guarda de qué caja era el cobro (quién cobró), también «yo» (null)', async () => {
+    const m = await cargar()
+    const { ErrorDeSupabase } = await import('./errorDeSupabase')
+    const sinRespuesta = new ErrorDeSupabase('Sin conexión: no se pudo confirmar el pago.', {}, true)
+
+    await expect(m.cobrarRecordandoSinConfirmar({ ...intento, cobradoPor: 'chofer-a' }, () => Promise.reject(sinRespuesta)))
+      .rejects.toBe(sinRespuesta)
+    expect(m.leerCobroSinConfirmar('4625')?.cobradoPor).toBe('chofer-a')
+
+    await expect(m.cobrarRecordandoSinConfirmar({ ...intento, cobradoPor: null }, () => Promise.reject(sinRespuesta)))
+      .rejects.toBe(sinRespuesta)
+    expect(m.leerCobroSinConfirmar('4625')?.cobradoPor).toBeNull()
+  })
+
   it('si sale bien, borra el que había', async () => {
     const m = await cargar()
     m.guardarCobroSinConfirmar(cobro)

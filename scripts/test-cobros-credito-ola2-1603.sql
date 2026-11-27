@@ -677,7 +677,7 @@ BEGIN
   SELECT string_agg(f, ', ') INTO v_txt
     FROM (VALUES ('public.cancelar_pedido_con_stock(bigint,text,uuid,text)'),
                  ('public.crear_nota_credito_venta_impl(bigint,bigint,jsonb,text,text)'),
-                 ('public.marcar_pagos_masivo_impl(bigint[],text,date)'),
+                 ('public.marcar_pagos_masivo_impl(bigint[],text,date,uuid)'),
                  ('public.marcar_entrega_y_pago_masivo_impl(bigint[],uuid,text,date)')) t(f)
    WHERE (SELECT prosrc FROM pg_proc WHERE oid = t.f::regprocedure)
          !~ 'SELECT rol INTO \w+ FROM perfiles WHERE id = (v_acting_user|v_user|auth\.uid\(\)) AND COALESCE\(activo, true\);';

@@ -174,7 +174,9 @@ BEGIN
     v_j := pg_temp.t_alta(v_c1, v_adm, v_prod, 100, v_hoy, 'ensayo-1492-' || gen_random_uuid());
     v_n := (v_j->>'pedido_id')::bigint;
     UPDATE pedidos SET transportista_id = v_tra WHERE id = v_n;
-    v_j := public.registrar_pagos_pedido_impl(v_n, '[{"monto":10,"forma_pago":"efectivo"}]'::jsonb, v_hoy);
+    -- T4 (#1710): el cobro es de quien lo cobró; el admin lo carga a nombre del chofer (p_cobrado_por).
+    v_j := public.registrar_pagos_pedido_impl(v_n, '[{"monto":10,"forma_pago":"efectivo"}]'::jsonb, v_hoy,
+                                              NULL, NULL, v_tra);
     v_p := (SELECT max(id) FROM pagos WHERE pedido_id = v_n AND NOT de_saldo_a_favor);
     v_txt := pg_temp.t_saldo(v_c1);
     IF (SELECT pedido_id::text || '/' || de_saldo_a_favor::text FROM pagos WHERE id = v_c) IS DISTINCT FROM v_n::text || '/true'

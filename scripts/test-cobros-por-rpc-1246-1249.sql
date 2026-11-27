@@ -200,8 +200,8 @@ CREATE OR REPLACE FUNCTION pg_temp.caso_g1(a uuid, tr uuid, pv uuid, en uuid, s 
 RETURNS jsonb LANGUAGE plpgsql AS $fn$
 DECLARE
   f text[] := '{}';
-  v_rpc  text := 'public.registrar_pagos_pedido(bigint,jsonb,date,text,text,uuid)';
-  v_impl text := 'public.registrar_pagos_pedido_impl(bigint,jsonb,date,text,text)';
+  v_rpc  text := 'public.registrar_pagos_pedido(bigint,jsonb,date,text,text,uuid,uuid)';
+  v_impl text := 'public.registrar_pagos_pedido_impl(bigint,jsonb,date,text,text,uuid)';
 BEGIN
   f := pg_temp.t_si(f, NOT has_table_privilege('authenticated', 'public.pagos', 'INSERT'),
                     'authenticated sigue con INSERT sobre pagos');

@@ -183,7 +183,7 @@ describe('buildManifiestoOps — consolidado de la ruta', () => {
     const ops = buildManifiestoOps(fakeDoc(), [pedido([itemRegaloDosTokens()])])
 
     // "2 Granadina" describe un bloque: imprimir "3x 2 Granadina" hacía cargar 6.
-    expect(manifiesto(ops)).toContain('3x Granadina (SUELTAS, NO FARDO)')
+    expect(manifiesto(ops)).toContain('3x Granadina 1L (SUELTAS, NO FARDO)')
     expect(manifiesto(ops).some((f) => f.includes('2 Granadina'))).toBe(false)
   })
 
@@ -280,14 +280,14 @@ describe('buildManifiestoOps — consolidado de la ruta', () => {
       expect(filas).toEqual(['2x Manaos Naranja 3L (SUELTAS, NO FARDO)'])
     })
 
-    it('dos sabores con la misma descripción no se suman en una fila anónima', () => {
+    it('dos sabores con la misma descripción no se suman: cada fila nombra su producto', () => {
       const [pomelo, naranja] = reparto()
       const filas = manifiesto(buildManifiestoOps(fakeDoc(), [
         pedido([{ ...pomelo, cantidad: 2 }, { ...naranja, cantidad: 4, descripcion_regalo: pomelo.descripcion_regalo }]),
       ]))
 
-      expect(filas).toContain('2x botellas Manaos Pomelo 3L - Manaos Pomelo 3L (SUELTAS, NO FARDO)')
-      expect(filas).toContain('4x botellas Manaos Pomelo 3L - Manaos Naranja 3L (SUELTAS, NO FARDO)')
+      expect(filas).toContain('2x botellas Manaos Pomelo 3L (SUELTAS, NO FARDO)')
+      expect(filas).toContain('4x botellas Manaos Naranja 3L (SUELTAS, NO FARDO)')
       expect(filas.some((f) => f.startsWith('6x'))).toBe(false)
     })
 
@@ -428,5 +428,26 @@ describe('buildCardOps — renglón Envío', () => {
     expect(labels(buildCardOps(fakeDoc(), pedido([itemVenta()]), 1))).toEqual(['Total pedido:'])
     expect(labels(buildCardOps(fakeDoc(), pedido([itemVenta()], { total: 0, cargo_envio: 500 }), 1)))
       .toEqual(['Total pedido:'])
+  })
+})
+
+describe('regalo: el sabor real de la línea (#1716)', () => {
+  const MULTIFRUTA = { id: 21, nombre: 'PLACER MULTIFRUTA 1,5 LT' }
+  const regaloGenerico = () => itemRegaloFraccion({
+    producto_id: MULTIFRUTA.id,
+    producto: MULTIFRUTA,
+    cantidad: 2,
+    descripcion_regalo: '2 botellas Placer 1,5L',
+    unidades_por_bloque_al_crear: 6,
+  })
+
+  it('la hoja de ruta y el manifiesto nombran el mismo sabor, sin marca de sustitución', () => {
+    const p = pedido([regaloGenerico()])
+    const hoja = textos(buildCardOps(fakeDoc(), p, 1)).find((t) => t.includes('SUELTAS'))
+    const filas = manifiesto(buildManifiestoOps(fakeDoc(), [p]))
+
+    expect(hoja).toContain('2x botellas PLACER MULTIFRUTA 1,5 LT')
+    expect(filas.some((f) => f.includes('botellas PLACER MULTIFRUTA 1,5 LT'))).toBe(true)
+    expect(hoja).not.toContain('Placer 1,5L')
   })
 })
