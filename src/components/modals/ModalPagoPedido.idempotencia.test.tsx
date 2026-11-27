@@ -127,6 +127,27 @@ describe('ModalPagoPedido — la clave del cobro sobrevive al modal (#1410)', ()
     })
   })
 
+  // T4 (#1710): la entrega con pago de la oficina cobró a nombre del chofer y quedó sin confirmar.
+  // El reintento (el encargado, sin selector) va con la misma clave y la misma caja.
+  it('el reintento de un cobro sin confirmar va con la caja con la que viajó', async () => {
+    const clave = '11111111-1111-4111-8111-111111111111'
+    guardarCobroSinConfirmar({
+      pedidoId: '4625',
+      fechaPago: fechaLocalISO(),
+      pagos: [{ formaPago: 'efectivo', monto: 10000 }],
+      clientRequestId: clave,
+      pagadoAntes: 0,
+      cobradoPor: 'chofer-a',
+    })
+    const onConfirmar = vi.fn<Confirmar>().mockResolvedValue(undefined)
+    abrir(onConfirmar)
+
+    fireEvent.click(screen.getByRole('button', { name: /^registrar pago$/i }))
+
+    await waitFor(() => expect(onConfirmar).toHaveBeenCalledTimes(1))
+    expect(onConfirmar.mock.calls[0][0]).toMatchObject({ clientRequestIds: [clave], cobradoPor: 'chofer-a' })
+  })
+
   // H2 (lente B10): quien no es admin cobra con hoy y el campo está deshabilitado. Un cobro sin
   // confirmar de otro día lo dejaba trabado («el cobro va con la fecha de hoy», sin forma de corregirlo).
   it('quien no es admin con un cobro sin confirmar de otro día lo cobra con la fecha de hoy y otra clave', async () => {

@@ -34,6 +34,7 @@ import { puedeAlternarRuta as puedeAlternarRutaPorRoles } from '../../utils/ruta
 import { mensajeCancelacion } from '../../utils/cancelacionFaltaStock'
 import { mensajeCancelacionRevertida, mensajeConfirmarRevertirCancelacion } from '../../utils/revertirCancelacion'
 import { datosDeEntrega, necesitaElegirChofer, type EleccionChofer } from '../../utils/choferDeEntrega'
+import { cobradorDeLaEntrega, quienesCobranDe } from '../../utils/quienCobro'
 import type { PagoPedidoPayload, EntregaSinPagoPayload } from '../modals/ModalPagoPedido'
 import {
   clienteHabilitadoVB,
@@ -332,6 +333,8 @@ export default function PedidosContainer(): React.ReactElement {
     () => (isAdmin ? usuariosTodos : []),
     [isAdmin, usuariosTodos],
   )
+  // T4 (#1710): a quién puede poner el admin en «Quién cobró»: los usuarios activos que no son del depósito.
+  const quienesCobran = useMemo(() => quienesCobranDe(usuarios), [usuarios])
 
   // Mutations
   const crearPedido = useCrearPedidoMutation()
@@ -1223,12 +1226,13 @@ export default function PedidosContainer(): React.ReactElement {
     setGuardando(false)
   }, [entregasMasivas, notify])
 
-  const handlePagosMasivos = useCallback(async (formaPago: string, pedidoIds: string[], fechaPago: string) => {
+  const handlePagosMasivos = useCallback(async (formaPago: string, pedidoIds: string[], fechaPago: string, cobradoPor?: string | null) => {
     setGuardando(true)
     try {
-      const huella = `pagos|${fechaPago}|${formaPago}|${[...pedidoIds].sort().join(',')}`
+      // T4: quién cobró es parte del cobro (otra caja, otro cobro).
+      const huella = `pagos|${fechaPago}|${formaPago}|${[...pedidoIds].sort().join(',')}${cobradoPor ? `|${cobradoPor}` : ''}`
       const cobrados = await pagosMasivos.mutateAsync({
-        pedidoIds, formaPago, fecha: fechaPago,
+        pedidoIds, formaPago, fecha: fechaPago, cobradoPor,
         // Mismo lote + misma forma + misma fecha = el mismo cobro. Un reintento
         // tras un error de red no vuelve a cobrarlo (mig 167).
         clientRequestId: requestIdMasivo(huella),
@@ -1641,10 +1645,13 @@ export default function PedidosContainer(): React.ReactElement {
 
   // El error ya fue notificado por usePagos.registrarPagosBatch via notifyError;
   // dejamos que se propague para que el modal lo muestre tambien.
-  const handleConfirmarPago = useCallback(async (payload: { pedidoId: string; clienteId: string; fechaPago: string; observaciones?: string; pagos: Array<{ formaPago: string; monto: number }>; clientRequestIds?: string[]; pagadoAntes: number }) => {
+  const handleConfirmarPago = useCallback(async (payload: { pedidoId: string; clienteId: string; fechaPago: string; observaciones?: string; pagos: Array<{ formaPago: string; monto: number }>; clientRequestIds?: string[]; pagadoAntes: number; cobradoPor?: string | null }) => {
     setGuardando(true)
     try {
-      const cobro = await cobrarRecordandoSinConfirmar(payload, () => registrarPagosBatch({
+      // T4: el cobro de la oficina es de quien lo carga, salvo que el admin elija otro. Se recuerda
+      // con el cobro sin confirmar: el reintento con su clave lo manda igual.
+      const cobradoPor = payload.cobradoPor ?? null
+      const cobro = await cobrarRecordandoSinConfirmar({ ...payload, cobradoPor }, () => registrarPagosBatch({
         clienteId: payload.clienteId,
         pedidoId: payload.pedidoId,
         fecha: payload.fechaPago,
@@ -1652,6 +1659,7 @@ export default function PedidosContainer(): React.ReactElement {
         pagos: payload.pagos,
         usuarioId: user?.id ?? null,
         clientRequestIds: payload.clientRequestIds,
+        cobradoPor,
       }))
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       // FRT-2: el cobro mueve `saldo_cuenta`. Sin esto el alta siguiente del mismo
@@ -1733,7 +1741,13 @@ export default function PedidosContainer(): React.ReactElement {
       try {
         // Si falla, el modal se cierra igual: el cobro queda guardado con su
         // clave y el "menú de pago" lo vuelve a proponer con ella (#1410).
-        const cobro = await cobrarRecordandoSinConfirmar(payload, () => registrarPagosBatch({
+        // T4 (#1710): la oficina carga la entrega a nombre del chofer: el cobro es suyo (el admin
+        // puede elegir otro). Un retiro en depósito es de quien lo carga. Quien no es de la oficina
+        // (el chofer en su pedido) cobra a su nombre. Se recuerda con el cobro sin confirmar.
+        const cobradoPor = (isAdmin || isEncargado)
+          ? cobradorDeLaEntrega(payload.cobradoPor, payload.eleccionChofer, pedido.transportista_id)
+          : null
+        const cobro = await cobrarRecordandoSinConfirmar({ ...payload, cobradoPor }, () => registrarPagosBatch({
           clienteId: payload.clienteId,
           pedidoId: payload.pedidoId,
           fecha: payload.fechaPago,
@@ -1741,6 +1755,7 @@ export default function PedidosContainer(): React.ReactElement {
           pagos: payload.pagos,
           usuarioId: user?.id ?? null,
           clientRequestIds: payload.clientRequestIds,
+          cobradoPor,
         }))
         cobroRepetido = cobro.idempotentReplay
       } catch (pagoErr) {
@@ -1764,7 +1779,7 @@ export default function PedidosContainer(): React.ReactElement {
     } finally {
       setGuardando(false)
     }
-  }, [pedidoEntregaConPago, cambiarEstado, registrarPagosBatch, user, queryClient, notify, handleConfirmarPago])
+  }, [pedidoEntregaConPago, cambiarEstado, registrarPagosBatch, user, queryClient, notify, handleConfirmarPago, isAdmin, isEncargado])
 
   const handleAnularPagoPedido = useCallback(async (pagoId: string) => {
     if (!pedidoPago) return
@@ -3261,6 +3276,8 @@ export default function PedidosContainer(): React.ReactElement {
             pedirChofer={!!pedidoEntregaConPago && necesitaElegirChofer(pedidoEntregaConPago)}
             transportistas={transportistas}
             permitirRetiro={isAdmin || isEncargado}
+            quienesCobran={isAdmin ? quienesCobran : undefined}
+            yoId={user?.id ?? null}
             onClose={() => {
               setModalPagoPedidoOpen(false)
               setPedidoPago(null)
@@ -3413,6 +3430,8 @@ export default function PedidosContainer(): React.ReactElement {
             guardando={guardando}
             isEncargado={isEncargado}
             isAdmin={isAdmin}
+            quienesCobran={isAdmin ? quienesCobran : undefined}
+            yoId={user?.id ?? null}
           />
         </Suspense>
       )}

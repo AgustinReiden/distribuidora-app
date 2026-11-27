@@ -410,6 +410,9 @@ BEGIN
   PERFORM pg_temp.t6_cobrar(v_ped, v_tra, v_suc, ARRAY[50, 50]);
   v_pgs := ARRAY(SELECT id FROM public.pagos WHERE pedido_id = v_ped ORDER BY id);
   v_fec := (SELECT fecha FROM public.pagos WHERE id = v_pgs[2]);
+  -- T4 (#1710): el cobro que se borra es de la caja del admin (ni del chofer de la boleta ni de quien
+  -- lo cargó): el que se repone vuelve a esa caja.
+  UPDATE public.pagos SET cobrado_por = v_adm WHERE id = v_pgs[2];
   v_s := pg_temp.t6_salvedad(v_ped, 60, v_adm, v_suc);
   f := pg_temp.t6_si(f, NOT EXISTS (SELECT 1 FROM public.pagos WHERE id = v_pgs[2])
                         AND (SELECT monto FROM public.pagos WHERE id = v_pgs[1]) = 40,
@@ -423,6 +426,9 @@ BEGIN
                                  WHERE pedido_id = v_ped AND id > v_pgs[2] AND monto = 50
                                    AND forma_pago = 'efectivo' AND fecha = v_fec AND usuario_id = v_tra),
                      'el cobro borrado no volvió como un cobro nuevo de 50 en efectivo, de su fecha y de su chofer');
+  f := pg_temp.t6_si(f, EXISTS (SELECT 1 FROM public.pagos
+                                 WHERE pedido_id = v_ped AND id > v_pgs[2] AND monto = 50 AND cobrado_por = v_adm),
+                     'el cobro repuesto no volvió a la caja del cobro borrado (T4)');
   f := pg_temp.t6_si(f, pg_temp.t6_saldo(v_cli) = 0, format('el saldo del cliente quedó en %s', pg_temp.t6_saldo(v_cli)));
   RETURN jsonb_build_object('fallas', to_jsonb(f));
 END
@@ -543,7 +549,9 @@ BEGIN
   -- El cobro anticipado: la boleta de hace 3 días, con su chofer, cobrada ese día.
   UPDATE public.pedidos SET fecha = v_hoy - 3, transportista_id = v_tra WHERE id = v_ped;
   PERFORM pg_temp.t6_claims(v_adm, v_suc);
-  v_res := public.registrar_pagos_pedido(v_ped, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb, v_hoy - 3);
+  -- T4 (#1710): el admin lo carga a nombre del chofer (p_cobrado_por): es de su rendición.
+  v_res := public.registrar_pagos_pedido(v_ped, '[{"monto":100,"forma_pago":"efectivo"}]'::jsonb, v_hoy - 3,
+                                         NULL, NULL, NULL, v_tra);
   PERFORM pg_temp.t6_reset();
   SELECT id INTO v_pg FROM public.pagos WHERE pedido_id = v_ped;
   UPDATE public.pedidos SET estado = 'entregado', fecha_entrega = now() WHERE id = v_ped;

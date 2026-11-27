@@ -2,8 +2,8 @@
 --
 -- Tienen que pasar:
 --   R3  · REN-3: el encargado no confirma, resuelve, marca ni desmarca su propia
---         rendicion. La confirma el admin o otro encargado; el encargado sigue
---         confirmando la de un chofer, y el admin la suya.
+--         rendicion. La confirma el admin (desde la T4, #1710, tampoco otro encargado);
+--         el encargado sigue confirmando la de un chofer, y el admin la suya.
 --   R2  · REN-2: un pago cambia de dueno y cae en un dia confirmado de un chofer:
 --         la boleta que cobro el admin pasa a la ruta del chofer (desde #1492, mig
 --         473, reimputar un credito ya no le cambia el dueno a un pago).
@@ -215,11 +215,13 @@ BEGIN
   PERFORM pg_temp.t_pago(c, s, NULL, 10, v_x + 2, tr);
   PERFORM pg_temp.t_pago(c, s, NULL, 10, v_x + 3, a);
 
-  -- Otro encargado si puede.
+  -- T4 (#1710): la rendición de un encargado la confirma un admin, tampoco otro encargado.
   UPDATE public.perfiles SET rol = 'encargado' WHERE id = tr;
   j := pg_temp.t_confirmar(tr, v_x + 1, e);
-  f := pg_temp.t_si(f, NOT pg_temp.t_rechazo(j), format('otro encargado no pudo confirmarla: %s', j));
+  f := pg_temp.t_si(f, pg_temp.t_rechazo(j), format('otro encargado confirmó la de un encargado: %s', j));
   UPDATE public.perfiles SET rol = 'transportista' WHERE id = tr;
+  j := pg_temp.t_confirmar(a, v_x + 1, e);
+  f := pg_temp.t_si(f, NOT pg_temp.t_rechazo(j), format('el admin no pudo confirmar la del encargado: %s', j));
 
   j := pg_temp.t_confirmar(e, v_x + 2, tr);
   f := pg_temp.t_si(f, NOT pg_temp.t_rechazo(j), format('el encargado no pudo confirmar la de un chofer: %s', j));
@@ -252,8 +254,11 @@ BEGIN
   f := pg_temp.t_si(f, NOT pg_temp.t_rechazo(j), format('no se pudo confirmar: %s', j));
   f := pg_temp.t_si(f, pg_temp.t_foto(v_x, tr, s) = 100, format('la foto no da 100: %s', pg_temp.t_foto(v_x, tr, s)));
 
-  -- La boleta cobrada pasa a la ruta del chofer: su cobro es del chofer, con su fecha.
+  -- La boleta cobrada pasa a la ruta del chofer, y el cobro pasa a ser del chofer, con su fecha.
+  -- Desde la T4 (#1710) el cobro no sigue a la boleta: es de quien lo cobró (pagos.cobrado_por), y
+  -- lo cambia el admin a mano (corregir_cobro_rendicion; acá, directo).
   UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id = v_p2;
+  UPDATE public.pagos SET cobrado_por = tr WHERE id = v_cobro;
   f := pg_temp.t_si(f, (SELECT pedido_id FROM public.pagos WHERE id = v_cobro) = v_p2
                        AND (SELECT transportista_id FROM public.pedidos WHERE id = v_p2) = tr,
                     'el cobro no quedo en la boleta del chofer');
@@ -308,6 +313,8 @@ BEGIN
     f := pg_temp.t_si(f, NOT pg_temp.t_rechazo(j), format('no se pudo confirmar el dia %s: %s', v_x + d, j));
   END LOOP;
   UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id = v_p;
+  -- T4 (#1710): el cobro no sigue a la boleta; pasa a ser del chofer a mano.
+  UPDATE public.pagos SET cobrado_por = tr WHERE pedido_id = v_p;
   f := pg_temp.t_si(f, pg_temp.t_detalle(a, v_x, tr) = 10 AND pg_temp.t_detalle(a, v_x + 1, tr) = 10
                        AND pg_temp.t_detalle(a, v_x + 2, tr) = 0 AND pg_temp.t_detalle(a, v_x + 3, tr) = 10
                        AND pg_temp.t_detalle(a, v_x + 4, tr) = 60,

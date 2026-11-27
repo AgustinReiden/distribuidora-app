@@ -82,19 +82,20 @@ export function unidadDelRegalo(desc: string | null | undefined): string | null 
 }
 
 /**
- * Nombre a imprimir: para un regalo manda la descripción de la promo. Si el
- * regalo se sustituyó, la descripción todavía nombra el producto ORIGINAL; lo
- * que se carga y se entrega es el sustituto, así que va su nombre, con la unidad
- * de la promo y sin aclaración.
+ * Nombre a imprimir. Un regalo lleva el producto REAL de la línea
+ * (`item.producto`, el que mueve el stock y el que se carga), con la unidad de
+ * la promo: la descripción de la promo ("2 botellas Placer 1,5L") es genérica y
+ * no dice el sabor que se entrega ("PLACER MULTIFRUTA 1,5 LT"); si el regalo se
+ * sustituyó, además nombra el producto ORIGINAL. Sin producto cargado cae a la
+ * descripción. Es la misma fuente que el manifiesto de carga (#1716).
  */
 export function nombreDeLaLinea(item: ItemImpresion): string {
-  const producto = item.producto?.nombre?.trim() || 'Producto';
-  if (!item.es_bonificacion) return producto;
-  if (esRegaloSustituido(item)) {
-    const unidad = unidadDelRegalo(item.descripcion_regalo);
-    return unidad ? `${unidad} ${producto}` : producto;
-  }
-  return nombreSinConteo(item.descripcion_regalo) || producto;
+  const nombreProducto = item.producto?.nombre?.trim()
+  const producto = nombreProducto || 'Producto'
+  if (!item.es_bonificacion) return producto
+  if (!nombreProducto) return nombreSinConteo(item.descripcion_regalo) || producto
+  const unidad = unidadDelRegalo(item.descripcion_regalo);
+  return unidad ? `${unidad} ${producto}` : producto;
 }
 
 /**

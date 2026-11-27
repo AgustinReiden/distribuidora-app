@@ -188,6 +188,11 @@ export interface CobroSinConfirmar {
    * movió por otro camino (otra cosa), y en los dos últimos casos no se propone.
    */
   pagadoAntes: number
+  /**
+   * T4 (#1710): de qué caja era el cobro (`p_cobrado_por`; `null` = de quien lo carga). Es parte de
+   * la solicitud: el reintento con la misma clave lo manda igual, o el server lo toma por otro cobro.
+   */
+  cobradoPor?: string | null
 }
 
 interface EntradaCobro extends Entrada {
@@ -340,6 +345,7 @@ export async function cobrarRecordandoSinConfirmar<T>(
         pagos: cobro.pagos,
         clientRequestId,
         pagadoAntes: cobro.pagadoAntes,
+        ...(cobro.cobradoPor !== undefined ? { cobradoPor: cobro.cobradoPor } : {}),
       })
     }
     throw e

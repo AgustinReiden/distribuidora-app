@@ -31,7 +31,8 @@
 --       de otro día. (Un gasto con otro origen_pago no se arma: gastos_rendicion_check lo ata a
 --       tener o no la rendición, y sin rendición no coincide con la línea por el chofer.) Ve 6.
 --   5 · FALT-B · un faltante sin línea. La compensación de un faltante (sin línea propia) no
---       cuenta. Ve 1.
+--       cuenta, ni lo que el cliente pagó después contra un faltante (T4, recupera_faltante_id).
+--       Ve 1.
 --   6 · FALT-C · líneas anuladas: una con el movimiento compensado y otra con el gasto anulado
 --       (no cuentan); una con el movimiento sin compensar, una con el gasto vivo y una con la
 --       compensación por otro monto. Ve 3.
@@ -256,6 +257,14 @@ BEGIN
   PERFORM pg_temp.linea(v_tra, 'gasto_no_cargado', 48, NULL, NULL, v_g, false, v_adm);
   -- FALT-B: un faltante sin línea
   PERFORM pg_temp.mov(v_e, 'faltante', -30, v_tra, 5, NULL, NULL, NULL, v_adm);
+  -- FALT-B (T4, #1710): lo que el cliente pagó después contra una línea viva es un faltante positivo
+  -- con recupera_faltante_id, en la caja de quien lo recibió y sin línea propia: no cuenta.
+  v_m := pg_temp.mov(v_e, 'faltante', -55, v_tra, 5, NULL, NULL, NULL, v_adm);
+  PERFORM pg_temp.linea(v_tra, 'empleado', 55, v_e, v_m, NULL, false, v_adm);
+  INSERT INTO empleado_movimientos (empleado_id, fecha, tipo, monto, observacion, creado_por, recupera_faltante_id,
+                                    rendicion_transportista_id, rendicion_fecha, rendicion_sucursal_id)
+  VALUES (v_e, public._tablero_hoy(), 'faltante', 20, 'T1 ensayo', v_adm,
+          (SELECT f.id FROM rendicion_faltantes f WHERE f.movimiento_id = v_m), v_adm, public._tablero_hoy(), 1);
   -- anuladas que están bien
   v_m := pg_temp.mov(v_e, 'faltante', -60, v_tra, 5, NULL, NULL, NULL, v_adm);
   PERFORM pg_temp.mov(v_e, 'faltante', 60, v_tra, 5, v_m, NULL, NULL, v_adm);
