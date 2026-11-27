@@ -8,7 +8,7 @@
 -- service_role (la admin API) y SQL.
 --
 -- Quién usaba el metadata para el alta: las altas por SQL o por la admin API que
--- traían rol y sucursal_id (transporte@crecertp.com el 24/04, guillermo@ el
+-- traían rol y sucursal_id (una el 24/04 y otra el
 -- 12/10). Las tres del 20/04 son la importación de TP Export (archive/062), que
 -- copió el metadata del proyecto viejo. Ese camino sigue andando con los mismos
 -- datos en app_metadata:
