@@ -33,6 +33,7 @@ import { esPedidoDeBaja } from '../../utils/pedidoDeBaja'
 import { preventistaPuedeEditar } from '../../utils/permisosPedido'
 import { puedeAlternarRuta as puedeAlternarRutaPorRoles } from '../../utils/rutaActiva'
 import { mensajeCancelacion } from '../../utils/cancelacionFaltaStock'
+import { mensajeCancelacionRevertida, mensajeConfirmarRevertirCancelacion } from '../../utils/revertirCancelacion'
 import { datosDeEntrega, necesitaElegirChofer, type EleccionChofer } from '../../utils/choferDeEntrega'
 import { cobradorDeLaEntrega, quienesCobranDe } from '../../utils/quienCobro'
 import type { PagoPedidoPayload, EntregaSinPagoPayload } from '../modals/ModalPagoPedido'
@@ -84,6 +85,7 @@ import {
   useVolverPedidoAPendienteMutation,
   useEntregasMasivasMutation,
   useCancelarPedidoMutation,
+  useRevertirCancelacionMutation,
   useCambiarClientePedidoMutation,
   usePagosMasivosMutation,
   useEntregaYPagoMasivosMutation,
@@ -348,6 +350,7 @@ export default function PedidosContainer(): React.ReactElement {
   const volverAPendienteMut = useVolverPedidoAPendienteMutation()
   const entregasMasivas = useEntregasMasivasMutation()
   const cancelarPedidoMut = useCancelarPedidoMutation()
+  const revertirCancelacionMut = useRevertirCancelacionMutation()
   const cambiarClientePedidoMut = useCambiarClientePedidoMutation()
   const pagosMasivos = usePagosMasivosMutation()
   const entregaYPagoMasivos = useEntregaYPagoMasivosMutation()
@@ -1195,6 +1198,22 @@ export default function PedidosContainer(): React.ReactElement {
     } catch (e) { notify.error((e as Error).message) }
     setGuardando(false)
   }, [pedidoCancelando, cancelarPedidoMut, user, notify])
+
+  // Sólo admin (el menú lo ofrece con puedeRevertirCancelacion y la RPC lo valida
+  // de nuevo): la confirmación dice qué vuelve y el aviso qué volvió.
+  const handleRevertirCancelacion = useCallback((pedido: PedidoDB) => {
+    setConfirmConfig({
+      visible: true, titulo: 'Revertir cancelación',
+      mensaje: mensajeConfirmarRevertirCancelacion(pedido), tipo: 'warning',
+      onConfirm: async () => {
+        try {
+          const r = await revertirCancelacionMut.mutateAsync({ pedidoId: pedido.id, usuarioId: user?.id })
+          notify.success(mensajeCancelacionRevertida(r))
+        } catch (e) { notify.error((e as Error).message) }
+        setConfirmConfig({ visible: false })
+      },
+    })
+  }, [revertirCancelacionMut, user, notify])
 
   const handleEntregasMasivas = useCallback(async (transportistaId: string, pedidoIds: string[], fechaEntrega: string) => {
     setGuardando(true)
@@ -3028,6 +3047,7 @@ export default function PedidosContainer(): React.ReactElement {
           onDesmarcarEntregado={handleDesmarcarEntregado}
           onNotaCreditoVenta={puedeCrearNotaCreditoVenta(perfil?.rol) ? setPedidoParaNotaCredito : undefined}
           onCancelarPedido={handleCancelarPedido}
+          onRevertirCancelacion={handleRevertirCancelacion}
           onEntregasMasivas={() => setModalEntregasMasivasOpen(true)}
           onPagosMasivos={() => setModalPagosMasivosOpen(true)}
           onEntregaYPagoMasivos={() => setModalEntregaYPagoMasivosOpen(true)}

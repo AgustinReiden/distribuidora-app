@@ -26,6 +26,7 @@ import { CampoNumero } from '../ui/CampoNumero'
 import { numeroEditable } from '../../utils/calculations';
 import { leerDecimalSinMiles, leerEntero } from '../../utils/normalizarNumero';
 import EtiquetaRefechado from '../pedidos/EtiquetaRefechado';
+import { ubicacionesSospechosas, type UbicacionSospechosa } from '../../utils/ubicacionSospechosa';
 
 /** Una coordenada tipeada (B20, D17): sin miles, con menos; la tecla del punto es la coma. */
 const leerCoordenada = (texto: string): number => leerDecimalSinMiles(texto) ?? NaN;
@@ -642,6 +643,24 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
   // Verificar si hay pedidos seleccionados sin coordenadas
   const pedidosSinCoordenadas = useMemo((): PedidoDB[] => {
     return pedidosSeleccionados.filter(p => !p.cliente?.latitud || !p.cliente?.longitud);
+  }, [pedidosSeleccionados]);
+
+  // Paradas cuya coordenada no cierra con su dirección (#1717): el optimizador
+  // sólo ve coordenadas, así que un cliente guardado en el punto de la calle
+  // separa a dos vecinos y mete otras paradas en el medio. Se avisa antes de
+  // optimizar, que es cuando todavía se puede corregir el pin.
+  const ubicacionesDudosas = useMemo((): Array<UbicacionSospechosa & { pedidos: [PedidoDB, PedidoDB] }> => {
+    const porId = new Map(pedidosSeleccionados.map(p => [p.id, p]));
+    return ubicacionesSospechosas(pedidosSeleccionados.map(p => ({
+      id: p.id,
+      direccion: p.cliente?.direccion,
+      latitud: p.cliente?.latitud,
+      longitud: p.cliente?.longitud,
+    }))).flatMap(s => {
+      const a = porId.get(s.ids[0]);
+      const b = porId.get(s.ids[1]);
+      return a && b ? [{ ...s, pedidos: [a, b] as [PedidoDB, PedidoDB] }] : [];
+    });
   }, [pedidosSeleccionados]);
 
   // Paradas que, según el plan del optimizador, caen fuera del horario del
@@ -1503,6 +1522,42 @@ const ModalGestionRutas = memo(function ModalGestionRutas({
                               <li key={p.id} className="flex items-center gap-2">
                                 <Circle className="w-2 h-2" />
                                 #{p.id} - {p.cliente?.nombre_fantasia}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Ubicaciones dudosas (#1717): vecinos que el mapa pone lejos */}
+                  {ubicacionesDudosas.length > 0 && (
+                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-lg p-4">
+                      <div className="flex items-start space-x-3">
+                        <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+                        <div>
+                          <p className="font-medium text-amber-800 dark:text-amber-200">
+                            {ubicacionesDudosas.length === 1
+                              ? 'Una ubicación no coincide con su dirección'
+                              : `${ubicacionesDudosas.length} ubicaciones no coinciden con su dirección`}
+                          </p>
+                          <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+                            La ruta se arma con el punto del mapa, no con la dirección escrita: si un
+                            cliente quedó marcado en el centro de la calle, sus vecinos salen separados.
+                            Corregí el punto en la ficha del cliente antes de optimizar.
+                          </p>
+                          <ul className="text-sm text-amber-700 dark:text-amber-300 mt-2 space-y-1">
+                            {ubicacionesDudosas.map(s => (
+                              <li key={`${s.ids[0]}-${s.ids[1]}`} className="flex items-start gap-2">
+                                <Circle className="w-2 h-2 mt-1.5 shrink-0" />
+                                <span>
+                                  {s.pedidos[0].cliente?.nombre_fantasia} ({s.pedidos[0].cliente?.direccion?.split(',')[0]})
+                                  {' y '}
+                                  {s.pedidos[1].cliente?.nombre_fantasia} ({s.pedidos[1].cliente?.direccion?.split(',')[0]})
+                                  {s.tipo === 'misma_coordenada'
+                                    ? ': tienen el mismo punto exacto en el mapa siendo direcciones distintas.'
+                                    : `: están en la misma cuadra, pero en el mapa quedan a ${(s.metros / 1000).toLocaleString('es-AR', { maximumFractionDigits: 1 })} km.`}
+                                </span>
                               </li>
                             ))}
                           </ul>
