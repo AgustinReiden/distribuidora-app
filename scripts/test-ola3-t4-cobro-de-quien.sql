@@ -74,6 +74,7 @@ DECLARE
   v_txt    text;
   v_num    numeric;
   v_clave  uuid := gen_random_uuid();
+  v_aud0   text;
   v_cli3   bigint;
   v_fallas text[] := '{}';
 BEGIN
@@ -169,6 +170,8 @@ BEGIN
      WHERE (e->>'id' LIKE 'FALT-%' OR e->>'id' LIKE 'REND-%' OR e->>'id' LIKE 'PAGO-%')
        AND (e->>'violaciones')::bigint <> 0;
   $f$;
+  -- Lo que la base ya traía en rojo antes del ensayo: se compara contra eso.
+  v_aud0 := pg_temp.aud();
   -- La caja de alguien un día, por forma.
   CREATE OR REPLACE FUNCTION pg_temp.caja(p_t uuid, p_d date, p_forma text DEFAULT 'efectivo') RETURNS numeric
   LANGUAGE sql AS $f$
@@ -373,7 +376,7 @@ BEGIN
     v_fallas := v_fallas || format('CF · el pago de ayer no fue al día abierto de C: %s', pg_temp.caja(v_c, v_hoy));
   END IF;
   v_txt := pg_temp.r(v_ad, format('SELECT public.corregir_cobro_rendicion(%s, NULL, %L::uuid, ''x'')::text', v_id, v_b));
-  IF v_txt !~ '^22023 ' THEN
+  IF v_txt !~ '^22023 .*ya estaba cerrado' THEN
     v_fallas := v_fallas || ('CF · pasó a otro un cobro que vive en el día siguiente: ' || v_txt);
   END IF;
   IF pg_temp.caja(v_c, v_hoy - 1) <> 7000 OR pg_temp.caja(v_ad, v_hoy - 1) <> 0 THEN
@@ -399,7 +402,9 @@ BEGIN
   IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('F · AD no cargó el cobro contra el faltante: ' || v_txt); END IF;
   v_mov := NULLIF(substr(v_txt, 6), '')::bigint;
   v_txt := pg_temp.aud();
-  IF v_txt IS NOT NULL THEN v_fallas := v_fallas || ('AUD · con el cobro contra el faltante: ' || v_txt); END IF;
+  IF v_txt IS DISTINCT FROM v_aud0 THEN
+    v_fallas := v_fallas || format('AUD · con el cobro contra el faltante: %s (antes %s)', v_txt, v_aud0);
+  END IF;
   IF public._rendicion_efectivo_a_entregar(1, v_e, v_hoy) <> 13000 THEN
     v_fallas := v_fallas || format('F · efectivo a entregar de E %s (13000)', public._rendicion_efectivo_a_entregar(1, v_e, v_hoy));
   END IF;
@@ -443,7 +448,9 @@ BEGIN
   END IF;
 
   v_txt := pg_temp.aud();
-  IF v_txt IS NOT NULL THEN v_fallas := v_fallas || ('AUD · al final: ' || v_txt); END IF;
+  IF v_txt IS DISTINCT FROM v_aud0 THEN
+    v_fallas := v_fallas || format('AUD · al final: %s (antes %s)', v_txt, v_aud0);
+  END IF;
 
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = 'ENSAYO FALLÓ · ' || array_to_string(v_fallas, ' | ');
