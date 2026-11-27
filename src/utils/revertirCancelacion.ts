@@ -6,7 +6,6 @@
  */
 import type { PedidoDB } from '../types'
 import { formatPrecio } from './formatters'
-import { esTipoVB } from './valeBlanco'
 
 type PedidoParaRevertir = Pick<PedidoDB, 'estado' | 'tipo_factura' | 'canal' | 'fecha_entrega'> & {
   motivo_cancelacion_tipo?: string | null
@@ -15,15 +14,16 @@ type PedidoParaRevertir = Pick<PedidoDB, 'estado' | 'tipo_factura' | 'canal' | '
 /**
  * ¿El menú ofrece "Revertir cancelación"? Lo mismo que el server rechaza sin mirar
  * el stock ni los cobros: la cancelación del cambio de cliente (ya existe el pedido
- * nuevo), la comanda de un canje, un vale blanco (nace entregado, y el entregado
- * no se revierte) y un pedido con fecha de entrega (tocaría la rendición).
+ * nuevo), la comanda de un canje y un pedido con fecha de entrega (tocaría la
+ * rendición). Un vale blanco entregado tiene fecha de entrega, así que tampoco; uno
+ * que no estaba entregado sí se revierte, como en el server (sólo el VB entregado
+ * no se revierte).
  */
 export function puedeRevertirCancelacion(pedido: PedidoParaRevertir, isAdmin: boolean | undefined): boolean {
   return Boolean(isAdmin)
     && pedido.estado === 'cancelado'
     && pedido.motivo_cancelacion_tipo !== 'cambio_de_cliente'
     && pedido.canal !== 'cambio'
-    && !esTipoVB(pedido.tipo_factura)
     && !pedido.fecha_entrega
 }
 
@@ -45,6 +45,8 @@ export interface ResultadoRevertirCancelacion {
   cobro_vuelto?: number
   pagos_vueltos?: number
   regalos_quitados?: Array<{ promocion_id: number; promocion?: string | null; motivo?: string }>
+  /** Las promos que con la reversión llegaron a su cupo y se apagaron. */
+  promos_apagadas?: Array<{ promocion_id: number; promocion?: string | null }>
   mermas_anuladas?: number
   sin_foto?: boolean
   mensaje?: string
@@ -63,6 +65,11 @@ export function mensajeCancelacionRevertida(r: ResultadoRevertirCancelacion): st
   if (regalos.length > 0) {
     const nombres = regalos.map(q => q.promocion || `promo #${q.promocion_id}`).join(', ')
     partes.push(`volvió sin el regalo de ${nombres}`)
+  }
+  const apagadas = r.promos_apagadas ?? []
+  if (apagadas.length > 0) {
+    const nombres = apagadas.map(q => q.promocion || `promo #${q.promocion_id}`).join(', ')
+    partes.push(`${apagadas.length === 1 ? 'se apagó la promo' : 'se apagaron las promos'} ${nombres}: llegó a su cupo`)
   }
   const mermas = Number(r.mermas_anuladas ?? 0)
   if (mermas > 0) {

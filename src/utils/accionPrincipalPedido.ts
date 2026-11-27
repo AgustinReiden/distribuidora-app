@@ -119,7 +119,7 @@ export function construirAccionesPedido(
     return construirAccionesValeBlanco(
       pedido,
       { isAdmin, isPreventista, isEncargado },
-      { onHistorial, onEditarNotas, onCancelarPedido, onImprimirComanda },
+      { onHistorial, onEditarNotas, onCancelarPedido, onRevertirCancelacion, onImprimirComanda },
     );
   }
 
@@ -295,7 +295,6 @@ export function construirAccionesPedido(
 
   // Solo admin revierte una cancelación, y no la del cambio de cliente, un canje ni
   // un pedido con fecha de entrega (revertir_cancelacion_pedido lo valida de nuevo).
-  // Un vale blanco no llega acá: tiene su menú, y el suyo no la ofrece.
   if (puedeRevertirCancelacion(pedido, isAdmin) && onRevertirCancelacion) {
     items.push({
       id: 'revertir_cancelacion',
@@ -341,13 +340,15 @@ export function esValeBlanco(pedido: Pick<PedidoDB, 'tipo_factura'> | null | und
  *    rutas) ni nota de crédito de venta (un VB no la admite),
  *  - "Cancelar" sólo admin, aunque esté entregado (excepción de
  *    cancelar_pedido_con_stock para VB): devuelve el stock y deja total 0.
+ *  - "Revertir cancelación" sólo admin y sólo del vale que no estaba entregado
+ *    (sin fecha de entrega): el entregado no se revierte.
  */
 function construirAccionesValeBlanco(
   pedido: PedidoDB,
   { isAdmin, isPreventista, isEncargado }: Pick<ContextoAccionesPedido, 'isAdmin' | 'isPreventista' | 'isEncargado'>,
-  { onHistorial, onEditarNotas, onCancelarPedido, onImprimirComanda }: Pick<
+  { onHistorial, onEditarNotas, onCancelarPedido, onRevertirCancelacion, onImprimirComanda }: Pick<
     HandlersAccionesPedido,
-    'onHistorial' | 'onEditarNotas' | 'onCancelarPedido' | 'onImprimirComanda'
+    'onHistorial' | 'onEditarNotas' | 'onCancelarPedido' | 'onRevertirCancelacion' | 'onImprimirComanda'
   >,
 ): AccionItem[] {
   const items: AccionItem[] = [];
@@ -380,6 +381,17 @@ function construirAccionesValeBlanco(
       icon: Edit2,
       onClick: () => onEditarNotas(pedido),
       className: 'text-blue-700 dark:text-blue-400'
+    });
+  }
+
+  if (puedeRevertirCancelacion(pedido, isAdmin) && onRevertirCancelacion) {
+    items.push({
+      id: 'revertir_cancelacion',
+      label: 'Revertir cancelación',
+      icon: RotateCcw,
+      onClick: () => onRevertirCancelacion(pedido),
+      className: 'text-amber-700 dark:text-amber-400',
+      divider: true
     });
   }
 

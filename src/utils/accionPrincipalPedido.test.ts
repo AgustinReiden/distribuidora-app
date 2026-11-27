@@ -315,10 +315,16 @@ describe('construirAccionesPedido — Revertir cancelación', () => {
     }
   })
 
-  it('no la ofrece en la cancelación del cambio de cliente, ni en un vale blanco', () => {
+  it('no la ofrece en la cancelación del cambio de cliente', () => {
     const cambio = { ...crearPedido({ estado: 'cancelado' }), motivo_cancelacion_tipo: 'cambio_de_cliente' } as PedidoDB
     expect(elegir(PERFILES.admin, cambio, conRevertir()).acciones.map(a => a.id)).not.toContain('revertir_cancelacion')
+  })
+
+  it('en un vale blanco, sólo la ofrece si no estaba entregado (sin fecha de entrega)', () => {
     const vb = { ...crearPedido({ estado: 'cancelado' }), tipo_factura: 'VB' } as PedidoDB
-    expect(elegir(PERFILES.admin, vb, conRevertir()).acciones.map(a => a.id)).not.toContain('revertir_cancelacion')
+    expect(elegir(PERFILES.admin, vb, conRevertir()).acciones.map(a => a.id)).toContain('revertir_cancelacion')
+    const vbEntregado = { ...vb, fecha_entrega: '2026-11-20T15:00:00Z' } as PedidoDB
+    expect(elegir(PERFILES.admin, vbEntregado, conRevertir()).acciones.map(a => a.id)).not.toContain('revertir_cancelacion')
+    expect(elegir(PERFILES.encargado, vb, conRevertir()).acciones.map(a => a.id)).not.toContain('revertir_cancelacion')
   })
 })

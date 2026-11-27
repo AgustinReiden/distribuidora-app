@@ -1,12 +1,15 @@
 -- Ensayo de la migración NNN_revertir_cancelacion: el admin revierte la cancelación de un pedido.
 --
 --   A0 · revertir_cancelacion_pedido y pedido_cancelacion_foto existen; la foto es sólo de server.
---   A1 · Común: V×10 a $10 (total 100), asignado a un chofer, cancelado ('otro'): el stock vuelve a 100.
---        Revertido: pendiente, sin chofer ni motivo, total 100, stock 90 (el último movimiento es
---        'pedido_cancelacion_revertida', con la línea y huella si salió de un lote), la foto cerrada y
---        el historial con 'pendiente - Cancelación revertida'. Revertir otra vez: «no está cancelado».
---   A2 · Cobro suelto: cobrada 60, cancelada (60 sueltos, sin otras boletas). Revertida: el pago vuelve
---        a la boleta (60/100), sin la marca de la cancelación, y nada suelto.
+--   A1 · Común, con bolsa (#1050): V×10 a $10 (total 100) sale de un lote L (bolsa 0: L 90, huella L:10),
+--        asignado a un chofer; entra una compra sin vencimiento (+20 a la bolsa); cancelado ('otro'): L 100,
+--        bolsa 20. Revertido: pendiente, sin chofer ni motivo, total 100, stock 110 con L 90, bolsa 20 y
+--        huella L:10 (sin el arreglo: L 100, bolsa 10), el último movimiento 'pedido_cancelacion_revertida',
+--        la foto cerrada y el historial con 'pendiente - Cancelación revertida'. Otra vez: «no está cancelado».
+--   A2 · Cobros sueltos con sus marcas: un cobro de 60 (notas «cobro de mostrador») y un crédito de 20 que
+--        se aplicó a la boleta (de_saldo_a_favor); cancelada (80 sueltos). Revertida: los dos vuelven
+--        (80/100) como estaban: el de 60 sin de_saldo_a_favor ni a_cuenta y con su nota, el de 20 con
+--        de_saldo_a_favor; nada suelto.
 --   A3 · Cobro aplicado a otra boleta: B debe 40, X cobrada 100 y cancelada (40 van a B, 60 sueltos).
 --        Revertida: vuelven los 60 (X 60/100) y B sigue 40/40.
 --   A4 · Sin stock: cancelada y el stock bajado a 5. Revertir se rechaza con el producto y «faltan 5», y
@@ -22,7 +25,21 @@
 --         como authenticated con la marca puesta.
 --   A11 · Sin foto (una cancelación vieja): cobrada 50, cancelada y sin foto. Revertida: total 100 desde
 --         las líneas, sin_foto, y el cobro sigue suelto.
---   En cada caso con plata, clientes.saldo_cuenta cierra contra sus boletas y créditos; en A2, A3, A7 y A8
+--   A12 · Falta de stock con un regalo del mismo producto que se saca por cupo: A×10 + A×2 de regalo (mueve
+--         stock, límite 2), cancelado por falta de stock (merma de 12); otro pedido toma el cupo. Revertido:
+--         la merma de 12 se anula y queda una nueva de 2 (al mismo costo); el stock no cambia (sin el
+--         arreglo: +2 fantasma y la merma de 2 desaparece).
+--   A13 · Lo mismo con el regalo de otro producto R: la merma de R (2) se anula y vuelve a mermarse; el
+--         stock de R no cambia y la de A (10) queda anulada.
+--   A14 · La promo cambió de tipo (mueve stock → no mueve) después de cancelar: el regalo NO se saca, baja
+--         su stock (la foto lo mueve) y la barra de la promo no cambia.
+--   A15 · Llegar al cupo apaga la promo: límite 1, X con R×1 cancelado y la promo prendida. Revertido: la
+--         promo queda apagada y la respuesta lo dice.
+--   A16 · El fardo del contenedor vuelve a salir de su lote (M3-1): promo de fracción con R de contenedor
+--         (un lote L de 5, bolsa 0); X con R×6 cierra un bloque (L 4); entra una compra a la bolsa (+3);
+--         cancelado: el fardo vuelve a L (L 5). Revertido: L 4, R 7, y el bloque nuevo dice que salió de L
+--         (sin el arreglo: L 5 y bolsa 2).
+--   En cada caso con plata, clientes.saldo_cuenta cierra contra sus boletas y créditos; en A2, A3, A7, A8, A12 y A16
 --   ningún check de auditoria_integridad() cambia (CC-A, CC-B, CC-C y STK-D siempre, y todo el que tenga
 --   violaciones).
 --
@@ -114,6 +131,40 @@ BEGIN
   PERFORM pg_temp.rc_reset();
   RETURN v_res;
 END
+$fn$;
+
+-- Una promo de regalo p_regalo. Sin fracción: mueve stock. Con fracción: bloques de 6 con el propio
+-- regalo de contenedor (1 por bloque).
+CREATE OR REPLACE FUNCTION pg_temp.rc_promo(p_suc bigint, p_regalo bigint, p_limite int, p_fraccion boolean)
+RETURNS bigint LANGUAGE sql AS $fn$
+  INSERT INTO public.promociones (nombre, tipo, fecha_inicio, sucursal_id, regalo_mueve_stock,
+                                  producto_regalo_id, ajuste_automatico, unidades_por_bloque,
+                                  stock_por_bloque, ajuste_producto_id, limite_usos)
+  VALUES ('ZZ ensayo revertir', 'bonificacion', public._tablero_hoy() - 1, p_suc, NOT p_fraccion, p_regalo,
+          p_fraccion, CASE WHEN p_fraccion THEN 6 END, CASE WHEN p_fraccion THEN 1 END,
+          CASE WHEN p_fraccion THEN p_regalo END, p_limite)
+  RETURNING id;
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.rc_regalo(p_prod bigint, p_cant int, p_promo bigint)
+RETURNS jsonb LANGUAGE sql AS $fn$
+  SELECT jsonb_build_array(jsonb_build_object('producto_id', p_prod, 'cantidad', p_cant, 'precio_unitario', 0,
+                                              'es_bonificacion', true, 'promocion_id', p_promo));
+$fn$;
+
+-- Una compra sin vencimiento: entra a la bolsa.
+CREATE OR REPLACE FUNCTION pg_temp.rc_compra_bolsa(p_prod bigint, p_cant int)
+RETURNS void LANGUAGE plpgsql AS $fn$
+BEGIN
+  PERFORM set_config('app.stock_origen', 'compra', true);
+  UPDATE public.productos SET stock = stock + p_cant WHERE id = p_prod;
+  PERFORM pg_temp.rc_reset();
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.rc_lote(p_lote bigint)
+RETURNS int LANGUAGE sql AS $fn$
+  SELECT cantidad_restante FROM public.producto_lotes WHERE id = p_lote;
 $fn$;
 
 CREATE OR REPLACE FUNCTION pg_temp.rc_stock(p_prod bigint)
@@ -226,9 +277,12 @@ BEGIN
     IF v_chofer IS NOT NULL THEN
       UPDATE pedidos SET estado = 'asignado', transportista_id = v_chofer WHERE id = v_x;
     END IF;
+    -- Con bolsa (un ensayo de lotes con bolsa 0 no prueba nada): +20 sin vencimiento.
+    PERFORM pg_temp.rc_compra_bolsa(v_p, 20);
     PERFORM pg_temp.rc_cancelar(v_x);
-    IF pg_temp.rc_stock(v_p) <> 100 THEN
-      v_fallas := v_fallas || format('A1 la cancelación dejó el stock en %s', pg_temp.rc_stock(v_p));
+    IF pg_temp.rc_stock(v_p) <> 120 OR pg_temp.rc_lote(v_lote) <> 100 THEN
+      v_fallas := v_fallas || format('A1 la cancelación dejó el stock en %s y el lote en %s', pg_temp.rc_stock(v_p),
+                                     pg_temp.rc_lote(v_lote));
     END IF;
     v_j := pg_temp.rc_revertir(v_x);
     IF NOT COALESCE((v_j->>'success')::boolean, false) THEN
@@ -237,8 +291,8 @@ BEGIN
       SELECT count(*) INTO v_n FROM pedidos
        WHERE id = v_x AND estado = 'pendiente' AND total = 100 AND transportista_id IS NULL
          AND motivo_cancelacion IS NULL AND motivo_cancelacion_tipo IS NULL AND total_real = 100;
-      IF v_n <> 1 OR pg_temp.rc_stock(v_p) <> 90 THEN
-        v_fallas := v_fallas || format('A1 quedó %s con stock %s (se esperaba pendiente 0/100 sin chofer ni motivo y 90)',
+      IF v_n <> 1 OR pg_temp.rc_stock(v_p) <> 110 THEN
+        v_fallas := v_fallas || format('A1 quedó %s con stock %s (se esperaba pendiente 0/100 sin chofer ni motivo y 110)',
                                        pg_temp.rc_estado(v_x), pg_temp.rc_stock(v_p));
       END IF;
       SELECT origen || ':' || COALESCE(referencia_id::text, '') INTO v_txt
@@ -249,9 +303,9 @@ BEGIN
       SELECT COALESCE(sum(pil.cantidad), 0) INTO v_n
         FROM pedido_item_lotes pil JOIN pedido_items pi ON pi.id = pil.pedido_item_id
        WHERE pi.pedido_id = v_x AND pil.lote_id = v_lote;
-      IF v_n <> 10 OR (SELECT cantidad_restante FROM producto_lotes WHERE id = v_lote) <> 90 THEN
-        v_fallas := v_fallas || format('A1 la huella quedó en %s y el lote en %s (se esperaba 10 y 90)', v_n,
-                                       (SELECT cantidad_restante FROM producto_lotes WHERE id = v_lote));
+      IF v_n <> 10 OR pg_temp.rc_lote(v_lote) <> 90 THEN
+        v_fallas := v_fallas || format('A1 la huella quedó en %s y el lote en %s, bolsa %s (se esperaba 10, 90 y 20)', v_n,
+                                       pg_temp.rc_lote(v_lote), pg_temp.rc_stock(v_p) - pg_temp.rc_lote(v_lote));
       END IF;
       IF NOT EXISTS (SELECT 1 FROM pedido_cancelacion_foto WHERE pedido_id = v_x AND revertida_at IS NOT NULL
                        AND revertida_por = v_adm AND estado_anterior IN ('asignado', 'pendiente')) THEN
@@ -281,18 +335,29 @@ BEGIN
     v_p := pg_temp.rc_producto(v_suc, 'A2', 100);
     v_x := pg_temp.rc_alta(v_cli, v_adm, pg_temp.rc_linea(v_p, 10, 10), 100, v_hoy);
     v_pago := pg_temp.rc_cobro(v_x, 60);
+    UPDATE pagos SET notas = 'cobro de mostrador' WHERE id = v_pago;
+    -- Un crédito suelto que se aplicó a la boleta: queda de_saldo_a_favor (lo pone su trigger).
+    INSERT INTO pagos (cliente_id, pedido_id, sucursal_id, monto, forma_pago, fecha, usuario_id, notas, a_cuenta)
+    VALUES (v_cli, NULL, v_suc, 20, 'efectivo', v_hoy, v_adm, '[saldo a favor]', true)
+    RETURNING id INTO v_b;
+    UPDATE pagos SET pedido_id = v_x, notas = NULL WHERE id = v_b;
     PERFORM pg_temp.rc_cancelar(v_x);
-    IF pg_temp.rc_suelto(v_cli) <> 60 THEN
+    IF pg_temp.rc_suelto(v_cli) <> 80 THEN
       v_fallas := v_fallas || format('A2 la cancelación dejó %s sueltos', pg_temp.rc_suelto(v_cli));
     END IF;
     v_j := pg_temp.rc_revertir(v_x);
     IF NOT COALESCE((v_j->>'success')::boolean, false)
-       OR pg_temp.rc_estado(v_x) <> 'pendiente 60.00/100.00'
+       OR pg_temp.rc_estado(v_x) <> 'pendiente 80.00/100.00'
        OR pg_temp.rc_suelto(v_cli) <> 0
-       OR (v_j->>'cobro_vuelto')::numeric <> 60
-       OR EXISTS (SELECT 1 FROM pagos WHERE id = v_pago AND (pedido_id IS DISTINCT FROM v_x
-                    OR COALESCE(notas, '') LIKE '%saldo a favor%')) THEN
-      v_fallas := v_fallas || format('A2 quedó %s, %s sueltos (%s)', pg_temp.rc_estado(v_x), pg_temp.rc_suelto(v_cli), v_j);
+       OR (v_j->>'cobro_vuelto')::numeric <> 80
+       OR NOT EXISTS (SELECT 1 FROM pagos WHERE id = v_pago AND pedido_id = v_x AND NOT de_saldo_a_favor
+                        AND NOT COALESCE(a_cuenta, false) AND notas = 'cobro de mostrador')
+       OR NOT EXISTS (SELECT 1 FROM pagos WHERE id = v_b AND pedido_id = v_x AND de_saldo_a_favor AND a_cuenta
+                        AND notas IS NULL) THEN
+      v_fallas := v_fallas || format('A2 quedó %s, %s sueltos (%s); pagos: %s', pg_temp.rc_estado(v_x), pg_temp.rc_suelto(v_cli), v_j,
+                                     (SELECT jsonb_agg(jsonb_build_object('id', id, 'pedido', pedido_id, 'sf', de_saldo_a_favor,
+                                                                          'ac', a_cuenta, 'notas', notas) ORDER BY id)
+                                        FROM pagos WHERE id IN (v_pago, v_b)));
     END IF;
     IF pg_temp.rc_saldo(v_cli) <> '' THEN
       v_fallas := v_fallas || ('A2' || pg_temp.rc_saldo(v_cli));
@@ -549,10 +614,164 @@ BEGIN
     WHEN OTHERS THEN v_fallas := v_fallas || ('A11 error: ' || SQLERRM);
   END;
 
+  -- A12 · falta de stock con un regalo del mismo producto que se saca por cupo
+  BEGIN
+    v_cli := pg_temp.rc_cliente(v_suc, 'ZZ revertir A12');
+    v_cli2 := pg_temp.rc_cliente(v_suc, 'ZZ revertir A12 otro');
+    v_p := pg_temp.rc_producto(v_suc, 'A12', 100);
+    v_promo := pg_temp.rc_promo(v_suc, v_p, 2, false);
+    v_j := pg_temp.rc_linea(v_p, 10, 10) || pg_temp.rc_regalo(v_p, 2, v_promo);
+    v_x := pg_temp.rc_alta(v_cli, v_adm, v_j, 100, v_hoy);
+    PERFORM pg_temp.rc_cancelar(v_x, 'falta_stock');
+    v_y := pg_temp.rc_alta(v_cli2, v_adm, v_j, 100, v_hoy);
+    v_n := pg_temp.rc_stock(v_p);
+    v_j := pg_temp.rc_revertir(v_x);
+    SELECT count(*) FILTER (WHERE anulada_at IS NOT NULL AND cantidad = 12),
+           count(*) FILTER (WHERE anulada_at IS NULL AND cantidad = 2
+                              AND observaciones LIKE 'Cancelacion revertida, pedido #' || v_x || '%')
+      INTO v_n2, v_lote
+      FROM mermas_stock WHERE producto_id = v_p;
+    IF NOT COALESCE((v_j->>'success')::boolean, false)
+       OR jsonb_array_length(v_j->'regalos_quitados') <> 1
+       OR pg_temp.rc_stock(v_p) <> v_n
+       OR v_n2 <> 1 OR v_lote <> 1
+       OR (SELECT sum(cantidad) FROM mermas_stock WHERE producto_id = v_p AND anulada_at IS NULL) <> 2
+       OR (SELECT costo_unitario FROM mermas_stock WHERE producto_id = v_p AND anulada_at IS NULL)
+          IS DISTINCT FROM (SELECT costo_unitario FROM mermas_stock WHERE producto_id = v_p AND anulada_at IS NOT NULL) THEN
+      v_fallas := v_fallas || format('A12 dio %s: stock %s (antes %s), mermas %s', v_j, pg_temp.rc_stock(v_p), v_n,
+                                     (SELECT jsonb_agg(jsonb_build_object('c', cantidad, 'anulada', anulada_at IS NOT NULL,
+                                                                          'costo', costo_unitario) ORDER BY id)
+                                        FROM mermas_stock WHERE producto_id = v_p));
+    END IF;
+    IF pg_temp.rc_checks() IS DISTINCT FROM v_checks THEN
+      v_fallas := v_fallas || format('A12 los checks pasaron de %s a %s', v_checks, pg_temp.rc_checks());
+    END IF;
+    RAISE EXCEPTION 'volver' USING ERRCODE = 'ZZRCC';
+  EXCEPTION
+    WHEN SQLSTATE 'ZZRCC' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || ('A12 error: ' || SQLERRM);
+  END;
+
+  -- A13 · lo mismo con el regalo de otro producto
+  BEGIN
+    v_cli := pg_temp.rc_cliente(v_suc, 'ZZ revertir A13');
+    v_cli2 := pg_temp.rc_cliente(v_suc, 'ZZ revertir A13 otro');
+    v_p := pg_temp.rc_producto(v_suc, 'A13 venta', 100);
+    v_r := pg_temp.rc_producto(v_suc, 'A13 regalo', 100);
+    v_promo := pg_temp.rc_promo(v_suc, v_r, 2, false);
+    v_j := pg_temp.rc_linea(v_p, 10, 10) || pg_temp.rc_regalo(v_r, 2, v_promo);
+    v_x := pg_temp.rc_alta(v_cli, v_adm, v_j, 100, v_hoy);
+    PERFORM pg_temp.rc_cancelar(v_x, 'falta_stock');
+    v_y := pg_temp.rc_alta(v_cli2, v_adm, v_j, 100, v_hoy);
+    v_n := pg_temp.rc_stock(v_r);
+    v_n2 := pg_temp.rc_stock(v_p);
+    v_j := pg_temp.rc_revertir(v_x);
+    IF NOT COALESCE((v_j->>'success')::boolean, false)
+       OR pg_temp.rc_stock(v_r) <> v_n OR pg_temp.rc_stock(v_p) <> v_n2
+       OR (SELECT COALESCE(sum(cantidad), 0) FROM mermas_stock WHERE producto_id = v_r AND anulada_at IS NULL) <> 2
+       OR (SELECT COALESCE(sum(cantidad), 0) FROM mermas_stock WHERE producto_id = v_p AND anulada_at IS NULL) <> 0 THEN
+      v_fallas := v_fallas || format('A13 dio %s: R %s (antes %s), V %s (antes %s), mermas R %s', v_j,
+                                     pg_temp.rc_stock(v_r), v_n, pg_temp.rc_stock(v_p), v_n2,
+                                     (SELECT jsonb_agg(jsonb_build_object('c', cantidad, 'anulada', anulada_at IS NOT NULL) ORDER BY id)
+                                        FROM mermas_stock WHERE producto_id = v_r));
+    END IF;
+    RAISE EXCEPTION 'volver' USING ERRCODE = 'ZZRCD';
+  EXCEPTION
+    WHEN SQLSTATE 'ZZRCD' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || ('A13 error: ' || SQLERRM);
+  END;
+
+  -- A14 · la promo cambió de tipo: el regalo vuelve, baja su stock y no toca la barra
+  BEGIN
+    v_cli := pg_temp.rc_cliente(v_suc, 'ZZ revertir A14');
+    v_p := pg_temp.rc_producto(v_suc, 'A14 venta', 100);
+    v_r := pg_temp.rc_producto(v_suc, 'A14 regalo', 100);
+    v_promo := pg_temp.rc_promo(v_suc, v_r, NULL, false);
+    v_x := pg_temp.rc_alta(v_cli, v_adm, pg_temp.rc_linea(v_p, 10, 10) || pg_temp.rc_regalo(v_r, 1, v_promo), 100, v_hoy);
+    PERFORM pg_temp.rc_cancelar(v_x);
+    UPDATE promociones SET regalo_mueve_stock = false WHERE id = v_promo;
+    v_n := (SELECT usos_pendientes FROM promociones WHERE id = v_promo);
+    v_j := pg_temp.rc_revertir(v_x);
+    IF NOT COALESCE((v_j->>'success')::boolean, false)
+       OR jsonb_array_length(v_j->'regalos_quitados') <> 0
+       OR NOT EXISTS (SELECT 1 FROM pedido_items WHERE pedido_id = v_x AND es_bonificacion AND producto_id = v_r)
+       OR pg_temp.rc_stock(v_r) <> 99
+       OR (SELECT usos_pendientes FROM promociones WHERE id = v_promo) IS DISTINCT FROM v_n::int THEN
+      v_fallas := v_fallas || format('A14 dio %s: R %s, barra %s (antes %s)', v_j, pg_temp.rc_stock(v_r),
+                                     (SELECT usos_pendientes FROM promociones WHERE id = v_promo), v_n);
+    END IF;
+    RAISE EXCEPTION 'volver' USING ERRCODE = 'ZZRCE';
+  EXCEPTION
+    WHEN SQLSTATE 'ZZRCE' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || ('A14 error: ' || SQLERRM);
+  END;
+
+  -- A15 · llegar al cupo apaga la promo
+  BEGIN
+    v_cli := pg_temp.rc_cliente(v_suc, 'ZZ revertir A15');
+    v_p := pg_temp.rc_producto(v_suc, 'A15 venta', 100);
+    v_r := pg_temp.rc_producto(v_suc, 'A15 regalo', 100);
+    v_promo := pg_temp.rc_promo(v_suc, v_r, 1, false);
+    v_x := pg_temp.rc_alta(v_cli, v_adm, pg_temp.rc_linea(v_p, 10, 10) || pg_temp.rc_regalo(v_r, 1, v_promo), 100, v_hoy);
+    PERFORM pg_temp.rc_cancelar(v_x);
+    UPDATE promociones SET activo = true WHERE id = v_promo;
+    v_j := pg_temp.rc_revertir(v_x);
+    IF NOT COALESCE((v_j->>'success')::boolean, false)
+       OR (SELECT activo FROM promociones WHERE id = v_promo)
+       OR jsonb_array_length(v_j->'promos_apagadas') <> 1
+       OR NOT EXISTS (SELECT 1 FROM pedido_items WHERE pedido_id = v_x AND es_bonificacion) THEN
+      v_fallas := v_fallas || format('A15 dio %s y la promo quedó activo=%s', v_j,
+                                     (SELECT activo FROM promociones WHERE id = v_promo));
+    END IF;
+    RAISE EXCEPTION 'volver' USING ERRCODE = 'ZZRCF';
+  EXCEPTION
+    WHEN SQLSTATE 'ZZRCF' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || ('A15 error: ' || SQLERRM);
+  END;
+
+  -- A16 · el fardo del contenedor vuelve a salir de su lote (M3-1)
+  BEGIN
+    v_cli := pg_temp.rc_cliente(v_suc, 'ZZ revertir A16');
+    v_p := pg_temp.rc_producto(v_suc, 'A16 venta', 100);
+    v_r := pg_temp.rc_producto(v_suc, 'A16 regalo', 5);
+    INSERT INTO producto_lotes (producto_id, sucursal_id, fecha_vencimiento, cantidad, cantidad_restante, origen)
+    VALUES (v_r, v_suc, v_hoy + 90, 5, 5, 'manual')
+    RETURNING id INTO v_lote;
+    v_promo := pg_temp.rc_promo(v_suc, v_r, NULL, true);
+    v_x := pg_temp.rc_alta(v_cli, v_adm, pg_temp.rc_linea(v_p, 10, 10) || pg_temp.rc_regalo(v_r, 6, v_promo), 100, v_hoy);
+    IF pg_temp.rc_lote(v_lote) <> 4 OR pg_temp.rc_stock(v_r) <> 4 THEN
+      v_fallas := v_fallas || format('A16 el alta dejó R en %s y L en %s (se esperaba 4 y 4)', pg_temp.rc_stock(v_r),
+                                     pg_temp.rc_lote(v_lote));
+    END IF;
+    PERFORM pg_temp.rc_compra_bolsa(v_r, 3);
+    PERFORM pg_temp.rc_cancelar(v_x);
+    IF pg_temp.rc_lote(v_lote) <> 5 OR pg_temp.rc_stock(v_r) <> 8 THEN
+      v_fallas := v_fallas || format('A16 la cancelación dejó R en %s y L en %s (se esperaba 8 y 5)', pg_temp.rc_stock(v_r),
+                                     pg_temp.rc_lote(v_lote));
+    END IF;
+    v_j := pg_temp.rc_revertir(v_x);
+    IF NOT COALESCE((v_j->>'success')::boolean, false)
+       OR pg_temp.rc_lote(v_lote) <> 4 OR pg_temp.rc_stock(v_r) <> 7
+       OR NOT EXISTS (SELECT 1 FROM promo_ajustes pa, jsonb_array_elements(pa.lotes_pendientes) e
+                       WHERE pa.promocion_id = v_promo
+                         AND pa.id = (SELECT max(id) FROM promo_ajustes WHERE promocion_id = v_promo)
+                         AND (e->>'lote_id')::bigint = v_lote AND (e->>'cantidad')::int = 1) THEN
+      v_fallas := v_fallas || format('A16 dio %s: R %s, L %s, bloque %s', v_j, pg_temp.rc_stock(v_r), pg_temp.rc_lote(v_lote),
+                                     (SELECT lotes_pendientes FROM promo_ajustes WHERE promocion_id = v_promo ORDER BY id DESC LIMIT 1));
+    END IF;
+    IF pg_temp.rc_checks() IS DISTINCT FROM v_checks THEN
+      v_fallas := v_fallas || format('A16 los checks pasaron de %s a %s', v_checks, pg_temp.rc_checks());
+    END IF;
+    RAISE EXCEPTION 'volver' USING ERRCODE = 'ZZRCG';
+  EXCEPTION
+    WHEN SQLSTATE 'ZZRCG' THEN NULL;
+    WHEN OTHERS THEN v_fallas := v_fallas || ('A16 error: ' || SQLERRM);
+  END;
+
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' || ');
   END IF;
-  RAISE EXCEPTION 'ENSAYO OK · A0 A1 A2 A3 A4 A5 A6 A7 A8 A9 A10 A11 y checks (%)', v_checks;
+  RAISE EXCEPTION 'ENSAYO OK · A0 A1 A2 A3 A4 A5 A6 A7 A8 A9 A10 A11 A12 A13 A14 A15 A16 y checks (%)', v_checks;
  END;
 END
 $ensayo$;

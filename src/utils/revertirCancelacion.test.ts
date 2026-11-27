@@ -28,8 +28,13 @@ describe('puedeRevertirCancelacion', () => {
   it('no lo ofrece en lo que el server rechaza siempre', () => {
     expect(puedeRevertirCancelacion({ ...cancelado, motivo_cancelacion_tipo: 'cambio_de_cliente' }, true)).toBe(false)
     expect(puedeRevertirCancelacion({ ...cancelado, canal: 'cambio' }, true)).toBe(false)
-    expect(puedeRevertirCancelacion({ ...cancelado, tipo_factura: 'VB' }, true)).toBe(false)
     expect(puedeRevertirCancelacion({ ...cancelado, fecha_entrega: '2026-11-20T15:00:00Z' }, true)).toBe(false)
+  })
+
+  it('un vale blanco: sólo el entregado (con fecha de entrega) no se revierte, como en el server', () => {
+    expect(puedeRevertirCancelacion({ ...cancelado, tipo_factura: 'VB' }, true)).toBe(true)
+    expect(puedeRevertirCancelacion({ ...cancelado, tipo_factura: 'VB', fecha_entrega: '2026-11-20T15:00:00Z' }, true))
+      .toBe(false)
   })
 })
 
@@ -69,5 +74,10 @@ describe('mensajeCancelacionRevertida', () => {
     expect(m).toContain('volvió sin el regalo de Promo verano, promo #9')
     expect(m).toContain('se anularon 2 mermas')
     expect(mensajeCancelacionRevertida({ success: true, mermas_anuladas: 1 })).toContain('se anuló 1 merma')
+  })
+
+  it('avisa la promo que llegó a su cupo y se apagó', () => {
+    expect(mensajeCancelacionRevertida({ success: true, promos_apagadas: [{ promocion_id: 3, promocion: 'Promo X' }] }))
+      .toContain('se apagó la promo Promo X: llegó a su cupo')
   })
 })
