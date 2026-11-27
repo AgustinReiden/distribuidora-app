@@ -1,5 +1,5 @@
 /**
- * Revertir la cancelación de un pedido (mig NNN_revertir_cancelacion, decisión del
+ * Revertir la cancelación de un pedido (mig 559_revertir_cancelacion, decisión del
  * dueño del 26/11/2026). La hace sólo un admin con `revertir_cancelacion_pedido`,
  * que valida todo de nuevo: esto decide si el menú la ofrece y qué dicen la
  * confirmación y el aviso.

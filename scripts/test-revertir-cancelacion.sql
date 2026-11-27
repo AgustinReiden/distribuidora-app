@@ -1,4 +1,4 @@
--- Ensayo de la migración NNN_revertir_cancelacion: el admin revierte la cancelación de un pedido.
+-- Ensayo de la migración 559_revertir_cancelacion: el admin revierte la cancelación de un pedido.
 --
 --   A0 · revertir_cancelacion_pedido y pedido_cancelacion_foto existen; la foto es sólo de server.
 --   A1 · Común, con bolsa (#1050): V×10 a $10 (total 100) sale de un lote L (bolsa 0: L 90, huella L:10),
