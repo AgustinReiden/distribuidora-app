@@ -227,7 +227,7 @@ describe('generarReciboPedido — unidad del regalo de fracción (#591/#592)', (
     // UN bloque, no las 3 botellas de la linea).
     expect(capturado.pages.flat()).toContain('3')
     const textoCompleto = capturado.pages.flat().join(' ')
-    expect(textoCompleto).toContain('Granadina (SUELTAS, NO FARDO) (REGALO)')
+    expect(textoCompleto).toContain('Granadina 1L (SUELTAS, NO FARDO) (REGALO)')
     expect(textoCompleto).not.toContain('2 Granadina')
   })
 
