@@ -19,7 +19,8 @@ import AvisosPedidos from '../pedidos/AvisosPedidos'
 import { filasPedidosExcel, resumenPagosExcel } from '../../utils/pedidosExcel'
 import { invalidarCuposPromo } from '../../hooks/queries/cuposPromoCache'
 import { campoFechaDeEntrega, type ReglaFechaEntrega } from '../../utils/fechaEntrega'
-import { fechaLocalISO, fechaHaceDias, formatPrecio } from '../../utils/formatters'
+import { fechaLocalISO, formatPrecio } from '../../utils/formatters'
+import { primerDiaDelMesEnCurso } from '../../utils/periodoMesEnCurso'
 import { fechaReferenciaPromo } from '../../utils/fechaReferenciaPromo'
 import { motivoDatosDePrecio } from '../../utils/datosDePrecio'
 import { camposCombo, camposComboRPC } from '../../utils/combosPedido'
@@ -169,11 +170,11 @@ const ModalQuienRepartio = lazyWithReload(() => import('../modals/ModalQuienRepa
 
 const ITEMS_PER_PAGE = 15
 
-// Ventana por defecto al abrir /pedidos: ultimos N dias.
-// El usuario puede ampliar/limpiar el rango con el chip o con "Fecha de carga"
-// del panel de filtros. La eleccion no persiste entre sesiones (cada visita
-// arranca aca).
-const VENTANA_DEFAULT_DIAS = 30
+// Ventana por defecto al abrir /pedidos: el mes en curso, del 1 hasta hoy (dia
+// argentino), igual que Metas (decision del dueño, 27/11; antes eran los ultimos
+// 30 dias y cruzaba el mes). El usuario puede ampliar/limpiar el rango con el chip
+// o con "Fecha de carga" del panel de filtros. La eleccion no persiste entre
+// sesiones (cada visita arranca aca).
 
 // #1318: las entregas masivas saltean lo que ya estaba entregado (por ejemplo,
 // lo entregó el chofer con el modal abierto), lo dado de baja y los canjes.
@@ -186,7 +187,7 @@ function avisoNoEntregados(n: number): string {
 
 function buildDefaultFiltros(): FiltrosPedidosState {
   return {
-    fechaDesde: fechaHaceDias(VENTANA_DEFAULT_DIAS),
+    fechaDesde: primerDiaDelMesEnCurso(),
     fechaHasta: null,
     estado: 'todos',
     estadoPago: 'todos',

@@ -57,6 +57,8 @@ export interface PedidoStatsProps {
   error?: boolean;
   /** Se llama al tocar "Reintentar" del aviso de error. */
   onReintentar?: () => void;
+  /** Período que cuentan los totales, en palabras («Noviembre · del 1 al 27»). */
+  periodoRotulo?: string;
 }
 
 interface StatItem {
@@ -92,7 +94,7 @@ interface StatItem {
 // COMPONENT
 // =============================================================================
 
-function PedidoStats({ summary, isEncargado, isDeposito = false, filtros, onFiltrosChange, cargando = false, error = false, onReintentar }: PedidoStatsProps): React.ReactElement {
+function PedidoStats({ summary, isEncargado, isDeposito = false, filtros, onFiltrosChange, cargando = false, error = false, onReintentar, periodoRotulo }: PedidoStatsProps): React.ReactElement {
   // Sin datos reales (cargando o fallida) un 0 sería una mentira: se ve "—".
   const sinDatos = cargando || error;
   // El rol determina qué montos se muestran: el encargado solo ve los impagos y
@@ -205,6 +207,11 @@ function PedidoStats({ summary, isEncargado, isDeposito = false, filtros, onFilt
 
   return (
     <div className="flex flex-col gap-2">
+      {periodoRotulo && (
+        <p className="text-xs font-medium text-stone-600 dark:text-stone-300" data-testid="periodo-totales">
+          {periodoRotulo}
+        </p>
+      )}
       {error && (
         <p className="text-xs text-red-700 dark:text-red-300" role="alert">
           No se pudieron calcular los totales.
