@@ -22,14 +22,25 @@
 --   C7 · Entrega y pago masivos de E a nombre de B ($ 4.000): de B (B 5.500).
 --   C8 · Rend-B5: un cobro que entra con una sesión sin usuario ni chofer es del de la sesión.
 --   C9 · Un pedazo es de la caja de su padre aunque lo cargue otro (el de A, cargado por AD).
+--   RP · La clave de un cobro (p_client_request_id): AD cobra $ 2.000 a nombre de B; el mismo con la
+--        misma caja es un replay (B sigue en 7.500); con otra caja (A) es otro cobro: 22023.
+--   MC · marcar_pagos_masivo de AD con quién cobró B ($ 1.000: B 8.500), y el FIFO combinado de AD a
+--        nombre de E2 ($ 3.000: E2 3.000).
 --   G  · G marcó $ 100.000 como transferencia y eran efectivo: E lo corrige (G efectivo 100.000,
 --        transferencia 0, la marca en las notas y una fila en audit_logs). E no corrige su
---        propia rendición, ni cambia quién cobró, ni corrige sin motivo.
+--        propia rendición ni la de un admin, ni cambia quién cobró, ni corrige sin motivo.
 --   D8 · D cobró $ 10.000; E lo marca en disconformidad. Un cobro de D que llega después con
 --        fecha de hoy ($ 500) no entra en ella: va a mañana (hoy 10.000, mañana 500). En la
---        disconformidad, E no corrige; AD pasa los 10.000 a transferencia (hoy efectivo 0).
+--        disconformidad, E no corrige; AD pasa los 10.000 a transferencia (hoy efectivo 0). Los
+--        pedazos van con su raíz: uno de 1.000 que sale de los 10.000 sigue hoy, y uno de 100 que
+--        sale de los 500 va con ellos a mañana (hoy 10.000, mañana 500). Al final, AD la resuelve y
+--        su foto tiene los 10.000 (no los 500 que llegaron después).
 --   CF · C cobró $ 7.000 ayer y su rendición de ayer se confirma: pasarle ese pago a AD no
---        cambia la rendición (sigue 7.000, de la foto) y corregir_cobro_rendicion la rechaza.
+--        cambia la rendición (sigue 7.000, de la foto) y corregir_cobro_rendicion la rechaza. Un
+--        pago de ayer que pasa a C vive en su rendición de hoy: pasárselo a B se rechaza (iría a
+--        ayer de B).
+--   AUD· FALT-*, REND-* y PAGO-* de auditoria_integridad() en 0 con el cobro contra el faltante
+--        vivo y al final.
 --   F  · F marcó $ 10.000 cobrados y rindió $ 5.000: AD resuelve con un faltante de $ 5.000 a
 --        cargo de F. El cliente paga esos $ 5.000 en la oficina a E: cobrar_faltante_rendicion
 --        (por AD) los suma al efectivo de E (8.000 → 13.000), le deja la cuenta de F en 0, no cambia
@@ -62,6 +73,8 @@ DECLARE
   v_n      int;
   v_txt    text;
   v_num    numeric;
+  v_clave  uuid := gen_random_uuid();
+  v_cli3   bigint;
   v_fallas text[] := '{}';
 BEGIN
  BEGIN
@@ -86,19 +99,22 @@ BEGIN
   VALUES (v_tag, v_tag, 'Calle T4 1', 1) RETURNING id INTO v_cli;
   INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
   VALUES (v_tag || ' b', v_tag || ' b', 'Calle T4 2', 1) RETURNING id INTO v_cli2;
+  INSERT INTO clientes (razon_social, nombre_fantasia, direccion, sucursal_id)
+  VALUES (v_tag || ' c', v_tag || ' c', 'Calle T4 3', 1) RETURNING id INTO v_cli3;
   INSERT INTO empleados (sucursal_id, nombre, puesto, creado_por, usuario_id)
   VALUES (1, v_tag || ' F', 'transportista', v_ad, v_f) RETURNING id INTO v_emp;
 
   -- Boletas asignadas, de hoy. p[1..4], p[6] y p[9..10]: de A; p[5]: del cliente 2, de A (la del FIFO);
   -- p[7]: sin chofer (C7); p[8]: de G; p[11]: de D; p[12]: de F; p[13]: de C (ayer); p[14]: sin chofer.
-  FOR v_n IN 1..14 LOOP
+  -- p[15] y p[16]: de A (RP y MC); p[17]: del cliente 3, de A (el FIFO combinado de MC).
+  FOR v_n IN 1..17 LOOP
     INSERT INTO pedidos (cliente_id, fecha, estado, total, monto_pagado, estado_pago, canal, usuario_id, creado_por,
                          sucursal_id, transportista_id)
-    VALUES (CASE WHEN v_n = 5 THEN v_cli2 ELSE v_cli END,
+    VALUES (CASE WHEN v_n = 5 THEN v_cli2 WHEN v_n = 17 THEN v_cli3 ELSE v_cli END,
             CASE WHEN v_n = 13 THEN v_hoy - 1 ELSE v_hoy END,
             CASE WHEN v_n IN (7, 14) THEN 'pendiente' ELSE 'asignado' END,
             CASE v_n WHEN 1 THEN 10000 WHEN 2 THEN 3000 WHEN 3 THEN 2000 WHEN 4 THEN 1500 WHEN 5 THEN 5000
-                     WHEN 7 THEN 4000 WHEN 8 THEN 100000 WHEN 11 THEN 10500 WHEN 12 THEN 10000 WHEN 13 THEN 7000
+                     WHEN 7 THEN 4000 WHEN 15 THEN 2000 WHEN 17 THEN 3000 WHEN 8 THEN 100000 WHEN 11 THEN 10500 WHEN 12 THEN 10000 WHEN 13 THEN 7000
                      ELSE 1000 END,
             0, 'pendiente', 'app', v_e, v_e, 1,
             CASE WHEN v_n IN (7, 14) THEN NULL WHEN v_n = 8 THEN v_g WHEN v_n = 11 THEN v_d
@@ -140,6 +156,18 @@ BEGIN
   LANGUAGE sql AS $f$
     SELECT format('SELECT public.registrar_pagos_pedido(%s, %L::jsonb, public._tablero_hoy(), NULL, NULL, NULL, %L::uuid)::text',
                   p_ped, jsonb_build_array(jsonb_build_object('monto', p_monto, 'forma_pago', p_forma)), p_quien);
+  $f$;
+  -- La caja de alguien un día, todas las formas.
+  CREATE OR REPLACE FUNCTION pg_temp.cajat(p_t uuid, p_d date) RETURNS numeric
+  LANGUAGE sql AS $f$
+    SELECT COALESCE(sum(x.monto), 0) FROM public._rendicion_pagos(1, p_d, p_d) x WHERE x.t_id = p_t;
+  $f$;
+  -- Los checks de auditoria_integridad() de rendiciones, pagos y faltantes que no dan 0.
+  CREATE OR REPLACE FUNCTION pg_temp.aud() RETURNS text LANGUAGE sql AS $f$
+    SELECT string_agg(format('%s=%s', e->>'id', e->>'violaciones'), ', ')
+      FROM jsonb_array_elements(public.auditoria_integridad()->'checks') e
+     WHERE (e->>'id' LIKE 'FALT-%' OR e->>'id' LIKE 'REND-%' OR e->>'id' LIKE 'PAGO-%')
+       AND (e->>'violaciones')::bigint <> 0;
   $f$;
   -- La caja de alguien un día, por forma.
   CREATE OR REPLACE FUNCTION pg_temp.caja(p_t uuid, p_d date, p_forma text DEFAULT 'efectivo') RETURNS numeric
@@ -227,6 +255,36 @@ BEGIN
   END IF;
   DELETE FROM pagos WHERE id = v_id;
 
+  -- ------------------------------------------------------------------- RP ---
+  v_txt := pg_temp.r(v_ad, format('SELECT public.registrar_pagos_pedido(%s, ''[{"monto":2000,"forma_pago":"efectivo"}]''::jsonb, public._tablero_hoy(), NULL, NULL, %L::uuid, %L::uuid)::text',
+                                  v_p[15], v_clave, v_b));
+  IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('RP · el cobro con clave: ' || v_txt); END IF;
+  v_txt := pg_temp.r(v_ad, format('SELECT public.registrar_pagos_pedido(%s, ''[{"monto":2000,"forma_pago":"efectivo"}]''::jsonb, public._tablero_hoy(), NULL, NULL, %L::uuid, %L::uuid)::text',
+                                  v_p[15], v_clave, v_b));
+  IF v_txt NOT LIKE 'PASA%idempotent_replay": true%' THEN
+    v_fallas := v_fallas || ('RP · el mismo cobro con la misma caja no fue un replay: ' || v_txt);
+  END IF;
+  v_txt := pg_temp.r(v_ad, format('SELECT public.registrar_pagos_pedido(%s, ''[{"monto":2000,"forma_pago":"efectivo"}]''::jsonb, public._tablero_hoy(), NULL, NULL, %L::uuid, %L::uuid)::text',
+                                  v_p[15], v_clave, v_a));
+  IF v_txt !~ '^22023 ' THEN
+    v_fallas := v_fallas || ('RP · la misma clave con otra caja no se rechazó: ' || v_txt);
+  END IF;
+  IF pg_temp.caja(v_b, v_hoy) <> 7500 OR pg_temp.caja(v_a, v_hoy) <> 12000 THEN
+    v_fallas := v_fallas || format('RP · B %s (7500), A %s (12000)', pg_temp.caja(v_b, v_hoy), pg_temp.caja(v_a, v_hoy));
+  END IF;
+
+  -- ------------------------------------------------------------------- MC ---
+  v_txt := pg_temp.r(v_ad, format('SELECT public.marcar_pagos_masivo(ARRAY[%s]::bigint[], ''efectivo'', public._tablero_hoy(), NULL, %L::uuid)::text',
+                                  v_p[16], v_b));
+  IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('MC · pagos masivos: ' || v_txt); END IF;
+  v_txt := pg_temp.r(v_ad, format('SELECT public.registrar_pago_combinado_cliente_fifo(%s, ''[{"monto":3000,"forma_pago":"efectivo"}]''::jsonb, public._tablero_hoy(), NULL, NULL, NULL, %L::uuid)::text',
+                                  v_cli3, v_e2));
+  IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('MC · FIFO combinado: ' || v_txt); END IF;
+  IF pg_temp.caja(v_b, v_hoy) <> 8500 OR pg_temp.caja(v_e2, v_hoy) <> 3000 OR pg_temp.caja(v_a, v_hoy) <> 12000 THEN
+    v_fallas := v_fallas || format('MC · B %s (8500), E2 %s (3000), A %s (12000)',
+                                   pg_temp.caja(v_b, v_hoy), pg_temp.caja(v_e2, v_hoy), pg_temp.caja(v_a, v_hoy));
+  END IF;
+
   -- -------------------------------------------------------------------- G ---
   v_txt := pg_temp.r(v_g, pg_temp.cobro(v_p[8], 100000, 'transferencia', NULL));
   IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('G · G no cobró: ' || v_txt); END IF;
@@ -247,6 +305,12 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM audit_logs WHERE tabla = 'pagos' AND registro_id = v_pago::text AND accion = 'UPDATE') THEN
     v_fallas := v_fallas || 'G · no quedó la fila de auditoría'::text;
   END IF;
+  -- La rendición de un admin, tampoco: AD cobra en la oficina una boleta de A ($ 1.000, a su caja).
+  v_txt := pg_temp.r(v_ad, pg_temp.cobro(v_p[6], 1000, 'efectivo', NULL));
+  IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('G · AD no cobró: ' || v_txt); END IF;
+  SELECT id INTO v_id FROM pagos WHERE pedido_id = v_p[6];
+  v_txt := pg_temp.r(v_e, format('SELECT public.corregir_cobro_rendicion(%s, ''transferencia'', NULL, ''x'')::text', v_id));
+  IF v_txt !~ '^42501 ' THEN v_fallas := v_fallas || ('G · E corrigió la rendición de un admin: ' || v_txt); END IF;
   -- Su propia rendición (el cobro de C2), no.
   SELECT id INTO v_id FROM pagos WHERE pedido_id = v_p[2];
   v_txt := pg_temp.r(v_e, format('SELECT public.corregir_cobro_rendicion(%s, ''transferencia'', NULL, ''x'')::text', v_id));
@@ -277,7 +341,24 @@ BEGIN
                                    pg_temp.caja(v_d, v_hoy), pg_temp.caja(v_d, v_hoy, 'transferencia'));
   END IF;
 
+  -- Los pedazos van con su raíz: 1.000 que salen de los 10.000 (llegó antes) y 100 de los 500
+  -- (llegó después), los dos nacidos ahora, después del corte.
+  UPDATE pagos SET monto = monto - 1000 WHERE id = v_id;
+  INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id, pago_padre_id)
+  VALUES (v_cli, NULL, 1000, 'transferencia', v_hoy, v_d, 1, v_id, v_id);
+  SELECT id INTO v_pago FROM pagos WHERE pedido_id = v_p[11] AND monto = 500;
+  UPDATE pagos SET monto = 400 WHERE id = v_pago;
+  INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, pago_origen_id, pago_padre_id)
+  VALUES (v_cli, NULL, 100, 'efectivo', v_hoy, v_d, 1, v_pago, v_pago);
+  IF pg_temp.cajat(v_d, v_hoy) <> 10000 OR pg_temp.cajat(v_d, v_hoy + 1) <> 500 THEN
+    v_fallas := v_fallas || format('D8 · con los pedazos: hoy %s (10000), mañana %s (500)',
+                                   pg_temp.cajat(v_d, v_hoy), pg_temp.cajat(v_d, v_hoy + 1));
+  END IF;
+
   -- ------------------------------------------------------------------- CF ---
+  -- Un pago a cuenta de ayer de AD (sin boleta: de quien lo cargó), para el día siguiente.
+  INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, a_cuenta)
+  VALUES (v_cli, NULL, 300, 'efectivo', v_hoy - 1, v_ad, 1, true) RETURNING id INTO v_id;
   INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id)
   VALUES (v_cli, v_p[13], 7000, 'efectivo', v_hoy - 1, v_c, 1) RETURNING id INTO v_pago;
   v_txt := pg_temp.r(v_ad, format('SELECT public.confirmar_rendicion(public._tablero_hoy() - 1, %L::uuid, ''confirmada'', ''{}''::jsonb, NULL)::text', v_c));
@@ -285,6 +366,16 @@ BEGIN
   v_txt := pg_temp.r(v_ad, format('SELECT public.corregir_cobro_rendicion(%s, NULL, %L::uuid, ''x'')::text', v_pago, v_ad));
   IF v_txt !~ '^42501 ' THEN v_fallas := v_fallas || ('CF · corrigió un cobro de una rendición confirmada: ' || v_txt); END IF;
   UPDATE pagos SET cobrado_por = v_ad WHERE id = v_pago;
+  -- El de AD pasa a C: su día (ayer) está cerrado para C, así que vive en la rendición de hoy de C.
+  -- Pasárselo a otro lo mandaría a ayer de ese otro: se rechaza.
+  UPDATE pagos SET cobrado_por = v_c WHERE id = v_id;
+  IF pg_temp.caja(v_c, v_hoy) <> 300 THEN
+    v_fallas := v_fallas || format('CF · el pago de ayer no fue al día abierto de C: %s', pg_temp.caja(v_c, v_hoy));
+  END IF;
+  v_txt := pg_temp.r(v_ad, format('SELECT public.corregir_cobro_rendicion(%s, NULL, %L::uuid, ''x'')::text', v_id, v_b));
+  IF v_txt !~ '^22023 ' THEN
+    v_fallas := v_fallas || ('CF · pasó a otro un cobro que vive en el día siguiente: ' || v_txt);
+  END IF;
   IF pg_temp.caja(v_c, v_hoy - 1) <> 7000 OR pg_temp.caja(v_ad, v_hoy - 1) <> 0 THEN
     v_fallas := v_fallas || format('CF · la confirmada cambió: C %s (7000), AD %s (0)',
                                    pg_temp.caja(v_c, v_hoy - 1), pg_temp.caja(v_ad, v_hoy - 1));
@@ -307,6 +398,8 @@ BEGIN
                                   v_falt, v_e));
   IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('F · AD no cargó el cobro contra el faltante: ' || v_txt); END IF;
   v_mov := NULLIF(substr(v_txt, 6), '')::bigint;
+  v_txt := pg_temp.aud();
+  IF v_txt IS NOT NULL THEN v_fallas := v_fallas || ('AUD · con el cobro contra el faltante: ' || v_txt); END IF;
   IF public._rendicion_efectivo_a_entregar(1, v_e, v_hoy) <> 13000 THEN
     v_fallas := v_fallas || format('F · efectivo a entregar de E %s (13000)', public._rendicion_efectivo_a_entregar(1, v_e, v_hoy));
   END IF;
@@ -329,6 +422,17 @@ BEGIN
   v_txt := pg_temp.r(v_ad, format('SELECT public.deshacer_resolucion_rendicion(public._tablero_hoy(), %L::uuid, ''x'')::text', v_f));
   IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('F · deshacer, ya sin el cobro: ' || v_txt); END IF;
 
+  -- ------------------------------------------------------------------ D8f ---
+  -- La disconformidad de D se resuelve: la foto respeta el corte (los 500 de después siguen mañana).
+  v_txt := pg_temp.r(v_ad, format('SELECT public.resolver_rendicion(public._tablero_hoy(), %L::uuid, ''Era transferencia'')::text', v_d));
+  IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('D8 · resolver la de D: ' || v_txt); END IF;
+  SELECT COALESCE(sum(fo.monto), 0) INTO v_num
+    FROM rendicion_pagos_confirmados fo JOIN rendiciones_control rc ON rc.id = fo.rendicion_id
+   WHERE rc.transportista_id = v_d AND rc.fecha = v_hoy AND rc.sucursal_id = 1;
+  IF v_num <> 10000 OR pg_temp.cajat(v_d, v_hoy + 1) <> 500 THEN
+    v_fallas := v_fallas || format('D8 · la foto de la resuelta tiene %s (10000) y mañana %s (500)', v_num, pg_temp.cajat(v_d, v_hoy + 1));
+  END IF;
+
   -- -------------------------------------------------------------------- R ---
   v_txt := pg_temp.r(v_e2, format('SELECT public.confirmar_rendicion(public._tablero_hoy(), %L::uuid, ''confirmada'', ''{}''::jsonb, NULL)::text', v_e));
   IF v_txt !~ '^42501 ' THEN v_fallas := v_fallas || ('R · otro encargado confirmó la de E: ' || v_txt); END IF;
@@ -338,11 +442,14 @@ BEGIN
     v_fallas := v_fallas || format('R · la foto de E: %s (8000)', pg_temp.caja(v_e, v_hoy));
   END IF;
 
+  v_txt := pg_temp.aud();
+  IF v_txt IS NOT NULL THEN v_fallas := v_fallas || ('AUD · al final: ' || v_txt); END IF;
+
   IF cardinality(v_fallas) > 0 THEN
     RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = 'ENSAYO FALLÓ · ' || array_to_string(v_fallas, ' | ');
   END IF;
   RAISE EXCEPTION USING ERRCODE = 'ZZ0OK',
-    MESSAGE = format('ENSAYO OK · A1 C1 C2 C3 C4 C5 C6 C7 C8 C9 G D8 CF F R (hoy %s)', v_hoy);
+    MESSAGE = format('ENSAYO OK · A1 C1 C2 C3 C4 C5 C6 C7 C8 C9 RP MC G D8 CF F AUD R (hoy %s)', v_hoy);
  END;
 END
 $ensayo$;

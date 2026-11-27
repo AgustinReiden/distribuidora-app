@@ -267,7 +267,9 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   const [eleccionChofer, setEleccionChofer] = useState<EleccionChofer | null>(null)
   const faltaChofer = !!modoEntregaTransportista && !!pedirChofer && !eleccionChofer
   // T4: lo que eligió el admin en «Quién cobró» (undefined: no tocó el campo).
-  const [cobradoPorElegido, setCobradoPorElegido] = useState<string | null | undefined>(undefined)
+  // Un cobro sin confirmar vuelve con la caja con la que viajó.
+  const [cobradoPorElegido, setCobradoPorElegido] = useState<string | null | undefined>(
+    () => leerCobroSinConfirmar(String(pedido.id))?.cobradoPor)
   const cobradoPorVisible: string | null = cobradoPorElegido !== undefined
     ? cobradoPorElegido
     : modoEntregaTransportista
@@ -426,7 +428,11 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
         clientRequestIds,
         pagadoAntes: yaPagado,
         ...(eleccion ? { eleccionChofer: eleccion } : {}),
-        ...(quienesCobran ? { cobradoPor: cobradoPorVisible } : {}),
+        // T4: el reintento de un cobro sin confirmar va con su caja (es parte de la solicitud:
+        // con otra, el server lo toma por otro cobro y lo rechaza).
+        ...(reintentaSinConfirmar && sinConfirmar!.cobradoPor !== undefined
+          ? { cobradoPor: sinConfirmar!.cobradoPor }
+          : quienesCobran ? { cobradoPor: cobradoPorVisible } : {}),
       })
       // Que resuelva no prueba que el cobro entró: la entrega con pago cierra el
       // modal sin tirar si el cobro falla. Ese camino guarda el cobro sin

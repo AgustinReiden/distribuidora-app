@@ -1629,7 +1629,10 @@ export default function PedidosContainer(): React.ReactElement {
   const handleConfirmarPago = useCallback(async (payload: { pedidoId: string; clienteId: string; fechaPago: string; observaciones?: string; pagos: Array<{ formaPago: string; monto: number }>; clientRequestIds?: string[]; pagadoAntes: number; cobradoPor?: string | null }) => {
     setGuardando(true)
     try {
-      const cobro = await cobrarRecordandoSinConfirmar(payload, () => registrarPagosBatch({
+      // T4: el cobro de la oficina es de quien lo carga, salvo que el admin elija otro. Se recuerda
+      // con el cobro sin confirmar: el reintento con su clave lo manda igual.
+      const cobradoPor = payload.cobradoPor ?? null
+      const cobro = await cobrarRecordandoSinConfirmar({ ...payload, cobradoPor }, () => registrarPagosBatch({
         clienteId: payload.clienteId,
         pedidoId: payload.pedidoId,
         fecha: payload.fechaPago,
@@ -1637,8 +1640,7 @@ export default function PedidosContainer(): React.ReactElement {
         pagos: payload.pagos,
         usuarioId: user?.id ?? null,
         clientRequestIds: payload.clientRequestIds,
-        // T4: el cobro de la oficina es de quien lo carga, salvo que el admin elija otro.
-        cobradoPor: payload.cobradoPor ?? null,
+        cobradoPor,
       }))
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       // FRT-2: el cobro mueve `saldo_cuenta`. Sin esto el alta siguiente del mismo
@@ -1720,7 +1722,13 @@ export default function PedidosContainer(): React.ReactElement {
       try {
         // Si falla, el modal se cierra igual: el cobro queda guardado con su
         // clave y el "menú de pago" lo vuelve a proponer con ella (#1410).
-        const cobro = await cobrarRecordandoSinConfirmar(payload, () => registrarPagosBatch({
+        // T4 (#1710): la oficina carga la entrega a nombre del chofer: el cobro es suyo (el admin
+        // puede elegir otro). Un retiro en depósito es de quien lo carga. Quien no es de la oficina
+        // (el chofer en su pedido) cobra a su nombre. Se recuerda con el cobro sin confirmar.
+        const cobradoPor = (isAdmin || isEncargado)
+          ? cobradorDeLaEntrega(payload.cobradoPor, payload.eleccionChofer, pedido.transportista_id)
+          : null
+        const cobro = await cobrarRecordandoSinConfirmar({ ...payload, cobradoPor }, () => registrarPagosBatch({
           clienteId: payload.clienteId,
           pedidoId: payload.pedidoId,
           fecha: payload.fechaPago,
@@ -1728,12 +1736,7 @@ export default function PedidosContainer(): React.ReactElement {
           pagos: payload.pagos,
           usuarioId: user?.id ?? null,
           clientRequestIds: payload.clientRequestIds,
-          // T4 (#1710): la oficina carga la entrega a nombre del chofer: el cobro es suyo (el
-          // admin puede elegir otro). Un retiro en depósito es de quien lo carga. Quien no es de la
-          // oficina (el chofer en su pedido) cobra a su nombre.
-          cobradoPor: (isAdmin || isEncargado)
-            ? cobradorDeLaEntrega(payload.cobradoPor, payload.eleccionChofer, pedido.transportista_id)
-            : null,
+          cobradoPor,
         }))
         cobroRepetido = cobro.idempotentReplay
       } catch (pagoErr) {
