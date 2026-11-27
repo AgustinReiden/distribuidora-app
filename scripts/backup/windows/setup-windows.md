@@ -44,7 +44,7 @@ todos los días a las 03:00, como SYSTEM (corre aunque nadie inicie sesión), y 
 máquina estaba apagada a esa hora corre apenas prende.
 
 **Si los backups van a una carpeta de red** (por ejemplo `Y:\Backups Sistemas\Distribuidora`,
-que es `\\192.168.0.12\OficinaCentral19\...`), SYSTEM no sirve: no tiene permiso en el
+que es `\\SERVIDOR\Compartida\...`), SYSTEM no sirve: no tiene permiso en el
 recurso compartido y no ve las unidades mapeadas. Instalar la tarea con una cuenta de
 Windows que pueda escribir ahí, y poner su contraseña cuando la pida (la guarda el
 Programador de tareas):
@@ -60,7 +60,7 @@ Si para entrar a la carpeta compartida la máquina pide un usuario y una contras
 otra máquina** (la que tiene la carpeta), guardalos para esa cuenta, logueado con ella:
 
 ```powershell
-cmdkey /add:192.168.0.12 /user:USUARIO_DE_LA_12 /pass
+cmdkey /add:SERVIDOR /user:USUARIO_DEL_SERVIDOR /pass
 ```
 
 Sin esto, a mano entra porque Windows recuerda la sesión del Explorador, pero la tarea
@@ -90,8 +90,8 @@ Set-Content -Path C:\ProgramData\distribuidora-backup\passphrase.txt -Encoding a
 | `TelegramBotToken`, `TelegramChatId` | Los mismos que `TELEGRAM_BOT_TOKEN` y `TELEGRAM_BACKUP_CHAT_ID` de GitHub |
 | `KeepDaily`, `KeepWeekly`, `KeepMonthly` | Cuántos guardar de cada uno (30 / 12 / 24 por defecto, ~1 GB) |
 
-En JSON cada barra de la ruta va doble: `\\192.168.0.12\OficinaCentral19\Backups Sistemas\Distribuidora`
-se escribe `"\\\\192.168.0.12\\OficinaCentral19\\Backups Sistemas\\Distribuidora"`.
+En JSON cada barra de la ruta va doble: `\\SERVIDOR\Compartida\Backups Sistemas\Distribuidora`
+se escribe `"\\\\SERVIDOR\\Compartida\\Backups Sistemas\\Distribuidora"`.
 
 ## Paso 4 — Primera corrida
 
