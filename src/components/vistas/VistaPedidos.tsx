@@ -26,6 +26,7 @@ import type {
   RegistrarSalvedadResult
 } from '../../types';
 import type { PedidoStatsSummary } from '../../hooks/queries';
+import { rotuloPeriodo } from '../../utils/periodoMesEnCurso';
 
 // =============================================================================
 // INTERFACES DE PROPS
@@ -287,6 +288,7 @@ export default function VistaPedidos({
         cargando={statsCargando}
         error={statsError}
         onReintentar={onRetryStats}
+        periodoRotulo={rotuloPeriodo(filtros.fechaDesde, filtros.fechaHasta)}
       />
 
       {/* Lista de pedidos */}
