@@ -155,6 +155,7 @@ export {
   usePedidosAsignadosQuery,
   useEntregasMasivasMutation,
   useCancelarPedidoMutation,
+  useRevertirCancelacionMutation,
   useCambiarClientePedidoMutation,
   usePedidosNoPagadosQuery,
   usePedidosParaEntregaYPagoQuery,
