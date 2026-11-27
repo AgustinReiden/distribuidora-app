@@ -35,7 +35,7 @@ import QueryErrorState from '../layout/QueryErrorState'
 import { supabase } from '../../hooks/supabase/base'
 import { useRendiciones } from '../../hooks/supabase'
 import { useQueryClient } from '@tanstack/react-query'
-import { useTransportistasQuery, useClienteQuery, gastosKeys, personalKeys } from '../../hooks/queries'
+import { useTransportistasQuery, useUsuariosQuery, useClienteQuery, gastosKeys, personalKeys } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useAuthData } from '../../contexts/AuthDataContext'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -44,6 +44,10 @@ import type { ResumenRendicionDiaria, PerfilDB, EstadoRendicion, CambiosGastosRe
 import { cobrosVistosDe, efectivoAEntregar } from '../../utils/rendicionGastos'
 import { gastosDeResolucion, textoFaltante } from '../../utils/faltantesRendicion'
 import { lazyWithReload } from '../../utils/lazyWithReload'
+import { faltantesParaMostrar, pendienteDelFaltante, puedeCorregirCobro, quienesCobranDe } from '../../utils/quienCobro'
+import CorregirCobro from '../rendiciones/CorregirCobro'
+import CobrarFaltante from '../rendiciones/CobrarFaltante'
+import type { PersonaQueCobra } from '../rendiciones/CampoQuienCobro'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 
 const SIN_CONEXION_DETALLE = 'Sin conexión. Revisá la señal e intentá de nuevo.'
@@ -161,10 +165,27 @@ interface ResumenCardProps {
   esPropia?: boolean
   /** Sólo el admin resuelve una disconformidad y deshace una resolución; el encargado ve que la resuelve un admin. */
   esAdmin?: boolean
+  /** Quien mira es encargado (corrige cobros de una rendición abierta de un chofer). */
+  esEncargado?: boolean
+  /**
+   * T4 (#1710): la rendición es de un encargado (lo que cobró en la oficina). La confirma un admin,
+   * nunca un encargado.
+   */
+  esDeEncargado?: boolean
+  /** Sólo para el admin: a quién le puede pasar un cobro o quién recibió lo que pagó el cliente. */
+  personas?: PersonaQueCobra[]
+  yoId?: string | null
+  /** Algo cambió (un cobro corregido, lo que pagó el cliente): recargar. */
+  onCambio?: () => void
 }
 
-function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onReabrir, onVerFicha, soloLectura = false, esPropia = false, esAdmin = false }: ResumenCardProps): React.ReactElement {
+function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onReabrir, onVerFicha, soloLectura = false, esPropia = false, esAdmin = false, esEncargado = false, esDeEncargado = false, personas, yoId, onCambio }: ResumenCardProps): React.ReactElement {
   const [expandido, setExpandido] = useState(false)
+  // T4: el cobro que se está corrigiendo y la línea de faltante que el cliente está pagando.
+  const [corrigiendo, setCorrigiendo] = useState<number | null>(null)
+  const [cobrandoFaltante, setCobrandoFaltante] = useState<number | null>(null)
+  const sePuedeCorregir = !soloLectura && puedeCorregirCobro({ esAdmin, esEncargado, estado: resumen.estado, esDeEncargado })
+  const faltantesVistos = faltantesParaMostrar(resumen.total_faltantes_empleados)
   const [detalle, setDetalle] = useState<DetalleRendicionCliente[] | null>(null)
   const [loadingDetalle, setLoadingDetalle] = useState(false)
   // Un error del backend tiene que verse. Antes se hacía setDetalle([]) y el
@@ -251,9 +272,8 @@ function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onReabrir, onV
     [detalle]
   )
 
-  // Cuánto cobró cada persona dentro de esta rendición. Sirve para el control
-  // de caja: la rendición agrupa por transportista, pero la plata la puede
-  // haber cobrado otro (p. ej. un saldo viejo cobrado en el mostrador).
+  // Quién cargó cada cobro de esta rendición. Desde la T4 (#1710) la rendición es de quien cobró;
+  // la oficina puede haber cargado a su nombre (la entrega con pago, la parada).
   const porCobrador = useMemo(() => {
     const m = new Map<string, number>()
     for (const d of detalle ?? []) m.set(d.cobrado_por, (m.get(d.cobrado_por) ?? 0) + d.total)
@@ -312,7 +332,7 @@ function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onReabrir, onV
     try {
       const filas = detalle.map(d => ({
         Cliente: d.cliente_nombre,
-        Cobró: d.cobrado_por,
+        Cargó: d.cobrado_por,
         Total: d.total,
         'Entregas (dia)': d.total_entregas,
         'Ctas Ctes': d.total_ctascte,
@@ -348,6 +368,11 @@ function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onReabrir, onV
               <span className="font-semibold text-gray-800 dark:text-white">
                 {resumen.transportista_nombre}
               </span>
+              {esDeEncargado && (
+                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
+                  Encargado · cobros de la oficina
+                </span>
+              )}
               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${estadoStyle.badge}`}>
                 {estadoStyle.label}
               </span>
@@ -397,13 +422,13 @@ function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onReabrir, onV
         )}
 
         {/* Efectivo a entregar: lo cobrado en efectivo menos los gastos y los pagos al personal con esa plata */}
-        {(resumen.total_efectivo > 0 || resumen.cantidad_gastos > 0 || resumen.total_pagos_personal > 0 || resumen.total_faltantes_empleados > 0 || resumen.faltantes.length > 0) && (
+        {(resumen.total_efectivo > 0 || resumen.cantidad_gastos > 0 || resumen.total_pagos_personal > 0 || resumen.total_faltantes_empleados !== 0 || resumen.faltantes.length > 0) && (
           <div className="mt-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
             <p className="text-xs text-gray-500 dark:text-gray-400">Efectivo a entregar</p>
             <p className={`text-xl font-bold ${efectivoAEntregarResumen < 0 ? 'text-red-600' : 'text-gray-800 dark:text-white'}`}>
               {formatPrecio(efectivoAEntregarResumen)}
             </p>
-            {(resumen.cantidad_gastos > 0 || resumen.total_pagos_personal > 0 || resumen.total_faltantes_empleados > 0) && (
+            {(resumen.cantidad_gastos > 0 || resumen.total_pagos_personal > 0 || resumen.total_faltantes_empleados !== 0) && (
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                 {[
                   `${formatPrecio(resumen.total_efectivo)} cobrados en efectivo`,
@@ -413,10 +438,12 @@ function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onReabrir, onV
                   resumen.total_pagos_personal > 0
                     ? `${formatPrecio(resumen.total_pagos_personal)} pagados al personal con esa plata`
                     : null,
-                  resumen.total_faltantes_empleados > 0
-                    ? `${formatPrecio(resumen.total_faltantes_empleados)} de faltantes a cargo de empleados`
+                  faltantesVistos.cargados > 0
+                    ? `${formatPrecio(faltantesVistos.cargados)} de faltantes a cargo de empleados`
                     : null,
                 ].filter(Boolean).join(' − ')}
+                {faltantesVistos.cobradosContraFaltantes > 0 &&
+                  ` + ${formatPrecio(faltantesVistos.cobradosContraFaltantes)} que pagaron clientes contra faltantes de choferes`}
               </p>
             )}
             {efectivoAEntregarResumen < 0 && (
@@ -448,9 +475,37 @@ function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onReabrir, onV
               <div className="mt-2">
                 <p className="text-xs font-medium text-gray-600 dark:text-gray-300">Diferencia imputada</p>
                 <ul className="mt-1 space-y-0.5 text-xs text-gray-700 dark:text-gray-300">
-                  {resumen.faltantes.map(f => (
-                    <li key={f.id}>{textoFaltante(f)}</li>
-                  ))}
+                  {resumen.faltantes.map(f => {
+                    const pendiente = pendienteDelFaltante(f)
+                    const recuperado = Number(f.recuperado ?? 0)
+                    return (
+                      <li key={f.id}>
+                        {textoFaltante(f)}
+                        {recuperado > 0 && (
+                          <span className="text-emerald-700 dark:text-emerald-300"> · el cliente ya pagó {formatPrecio(recuperado)}</span>
+                        )}
+                        {!soloLectura && esAdmin && pendiente > 0 && cobrandoFaltante !== f.id && (
+                          <button
+                            type="button"
+                            onClick={() => setCobrandoFaltante(f.id)}
+                            className="ml-2 text-blue-600 dark:text-blue-400 underline"
+                          >
+                            Lo pagó el cliente
+                          </button>
+                        )}
+                        {cobrandoFaltante === f.id && (
+                          <CobrarFaltante
+                            faltanteId={f.id}
+                            pendiente={pendiente}
+                            personas={personas ?? []}
+                            yoId={yoId}
+                            onCancelar={() => setCobrandoFaltante(null)}
+                            onHecho={() => { setCobrandoFaltante(null); onCambio?.() }}
+                          />
+                        )}
+                      </li>
+                    )
+                  })}
                 </ul>
               </div>
             )}
@@ -531,10 +586,10 @@ function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onReabrir, onV
               Detalle
             </Button>
 
-            {soloLectura ? null : esPropia ? (
+            {soloLectura ? null : esPropia || (esDeEncargado && !esAdmin) ? (
               (resumen.estado === 'pendiente' || resumen.estado === 'disconformidad') && (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Tu rendición la confirma otro encargado o un admin
+                  {esDeEncargado ? 'La rendición de un encargado la confirma un admin' : 'Tu rendición la confirma otro encargado o un admin'}
                 </p>
               )
             ) : resumen.estado === 'disconformidad' ? (
@@ -679,7 +734,7 @@ function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onReabrir, onV
                       key={nombre}
                       className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
                     >
-                      Cobró {nombre}: <strong>{formatPrecio(monto)}</strong>
+                      Cargó {nombre}: <strong>{formatPrecio(monto)}</strong>
                     </span>
                   ))}
                 </div>
@@ -700,7 +755,7 @@ function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onReabrir, onV
                     <thead>
                       <tr className="text-gray-500 dark:text-gray-400 text-left border-b border-gray-200 dark:border-gray-700">
                         <th className="py-1 pr-2 font-medium">Cliente</th>
-                        <th className="py-1 px-2 font-medium">Cobró</th>
+                        <th className="py-1 px-2 font-medium">Cargó</th>
                         {formaFiltro && <th className="py-1 px-2 font-medium text-right">{FORMA_LABELS[formaFiltro]}</th>}
                         <th className="py-1 px-2 font-medium text-right">Total</th>
                         <th className="py-1 px-2 font-medium text-right">Entregas</th>
@@ -754,8 +809,33 @@ function ResumenCard({ resumen, onCerrar, onResolver, onDeshacer, onReabrir, onV
                                             )}
                                             {!p.pedido_id && <span className="text-gray-500"> · Pago a cuenta</span>}
                                             {p.referencia && <span className="text-gray-400"> · Ref: {p.referencia}</span>}
-                                            <span className="text-gray-400"> · cobró {p.cobrado_por}</span>
+                                            <span className="text-gray-400"> · cargó {p.cobrado_por}</span>
                                             {p.notas && <p className="text-gray-400 italic">{p.notas}</p>}
+                                            {sePuedeCorregir && !['adelanto_sueldo', 'nota_credito'].includes(p.forma_pago) && corrigiendo !== p.pago_id && (
+                                              <button
+                                                type="button"
+                                                onClick={(e) => { e.stopPropagation(); setCorrigiendo(p.pago_id) }}
+                                                className="text-blue-600 dark:text-blue-400 underline"
+                                              >
+                                                Corregir
+                                              </button>
+                                            )}
+                                            {corrigiendo === p.pago_id && (
+                                              <CorregirCobro
+                                                pagoId={p.pago_id}
+                                                formaActual={p.forma_pago}
+                                                esAdmin={esAdmin}
+                                                personas={personas}
+                                                onCancelar={() => setCorrigiendo(null)}
+                                                onHecho={() => {
+                                                  setCorrigiendo(null)
+                                                  setPagosPorFila({})
+                                                  setFilaAbierta(null)
+                                                  setExpandido(false)
+                                                  onCambio?.()
+                                                }}
+                                              />
+                                            )}
                                           </div>
                                           <span className={`px-1.5 py-0.5 rounded shrink-0 ${
                                             p.es_entrega_del_dia
@@ -844,6 +924,10 @@ export default function VistaRendiciones(): React.ReactElement {
     desmarcarControlada
   } = useRendiciones()
   const { data: transportistas = [] } = useTransportistasQuery()
+  // T4 (#1710): el rol de cada uno (la rendición de un encargado) y a quién puede elegir el admin.
+  const { data: usuarios = [] } = useUsuariosQuery()
+  const encargados = useMemo(() => new Set(usuarios.filter(u => u.rol === 'encargado').map(u => u.id)), [usuarios])
+  const personasQueCobran = useMemo(() => (isAdmin ? quienesCobranDe(usuarios) : []), [isAdmin, usuarios])
 
   const hoy = fechaLocalISO()
   const haceUnaSemana = useMemo(() => {
@@ -1144,6 +1228,11 @@ export default function VistaRendiciones(): React.ReactElement {
               soloLectura={!esOficina}
               esPropia={!isAdmin && r.transportista_id === user?.id}
               esAdmin={isAdmin}
+              esEncargado={!!isEncargado}
+              esDeEncargado={encargados.has(r.transportista_id)}
+              personas={personasQueCobran}
+              yoId={user?.id ?? null}
+              onCambio={() => { void cargar() }}
             />
           ))}
         </div>

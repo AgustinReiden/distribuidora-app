@@ -38,6 +38,7 @@ vi.mock('../../hooks/queries', () => ({
   useZonasEstandarizadasQuery: () => ({ data: [] }),
   useProductosQuery: () => ({ data: [] }),
   useClienteAdmiteAdelantoQuery: () => ({ data: undefined }),
+  useUsuariosQuery: () => ({ data: [] }),
 }))
 vi.mock('../../hooks/queries/useUltimaFechaCajaCerradaQuery', () => ({
   useFechaMinimaPago: () => undefined,

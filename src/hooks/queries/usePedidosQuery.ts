@@ -11,6 +11,7 @@ import { clientesKeys } from './useClientesQuery'
 import { promocionesKeys } from './usePromocionesQuery'
 import { invalidarCuposPromo } from './cuposPromoCache'
 import { fechaLocalISO } from '../../utils/formatters'
+import { argQuienCobro } from '../../utils/quienCobro'
 import { nuevoRequestId, type VerificacionDeAlta } from '../../utils/idempotencia'
 import { isTransientNetworkError, conPlazoDeRed } from '../../utils/retryWithBackoff'
 import { RechazoDeNegocioError } from '../../utils/rechazoDeNegocio'
@@ -1328,11 +1329,14 @@ async function marcarPagosMasivo(
   pedidoIds: string[],
   formaPago: string,
   fecha?: string | null,
-  clientRequestId?: string
+  clientRequestId?: string,
+  cobradoPor?: string | null
 ): Promise<number> {
   const rpcArgs: Record<string, unknown> = {
     p_pedido_ids: pedidoIds.map(id => Number(id)),
     p_forma_pago: formaPago,
+    // T4 (#1710): de qué caja es el cobro, sólo si lo eligió el admin.
+    ...argQuienCobro(cobradoPor),
   }
   if (fecha) rpcArgs.p_fecha = fecha
   // Idempotencia (mig 167): un reintento con el mismo UUID devuelve el
@@ -1357,7 +1361,8 @@ export function usePagosMasivosMutation() {
       pedidoIds: string[];
       formaPago: string;
       fecha?: string | null;
-      clientRequestId?: string
+      clientRequestId?: string;
+      cobradoPor?: string | null
     }) => {
       // Mismo UUID en todo reintento automático: react-query re-ejecuta este
       // `mutationFn` con el MISMO objeto `variables` (no uno nuevo por
@@ -1365,7 +1370,8 @@ export function usePagosMasivosMutation() {
       // `marcarPagosMasivo` genere uno nuevo cada vez con `??`- es lo que hace
       // que el reintento dedupee en vez de cobrar dos veces.
       variables.clientRequestId ??= nuevoRequestId()
-      return marcarPagosMasivo(variables.pedidoIds, variables.formaPago, variables.fecha, variables.clientRequestId)
+      return marcarPagosMasivo(variables.pedidoIds, variables.formaPago, variables.fecha, variables.clientRequestId,
+        variables.cobradoPor)
     },
     // `marcar_pagos_masivo` es idempotente por `p_client_request_id` (mig 167),
     // pero sólo vale la pena reintentar un blip de red.

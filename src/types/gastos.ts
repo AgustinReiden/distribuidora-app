@@ -198,6 +198,8 @@ export interface FaltanteDeRendicion {
   rubro_nombre: string | null
   creado_por_nombre: string | null
   created_at: string
+  /** Lo que el cliente ya pagó después contra esta línea (T4, #1710): descuenta el faltante. */
+  recuperado?: number
 }
 
 /** Una línea de lo que manda `resolver_rendicion` en `p_resolucion`. */
