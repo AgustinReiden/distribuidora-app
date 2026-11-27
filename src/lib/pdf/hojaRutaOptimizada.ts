@@ -18,6 +18,7 @@ import { bloqueDeudaComanda, deudaSinBoletasDelLote } from '../../utils/deudaCli
 import { lineaItemImpresion } from './utils/lineaItem'
 import { consolidarCarga, type OpcionesManifiesto } from '../../utils/manifiestoCarga'
 import { barridasEfectivas, ETIQUETA_BARRIDA, type Barrida } from '../../utils/barridas'
+import { partirTarjeta } from '../../utils/partirTarjeta'
 import { horarioParaRutear } from '../../hooks/useOptimizarRuta'
 
 export {
@@ -46,7 +47,7 @@ const CARD_INNER_PADDING = 2
 const CARD_CONTENT_WIDTH = COLUMN_WIDTH - CARD_INNER_PADDING * 2
 const CARD_BOTTOM_SPACING = 3
 
-type CardOp =
+type CardOp = (
   | { kind: 'text'; text: string; fontSize: number; bold: boolean; advance: number }
   | { kind: 'product'; text: string; subtotal: string | null; fontSize: number; advance: number }
   | { kind: 'total'; label: string; value: string; fontSize: number; advance: number }
@@ -56,6 +57,7 @@ type CardOp =
   | { kind: 'deuda-pago'; advance: number }
   | { kind: 'divider'; advance: number }
   | { kind: 'spacer'; advance: number }
+) & { pie?: boolean }
 
 type ManifiestoOp =
   | { kind: 'manifiesto-title'; text: string; advance: number }
@@ -336,8 +338,10 @@ export function buildCardOps(doc: jsPDF, pedido: PedidoDB, orderNumber: number):
   }
 
   // Total pedido (no aplica a paradas de cambio: total 0, no es una venta)
+  // El pie (total, deuda, notas, entregado) es indivisible: si la tarjeta se
+  // parte entre columnas, va entero en la última parte (#1715).
   if (!esCambio) {
-    ops.push({ kind: 'spacer', advance: 1 })
+    ops.push({ kind: 'spacer', advance: 1, pie: true })
     const cargoEnvio = pedido.total - ventaDePedido(pedido)
     if (cargoEnvio > 0) {
       ops.push({
@@ -379,7 +383,7 @@ export function buildCardOps(doc: jsPDF, pedido: PedidoDB, orderNumber: number):
 
   // Entregado + forma de pago. La firma del cliente va en la comanda, no acá.
   // Una parada de cambio no cobra nada: sin forma de pago.
-  ops.push({ kind: 'spacer', advance: 1 })
+  ops.push(esCambio ? { kind: 'spacer', advance: 1, pie: true } : { kind: 'spacer', advance: 1 })
   ops.push({ kind: 'entregado', pago: esCambio ? null : formaPagoParada(pedido), advance: 4.5 })
 
   // Divisor
@@ -714,6 +718,17 @@ function drawCierreOps(doc: jsPDF, ops: CierreOp[], x: number, yStart: number): 
 /** Alto que ocupa el separador de barrida, para el calculo de salto de columna. */
 const SEPARADOR_BARRIDA_ALTO = 7
 
+/** Alto mínimo de columna libre para empezar a partir un pedido largo ahí. */
+const MIN_ALTO_PARTE = 40
+
+/** Encabezado de la continuación de un pedido partido: «N. Cliente (cont.)». */
+function encabezadoContinuacion(doc: jsPDF, texto: string): CardOp[] {
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(11)
+  const [primera] = doc.splitTextToSize(`${texto} (cont.)`, CARD_CONTENT_WIDTH)
+  return [{ kind: 'text', text: primera ?? `${texto} (cont.)`, fontSize: 11, bold: true, advance: 5 }]
+}
+
 /** Titulo de tanda: linea + etiqueta ('Cierran al mediodia', etc.). */
 function drawSeparadorBarrida(doc: jsPDF, barrida: Barrida, x: number, y: number): number {
   const ancho = COLUMN_WIDTH
@@ -728,7 +743,7 @@ function drawSeparadorBarrida(doc: jsPDF, barrida: Barrida, x: number, y: number
   return y + SEPARADOR_BARRIDA_ALTO
 }
 
-const nuevoDocA4 = (): jsPDF => new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+export const nuevoDocA4 = (): jsPDF => new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
 
 /** Si llega algo distinto a objeto, se ignora. */
 const normalizarInfo = (infoRuta: InfoRuta): InfoRuta =>
@@ -738,7 +753,7 @@ const normalizarInfo = (infoRuta: InfoRuta): InfoRuta =>
  * Dibuja la hoja de ruta (tarjetas + cierre de jornada) en las 3 columnas,
  * empezando en la pagina actual del doc.
  */
-function dibujarHojaRuta(doc: jsPDF, transportista: PerfilDB, pedidos: PedidoDB[], info: InfoRuta): void {
+export function dibujarHojaRuta(doc: jsPDF, transportista: PerfilDB, pedidos: PedidoDB[], info: InfoRuta): void {
   let columnTop = drawPageHeader(doc, transportista, pedidos, info, true)
   const columnBottom = PAGE_HEIGHT - PAGE_MARGIN
 
@@ -777,8 +792,15 @@ function dibujarHojaRuta(doc: jsPDF, transportista: PerfilDB, pedidos: PedidoDB[
     const cambiaBarrida = barrida !== barridaPrevia
     const altoSeparador = cambiaBarrida ? SEPARADOR_BARRIDA_ALTO : 0
 
-    // Si no entra en la columna actual, pasa a la siguiente
-    if (y + height + altoSeparador > columnBottom && y > columnTop) {
+    const altoColumna = columnBottom - columnTop
+    // Un pedido más alto que una columna entera se parte en columnas (#1715):
+    // «(cont.)» arriba y «sigue» abajo, sin perder renglones ni el pie. Uno que
+    // entra en una columna vacía no se parte: pasa entero a la siguiente.
+    const hayQuePartir = height + altoSeparador > altoColumna
+    if (hayQuePartir) {
+      // Con poco lugar en la columna actual, arranca en la siguiente.
+      if (columnBottom - y - altoSeparador < MIN_ALTO_PARTE && y > columnTop) advanceColumn()
+    } else if (y + height + altoSeparador > columnBottom && y > columnTop) {
       advanceColumn()
     }
 
@@ -787,7 +809,21 @@ function dibujarHojaRuta(doc: jsPDF, transportista: PerfilDB, pedidos: PedidoDB[
       barridaPrevia = barrida
     }
 
-    y = drawCardOps(doc, ops, columnX(), y)
+    if (!hayQuePartir) {
+      y = drawCardOps(doc, ops, columnX(), y)
+      return
+    }
+    const nombre = pedido.cliente?.nombre_fantasia || 'Sin cliente'
+    const partes = partirTarjeta<CardOp>(ops, {
+      disponible: columnBottom - y,
+      altoColumna,
+      encabezadoCont: () => encabezadoContinuacion(doc, `${idx + 1}. ${nombre}`),
+      continua: () => ({ kind: 'italic', text: '... sigue en la columna siguiente', fontSize: 8, advance: 4 }),
+    })
+    partes.forEach((parte, i) => {
+      if (i > 0) advanceColumn()
+      y = drawCardOps(doc, parte, columnX(), y)
+    })
   })
 
   // Cierre de jornada: intenta colocarlo al final de la columna actual
