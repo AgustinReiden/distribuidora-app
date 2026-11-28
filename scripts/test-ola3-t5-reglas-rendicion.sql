@@ -137,6 +137,11 @@ BEGIN
     v_p := v_p || v_id;
   END LOOP;
 
+  -- El rubro de los gastos del ensayo, por su nombre (el id cambia de una base a otra).
+  IF NOT EXISTS (SELECT 1 FROM public.gasto_rubros r WHERE r.nombre = 'Peajes y estacionamiento' AND r.activo) THEN
+    RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = 'ENSAYO FALLÓ · falta el rubro «Peajes y estacionamiento» activo';
+  END IF;
+
   -- ---------------------------------------------------------------- helpers -
   CREATE OR REPLACE FUNCTION pg_temp.como(p_uid uuid, p_suc bigint) RETURNS void LANGUAGE plpgsql AS $f$
   BEGIN
@@ -188,7 +193,7 @@ BEGIN
   CREATE OR REPLACE FUNCTION pg_temp.gasto(p_t uuid, p_monto numeric) RETURNS text
   LANGUAGE sql AS $f$
     SELECT format('SELECT public.guardar_gasto(%L::jsonb)::text',
-                  jsonb_build_object('fecha', public._tablero_hoy(), 'rubro_id', 22, 'monto_total', p_monto,
+                  jsonb_build_object('fecha', public._tablero_hoy(), 'rubro_id', (SELECT r.id FROM public.gasto_rubros r WHERE r.nombre = 'Peajes y estacionamiento' AND r.activo), 'monto_total', p_monto,
                                      'comprobante', 'ninguno', 'origen_pago', 'rendicion',
                                      'rendicion_transportista_id', p_t, 'rendicion_fecha', public._tablero_hoy()));
   $f$;
@@ -430,7 +435,7 @@ BEGIN
   v_txt := pg_temp.r(v_k, pg_temp.cobro(v_p[9], 1000, 'efectivo'));
   IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('CL · K no cobró: ' || v_txt); END IF;
   v_gasto := jsonb_build_object('vistos', '[]'::jsonb, 'clave', v_clave,
-               'guardar', jsonb_build_array(jsonb_build_object('fecha', v_hoy, 'rubro_id', 22, 'monto_total', 300,
+               'guardar', jsonb_build_array(jsonb_build_object('fecha', v_hoy, 'rubro_id', (SELECT r.id FROM public.gasto_rubros r WHERE r.nombre = 'Peajes y estacionamiento' AND r.activo), 'monto_total', 300,
                                                                'comprobante', 'ninguno')));
   v_txt := pg_temp.r(v_e, pg_temp.confirmar(v_k, 'confirmada', v_gasto));
   v_h1 := v_txt;
