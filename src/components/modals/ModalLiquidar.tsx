@@ -45,6 +45,7 @@ import {
   pisoDeFechaDeCarga,
   textoPeriodo,
 } from '../../utils/personal'
+import { textoPorcentajeComision } from '../../utils/porcentajesComision'
 import type {
   AvisoLiquidacion,
   Empleado,
@@ -384,6 +385,16 @@ export default function ModalLiquidar({
                   )}
                   importe={<span className={cn('font-medium', colorImporte(v.comisiones.total))}>{conSigno(v.comisiones.total)}</span>}
                 >
+                  {/* COM-1 (T7): con qué % se calculó y quién lo cargó. */}
+                  {(v.comisiones.porcentajes?.length ?? 0) > 0 && (
+                    <ul aria-label="Porcentajes de la comisión" className="mt-1 space-y-0.5 text-xs text-gray-600 dark:text-gray-400">
+                      {v.comisiones.porcentajes!.map(p => (
+                        <li key={`${p.origen}-${p.regla_id ?? p.rol}-${p.pct}`}>
+                          {textoPorcentajeComision(p)}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   {verPedidos && (
                     <div className="mt-2 rounded-lg border border-gray-200 dark:border-gray-700 overflow-x-auto">
                       <table className="w-full text-xs">

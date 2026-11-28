@@ -27,6 +27,7 @@ vi.mock('../../../hooks/queries/usePoliticasComercialesQuery', () => {
     useActualizarAlertasCombosMutation: mutacion,
     useActualizarDiasAtrasFechaPedidoMutation: mutacion,
     useActualizarMultiploRedondeoPrecioMutation: mutacion,
+    useActualizarComisionPctSimulacionMutation: mutacion,
     useImpactoMinimoQuery: () => ({ data: undefined, isFetching: false }),
   }
 })

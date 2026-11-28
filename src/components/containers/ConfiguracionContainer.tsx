@@ -16,6 +16,7 @@ import {
   useActualizarAlertasCombosMutation,
   useActualizarDiasAtrasFechaPedidoMutation,
   useActualizarMultiploRedondeoPrecioMutation,
+  useActualizarComisionPctSimulacionMutation,
   useImpactoMinimoQuery,
 } from '../../hooks/queries/usePoliticasComercialesQuery'
 import { useNotification } from '../../contexts/NotificationContext'
@@ -50,6 +51,7 @@ export default function ConfiguracionContainer() {
   const actualizarAlertasCombos = useActualizarAlertasCombosMutation()
   const actualizarDiasAtrasFechaPedido = useActualizarDiasAtrasFechaPedidoMutation()
   const actualizarMultiploRedondeo = useActualizarMultiploRedondeoPrecioMutation()
+  const actualizarPctSimulacion = useActualizarComisionPctSimulacionMutation()
 
   // Lo que el usuario está tipeando, para poder mostrarle el impacto ANTES de
   // guardar. Arranca en el valor vigente.
@@ -129,6 +131,16 @@ export default function ConfiguracionContainer() {
     }
   }, [actualizarVentana, notify])
 
+  // D11 (reportes-R5): el % de la simulación de comisiones del gerencial.
+  const handleGuardarPctSimulacion = useCallback(async (pct: number) => {
+    try {
+      await actualizarPctSimulacion.mutateAsync(pct)
+      notify.success(`Simulación de comisiones del gerencial: ${String(pct).replace('.', ',')} %`)
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'No se pudo guardar la configuración')
+    }
+  }, [actualizarPctSimulacion, notify])
+
   const handleGuardarAlertasCombos = useCallback(async (margenMinimoPct: number, descuentoMaximoPct: number) => {
     try {
       await actualizarAlertasCombos.mutateAsync({ margenMinimoPct, descuentoMaximoPct })
@@ -200,6 +212,9 @@ export default function ConfiguracionContainer() {
         puedeEditarVentana={isAdmin}
         guardandoVentana={actualizarVentana.isPending}
         onGuardarVentana={handleGuardarVentana}
+        comisionPctSimulacion={politicas.comisionPctSimulacion}
+        guardandoComisionPctSimulacion={actualizarPctSimulacion.isPending}
+        onGuardarComisionPctSimulacion={handleGuardarPctSimulacion}
         comboMargenMinimoPct={politicas.comboMargenMinimoPct}
         comboDescuentoMaximoPct={politicas.comboDescuentoMaximoPct}
         puedeEditarAlertasCombos={isAdmin}

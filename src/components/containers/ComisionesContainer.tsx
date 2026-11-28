@@ -1,6 +1,6 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import { fechaLocalISO } from '../../utils/formatters'
+import { fechaLocalISO, primerDiaMesLocalISO } from '../../utils/formatters'
 import { useCalcularComisionesQuery, useVendedoresComisionablesQuery } from '../../hooks/queries'
 import { vendedoresElegibles } from '../../utils/vendedoresComision'
 import { useAuthData } from '../../contexts/AuthDataContext'
@@ -19,9 +19,9 @@ function LoadingState(): React.ReactElement {
   )
 }
 
+// Fr-B2: el 1° del mes argentino, no el del reloj del dispositivo.
 function getPrimerDiaMes(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+  return primerDiaMesLocalISO()
 }
 
 function getHoy(): string {
@@ -80,8 +80,9 @@ export default function ComisionesContainer(): React.ReactElement {
         <Suspense fallback={null}>
           <ModalComisionReglas
             preventistas={preventistas}
-            comisionPreventista={resultado?.comision_pct_preventista ?? resultado?.comision_default ?? 2}
-            comisionOtros={resultado?.comision_pct_otros ?? 0}
+            // Fr-B2: sin el cálculo no hay número que mostrar (antes, un 2 % y un 0 % inventados).
+            comisionPreventista={resultado?.comision_pct_preventista ?? resultado?.comision_default}
+            comisionOtros={resultado?.comision_pct_otros}
             onClose={() => setModalReglasOpen(false)}
           />
         </Suspense>

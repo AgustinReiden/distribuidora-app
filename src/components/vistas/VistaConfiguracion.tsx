@@ -48,6 +48,10 @@ export interface VistaConfiguracionProps {
   onGuardarComisiones: (pctPreventista: number, pctOtros: number) => void;
   /** El % lo cambia sólo el admin (#1320): el encargado lo ve y no lo edita. */
   puedeEditarComisiones: boolean;
+  /** D11: el % de la simulación del gerencial. Sin `onGuardarComisionPctSimulacion` no se muestra. */
+  comisionPctSimulacion?: number;
+  guardandoComisionPctSimulacion?: boolean;
+  onGuardarComisionPctSimulacion?: (pct: number) => void;
   /** Dias de anticipacion del aviso amarillo de vencimiento (mig 223). */
   diasAlertaVencimiento: number;
   /** Dias de anticipacion del aviso rojo. Siempre <= el amarillo. */
@@ -413,6 +417,107 @@ function FormVentanaPrecioAnterior({
         {!cambio && !invalido && (
           <span className="text-xs text-stone-500 dark:text-stone-400">
             Vigente: {horas} h
+          </span>
+        )}
+      </div>
+    </form>
+  );
+}
+
+/**
+ * D11 (reportes-R5, decisión del dueño del 26/11): el % plano con que el gerencial simula la
+ * comisión («Comisión 2 %»). Es de la política comercial de la sucursal, con 2 de semilla, y lo
+ * cambia sólo el admin (`actualizar_comision_pct_simulacion`). No cambia lo que se paga: eso sale
+ * de las reglas y del % por defecto.
+ */
+function FormSimulacionComision({
+  pct,
+  puedeEditar,
+  guardando,
+  onGuardar,
+}: {
+  pct: number;
+  puedeEditar: boolean;
+  guardando: boolean;
+  onGuardar: (pct: number) => void;
+}) {
+  const [valor, setValor] = useState(numeroEditable(pct));
+
+  // El valor del servidor llega después del primer render y cambia al cambiar de sucursal.
+  useEffect(() => { setValor(numeroEditable(pct)); }, [pct]);
+  useTrabajoEnCurso(leerDecimalSinMiles(valor) !== pct, 'configuración: % de la simulación de comisiones sin guardar');
+
+  // Sin miles (B20, D17), el mismo rango que el CHECK y la RPC: de 0 a 100.
+  const n = leerDecimalSinMiles(valor) ?? NaN;
+  const invalido = !Number.isFinite(n) || n < 0 || n > 100;
+  const cambio = !invalido && n !== pct;
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (invalido || !puedeEditar) return;
+    onGuardar(n);
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="bg-white dark:bg-gray-800 border border-stone-200/80 dark:border-gray-700 rounded-xl p-5 space-y-4 shadow-warm"
+    >
+      <div>
+        <h2 className="text-sm font-semibold text-stone-900 dark:text-white flex items-center gap-2">
+          <Percent className="w-4 h-4 text-stone-500" aria-hidden="true" />
+          Simulación de comisiones del gerencial
+        </h2>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
+          Es el porcentaje plano con que el reporte gerencial simula la comisión de cada vendedor,
+          sin mirar el rol ni las reglas. No cambia lo que se paga.
+        </p>
+        {!puedeEditar && (
+          <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
+            Solo un admin puede cambiarlo.
+          </p>
+        )}
+      </div>
+
+      <div>
+        <label htmlFor="pct-simulacion" className="block text-sm font-medium text-stone-900 dark:text-white">
+          Porcentaje
+        </label>
+        <div className="mt-2 flex items-center gap-2">
+          <CampoNumero
+            id="pct-simulacion"
+            sinMiles
+            decimales={2}
+            motivo={null}
+            value={valor}
+            onChange={setValor}
+            disabled={!puedeEditar}
+            aria-invalid={invalido}
+            aria-describedby={invalido ? 'pct-simulacion-error' : undefined}
+            className="w-28 px-3 py-2 rounded-lg border border-stone-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
+          <span className="text-stone-500 dark:text-stone-400">%</span>
+        </div>
+        {invalido && (
+          <p id="pct-simulacion-error" role="alert" className="text-xs text-red-600 mt-2">
+            Ingresá un porcentaje entre 0 y 100.
+          </p>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Button
+          type="submit"
+          variant="primary"
+          size="md"
+          disabled={guardando || !cambio || invalido || !puedeEditar}
+          loading={guardando}
+        >
+          Guardar
+        </Button>
+        {!cambio && !invalido && (
+          <span className="text-xs text-stone-500 dark:text-stone-400">
+            Vigente: {String(pct).replace('.', ',')} %
           </span>
         )}
       </div>
@@ -965,6 +1070,9 @@ export default function VistaConfiguracion({
   guardandoComisiones,
   onGuardarComisiones,
   puedeEditarComisiones,
+  comisionPctSimulacion,
+  guardandoComisionPctSimulacion,
+  onGuardarComisionPctSimulacion,
   diasAlertaVencimiento,
   diasCriticoVencimiento,
   guardandoAlertas,
@@ -1277,6 +1385,15 @@ export default function VistaConfiguracion({
         guardando={guardandoVentana}
         onGuardar={onGuardarVentana}
       />
+
+      {onGuardarComisionPctSimulacion && (
+        <FormSimulacionComision
+          pct={comisionPctSimulacion ?? 2}
+          puedeEditar={puedeEditarComisiones}
+          guardando={guardandoComisionPctSimulacion ?? false}
+          onGuardar={onGuardarComisionPctSimulacion}
+        />
+      )}
 
       {onGuardarDiasAtrasFechaPedido && (
         <FormDiasAtrasFechaPedido

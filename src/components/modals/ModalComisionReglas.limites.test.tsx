@@ -15,6 +15,8 @@ vi.mock('../../hooks/queries', () => ({
 vi.mock('../../contexts/NotificationContext', () => ({
   useNotification: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }),
 }))
+// COM-1 (T7): el modal saca de los vendedores a quien carga; acá no hay nadie logueado que sacar.
+vi.mock('../../contexts/AuthDataContext', () => ({ useAuthData: () => ({ user: null }) }))
 
 import ModalComisionReglas from './ModalComisionReglas'
 

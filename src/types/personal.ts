@@ -2,6 +2,7 @@
  * Tipos del módulo Personal (entrega 3 de gastos): empleados, arreglos de sueldo
  * y su cuenta corriente. Los ids son `number` (bigint en runtime), salvo el del usuario.
  */
+import type { PorcentajeComision } from '../utils/porcentajesComision'
 
 export type PuestoEmpleado =
   | 'preventista'
@@ -191,7 +192,11 @@ export interface VistaPreviaLiquidacion {
   /** `hoy <= hasta`: el período todavía no terminó. */
   en_curso: boolean
   sueldo: { propuesto: number; arreglo_desde: string | null }
-  comisiones: { total: number; base: number; detalle: PedidoLiquidado[] }
+  /**
+   * `porcentajes` (COM-1, T7): con qué % se calculó y quién lo cargó. Opcional: un server de antes
+   * de la migración no lo trae.
+   */
+  comisiones: { total: number; base: number; detalle: PedidoLiquidado[]; porcentajes?: PorcentajeComision[] }
   ajustes: { total: number; detalle: AjusteLiquidado[] }
   movimientos: MovimientoDelPeriodo[]
   saldo_anterior: number

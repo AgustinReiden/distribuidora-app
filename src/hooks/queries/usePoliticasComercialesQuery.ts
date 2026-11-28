@@ -81,6 +81,11 @@ export interface PoliticasComerciales {
    * #1561, CAT-8). Antes era una constante del front. Sólo lo edita el admin.
    */
   multiploRedondeoPrecio: number
+  /**
+   * D11 (reportes-R5): el % plano con que el gerencial simula la comisión (de 0 a 100, default 2).
+   * Reservado: lo da `politica_comercial_reservada()`. Sólo lo edita el admin.
+   */
+  comisionPctSimulacion: number
 }
 
 const CACHE_KEY = 'politicas_comerciales'
@@ -106,6 +111,7 @@ export const POLITICAS_POR_DEFECTO: PoliticasComerciales = {
   comboDescuentoMaximoPct: 30,
   diasAtrasFechaPedido: DIAS_ATRAS_FECHA_PEDIDO_POR_DEFECTO,
   multiploRedondeoPrecio: MULTIPLO_REDONDEO_PRECIO,
+  comisionPctSimulacion: 2,
 }
 
 function modoValido(modo: unknown): ModoMinimoPedido {
@@ -123,7 +129,7 @@ export const POLITICA_COLUMNAS_PARA_VENDER =
 
 /** Lo que sólo ven admin y encargado: lo da la RPC `politica_comercial_reservada()`. */
 export const POLITICA_COLUMNAS_RESERVADAS =
-  'comision_pct_preventista, comision_pct_otros, ventana_precio_anterior_horas, combo_margen_minimo_pct, combo_descuento_maximo_pct'
+  'comision_pct_preventista, comision_pct_otros, ventana_precio_anterior_horas, combo_margen_minimo_pct, combo_descuento_maximo_pct, comision_pct_simulacion'
 
 const SIN_CONEXION_POLITICA = 'Sin conexión: no se pudo cargar la política comercial. Revisá la señal e intentá de nuevo.'
 
@@ -191,6 +197,8 @@ async function fetchPoliticas(sucursalId: number | null): Promise<PoliticasComer
     diasAtrasFechaPedido,
     // `||` y no `??`: el CHECK no deja un 0, así que un 0 sólo puede ser un hueco.
     multiploRedondeoPrecio: Number(data?.multiplo_redondeo_precio ?? MULTIPLO_REDONDEO_PRECIO) || MULTIPLO_REDONDEO_PRECIO,
+    // `??`: 0 % es un valor (simular sin comisión). Un server de antes de la migración no lo trae: 2.
+    comisionPctSimulacion: Number(data?.comision_pct_simulacion ?? 2),
   }
 
   // Sin expiración a propósito: un valor viejo es infinitamente mejor que
@@ -572,6 +580,37 @@ export function useActualizarVentanaPrecioAnteriorMutation() {
       ).catch(() => {})
 
       return typeof data === 'number' ? data : horas
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })
+    },
+  })
+}
+
+/**
+ * D11 (reportes-R5): el % con que el gerencial simula la comisión, de la sucursal activa. Sólo
+ * admin (lo hace cumplir la RPC); es reservado, así que se lee por `politica_comercial_reservada`.
+ */
+export function useActualizarComisionPctSimulacionMutation() {
+  const queryClient = useQueryClient()
+  const { currentSucursalId } = useSucursal()
+
+  return useMutation({
+    mutationFn: async (pct: number) => {
+      const { data, error } = await supabase.rpc('actualizar_comision_pct_simulacion', {
+        p_pct: pct,
+      })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo confirmar que el porcentaje de la simulación se haya guardado. Revisá antes de reintentar.')
+
+      const previo = await getCachedData<PoliticasComerciales>(CACHE_KEY, currentSucursalId).catch(() => null)
+      await cacheData(
+        CACHE_KEY,
+        { ...POLITICAS_POR_DEFECTO, ...(previo ?? {}), comisionPctSimulacion: typeof data === 'number' ? data : pct },
+        undefined,
+        currentSucursalId,
+      ).catch(() => {})
+
+      return typeof data === 'number' ? data : pct
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: politicasComercialesKeys.all(currentSucursalId) })
