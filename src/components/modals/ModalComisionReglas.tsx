@@ -13,6 +13,10 @@
  * Un mes cerrado no cambia (#1320): la baja tiene fecha y la regla sigue
  * rigiendo para los pedidos anteriores, y una regla nueva no puede regir antes
  * del 1° del mes en curso (el RPC lo rechaza; el input ya no lo ofrece).
+ *
+ * Nadie se fija su propio porcentaje (COM-1, D2 del dueño del 26/11): el vendedor
+ * de la regla no puede ser quien la carga, y una regla propia no se da de baja
+ * desde acá (el RPC lo rechaza; la pantalla no lo ofrece).
  */
 import { useMemo, useState } from 'react'
 import { Plus, Trash2, Percent, AlertTriangle } from 'lucide-react'
@@ -25,6 +29,7 @@ import {
   useDesactivarComisionReglaMutation,
 } from '../../hooks/queries'
 import { useNotification } from '../../contexts/NotificationContext'
+import { useAuthData } from '../../contexts/AuthDataContext'
 import { etiquetaOrigen } from '../../utils/origenPrecio'
 import { fechaLocalISO } from '../../utils/formatters'
 import type { OrigenPrecio } from '../../utils/origenPrecio'
@@ -38,10 +43,13 @@ export interface PreventistaOption {
 
 export interface ModalComisionReglasProps {
   preventistas: PreventistaOption[]
-  /** % por defecto de los preventistas (mig 207). */
-  comisionPreventista: number
-  /** % por defecto del resto: admin, encargado (mig 207). */
-  comisionOtros: number
+  /**
+   * % por defecto de los preventistas (mig 207). `undefined` mientras el cálculo
+   * no llegó (o falló): no se muestra un número inventado (Fr-B2).
+   */
+  comisionPreventista?: number
+  /** % por defecto del resto: admin, encargado (mig 207). `undefined`, como el de arriba. */
+  comisionOtros?: number
   onClose: () => void
 }
 
@@ -64,7 +72,12 @@ export default function ModalComisionReglas({
   // B20: los campos de número en rojo frenan el guardado.
   const ilegibles = useRegistroIlegibles()
   const notify = useNotification()
-  const { data: reglas = [], isLoading } = useComisionReglasQuery()
+  const { user } = useAuthData()
+  const miId = user?.id ?? null
+  const { data: reglas = [], isLoading, error: errorReglas, refetch } = useComisionReglasQuery()
+  // COM-1: la persona que carga no aparece como vendedor de su propia regla.
+  const vendedores = useMemo(() => preventistas.filter(p => p.id !== miId), [preventistas, miId])
+  const pctTexto = (n: number | undefined): string => (n == null ? '—' : `${String(n).replace('.', ',')}%`)
   const guardar = useGuardarComisionReglaMutation()
   const desactivar = useDesactivarComisionReglaMutation()
 
@@ -121,6 +134,10 @@ export default function ModalComisionReglas({
       notify.error('El porcentaje debe estar entre 0 y 100')
       return
     }
+    if (preventistaId && preventistaId === miId) {
+      notify.error('Nadie se fija su propio porcentaje de comisión: tu regla la tiene que cargar otro admin')
+      return
+    }
     if (!vigenteDesde || vigenteDesde < primerDiaMes) {
       notify.error('La regla no puede regir antes del 1° del mes en curso: los meses anteriores ya cerraron')
       return
@@ -160,9 +177,10 @@ export default function ModalComisionReglas({
           <Percent className="w-5 h-5 shrink-0 mt-0.5 text-indigo-600" aria-hidden="true" />
           <p className="text-xs text-stone-600 dark:text-gray-300">
             Gana la regla más específica que coincida. Sin ninguna regla que aplique se usa el
-            porcentaje por defecto según el rol: <strong>{comisionPreventista}%</strong> para
-            preventistas y <strong>{comisionOtros}%</strong> para el resto (admin, encargado), que
-            se configuran en Configuración. Cargá una regla con origen «Cualquiera» para el % base
+            porcentaje por defecto según el rol que el vendedor tenía al vender:{' '}
+            <strong>{pctTexto(comisionPreventista)}</strong> para preventistas y{' '}
+            <strong>{pctTexto(comisionOtros)}</strong> para el resto (admin, encargado), que se
+            configuran en Configuración. Tu propia regla la carga otro admin. Cargá una regla con origen «Cualquiera» para el % base
             de una persona y otra con «{etiquetaOrigen('mayorista')}» para el % reducido.
           </p>
         </div>
@@ -198,7 +216,7 @@ export default function ModalComisionReglas({
                 className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"
               >
                 <option value="">Todos</option>
-                {preventistas.map(p => (
+                {vendedores.map(p => (
                   <option key={p.id} value={p.id}>{p.nombre}</option>
                 ))}
               </select>
@@ -267,10 +285,26 @@ export default function ModalComisionReglas({
         {/* Listado */}
         {isLoading ? (
           <p className="text-sm text-stone-500">Cargando reglas…</p>
+        ) : errorReglas ? (
+          // Fr-B2: un error de carga no es «no hay reglas»: con reglas cargadas, decir que se
+          // comisiona con el default era falso.
+          <div role="alert" className="flex items-start gap-3 p-3 rounded-lg border border-rose-300 dark:border-rose-700/60 bg-rose-50 dark:bg-rose-900/20 text-sm text-rose-800 dark:text-rose-200">
+            <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" aria-hidden="true" />
+            <div className="min-w-0">
+              <p>No se pudieron cargar las reglas: {(errorReglas as Error).message || 'error desconocido'}</p>
+              <button
+                type="button"
+                onClick={() => void refetch()}
+                className="mt-1 font-medium underline hover:no-underline"
+              >
+                Reintentar
+              </button>
+            </div>
+          </div>
         ) : reglas.length === 0 ? (
           <p className="text-sm text-stone-500 dark:text-gray-400">
             No hay reglas cargadas: se comisiona con el default por rol
-            ({comisionPreventista}% preventistas, {comisionOtros}% el resto).
+            ({pctTexto(comisionPreventista)} preventistas, {pctTexto(comisionOtros)} el resto).
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -298,7 +332,7 @@ export default function ModalComisionReglas({
                       {!r.activo && (r.baja_desde ? ` · dada de baja el ${r.baja_desde}` : ' · dada de baja')}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      {r.activo && (
+                      {r.activo && r.preventista_id !== miId && (
                         <button
                           type="button"
                           onClick={() => void handleBaja(r.id)}

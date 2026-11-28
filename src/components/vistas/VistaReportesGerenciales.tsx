@@ -257,7 +257,8 @@ export default function VistaReportesGerenciales({
   }
 
   useEffect(() => {
-    if (reporte?.kpis?.comision_pct_default) setComPct(reporte.kpis.comision_pct_default)
+    // D11: el % de la política de la sucursal; un 0 configurado también vale (antes quedaba el 2).
+    if (reporte?.kpis?.comision_pct_default != null) setComPct(Number(reporte.kpis.comision_pct_default))
   }, [reporte?.kpis?.comision_pct_default])
 
   const k = reporte?.kpis

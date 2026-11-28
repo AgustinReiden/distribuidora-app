@@ -245,6 +245,32 @@ describe('ModalLiquidar', () => {
     expect(screen.getByText('Comisiona, pero no tiene un usuario vinculado: no se le pueden calcular pedidos.')).toBeInTheDocument()
   })
 
+  // COM-1 (T7): la pantalla de liquidar dice con qué % se calculó y quién lo cargó.
+  it('muestra cada % de la comisión y quién lo cargó', () => {
+    cargar({
+      comisiones: {
+        ...VISTA.comisiones,
+        porcentajes: [
+          { pct: 2, regla_id: null, origen: 'por_defecto', rol: 'preventista', cargado_por: 'Agustín', cargado_el: '2026-10-01',
+            pedidos: 1, base: 10000000, comision: 200000 },
+          { pct: 2, regla_id: 12, origen: 'regla', rol: null, cargado_por: 'Marta', cargado_el: '2026-10-15',
+            pedidos: 1, base: 8430000, comision: 168600 },
+        ],
+      },
+    })
+    renderModal()
+    const lista = screen.getByRole('list', { name: 'Porcentajes de la comisión' })
+    expect(within(lista).getAllByRole('listitem').map(li => li.textContent)).toEqual([
+      '2 % por defecto de preventista · lo cargó Agustín el 01/10/2026 · 1 pedido',
+      '2 % de una regla · lo cargó Marta el 15/10/2026 · 1 pedido',
+    ])
+  })
+
+  it('un server sin porcentajes no muestra la lista', () => {
+    renderModal()
+    expect(screen.queryByRole('list', { name: 'Porcentajes de la comisión' })).not.toBeInTheDocument()
+  })
+
   it('ver pedidos despliega la tabla', async () => {
     const { user } = renderModal()
     expect(screen.queryByRole('table')).not.toBeInTheDocument()

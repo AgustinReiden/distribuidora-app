@@ -42,6 +42,7 @@ import {
   useActualizarVentanaPrecioAnteriorMutation,
   useActualizarAlertasCombosMutation,
   useActualizarDiasAtrasFechaPedidoMutation,
+  useActualizarComisionPctSimulacionMutation,
   POLITICAS_POR_DEFECTO,
   POLITICA_COLUMNAS_PARA_VENDER,
   POLITICA_COLUMNAS_RESERVADAS,
@@ -202,6 +203,42 @@ describe('usePoliticasComercialesQuery — ventanaPrecioAnteriorHoras (#1157)', 
     const { result } = renderHook(() => useActualizarVentanaPrecioAnteriorMutation(), { wrapper })
     await act(async () => {
       await expect(result.current.mutateAsync(48)).rejects.toThrow('Acceso denegado: se requiere rol admin')
+    })
+    expect(cacheData).not.toHaveBeenCalled()
+  })
+})
+
+describe('usePoliticasComercialesQuery — el % de la simulación del gerencial (D11, T7)', () => {
+  it('sale de la RPC reservada; sin dato es 2 y un 0 configurado se respeta', async () => {
+    expect(POLITICAS_POR_DEFECTO.comisionPctSimulacion).toBe(2)
+    expect(POLITICA_COLUMNAS_RESERVADAS.split(', ')).toContain('comision_pct_simulacion')
+    m.reservada = { data: [{ comision_pct_simulacion: '0.00' }], error: null }
+    const { result } = renderHook(() => usePoliticasComercialesQuery(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.politicas.comisionPctSimulacion).toBe(0)
+  })
+
+  it('la mutación llama la RPC con p_pct y guarda el caché con el campo, sin perder los demás', async () => {
+    m.rpc.mockResolvedValue({ data: 3.5, error: null })
+    m.cache = { ...POLITICAS_POR_DEFECTO, montoMinimoPedido: 5000 }
+    const { result } = renderHook(() => useActualizarComisionPctSimulacionMutation(), { wrapper })
+    let devuelto: number | undefined
+    await act(async () => { devuelto = await result.current.mutateAsync(3.5) })
+    expect(m.rpc).toHaveBeenCalledWith('actualizar_comision_pct_simulacion', { p_pct: 3.5 })
+    expect(devuelto).toBe(3.5)
+    expect(cacheData).toHaveBeenCalledWith(
+      'politicas_comerciales',
+      expect.objectContaining({ comisionPctSimulacion: 3.5, montoMinimoPedido: 5000 }),
+      undefined,
+      1,
+    )
+  })
+
+  it('si la RPC rechaza (no es admin), la mutación rechaza y no toca el caché', async () => {
+    m.rpc.mockResolvedValue({ data: null, error: { message: 'Sólo un admin puede cambiar el porcentaje de la simulación de comisiones', code: '42501' } })
+    const { result } = renderHook(() => useActualizarComisionPctSimulacionMutation(), { wrapper })
+    await act(async () => {
+      await expect(result.current.mutateAsync(9)).rejects.toThrow('Sólo un admin')
     })
     expect(cacheData).not.toHaveBeenCalled()
   })

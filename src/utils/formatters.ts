@@ -67,6 +67,14 @@ export function fechaLocalISO(date: Date = new Date()): string {
 }
 
 /**
+ * El 1° del mes argentino (YYYY-MM-01). Con `getFullYear()`/`getMonth()` del dispositivo, en otra
+ * zona horaria (o un reloj en UTC) daba el mes de al lado la última noche del mes (Fr-B2).
+ */
+export function primerDiaMesLocalISO(date: Date = new Date()): string {
+  return `${fechaLocalISO(date).slice(0, 8)}01`
+}
+
+/**
  * El día argentino (YYYY-MM-DD) de un timestamptz, como lo corta el server:
  * `(x AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`. Cortar el ISO en
  * la 'T' da el día UTC, y de 21 a 24 hs eso ya es el día siguiente (#1344).
