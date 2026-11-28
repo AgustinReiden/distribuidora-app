@@ -22,7 +22,16 @@
 --     (pedidos.created_at): el rol_anterior del primer cambio posterior, o el
 --     de hoy si no cambió después (_rol_al_momento). _comision_lineas decide
 --     el % por defecto con _actua_como_preventista_al (la misma regla que
---     _actua_como_preventista, a ese momento). 'preventista_taco' (un rol que
+--     _actua_como_preventista, a ese momento), y sólo la llama para los
+--     vendedores que tienen algún cambio de rol: el resto, como antes, con
+--     _actua_como_preventista una vez por vendedor y sucursal.
+--     El cambio de cliente (cambiar_cliente_pedido) recrea el pedido, y su
+--     created_at es el del cambio: el pedido nuevo guarda en pedidos.vendido_at
+--     el momento de la venta del original (lo pone un trigger, con el
+--     app.cambio_cliente_desde que fija cambiar_cliente_pedido; en un cambio de
+--     un cambio, el del primero). No se copia created_at: es la hora de carga y
+--     lo leen otros (los reportes por hora de carga, el orden de las listas).
+--     Nadie más la escribe: no tiene grant de escritura y el trigger la fija. 'preventista_taco' (un rol que
 --     existió en mayo y ya no está en el CHECK) cuenta como preventista: lo
 --     tuvo un preventista que hoy lo es, y así sus pedidos pendientes no
 --     cambian. Lo liquidado no se mueve: la foto de empleado_liquidacion_lineas
@@ -86,6 +95,8 @@ LOCK TABLE public.comision_reglas IN ACCESS EXCLUSIVE MODE NOWAIT;
 LOCK TABLE public.politicas_comerciales IN ACCESS EXCLUSIVE MODE NOWAIT;
 LOCK TABLE public.metas_preventista IN ACCESS EXCLUSIVE MODE NOWAIT;
 LOCK TABLE public.perfiles IN SHARE ROW EXCLUSIVE MODE NOWAIT;
+-- La columna vendido_at y su trigger.
+LOCK TABLE public.pedidos IN ACCESS EXCLUSIVE MODE NOWAIT;
 
 DO $lf$
 BEGIN
@@ -117,7 +128,9 @@ BEGIN
     -- Las que se llaman sin tocarse: su regla es la que se copia o se usa.
     ('public._actua_como_preventista(uuid,bigint)', 'ef86cf93bcd7a2e03a05e35895b2bdf1'),
     ('public._liquidacion_lineas(public.empleados,date)', '3725914b726b3d4bcdb728c0d1cde912'),
-    ('public._sucursales_red()', '4a78724955d5f6d24b995cf53581b5f3')
+    ('public._sucursales_red()', '4a78724955d5f6d24b995cf53581b5f3'),
+    -- Fija app.cambio_cliente_desde antes de recrear el pedido: el trigger de vendido_at lo lee.
+    ('public.cambiar_cliente_pedido(bigint,bigint,uuid,jsonb,numeric,numeric,numeric,text,text)', '7d313f0793a7809db1d07598c5ce1d47')
   ) AS t(f, h) LOOP
     IF to_regprocedure(r.f) IS NULL THEN
       RAISE EXCEPTION 'mig NNN · % no existe: rehacer sobre lo vigente', r.f;
@@ -130,6 +143,10 @@ BEGIN
   IF to_regclass('public.perfil_rol_cambios') IS NOT NULL
      OR to_regprocedure('public._rol_al_momento(uuid,timestamptz)') IS NOT NULL THEN
     RAISE EXCEPTION 'mig NNN · ya está aplicada (existe perfil_rol_cambios)';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.pedidos'::regclass
+                AND attname = 'vendido_at' AND NOT attisdropped) THEN
+    RAISE EXCEPTION 'mig NNN · ya está aplicada (existe pedidos.vendido_at)';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.politicas_comerciales'::regclass
                 AND attname = 'comision_pct_simulacion' AND NOT attisdropped) THEN
@@ -264,37 +281,76 @@ AS $function$
 $function$;
 REVOKE EXECUTE ON FUNCTION public._actua_como_preventista_al(uuid, bigint, timestamptz) FROM PUBLIC, anon, authenticated;
 
+-- El momento de la venta de un pedido que viene de un cambio de cliente. NULL
+-- en todo lo demás (el momento es created_at): sin reescribir la tabla.
+ALTER TABLE public.pedidos ADD COLUMN vendido_at timestamptz;
+COMMENT ON COLUMN public.pedidos.vendido_at IS
+  'COM-2 (#1551, D3): el momento de la venta del pedido original si este nació de un cambio de cliente (el rol del vendedor se mira ahí). NULL: es created_at. Lo pone pedidos_vendido_at; nadie la escribe.';
+
+CREATE FUNCTION public.pedidos_vendido_at()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_desde text;
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    -- No se cambia después: es un dato del alta.
+    NEW.vendido_at := OLD.vendido_at;
+    RETURN NEW;
+  END IF;
+  -- cambiar_cliente_pedido fija app.cambio_cliente_desde (el pedido original)
+  -- mientras recrea el pedido: el nuevo se vendió cuando el original.
+  v_desde := NULLIF(current_setting('app.cambio_cliente_desde', true), '');
+  IF v_desde ~ '^[0-9]+$' THEN
+    NEW.vendido_at := (SELECT COALESCE(o.vendido_at, o.created_at) FROM public.pedidos o
+                        WHERE o.id = v_desde::bigint AND o.sucursal_id = NEW.sucursal_id);
+  ELSE
+    NEW.vendido_at := NULL;
+  END IF;
+  RETURN NEW;
+END
+$function$;
+REVOKE EXECUTE ON FUNCTION public.pedidos_vendido_at() FROM PUBLIC, anon, authenticated;
+
+CREATE TRIGGER trg_pedidos_vendido_at
+  BEFORE INSERT OR UPDATE OF vendido_at ON public.pedidos
+  FOR EACH ROW EXECUTE FUNCTION public.pedidos_vendido_at();
+
 -- _comision_lineas: el % por defecto con el rol al vender (antes: el de hoy).
+-- Sólo para quien tiene cambios de rol: para el resto el rol de hoy es el de
+-- siempre, y se mira una vez por vendedor y sucursal, como antes.
 DO $comision_lineas$
 DECLARE
   v_def text := pg_get_functiondef('public._comision_lineas(bigint[])'::regprocedure);
 BEGIN
   v_def := pg_temp.parche(v_def,
+$a$  ncp_it AS MATERIALIZED (
+$a$,
+$n$  -- COM-2 (#1551): los vendedores con algún cambio de rol (una tabla chica).
+  cambiaron AS MATERIALIZED (
+    SELECT DISTINCT c.usuario_id FROM public.perfil_rol_cambios c
+  ),
+  ncp_it AS MATERIALIZED (
+$n$, 1, '_comision_lineas: los que cambiaron de rol');
+  v_def := pg_temp.parche(v_def,
 $a$    SELECT p.id, p.usuario_id, p.fecha, p.sucursal_id,
 $a$,
 $n$    SELECT p.id, p.usuario_id, p.fecha, p.sucursal_id,
-           -- COM-2 (#1551, D3 del dueño del 26/11): el % por defecto sale del rol
-           -- que el vendedor tenía al cargar el pedido, no del de hoy.
-           public._actua_como_preventista_al(p.usuario_id, p.sucursal_id, p.created_at) AS es_preventista,
+           -- COM-2 (#1551, D3 del dueño del 26/11): quien cambió de rol comisiona
+           -- con el que tenía al vender (al cargar el pedido, o el original de un
+           -- cambio de cliente: vendido_at). NULL: no cambió, y vale el de vend.
+           CASE WHEN p.usuario_id IN (SELECT cambiaron.usuario_id FROM cambiaron)
+                THEN public._actua_como_preventista_al(p.usuario_id, p.sucursal_id,
+                                                       COALESCE(p.vendido_at, p.created_at))
+           END AS es_preventista_al,
 $n$, 1, '_comision_lineas: el rol al vender en ped');
-  v_def := pg_temp.parche(v_def,
-$a$  vend AS (
-    -- COM-5 (#1321): el % de preventista es de quien actua como preventista en
-    -- la sucursal del pedido (rol base o el extra), no del rol base.
-    SELECT u.usuario_id, u.sucursal_id,
-           _actua_como_preventista(u.usuario_id, u.sucursal_id) AS es_preventista
-    FROM (SELECT DISTINCT ped.usuario_id, ped.sucursal_id FROM ped) u
-  ),
-$a$, '', 1, '_comision_lineas: sin vend');
   v_def := pg_temp.parche(v_def,
 $a$           CASE WHEN vend.es_preventista THEN pm.pct_preventista ELSE pm.pct_otros END AS pct_default
 $a$,
-$n$           -- COM-5 (#1321): de quien actuaba como preventista en la sucursal del pedido.
-           CASE WHEN ped.es_preventista THEN pm.pct_preventista ELSE pm.pct_otros END AS pct_default
+$n$           CASE WHEN COALESCE(ped.es_preventista_al, vend.es_preventista) THEN pm.pct_preventista ELSE pm.pct_otros END AS pct_default
 $n$, 1, '_comision_lineas: pct_default');
-  v_def := pg_temp.parche(v_def,
-$a$    JOIN vend ON vend.usuario_id = ped.usuario_id AND vend.sucursal_id = ped.sucursal_id
-$a$, '', 1, '_comision_lineas: sin el join a vend');
   EXECUTE v_def;
 END
 $comision_lineas$;
@@ -334,10 +390,13 @@ BEGIN
     SELECT u.email INTO v_email FROM auth.users u WHERE u.id = v_uid;
     SELECT p.rol INTO v_rol FROM public.perfiles p WHERE p.id = v_uid;
   END IF;
+  -- clock_timestamp y no now(): el alta y el cambio del % en la misma
+  -- transacción quedan en orden (el id es un uuid y no desempata), y la
+  -- pantalla de liquidar toma el último.
   INSERT INTO public.audit_logs (tabla, registro_id, accion, old_data, new_data, campos_modificados,
-                                 usuario_id, usuario_email, usuario_rol, sucursal_id)
+                                 usuario_id, usuario_email, usuario_rol, created_at, sucursal_id)
   VALUES (TG_TABLE_NAME, COALESCE(NEW.id, OLD.id)::text, TG_OP, v_old, v_new, v_campos,
-          v_uid, v_email, v_rol,
+          v_uid, v_email, v_rol, clock_timestamp(),
           COALESCE(CASE WHEN TG_OP = 'DELETE' THEN OLD.sucursal_id ELSE NEW.sucursal_id END,
                    CASE WHEN TG_OP = 'UPDATE' THEN OLD.sucursal_id END,
                    public.current_sucursal_id()));
@@ -594,38 +653,75 @@ $a$           'base', COALESCE(round(sum(l.base) FILTER (WHERE l.tipo = 'inicial
 $a$,
 $n$           'base', COALESCE(round(sum(l.base) FILTER (WHERE l.tipo = 'inicial'), 2), 0),
            -- COM-1 (#1551, D2): cada % con que se calculó lo pendiente, y quién lo
-           -- cargó: la regla (su usuario_id) o el % por defecto del mes del
-           -- pedido para su rol al vender (el de comision_pct_vigencias).
+           -- dejó como está y cuándo, de un mismo momento. Una regla: el último alta
+           -- o cambio de su % en la auditoría (sin auditoría, de antes de la
+           -- migración, su usuario_id y su created_at: entonces la edición no
+           -- tocaba usuario_id). El % por defecto: la vigencia del mes del pedido
+           -- (usuario_id y actualizado_en, los escribe juntos el upsert). El rol
+           -- al vender, una vez por pedido (COM-2), y por vendedor si no cambió.
            'porcentajes', COALESCE((
+             WITH x AS (
+               SELECT i.pct, i.regla_id, i.pedido_id, p.usuario_id, p.sucursal_id, p.fecha,
+                      COALESCE(p.vendido_at, p.created_at) AS vendido,
+                      sum(i.base) AS base, sum(i.comision) AS comision
+                 FROM l i
+                 JOIN pedidos p ON p.id = i.pedido_id
+                WHERE i.tipo = 'inicial'
+                GROUP BY i.pct, i.regla_id, i.pedido_id, p.usuario_id, p.sucursal_id, p.fecha, p.vendido_at, p.created_at
+             ),
+             v AS (
+               SELECT u.usuario_id, u.sucursal_id, public._actua_como_preventista(u.usuario_id, u.sucursal_id) AS hoy,
+                      EXISTS (SELECT 1 FROM perfil_rol_cambios c WHERE c.usuario_id = u.usuario_id) AS cambio
+                 FROM (SELECT DISTINCT x.usuario_id, x.sucursal_id FROM x WHERE x.regla_id IS NULL) u
+             ),
+             -- La vigencia de cada sucursal y mes, una vez (no por pedido).
+             vm AS (
+               SELECT m.sucursal_id, m.mes, vg.vigente_desde
+                 FROM (SELECT DISTINCT x.sucursal_id, date_trunc('month', x.fecha)::date AS mes
+                         FROM x WHERE x.regla_id IS NULL) m
+                 LEFT JOIN LATERAL (
+                   SELECT y.vigente_desde FROM comision_pct_vigencias y
+                    WHERE y.sucursal_id = m.sucursal_id AND y.vigente_desde <= m.mes
+                    ORDER BY y.vigente_desde DESC LIMIT 1) vg ON true
+             ),
+             g AS (
+               SELECT x.pct, x.regla_id,
+                      CASE WHEN x.regla_id IS NOT NULL THEN NULL
+                           WHEN v.cambio THEN public._actua_como_preventista_al(x.usuario_id, x.sucursal_id, x.vendido)
+                           ELSE v.hoy END AS es_preventista,
+                      vm.sucursal_id AS vig_sucursal, vm.vigente_desde AS vig_desde,
+                      count(DISTINCT x.pedido_id) AS pedidos, sum(x.base) AS base, sum(x.comision) AS comision
+                 FROM x
+                 LEFT JOIN v ON v.usuario_id = x.usuario_id AND v.sucursal_id = x.sucursal_id AND x.regla_id IS NULL
+                 LEFT JOIN vm ON vm.sucursal_id = x.sucursal_id AND vm.mes = date_trunc('month', x.fecha)::date
+                             AND x.regla_id IS NULL
+                GROUP BY 1, 2, 3, 4, 5
+             )
              SELECT jsonb_agg(jsonb_build_object(
                       'pct', g.pct, 'regla_id', g.regla_id,
                       'origen', CASE WHEN g.regla_id IS NULL THEN 'por_defecto' ELSE 'regla' END,
                       'rol', CASE WHEN g.regla_id IS NOT NULL THEN NULL
                                   WHEN g.es_preventista THEN 'preventista' ELSE 'resto' END,
                       'cargado_por', pf.nombre,
-                      'cargado_el', CASE WHEN g.regla_id IS NOT NULL
-                                         THEN (r.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
-                                         ELSE (cv.actualizado_en AT TIME ZONE 'America/Argentina/Buenos_Aires')::date END,
+                      'cargado_el', (q.cuando AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,
                       'pedidos', g.pedidos, 'base', round(g.base, 2), 'comision', round(g.comision, 2))
                     ORDER BY g.base DESC, g.pct)
-               FROM (SELECT i.pct, i.regla_id,
-                            CASE WHEN i.regla_id IS NULL
-                                 THEN public._actua_como_preventista_al(p.usuario_id, p.sucursal_id, p.created_at) END AS es_preventista,
-                            CASE WHEN i.regla_id IS NULL THEN v.sucursal_id END AS vig_sucursal,
-                            CASE WHEN i.regla_id IS NULL THEN v.vigente_desde END AS vig_desde,
-                            count(DISTINCT i.pedido_id) AS pedidos, sum(i.base) AS base, sum(i.comision) AS comision
-                       FROM l i
-                       JOIN pedidos p ON p.id = i.pedido_id
-                       LEFT JOIN LATERAL (
-                         SELECT x.sucursal_id, x.vigente_desde FROM comision_pct_vigencias x
-                          WHERE x.sucursal_id = p.sucursal_id
-                            AND x.vigente_desde <= date_trunc('month', p.fecha)::date
-                          ORDER BY x.vigente_desde DESC LIMIT 1) v ON i.regla_id IS NULL
-                      WHERE i.tipo = 'inicial'
-                      GROUP BY 1, 2, 3, 4, 5) g
+               FROM g
                LEFT JOIN comision_reglas r ON r.id = g.regla_id
                LEFT JOIN comision_pct_vigencias cv ON cv.sucursal_id = g.vig_sucursal AND cv.vigente_desde = g.vig_desde
-               LEFT JOIN perfiles pf ON pf.id = COALESCE(r.usuario_id, cv.usuario_id)), '[]'::jsonb),
+               LEFT JOIN LATERAL (
+                 SELECT a.usuario_id, a.created_at FROM audit_logs a
+                  WHERE a.tabla = 'comision_reglas' AND a.registro_id = r.id::text
+                    AND (a.accion = 'INSERT' OR (a.accion = 'UPDATE' AND 'porcentaje' = ANY(a.campos_modificados)))
+                  ORDER BY a.created_at DESC, a.id DESC LIMIT 1) au ON g.regla_id IS NOT NULL
+               CROSS JOIN LATERAL (
+                 SELECT CASE WHEN g.regla_id IS NULL THEN cv.usuario_id
+                             WHEN au.created_at IS NOT NULL THEN au.usuario_id
+                             ELSE r.usuario_id END AS quien,
+                        CASE WHEN g.regla_id IS NULL THEN cv.actualizado_en
+                             WHEN au.created_at IS NOT NULL THEN au.created_at
+                             ELSE r.created_at END AS cuando) q
+               LEFT JOIN perfiles pf ON pf.id = q.quien), '[]'::jsonb),
 $n$, 1, '_liquidacion_json: los porcentajes');
   EXECUTE v_def;
 END
@@ -1119,7 +1215,7 @@ DECLARE
   v text;
 BEGIN
   FOR r IN SELECT * FROM (VALUES
-    ('public._comision_lineas(bigint[])', 'b93a3efb555bfebf862d1b5c808c9900'),
+    ('public._comision_lineas(bigint[])', 'cc9f2b9a95bb7e2261af1c31fa244d68'),
     ('public.guardar_comision_regla(bigint,bigint,uuid,text,numeric,date,date,bigint,uuid)', 'f7feabef61bac55296da4ba8624407b6'),
     ('public.desactivar_comision_regla(bigint)', '098efc23c0d9277f15d75e7cd731ad3c'),
     ('public.registrar_origen_precio_items(bigint,jsonb,uuid)', 'b3f3f55a1ba883f8db7efd7179ab76fd'),
@@ -1128,14 +1224,15 @@ BEGIN
     ('public._metas_logrado(bigint[])', '5bbbcb203407063cc218d669e2782be3'),
     ('public.politica_comercial_reservada()', '01091e1286a85ff0cb8e7b2500023a24'),
     ('public.reporte_gerencial(bigint,date,date,boolean,boolean)', '4eb740b658a3703a670beefc4f3c3d7f'),
-    ('public._liquidacion_json(public.empleados,date,date,numeric)', '78006e434678e176f0559545caad5e53'),
+    ('public._liquidacion_json(public.empleados,date,date,numeric)', '97387998c8bdacc3a212fb02adb54f4f'),
     ('public._rol_al_momento(uuid,timestamptz)', '6d88a66fbc6248ee0044f1435ec6d50b'),
     ('public._actua_como_preventista_al(uuid,bigint,timestamptz)', 'b732b8a4a9e7d7410816592f6f3598de'),
     ('public.perfiles_anota_cambio_de_rol()', 'c79627f67259228cfbac0856fe6906b5'),
     ('public.actualizar_comision_pct_simulacion(numeric)', '23512b0ed973914e4914e7d53c8573b6'),
     ('public._comision_pct_simulacion(bigint[])', '25e49e4876fbf757d6ace1edf7f2c1a8'),
     ('public._origen_precio_de_lineas(bigint)', 'ed1fbb78df7281a21d4785ce458968ab'),
-    ('public.audit_comision_reglas()', 'a1a70817ef721cb37e1b32ee8d9cd557')
+    ('public.audit_comision_reglas()', 'a3ce2ae7bdaa85d10047af2fc8eaa34b'),
+    ('public.pedidos_vendido_at()', '65b1ef637c9062c7ea640f1443075859')
   ) AS t(f, h) LOOP
     SELECT md5(prosrc) INTO v FROM pg_proc WHERE oid = r.f::regprocedure;
     IF v IS DISTINCT FROM r.h THEN
@@ -1157,7 +1254,8 @@ BEGIN
     ('public.perfiles_anota_cambio_de_rol()', false),
     ('public._comision_pct_simulacion(bigint[])', false),
     ('public._origen_precio_de_lineas(bigint)', false),
-    ('public.audit_comision_reglas()', false)
+    ('public.audit_comision_reglas()', false),
+    ('public.pedidos_vendido_at()', false)
   ) AS t(f, rpc) LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_proc p, unnest(p.proconfig) c
                     WHERE p.oid = r.f::regprocedure AND c LIKE 'search_path=%pg_temp') THEN
@@ -1179,6 +1277,12 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.comision_reglas'::regclass
                   AND tgname = 'audit_comision_reglas' AND NOT tgisinternal) THEN
     RAISE EXCEPTION 'mig NNN · comision_reglas sin auditoría';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.pedidos'::regclass
+                  AND tgname = 'trg_pedidos_vendido_at' AND NOT tgisinternal)
+     OR has_column_privilege('authenticated', 'public.pedidos', 'vendido_at', 'UPDATE')
+     OR has_column_privilege('authenticated', 'public.pedidos', 'vendido_at', 'INSERT') THEN
+    RAISE EXCEPTION 'mig NNN · pedidos.vendido_at sin su trigger o escribible por REST';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.perfiles'::regclass
                   AND tgname = 'trg_perfiles_anota_cambio_de_rol' AND NOT tgisinternal) THEN

@@ -15,9 +15,14 @@
 --     pendiente es $ 9.000 (el primero con su rol al vender) y $ 0 el segundo, en _comision_lineas y
 --     en calcular_comisiones. El cambio queda anotado en perfil_rol_cambios.
 --     1b · 'preventista_taco' (rol de mayo) cuenta como preventista; un rol viejo de admin, no.
+--     1c · el cambio de cliente: Lucas, preventista, carga hace 10 días un pedido de $ 1.000; hoy pasa
+--     a encargado y el admin le cambia el cliente. El pedido nuevo (created_at de hoy) comisiona al 3 %
+--     ($ 30), con el rol de la venta original (pedidos.vendido_at), y vendido_at no se cambia después.
 -- 2 · COM-1 (D2) el admin que se carga su %: A2 se pone el 50 % → 42501 y no queda regla. A le
 --     carga a A2 el 5 % → entra; A2 no la edita ni la da de baja. La regla de Pedro la carga A al 5 %
 --     y la edita A2 al 4 %: usuario_id pasa a A2 (Com-B2) y la auditoría anota el alta y la edición.
+--     En la pantalla de liquidar (4) dice A2 y hoy: quien dejó el % y cuándo, aunque la regla se haya
+--     creado hace 5 días.
 --     2b · la regla para todas las sucursales que carga el server, sin sesión, entra y queda auditada.
 -- 3 · Fr-B8 el doble toque: el mismo alta dos veces da el mismo id y una sola regla; el mismo día
 --     con otro % se rechaza (23505, con su motivo).
@@ -53,6 +58,9 @@ DECLARE
   v_mes    date := date_trunc('month', public._tablero_hoy())::date;
   v_a2     uuid;
   v_juan   uuid;
+  v_lucas  uuid;
+  v_q      bigint;
+  v_qn     bigint;
   v_pedro  uuid;
   v_ana    uuid;
   v_ana2   uuid;
@@ -242,6 +250,7 @@ BEGIN
   PERFORM pg_temp.claims(v_ua, v_s1);
   v_a2    := pg_temp.u('admin', v_s1);
   v_juan  := pg_temp.u('preventista', v_s1);
+  v_lucas := pg_temp.u('preventista', v_s1);
   v_pedro := pg_temp.u('preventista', v_s1);
   v_ana   := pg_temp.u('preventista', v_s1);
   v_ana2  := pg_temp.u('preventista', v_s1);
@@ -313,6 +322,45 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('1b · error: %s', SQLERRM);
   END;
 
+  -- ================= 1c · COM-2 el cambio de cliente conserva el rol de la venta original ===
+  BEGIN
+    -- Lucas carga el pedido como el front (crear_pedido_completo), hace 10 días.
+    PERFORM pg_temp.claims(v_lucas, v_s1);
+    v_j := public.crear_pedido_completo(v_c1, 1000, v_lucas,
+             jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 10, 'precio_unitario', 100)),
+             'ensayo t7', 'efectivo', 'pendiente', v_hoy, NULL);
+    IF NOT COALESCE((v_j->>'success')::boolean, false) THEN
+      RAISE EXCEPTION 'no se pudo crear el pedido de Lucas: %', v_j;
+    END IF;
+    v_q := (v_j->>'pedido_id')::bigint;
+    UPDATE pedidos SET created_at = now() - interval '10 days' WHERE id = v_q;
+    PERFORM pg_temp.claims(v_ua, v_s1);
+    UPDATE perfiles SET rol = 'encargado' WHERE id = v_lucas;
+    v_j := public.cambiar_cliente_pedido(v_q, v_c2, v_ua,
+             jsonb_build_array(jsonb_build_object('producto_id', v_prod, 'cantidad', 10, 'precio_unitario', 100)),
+             1000, NULL, 0, 'ensayo t7', 'pedido_nuevo');
+    PERFORM set_config('app.stock_origen', '', true);
+    PERFORM set_config('app.stock_ref_tipo', '', true);
+    PERFORM set_config('app.stock_ref_id', '', true);
+    PERFORM set_config('app.stock_user_id', '', true);
+    v_qn := (SELECT id FROM pedidos WHERE cliente_id = v_c2 AND usuario_id = v_lucas ORDER BY id DESC LIMIT 1);
+    IF v_qn IS NULL OR v_qn = v_q THEN
+      RAISE EXCEPTION 'el cambio de cliente no dejó un pedido nuevo: %', v_j;
+    END IF;
+    PERFORM pg_temp.claims(v_ua, v_s1);
+    UPDATE pedidos SET estado = 'entregado', retiro_deposito = true,
+                       fecha_entrega = (v_hoy + time '12:00') AT TIME ZONE 'America/Argentina/Buenos_Aires'
+     WHERE id = v_qn;
+    v_fallas := v_fallas || pg_temp.chk(pg_temp.comision(ARRAY[v_qn]) = 30,
+                  format('1c Lucas: el pedido del cambio de cliente comisiona %s y no 30 (vendido_at %s, created_at %s)',
+                         pg_temp.comision(ARRAY[v_qn]), (SELECT vendido_at FROM pedidos WHERE id = v_qn),
+                         (SELECT created_at FROM pedidos WHERE id = v_qn)));
+    UPDATE pedidos SET vendido_at = now() WHERE id = v_qn;
+    v_fallas := v_fallas || pg_temp.chk((SELECT vendido_at FROM pedidos WHERE id = v_qn) = now() - interval '10 days',
+                  '1c vendido_at se pudo cambiar después del alta');
+  EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('1c · error: %s', SQLERRM);
+  END;
+
   -- =================================== 2 · COM-1 y Com-B2 nadie se fija su % ===
   BEGIN
     v_fallas := v_fallas || pg_temp.falla('2 A2 se pone el 50 %', pg_temp.regla(NULL, v_a2, 50), '42501', v_a2);
@@ -332,6 +380,8 @@ BEGIN
                   '2 la regla de A2 cambió por A2');
     -- La de Pedro: la carga A al 5 % y la edita A2 al 4 % (la regla nace este mes: se edita en el lugar).
     v_r1 := pg_temp.como(pg_temp.regla(NULL, v_pedro, 5))::bigint;
+    -- La regla se creó hace 5 días (la edición es hoy): «cargado el» tiene que ser el de la edición.
+    UPDATE comision_reglas SET created_at = now() - interval '5 days' WHERE id = v_r1;
     v_r2 := pg_temp.como(pg_temp.regla(v_r1, v_pedro, 4), v_a2)::bigint;
     v_fallas := v_fallas || pg_temp.chk(v_r2 = v_r1 AND (SELECT porcentaje FROM comision_reglas WHERE id = v_r1) = 4
                                         AND (SELECT usuario_id FROM comision_reglas WHERE id = v_r1) = v_a2,
@@ -385,8 +435,9 @@ BEGIN
                     SELECT 1 FROM jsonb_array_elements(v_j#>'{comisiones,porcentajes}') x
                      WHERE (x->>'pct')::numeric = 4 AND x->>'origen' = 'regla'
                        AND x->>'cargado_por' = (SELECT nombre FROM perfiles WHERE id = v_a2)
+                       AND (x->>'cargado_el')::date = v_hoy
                        AND (x->>'comision')::numeric = 4000),
-                  format('4 Pedro: los porcentajes no dicen 4 %% de la regla cargada por A2: %s', v_j#>'{comisiones,porcentajes}'));
+                  format('4 Pedro: los porcentajes no dicen 4 %% de la regla que dejó A2 hoy: %s', v_j#>'{comisiones,porcentajes}'));
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('4 · error: %s', SQLERRM);
   END;
 
@@ -557,7 +608,7 @@ BEGIN
   END;
 
   IF cardinality(v_fallas) = 0 THEN
-    RAISE EXCEPTION 'ENSAYO OK · t7 comisiones y metas: 1 a 9, con 1b, 2b, R1 y R2';
+    RAISE EXCEPTION 'ENSAYO OK · t7 comisiones y metas: 1 a 9, con 1b, 1c, 2b, R1 y R2';
   END IF;
   RAISE EXCEPTION 'ENSAYO FALLÓ · %', array_to_string(v_fallas, ' | ');
 END

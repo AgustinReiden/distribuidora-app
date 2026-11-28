@@ -12,7 +12,10 @@ export interface PorcentajeComision {
   origen: 'regla' | 'por_defecto'
   /** Sólo en el % por defecto: el rol del vendedor al vender. */
   rol: 'preventista' | 'resto' | null
-  /** El nombre de quien lo cargó; `null` si lo cargó el sistema. */
+  /**
+   * Quien dejó ese % y cuándo, de un mismo momento: el último alta o cambio del % de la regla
+   * (o de la vigencia del % por defecto). `null` si lo cargó el sistema.
+   */
   cargado_por: string | null
   cargado_el: string | null
   pedidos: number
