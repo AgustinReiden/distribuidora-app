@@ -654,9 +654,10 @@ $a$,
 $n$           'base', COALESCE(round(sum(l.base) FILTER (WHERE l.tipo = 'inicial'), 2), 0),
            -- COM-1 (#1551, D2): cada % con que se calculó lo pendiente, y quién lo
            -- dejó como está y cuándo, de un mismo momento. Una regla: el último alta
-           -- o cambio de su % en la auditoría (sin auditoría, de antes de la
-           -- migración, su usuario_id y su created_at: entonces la edición no
-           -- tocaba usuario_id). El % por defecto: la vigencia del mes del pedido
+           -- o cambio de su % en la auditoría (sin ninguna fila en la auditoría, de
+           -- antes de la migración, su usuario_id y su created_at: entonces la
+           -- edición no tocaba usuario_id; con filas pero sin la del %, la fecha
+           -- del alta y nadie). El % por defecto: la vigencia del mes del pedido
            -- (usuario_id y actualizado_en, los escribe juntos el upsert). El rol
            -- al vender, una vez por pedido (COM-2), y por vendedor si no cambió.
            'porcentajes', COALESCE((
@@ -714,9 +715,17 @@ $n$           'base', COALESCE(round(sum(l.base) FILTER (WHERE l.tipo = 'inicial
                   WHERE a.tabla = 'comision_reglas' AND a.registro_id = r.id::text
                     AND (a.accion = 'INSERT' OR (a.accion = 'UPDATE' AND 'porcentaje' = ANY(a.campos_modificados)))
                   ORDER BY a.created_at DESC, a.id DESC LIMIT 1) au ON g.regla_id IS NOT NULL
+               -- Sin ninguna fila en la auditoría (anterior a la migración y nunca
+               -- tocada), su usuario_id y su created_at son los del alta. Con filas
+               -- pero ninguna del %, quién no se sabe: la fecha del alta, sin nombre.
+               LEFT JOIN LATERAL (
+                 SELECT true AS hay FROM audit_logs a2
+                  WHERE a2.tabla = 'comision_reglas' AND a2.registro_id = r.id::text
+                  LIMIT 1) aa ON g.regla_id IS NOT NULL AND au.created_at IS NULL
                CROSS JOIN LATERAL (
                  SELECT CASE WHEN g.regla_id IS NULL THEN cv.usuario_id
                              WHEN au.created_at IS NOT NULL THEN au.usuario_id
+                             WHEN aa.hay THEN NULL
                              ELSE r.usuario_id END AS quien,
                         CASE WHEN g.regla_id IS NULL THEN cv.actualizado_en
                              WHEN au.created_at IS NOT NULL THEN au.created_at
@@ -1224,7 +1233,7 @@ BEGIN
     ('public._metas_logrado(bigint[])', '5bbbcb203407063cc218d669e2782be3'),
     ('public.politica_comercial_reservada()', '01091e1286a85ff0cb8e7b2500023a24'),
     ('public.reporte_gerencial(bigint,date,date,boolean,boolean)', '4eb740b658a3703a670beefc4f3c3d7f'),
-    ('public._liquidacion_json(public.empleados,date,date,numeric)', '97387998c8bdacc3a212fb02adb54f4f'),
+    ('public._liquidacion_json(public.empleados,date,date,numeric)', 'f172838f655762a269cae6e34a1c8056'),
     ('public._rol_al_momento(uuid,timestamptz)', '6d88a66fbc6248ee0044f1435ec6d50b'),
     ('public._actua_como_preventista_al(uuid,bigint,timestamptz)', 'b732b8a4a9e7d7410816592f6f3598de'),
     ('public.perfiles_anota_cambio_de_rol()', 'c79627f67259228cfbac0856fe6906b5'),

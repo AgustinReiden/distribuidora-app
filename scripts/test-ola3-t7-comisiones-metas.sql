@@ -355,6 +355,14 @@ BEGIN
                   format('1c Lucas: el pedido del cambio de cliente comisiona %s y no 30 (vendido_at %s, created_at %s)',
                          pg_temp.comision(ARRAY[v_qn]), (SELECT vendido_at FROM pedidos WHERE id = v_qn),
                          (SELECT created_at FROM pedidos WHERE id = v_qn)));
+    -- La pantalla de liquidar dice el rol al vender: preventista, no el encargado de hoy.
+    v_n := pg_temp.alta(jsonb_build_object('usuario_id', v_lucas));
+    SELECT public._liquidacion_json(e, v_hoy - 40, v_hoy) INTO v_j FROM empleados e WHERE e.id = v_n;
+    v_fallas := v_fallas || pg_temp.chk(EXISTS (
+                    SELECT 1 FROM jsonb_array_elements(v_j#>'{comisiones,porcentajes}') x
+                     WHERE x->>'origen' = 'por_defecto' AND x->>'rol' = 'preventista' AND (x->>'pct')::numeric = 3
+                       AND (x->>'comision')::numeric = 30),
+                  format('1c Lucas: la liquidación no dice 3 %% por defecto de preventista: %s', v_j#>'{comisiones,porcentajes}'));
     UPDATE pedidos SET vendido_at = now() WHERE id = v_qn;
     v_fallas := v_fallas || pg_temp.chk((SELECT vendido_at FROM pedidos WHERE id = v_qn) = now() - interval '10 days',
                   '1c vendido_at se pudo cambiar después del alta');
@@ -428,6 +436,32 @@ BEGIN
                        AND x->>'cargado_por' = (SELECT nombre FROM perfiles WHERE id = v_ua)
                        AND (x->>'comision')::numeric = 9000),
                   format('4 Juan: los porcentajes no dicen 3 %% por defecto de preventista cargado por A: %s', v_j#>'{comisiones,porcentajes}'));
+    -- 4b · una regla sin el alta en la auditoría (como las de antes de la migración) a la que
+    -- después A2 sólo le cambia la vigencia: no dice A2 ni el día del cambio, sino nadie y el día
+    -- del alta. Sin ninguna fila, el usuario y el día del alta.
+    PERFORM pg_temp.claims(v_ua, v_s1);
+    SET LOCAL session_replication_role = replica;
+    INSERT INTO comision_reglas (sucursal_id, preventista_id, porcentaje, vigente_desde, usuario_id, created_at)
+    VALUES (v_s1, v_ana2, 6, v_mes, v_ua, now() - interval '20 days') RETURNING id INTO v_r1;
+    SET LOCAL session_replication_role = origin;
+    v_x := pg_temp.alta(jsonb_build_object('usuario_id', v_ana2));
+    v_pv := pg_temp.pedido(v_ana2, v_c1, v_hoy, 10000);
+    SELECT public._liquidacion_json(e, v_hoy - 40, v_hoy) INTO v_j FROM empleados e WHERE e.id = v_x;
+    v_fallas := v_fallas || pg_temp.chk(EXISTS (
+                    SELECT 1 FROM jsonb_array_elements(v_j#>'{comisiones,porcentajes}') x
+                     WHERE (x->>'regla_id')::bigint = v_r1
+                       AND x->>'cargado_por' = (SELECT nombre FROM perfiles WHERE id = v_ua)
+                       AND (x->>'cargado_el')::date = ((now() - interval '20 days') AT TIME ZONE 'America/Argentina/Buenos_Aires')::date),
+                  format('4b sin auditoría no dice A y el día del alta: %s', v_j#>'{comisiones,porcentajes}'));
+    PERFORM pg_temp.como(format('SELECT public.guardar_comision_regla(p_id => %s, p_sucursal_id => %s, p_preventista_id => %L::uuid, p_origen_precio => NULL, p_porcentaje => 6, p_vigente_hasta => %L::date)',
+                                v_r1, v_s1, v_ana2, v_hoy + 300), v_a2);
+    SELECT public._liquidacion_json(e, v_hoy - 40, v_hoy) INTO v_j FROM empleados e WHERE e.id = v_x;
+    v_fallas := v_fallas || pg_temp.chk(EXISTS (
+                    SELECT 1 FROM jsonb_array_elements(v_j#>'{comisiones,porcentajes}') x
+                     WHERE (x->>'regla_id')::bigint = v_r1
+                       AND x->>'cargado_por' IS NULL
+                       AND (x->>'cargado_el')::date = ((now() - interval '20 days') AT TIME ZONE 'America/Argentina/Buenos_Aires')::date),
+                  format('4b con sólo un cambio de vigencia dice otro que cargó el %%: %s', v_j#>'{comisiones,porcentajes}'));
     e_pedro := pg_temp.alta(jsonb_build_object('usuario_id', v_pedro));
     v_pp := pg_temp.pedido(v_pedro, v_c1, v_hoy, 100000);
     SELECT public._liquidacion_json(e, v_hoy - 40, v_hoy) INTO v_j FROM empleados e WHERE e.id = e_pedro;
