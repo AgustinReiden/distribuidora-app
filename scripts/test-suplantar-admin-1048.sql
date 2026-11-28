@@ -235,8 +235,10 @@ BEGIN
     SELECT sucursal_id INTO v_otra_red FROM usuario_sucursales
      WHERE usuario_id = v_admin_red AND sucursal_id <> v_suc_red ORDER BY sucursal_id LIMIT 1;
     IF v_otra_red IS NOT NULL THEN
-      INSERT INTO comision_reglas (sucursal_id, porcentaje, vigente_desde)
-      VALUES (v_otra_red, 1.5, current_date) RETURNING id INTO v_id;
+      -- Con origen: si v_otra_red es la sucursal ajena de arriba, sin origen sería la misma regla
+      -- activa desde el mismo día, y desde T7 (Fr-B8) hay una sola por clave y día.
+      INSERT INTO comision_reglas (sucursal_id, origen_precio, porcentaje, vigente_desde)
+      VALUES (v_otra_red, 'mayorista', 1.5, current_date) RETURNING id INTO v_id;
     END IF;
     PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin_red, 'role', 'authenticated')::text, true);
     PERFORM set_config('request.headers', json_build_object('x-sucursal-id', v_suc_red::text)::text, true);
