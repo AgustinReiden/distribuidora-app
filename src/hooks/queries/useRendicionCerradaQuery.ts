@@ -31,6 +31,33 @@ async function fetchRendicionCerrada(fecha: string, sucursalId: number | null, c
   return Boolean(data)
 }
 
+/**
+ * D8 (T5): si el control de ese chofer ese día ya está cerrado: confirmado, resuelto o en
+ * disconformidad (`control_rendicion_cerrado`, lo que mira el server antes de una entrega). Una
+ * entrega a ese día se rechaza: el modal lo avisa antes.
+ */
+export function useControlRendicionCerradoQuery(
+  transportistaId: string | null | undefined,
+  fecha: string | null | undefined,
+  enabled = true,
+) {
+  const { currentSucursalId } = useSucursal()
+  return useQuery({
+    queryKey: [...rendicionCerradaKeys.all, 'control', currentSucursalId, transportistaId ?? null, fecha ?? ''] as const,
+    queryFn: async (): Promise<boolean> => {
+      const { data, error } = await supabase.rpc('control_rendicion_cerrado', {
+        p_transportista_id: transportistaId,
+        p_sucursal_id: currentSucursalId,
+        p_fecha: fecha,
+      })
+      if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo verificar si la rendición de ese chofer está cerrada. Revisá la señal e intentá de nuevo.')
+      return Boolean(data)
+    },
+    enabled: enabled && !!transportistaId && !!fecha && currentSucursalId != null,
+    staleTime: 30 * 1000,
+  })
+}
+
 export function useRendicionCerradaQuery(fecha: string | null | undefined, enabled = true, cobradoPor?: string | null) {
   const { currentSucursalId } = useSucursal()
   const fechaSafe = fecha || ''

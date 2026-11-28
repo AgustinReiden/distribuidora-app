@@ -27,7 +27,12 @@
 --      crédito, reponer el cobro de una salvedad, el cambio de comprobante, la cancelación de un
 --      vale blanco y el pedido entregado en un día cerrado (_pedido_en_caja_cerrada).
 --  2 · m1 / D8 · control_rendicion_cerrado cuenta la disconformidad como cerrada, y
---      anular_control_por_cambio_fecha_entrega (su espejo) también.
+--      anular_control_por_cambio_fecha_entrega (su espejo) también. Además ese trigger ya no borra
+--      una disconformidad por ningún camino: un cambio de entrega del server (la cancelación de un
+--      vale blanco o de una boleta entregada, el cambio de cliente) sobre un día en disconformidad
+--      se rechaza. La guarda de caja de esas funciones sólo mira confirmada y resuelta.
+--      corregir_cobro_rendicion (T4) no pasa un cobro a quien tiene la caja cerrada hasta su fecha
+--      (ultima_fecha_caja_cerrada, como el guard), no sólo ese mismo día.
 --  3 · 1601-b2 · control_rendicion_cerrado, ultima_fecha_caja_cerrada y rendicion_dia_cerrada
 --      rechazan a un usuario desactivado (su token puede seguir vivo, #1474).
 --  4 · Rend-B1 · se elimina marcar_rendicion_controlada: ninguna pantalla la usaba, dejaba una
@@ -54,9 +59,11 @@
 -- 11 · Clave de idempotencia del cierre y de la resolución (altas_por_clave, 'cierre_rendicion' y
 --      'resolucion_rendicion'): un reintento con la misma clave y lo mismo devuelve el control
 --      del primer intento, en vez de rechazar con «los gastos cambiaron» (sus gastos ya estaban).
--- 12 · GTO-7 / D9 · _guardar_gasto: un gasto de la propia rendición (nuevo, que llega o que sale
---      de ella) se rechaza; el admin lo anota al cerrarla o resolverla. El encargado no toca los
---      gastos de la rendición de un encargado.
+--      Si lo que nombraba ya no está (el cierre se reabrió, la resolución se deshizo), la clave se
+--      libera y es un cierre o una resolución nuevos.
+-- 12 · GTO-7 / D9 · _guardar_gasto y _anular_gasto: un gasto de la propia rendición (nuevo, que
+--      llega, que sale de ella o que se anula) se rechaza; el admin lo anota al cerrarla o
+--      resolverla. El encargado no toca los gastos de la rendición de un encargado.
 -- 13 · SEG-2 · obtener_faltantes_rendiciones no le da al transportista quién cargó la línea ni el
 --      rubro; la observación, sólo de la línea que se le cargó a él.
 -- 14 · auditoria_definer_sin_rol: la lista blanca con las firmas y los cuerpos nuevos.
@@ -121,6 +128,8 @@ BEGIN
     ('public.pagos_cobrado_por()',                                                   '9b1238813541f8268e460b792ed62b3e'),
     ('public.actualizar_forma_pago_pago(bigint,text)',                               '635b6cb520d332bd543fec2043414500'),
     ('public.pagos_guard_anulacion_caja_cerrada()',                                  '649493239bdded558fe4a55649c1c60c'),
+    ('public.corregir_cobro_rendicion(bigint,text,uuid,text)',                       'e7e2c761592658de4d4c1988630bc8bb'),
+    ('public._anular_gasto(bigint,text,boolean)',                                    'af021b07fcf5741ccbed34890a0004ab'),
     ('public.auditoria_definer_sin_rol()',                                           '0584667cb81b0a3569055a9d7c8297ec')
   ) AS t(f, h) LOOP
     IF to_regprocedure(r.f) IS NULL THEN
@@ -423,6 +432,46 @@ BEGIN
   v_def := pg_temp.t5_parche(v_def,
     'AND fecha = v_dia AND estado IN (''confirmada'', ''resuelta'')) THEN',
     'AND fecha = v_dia AND estado IN (''confirmada'', ''resuelta'', ''disconformidad'')) THEN', 2);
+  -- D8: una disconformidad no se borra por ningún camino, tampoco el del server (la cancelación de
+  -- un vale blanco o de una boleta entregada, el cambio de cliente): se resuelve primero.
+  v_def := pg_temp.t5_parche(v_def,
+    '    DELETE FROM rendiciones_control
+    WHERE transportista_id = OLD.transportista_id',
+    '    IF EXISTS (SELECT 1 FROM rendiciones_control
+                WHERE transportista_id = OLD.transportista_id AND sucursal_id = OLD.sucursal_id
+                  AND fecha = v_dia AND estado = ''disconformidad'') THEN
+      RAISE EXCEPTION ''La rendición del % de ese transportista está en disconformidad: este cambio la reabriría. Un admin la tiene que resolver primero.'',
+        to_char(v_dia, ''DD/MM/YYYY'') USING ERRCODE = ''42501'';
+    END IF;
+    DELETE FROM rendiciones_control
+    WHERE transportista_id = OLD.transportista_id', 1);
+  v_def := pg_temp.t5_parche(v_def,
+    '    DELETE FROM rendiciones_control
+    WHERE transportista_id = NEW.transportista_id',
+    '    IF EXISTS (SELECT 1 FROM rendiciones_control
+                WHERE transportista_id = NEW.transportista_id AND sucursal_id = NEW.sucursal_id
+                  AND fecha = v_dia AND estado = ''disconformidad'') THEN
+      RAISE EXCEPTION ''La rendición del % de ese transportista está en disconformidad: este cambio la reabriría. Un admin la tiene que resolver primero.'',
+        to_char(v_dia, ''DD/MM/YYYY'') USING ERRCODE = ''42501'';
+    END IF;
+    DELETE FROM rendiciones_control
+    WHERE transportista_id = NEW.transportista_id', 1);
+  EXECUTE v_def;
+
+  -- corregir_cobro_rendicion: a quien tiene la caja cerrada hasta la fecha del cobro no se le pasa
+  -- (el cobro iría al día siguiente a su último cierre, #1328), como guard_pago_fecha_cerrada.
+  v_def := pg_get_functiondef('public.corregir_cobro_rendicion(bigint,text,uuid,text)'::regprocedure);
+  v_def := pg_temp.t5_parche(v_def,
+    '  IF v_nuevo IS DISTINCT FROM v_r.t_id
+     AND EXISTS (SELECT 1 FROM rendiciones_control rc
+                  WHERE rc.transportista_id = v_nuevo AND rc.fecha = v_pg.fecha AND rc.sucursal_id = v_sucursal_id
+                    AND rc.estado IN (''confirmada'', ''resuelta'', ''disconformidad'')) THEN',
+    '  -- T5 (D6): y la caja de quien cobró, cerrada hasta esa fecha (ultima_fecha_caja_cerrada).
+  IF v_nuevo IS DISTINCT FROM v_r.t_id
+     AND (EXISTS (SELECT 1 FROM rendiciones_control rc
+                   WHERE rc.transportista_id = v_nuevo AND rc.fecha = v_pg.fecha AND rc.sucursal_id = v_sucursal_id
+                     AND rc.estado IN (''confirmada'', ''resuelta'', ''disconformidad''))
+          OR v_pg.fecha <= public.ultima_fecha_caja_cerrada(v_sucursal_id, v_nuevo)) THEN', 1);
   EXECUTE v_def;
 END
 $rpcs_cobro$;
@@ -709,8 +758,9 @@ BEGIN
 
   -- 2a · T5: la clave del cierre (altas_por_clave, como el alta de un gasto). La misma clave con
   --      lo mismo es un reintento (la respuesta se perdió): devuelve el control del primer
-  --      intento sin volver a guardar sus gastos. Sin clave (un PWA de antes), como siempre: un
-  --      reintento con gastos nuevos se rechaza porque ya están.
+  --      intento sin volver a guardar sus gastos. Si ese cierre ya no está (se reabrió), la clave
+  --      se libera. Sin clave (un PWA de antes), como siempre: un reintento con gastos nuevos se
+  --      rechaza porque ya están.
   IF jsonb_typeof(p_gastos_rendicion) = ''object''
      AND NULLIF(p_gastos_rendicion->>''clave'', '''') IS NOT NULL THEN
     BEGIN
@@ -735,12 +785,12 @@ BEGIN
         RAISE EXCEPTION ''Este cierre ya entró con el intento anterior y lo que mandaste ahora es distinto: tocá Refrescar y volvé a abrirlo.''
           USING ERRCODE = ''22023'';
       END IF;
-      IF v_previa.entidad_id IS NULL
-         OR NOT EXISTS (SELECT 1 FROM rendiciones_control WHERE id = v_previa.entidad_id) THEN
-        RAISE EXCEPTION ''Este cierre ya había entrado con el intento anterior y después se reabrió: tocá Refrescar y volvé a cerrarlo.''
-          USING ERRCODE = ''22023'';
+      IF v_previa.entidad_id IS NOT NULL
+         AND EXISTS (SELECT 1 FROM rendiciones_control WHERE id = v_previa.entidad_id) THEN
+        RETURN v_previa.entidad_id;
       END IF;
-      RETURN v_previa.entidad_id;
+      -- El cierre de esa clave ya no está (se reabrió): la clave se libera y esto es un cierre nuevo.
+      UPDATE altas_por_clave SET entidad_id = NULL WHERE clave = v_clave;
     END IF;
   END IF;
 
@@ -869,7 +919,8 @@ BEGIN
     '  PERFORM public._rendicion_bloquear(ARRAY[public._rendicion_clave(p_transportista_id, p_fecha, v_sucursal_id)]);
 
   -- 6b · T5: la clave de la resolución (altas_por_clave). La misma clave con lo mismo es un
-  --      reintento: devuelve el control del primer intento, ya resuelto, sin volver a imputar.
+  --      reintento: devuelve el control del primer intento, ya resuelto, sin volver a imputar. Si
+  --      esa resolución se deshizo, la clave se libera.
   IF v_clave IS NOT NULL THEN
     v_contenido := md5(jsonb_build_object(''fecha'', p_fecha, ''transportista'', p_transportista_id,
                                           ''observaciones'', p_observaciones,
@@ -888,13 +939,13 @@ BEGIN
         RAISE EXCEPTION ''Esta resolución ya entró con el intento anterior y lo que mandaste ahora es distinto: tocá Refrescar y volvé a abrirla.''
           USING ERRCODE = ''22023'';
       END IF;
-      IF v_previa.entidad_id IS NULL
-         OR NOT EXISTS (SELECT 1 FROM rendiciones_control
-                         WHERE id = v_previa.entidad_id AND estado = ''resuelta'') THEN
-        RAISE EXCEPTION ''Esta resolución ya había entrado con el intento anterior y después se deshizo: tocá Refrescar y volvé a abrirla.''
-          USING ERRCODE = ''22023'';
+      IF v_previa.entidad_id IS NOT NULL
+         AND EXISTS (SELECT 1 FROM rendiciones_control
+                      WHERE id = v_previa.entidad_id AND estado = ''resuelta'') THEN
+        RETURN v_previa.entidad_id;
       END IF;
-      RETURN v_previa.entidad_id;
+      -- La resolución de esa clave ya no está (se deshizo): la clave se libera y esto es otra.
+      UPDATE altas_por_clave SET entidad_id = NULL WHERE clave = v_clave;
     END IF;
   END IF;
 
@@ -999,6 +1050,35 @@ BEGIN
 END
 $gasto$;
 
+DO $anular_gasto$
+DECLARE
+  v_def text;
+BEGIN
+  v_def := pg_get_functiondef('public._anular_gasto(bigint,text,boolean)'::regprocedure);
+  v_def := pg_temp.t5_parche(v_def,
+    '  IF NOT p_desde_cierre AND v_gasto.origen_pago = ''rendicion''
+     AND public.control_rendicion_cerrado(',
+    '  -- GTO-7 / D9 (T5): anular un gasto de la propia rendición, tampoco (el admin, desde el cierre o
+  -- al deshacer la resolución, sí); el de la rendición de un encargado lo anula un admin.
+  IF v_gasto.origen_pago = ''rendicion'' THEN
+    IF NOT (p_desde_cierre AND public.es_admin()) AND v_gasto.rendicion_transportista_id = v_uid THEN
+      IF public.es_admin() THEN
+        RAISE EXCEPTION ''Un gasto de tu propia rendición se quita al cerrarla, desde Rendiciones (o lo anula otro admin)''
+          USING ERRCODE = ''42501'';
+      END IF;
+      RAISE EXCEPTION ''Los gastos de tu propia rendición los anula un admin'' USING ERRCODE = ''42501'';
+    END IF;
+    IF NOT public.es_admin() AND EXISTS (SELECT 1 FROM perfiles pe
+                                          WHERE pe.id = v_gasto.rendicion_transportista_id AND pe.rol = ''encargado'') THEN
+      RAISE EXCEPTION ''Los gastos de la rendición de un encargado los anula un admin'' USING ERRCODE = ''42501'';
+    END IF;
+  END IF;
+  IF NOT p_desde_cierre AND v_gasto.origen_pago = ''rendicion''
+     AND public.control_rendicion_cerrado(', 1);
+  EXECUTE v_def;
+END
+$anular_gasto$;
+
 -- -------------------------------------------------------------------------
 -- 6 · SEG-2: lo que el transportista ve de sus faltantes
 -- -------------------------------------------------------------------------
@@ -1084,6 +1164,8 @@ BEGIN
               'public.anular_control_por_cambio_fecha_entrega()'::regprocedure,
               'public.actualizar_forma_pago_pago(bigint,text)'::regprocedure,
               'public.pagos_guard_anulacion_caja_cerrada()'::regprocedure,
+              'public.corregir_cobro_rendicion(bigint,text,uuid,text)'::regprocedure,
+              'public._anular_gasto(bigint,text,boolean)'::regprocedure,
               'public.consultar_control_rendicion(uuid,date)'::regprocedure,
               'public.jornadas_transportista(date,date,uuid)'::regprocedure,
               'public.jornada_transportista_detalle(date,uuid)'::regprocedure,

@@ -104,6 +104,7 @@ vi.mock('../../../hooks/queries', async (importOriginal) => ({
 
 vi.mock('../../../hooks/queries/useUltimaFechaCajaCerradaQuery', () => ({
   useFechaMinimaPago: () => undefined,
+  useFechasMinimasPorCobrador: () => new Map(),
 }))
 vi.mock('../../../hooks/queries/useRecorridoActivoQuery', () => ({
   useRecorridoActivoQuery: () => ({ data: null }),

@@ -17,6 +17,7 @@ const pedidos = [
 vi.mock('../../hooks/queries', () => ({
   usePedidosParaEntregaYPagoQuery: () => ({ data: pedidos, isLoading: false }),
   useRendicionCerradaQuery: () => ({ data: false }),
+  useControlRendicionCerradoQuery: () => ({ data: false }),
 }))
 
 import ModalEntregaYPagoMasivos from './ModalEntregaYPagoMasivos'

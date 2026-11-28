@@ -203,7 +203,12 @@ export function useRendiciones(): UseRendicionesReturn {
 
     if (!error) claveCierre.olvidar([huella])
     if (error) {
-      throw await recargarConFallo(errorNotificado(error, 'Error al cerrar rendición', 'Sin conexión: no se pudo confirmar el cierre de la rendición. Revisá su estado antes de reintentar.'))
+      const fallo = errorNotificado(error, 'Error al cerrar rendición', 'Sin conexión: no se pudo confirmar el cierre de la rendición. Revisá su estado antes de reintentar.')
+      // El server contestó con un error: no se escribió nada, así que la clave no nombra ningún cierre
+      // (y una clave rechazada, como la de un cierre que se reabrió, no se queda trabada). Sin servidor
+      // la llamada pudo haber entrado: la clave se guarda para el reintento.
+      if (!fallo.sinServidor) claveCierre.olvidar([huella])
+      throw await recargarConFallo(fallo)
     }
 
     if (ultimoRango) {
@@ -228,8 +233,11 @@ export function useRendiciones(): UseRendicionesReturn {
 
     if (!error) claveCierre.olvidar([huella])
     if (error) {
+      const fallo = errorNotificado(error, 'Error al resolver rendición', 'Sin conexión: no se pudo confirmar la resolución de la rendición. Revisá su estado antes de reintentar.')
+      // Como el cierre: con respuesta del server la clave se olvida; sin servidor, se guarda.
+      if (!fallo.sinServidor) claveCierre.olvidar([huella])
       // La llamada pudo haber llegado aunque la respuesta se perdió: la tarjeta tiene que mostrar lo que hay.
-      throw await recargarConFallo(errorNotificado(error, 'Error al resolver rendición', 'Sin conexión: no se pudo confirmar la resolución de la rendición. Revisá su estado antes de reintentar.'))
+      throw await recargarConFallo(fallo)
     }
 
     if (ultimoRango) {

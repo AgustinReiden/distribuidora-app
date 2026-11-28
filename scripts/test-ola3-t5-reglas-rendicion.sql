@@ -18,7 +18,11 @@
 --        la de la sucursal, hoy.
 --   B1 · marcar_rendicion_controlada ya no existe.
 --   D8 · D cobra $ 10.000; E la marca en disconformidad. control_rendicion_cerrado da true, y un
---        gasto de $ 300 cargado desde Gastos a esa rendición se rechaza («ya está cerrada»).
+--        gasto de $ 300 cargado desde Gastos a esa rendición se rechaza («ya está cerrada»), como un
+--        pago al personal de $ 2.000 con su plata. El server cancela una boleta de $ 2.000 que D
+--        entregó hoy (como un vale blanco): se rechaza y la disconformidad sigue.
+--   CQ · corregir_cobro_rendicion: Q tiene confirmado ayer; un cobro de E2 de hace 3 días no se le
+--        pasa a Q (su caja está cerrada hasta ayer, 42501).
 --   B2 · consultar_control_rendicion: la disconformidad de D está controlada; una fila «pendiente»
 --        de C, no.
 --   P2 · 1601-b2: IN (desactivado) no consulta control_rendicion_cerrado, ultima_fecha_caja_cerrada
@@ -42,10 +46,14 @@
 --        desde Gastos (42501), E sí a la de B ($ 250: B entrega 30.450).
 --   D7 · AD cobra $ 5.000 en la oficina, marca su propia rendición en disconformidad y la resuelve
 --        con $ 1.000 de robo o pérdida: pasa (el gasto del robo es de su rendición).
+--   G9 · D9 al anular: E no anula un gasto de su propia rendición (42501), ni E2 uno de la de E.
 --   CL · La clave del cierre: AD confirma la de K con un gasto de $ 300 y una clave; el mismo
 --        cierre otra vez devuelve el mismo control, sin otro gasto (K tiene 1). Otro cierre con la
---        misma clave, 22023.
+--        misma clave, 22023. La de K2 se cierra con una clave, se reabre y se vuelve a cerrar con lo
+--        mismo: entra (la clave se liberó).
 --   RL · La clave de la resolución: AD resuelve la de L con una clave; otra vez, el mismo control.
+--        Se deshace: la disconformidad sigue cerrada (un gasto no entra) y resolverla otra vez con
+--        lo mismo entra.
 --   AUD· FALT-*, REND-* y PAGO-* de auditoria_integridad() como estaban antes del ensayo.
 
 DO $ensayo$
@@ -63,6 +71,10 @@ DECLARE
   v_l      uuid := gen_random_uuid();
   v_m      uuid := gen_random_uuid();
   v_n      uuid := gen_random_uuid();
+  v_k2     uuid := gen_random_uuid();
+  v_q      uuid := gen_random_uuid();
+  v_emp_w  bigint;
+  v_clave3 uuid := gen_random_uuid();
   v_x2     uuid := gen_random_uuid();
   v_in     uuid := gen_random_uuid();
   v_e      uuid := gen_random_uuid();
@@ -102,6 +114,7 @@ BEGIN
                  (v_h, 'transportista', 1, 'H'), (v_k, 'transportista', 1, 'K'),
                  (v_l, 'transportista', 1, 'L'), (v_m, 'transportista', 1, 'M'),
                  (v_n, 'transportista', 1, 'N'), (v_in, 'transportista', 1, 'IN'),
+                 (v_k2, 'transportista', 1, 'K2'), (v_q, 'transportista', 1, 'Q'),
                  (v_x2, 'transportista', 2, 'X2'), (v_e, 'encargado', 1, 'E'),
                  (v_e2, 'encargado', 1, 'E2'), (v_ad, 'admin', 1, 'AD')) AS u(id, rol, suc, que);
   -- El sync con auth.users (el ban) pide una columna que la base local no tiene: se apaga para esto.
@@ -119,12 +132,17 @@ BEGIN
   VALUES (1, v_tag || ' M', 'transportista', v_ad, v_m) RETURNING id INTO v_emp_m;
   INSERT INTO empleados (sucursal_id, nombre, puesto, creado_por, usuario_id)
   VALUES (1, v_tag || ' Gp', 'otro', v_ad, NULL) RETURNING id INTO v_emp_g;
+  -- W: se le deben $ 5.000 (para pagarle desde una rendición).
+  INSERT INTO empleados (sucursal_id, nombre, puesto, creado_por, usuario_id)
+  VALUES (1, v_tag || ' W', 'otro', v_ad, NULL) RETURNING id INTO v_emp_w;
+  INSERT INTO empleado_movimientos (empleado_id, fecha, tipo, monto, observacion, creado_por)
+  VALUES (v_emp_w, v_hoy, 'ajuste', 5000, 'ensayo T5', v_ad);
 
   -- Boletas asignadas, de hoy (cliente 1 salvo p[5] y p[6]). p[1], p[2]: de A; p[3]: de B; p[4]: de D;
   -- p[5], p[6]: del cliente 2, de A (el FIFO y el masivo de E); p[7]: de H; p[8]: de M; p[9]: de K;
   -- p[10]: de L; p[11]: de A (la oficina de AD); p[12]: de B (la entrega masiva de E); p[13]: de B (el
-  -- cobro que AD anula).
-  FOR v_i IN 1..13 LOOP
+  -- cobro que AD anula); p[14]: de K2.
+  FOR v_i IN 1..14 LOOP
     INSERT INTO pedidos (cliente_id, fecha, estado, total, monto_pagado, estado_pago, canal, usuario_id, creado_por,
                          sucursal_id, transportista_id)
     VALUES (CASE WHEN v_i IN (5, 6) THEN v_cli2 ELSE v_cli END, v_hoy, 'asignado',
@@ -132,7 +150,7 @@ BEGIN
                      WHEN 6 THEN 1000 WHEN 7 THEN 8000 WHEN 8 THEN 1000 WHEN 11 THEN 5000 WHEN 12 THEN 700 WHEN 13 THEN 100 ELSE 1000 END,
             0, 'pendiente', 'app', v_e, v_e, 1,
             CASE WHEN v_i IN (1, 2, 5, 6, 11) THEN v_a WHEN v_i IN (3, 12, 13) THEN v_b WHEN v_i = 4 THEN v_d
-                 WHEN v_i = 7 THEN v_h WHEN v_i = 8 THEN v_m WHEN v_i = 9 THEN v_k ELSE v_l END)
+                 WHEN v_i = 7 THEN v_h WHEN v_i = 8 THEN v_m WHEN v_i = 9 THEN v_k WHEN v_i = 14 THEN v_k2 ELSE v_l END)
     RETURNING id INTO v_id;
     v_p := v_p || v_id;
   END LOOP;
@@ -270,6 +288,43 @@ BEGIN
   IF v_txt IS DISTINCT FROM 'PASA true' THEN v_fallas := v_fallas || ('D8 · la disconformidad no cuenta como cerrada: ' || v_txt); END IF;
   v_txt := pg_temp.r(v_e, pg_temp.gasto(v_d, 300));
   IF v_txt !~ 'ya está cerrada' THEN v_fallas := v_fallas || ('D8 · un gasto entró en la disconformidad: ' || v_txt); END IF;
+  v_txt := pg_temp.r(v_ad, format('SELECT public.registrar_movimiento_empleado(%s, %L::jsonb)::text', v_emp_w,
+             jsonb_build_object('tipo', 'pago', 'monto', 2000, 'origen_pago', 'rendicion',
+                                'rendicion_transportista_id', v_d, 'rendicion_fecha', v_hoy)));
+  IF v_txt !~ 'ya está cerrada' THEN v_fallas := v_fallas || ('D8 · un pago al personal salió de la disconformidad: ' || v_txt); END IF;
+  -- Una boleta que D entregó hoy. El server (una DEFINER, como la cancelación de un vale blanco, que
+  -- mira sólo la caja confirmada) la cancela: el trigger del control no borra la disconformidad.
+  INSERT INTO pedidos (cliente_id, fecha, estado, total, monto_pagado, estado_pago, canal, usuario_id, creado_por,
+                       sucursal_id, transportista_id, fecha_entrega)
+  VALUES (v_cli, v_hoy, 'entregado', 2000, 0, 'pendiente', 'app', v_e, v_e, 1, v_d, now())
+  RETURNING id INTO v_id;
+  BEGIN
+    UPDATE pedidos SET estado = 'cancelado', total = 0, motivo_cancelacion = 'ensayo T5' WHERE id = v_id;
+    v_txt := 'PASA';
+  EXCEPTION WHEN OTHERS THEN
+    v_txt := SQLSTATE || ' ' || SQLERRM;
+  END;
+  IF v_txt !~ '^42501 .*disconformidad'
+     OR NOT EXISTS (SELECT 1 FROM rendiciones_control WHERE transportista_id = v_d AND fecha = v_hoy
+                     AND sucursal_id = 1 AND estado = 'disconformidad') THEN
+    v_fallas := v_fallas || ('D8 · cancelar una entrega del día borró la disconformidad: ' || v_txt);
+  END IF;
+  -- Y una entrega de ayer de D que el server pasa a hoy: tampoco.
+  INSERT INTO pedidos (cliente_id, fecha, estado, total, monto_pagado, estado_pago, canal, usuario_id, creado_por,
+                       sucursal_id, transportista_id, fecha_entrega)
+  VALUES (v_cli, v_hoy - 1, 'entregado', 1500, 0, 'pendiente', 'app', v_e, v_e, 1, v_d, now() - interval '1 day')
+  RETURNING id INTO v_id;
+  BEGIN
+    UPDATE pedidos SET fecha_entrega = now() WHERE id = v_id;
+    v_txt := 'PASA';
+  EXCEPTION WHEN OTHERS THEN
+    v_txt := SQLSTATE || ' ' || SQLERRM;
+  END;
+  IF v_txt !~ '^42501 .*disconformidad'
+     OR NOT EXISTS (SELECT 1 FROM rendiciones_control WHERE transportista_id = v_d AND fecha = v_hoy
+                     AND sucursal_id = 1 AND estado = 'disconformidad') THEN
+    v_fallas := v_fallas || ('D8 · pasar una entrega al día de la disconformidad la borró: ' || v_txt);
+  END IF;
 
   -- ------------------------------------------------------------------- B2 ---
   INSERT INTO rendiciones_control (fecha, transportista_id, sucursal_id, controlada_por)
@@ -420,6 +475,32 @@ BEGIN
                                    public._rendicion_efectivo_a_entregar(1, v_e, v_hoy), public._rendicion_efectivo_a_entregar(1, v_b, v_hoy));
   END IF;
 
+  -- ------------------------------------------------------------------- G9 ---
+  SELECT id INTO v_id FROM gastos WHERE rendicion_transportista_id = v_e AND anulado_at IS NULL;
+  UPDATE gastos SET creado_por = v_e WHERE id = v_id;
+  v_txt := pg_temp.r(v_e, format('SELECT public.anular_gasto(%s, ''ensayo'')::text', v_id));
+  IF v_txt !~ '^42501 .*propia rendición' THEN v_fallas := v_fallas || ('G9 · E anuló un gasto de su rendición: ' || v_txt); END IF;
+  UPDATE gastos SET creado_por = v_e2 WHERE id = v_id;
+  v_txt := pg_temp.r(v_e2, format('SELECT public.anular_gasto(%s, ''ensayo'')::text', v_id));
+  IF v_txt !~ '^42501 .*encargado' THEN v_fallas := v_fallas || ('G9 · E2 anuló un gasto de la rendición de E: ' || v_txt); END IF;
+  UPDATE gastos SET creado_por = v_ad WHERE id = v_id;
+
+  -- ------------------------------------------------------------------- CQ ---
+  BEGIN
+    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, cobrado_por)
+    VALUES (v_cli, NULL, 100, 'efectivo', v_hoy - 1, v_q, 1, v_q);
+    v_txt := pg_temp.r(v_ad, format('SELECT public.confirmar_rendicion(public._tablero_hoy() - 1, %L::uuid, ''confirmada'', ''{}''::jsonb, ''T5'')::text', v_q));
+    IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('CQ · no se confirmó la de Q de ayer: ' || v_txt); END IF;
+    INSERT INTO pagos (cliente_id, pedido_id, monto, forma_pago, fecha, usuario_id, sucursal_id, cobrado_por)
+    VALUES (v_cli, NULL, 300, 'efectivo', v_hoy - 3, v_e2, 1, v_e2) RETURNING id INTO v_pago;
+    v_txt := pg_temp.r(v_ad, format('SELECT public.corregir_cobro_rendicion(%s, NULL, %L::uuid, ''era de Q'')::text', v_pago, v_q));
+    IF v_txt !~ '^42501 .*cerrada' OR (SELECT cobrado_por FROM pagos WHERE id = v_pago) IS DISTINCT FROM v_e2 THEN
+      v_fallas := v_fallas || ('CQ · se le pasó un cobro a quien tiene la caja cerrada hasta después: ' || v_txt);
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_fallas := v_fallas || ('CQ · error: ' || SQLERRM);
+  END;
+
   -- ------------------------------------------------------------------- D7 ---
   v_txt := pg_temp.r(v_ad, pg_temp.confirmar(v_ad, 'disconformidad', '{}'));
   IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('D7 · AD no marcó la suya en disconformidad: ' || v_txt); END IF;
@@ -449,6 +530,18 @@ BEGIN
   END IF;
   v_txt := pg_temp.r(v_e, pg_temp.confirmar(v_k, 'disconformidad', v_gasto));
   IF v_txt !~ '^22023 .*distinto' THEN v_fallas := v_fallas || ('CL · otro cierre con la misma clave: ' || v_txt); END IF;
+  -- Cerrar, reabrir y volver a cerrar con lo mismo (la respuesta del primero se perdió).
+  v_txt := pg_temp.r(v_k2, pg_temp.cobro(v_p[14], 1000, 'efectivo'));
+  IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('CL · K2 no cobró: ' || v_txt); END IF;
+  v_gasto := jsonb_build_object('vistos', '[]'::jsonb, 'clave', v_clave3);
+  v_h1 := pg_temp.r(v_ad, pg_temp.confirmar(v_k2, 'confirmada', v_gasto));
+  v_txt := pg_temp.r(v_ad, format('SELECT public.desmarcar_rendicion_controlada(public._tablero_hoy(), %L::uuid)::text', v_k2));
+  IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('CL · no se reabrió la de K2: ' || v_txt); END IF;
+  v_txt := pg_temp.r(v_ad, pg_temp.confirmar(v_k2, 'confirmada', v_gasto));
+  IF v_h1 NOT LIKE 'PASA%' OR v_txt NOT LIKE 'PASA%'
+     OR NOT EXISTS (SELECT 1 FROM rendiciones_control WHERE transportista_id = v_k2 AND fecha = v_hoy AND estado = 'confirmada') THEN
+    v_fallas := v_fallas || format('CL · volver a cerrar con la misma clave tras reabrir: %s, después %s', v_h1, v_txt);
+  END IF;
 
   -- ------------------------------------------------------------------- RL ---
   v_txt := pg_temp.r(v_l, pg_temp.cobro(v_p[10], 1000, 'efectivo'));
@@ -461,6 +554,17 @@ BEGIN
   IF v_h1 NOT LIKE 'PASA%' OR v_txt IS DISTINCT FROM v_h1 THEN
     v_fallas := v_fallas || format('RL · el reintento de la resolución: %s, después %s', v_h1, v_txt);
   END IF;
+  v_txt := pg_temp.r(v_ad, format('SELECT public.deshacer_resolucion_rendicion(public._tablero_hoy(), %L::uuid, ''ensayo T5'')::text', v_l));
+  IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('RL · no se deshizo: ' || v_txt); END IF;
+  v_txt := pg_temp.r(v_e, format('SELECT public.control_rendicion_cerrado(%L::uuid, 1, public._tablero_hoy())::text', v_l));
+  IF v_txt IS DISTINCT FROM 'PASA true' THEN v_fallas := v_fallas || ('RL · deshecha, la disconformidad no cuenta como cerrada: ' || v_txt); END IF;
+  v_txt := pg_temp.r(v_e, pg_temp.gasto(v_l, 50));
+  IF v_txt !~ 'ya está cerrada' THEN v_fallas := v_fallas || ('RL · deshecha, un gasto entró: ' || v_txt); END IF;
+  v_txt := pg_temp.r(v_ad, pg_temp.resolver(v_l, v_j));
+  IF v_txt NOT LIKE 'PASA%'
+     OR NOT EXISTS (SELECT 1 FROM rendiciones_control WHERE transportista_id = v_l AND fecha = v_hoy AND estado = 'resuelta') THEN
+    v_fallas := v_fallas || ('RL · resolverla otra vez con la misma clave tras deshacer: ' || v_txt);
+  END IF;
 
   v_txt := pg_temp.aud();
   IF v_txt IS DISTINCT FROM v_aud0 THEN
@@ -471,7 +575,7 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = 'ZZ0FA', MESSAGE = 'ENSAYO FALLÓ · ' || array_to_string(v_fallas, ' | ');
   END IF;
   RAISE EXCEPTION USING ERRCODE = 'ZZ0OK',
-    MESSAGE = format('ENSAYO OK · D6 B1 D8 B2 P2 B6 B3 B7 M1 GC S2 G7 D7 CL RL AUD (hoy %s)', v_hoy);
+    MESSAGE = format('ENSAYO OK · D6 B1 D8 B2 P2 B6 B3 B7 M1 GC S2 G7 G9 CQ D7 CL RL AUD (hoy %s)', v_hoy);
  END;
 END
 $ensayo$;

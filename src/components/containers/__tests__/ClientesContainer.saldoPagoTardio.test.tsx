@@ -86,6 +86,7 @@ vi.mock('../../../hooks/queries/useCambiosProductosQuery', () => ({
 }))
 vi.mock('../../../hooks/queries/useUltimaFechaCajaCerradaQuery', () => ({
   useFechaMinimaPago: () => undefined,
+  useFechasMinimasPorCobrador: () => new Map(),
 }))
 vi.mock('../../../contexts/AuthDataContext', () => ({
   useAuthData: () => ({

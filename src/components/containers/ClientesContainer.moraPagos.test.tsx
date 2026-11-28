@@ -42,6 +42,7 @@ vi.mock('../../hooks/queries', () => ({
 }))
 vi.mock('../../hooks/queries/useUltimaFechaCajaCerradaQuery', () => ({
   useFechaMinimaPago: () => undefined,
+  useFechasMinimasPorCobrador: () => new Map(),
 }))
 vi.mock('../../hooks/supabase', () => ({
   usePagos: () => pagos,

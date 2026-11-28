@@ -9,9 +9,12 @@ import { fechaLocalISO } from '../../utils/formatters'
 import type { PerfilDB } from '../../types'
 
 const pedidos = [{ id: '7', estado: 'asignado', estado_pago: 'pendiente', total: 100, monto_pagado: 0, cliente: { nombre_fantasia: 'Kiosco' } }]
+// D8 (T5): el control del chofer elegido ese día (confirmado, resuelto o en disconformidad).
+const control = vi.hoisted(() => ({ cerrado: false, pedidos: [] as unknown[] }))
 vi.mock('../../hooks/queries', () => ({
   usePedidosParaEntregaYPagoQuery: () => ({ data: pedidos, isLoading: false }),
   useRendicionCerradaQuery: () => ({ data: false }),
+  useControlRendicionCerradoQuery: (...a: unknown[]) => { control.pedidos.push(a); return { data: control.cerrado } },
 }))
 
 import ModalEntregaYPagoMasivos from './ModalEntregaYPagoMasivos'
@@ -54,6 +57,17 @@ describe('ModalEntregaYPagoMasivos · fecha de entrega', () => {
     expect(boton).toBeDisabled()
     fireEvent.change(screen.getByLabelText('Fecha'), { target: { value: menos(60) } })
     expect(boton).toBeEnabled()
+  })
+
+  it('D8: con la rendición del chofer en disconformidad ese día avisa y no deja entregar', () => {
+    control.cerrado = true
+    control.pedidos = []
+    renderModal({ isAdmin: true })
+    expect(screen.getByRole('alert')).toHaveTextContent('está en disconformidad')
+    expect(screen.getByRole('button', { name: /Entregar y registrar pago/ })).toBeDisabled()
+    // Pregunta por el chofer elegido y la fecha de la entrega.
+    expect(control.pedidos).toContainEqual(['c-1', fechaLocalISO(), true])
+    control.cerrado = false
   })
 
   it('el encargado ve el aviso con su coma: «otra fecha, pedíselo»', () => {

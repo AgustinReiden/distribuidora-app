@@ -9,7 +9,7 @@
  * D6 (T5, decisión del dueño 26/11): con `cobradoPor`, la caja de quien cobra (el último día que se le
  * confirmó): confirmar la de un chofer no traba los cobros de los demás. Sin él, la de la sucursal.
  */
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { supabase } from '../supabase/base'
 import { errorDeSupabase } from '../../utils/errorDeSupabase'
 import { useSucursal } from '../../contexts/SucursalContext'
@@ -42,6 +42,40 @@ export function useUltimaFechaCajaCerradaQuery(enabled = true, cobradoPor?: stri
   })
 }
 
+/** El día siguiente a una fecha YYYY-MM-DD (o undefined). */
+function diaSiguiente(fecha: string | null | undefined): string | undefined {
+  if (!fecha) return undefined
+  // Anclar a mediodia UTC para que sumar un dia no cruce husos horarios.
+  const d = new Date(`${fecha}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * D6 (T5): la fecha mínima de cada caja, por quien cobró. Para anular un cobro o cambiarle la forma:
+ * el server mira la caja de quien lo cobró (`pagos.cobrado_por`); un cobro sin dueño, la de la
+ * sucursal (clave `null`). Devuelve la fecha mínima (último cierre + 1 día) por dueño; sin cierre, no
+ * tiene entrada.
+ */
+export function useFechasMinimasPorCobrador(cobradores: ReadonlyArray<string | null | undefined>, enabled = true): Map<string | null, string> {
+  const { currentSucursalId } = useSucursal()
+  const distintos = [...new Set(cobradores.map(c => c || null))]
+  const resultados = useQueries({
+    queries: distintos.map(quien => ({
+      queryKey: ultimaFechaCajaCerradaKeys.forSucursal(currentSucursalId, quien),
+      queryFn: () => fetchUltimaFechaCajaCerrada(currentSucursalId, quien),
+      enabled: enabled && currentSucursalId != null,
+      staleTime: 60 * 1000,
+    })),
+  })
+  const mapa = new Map<string | null, string>()
+  distintos.forEach((quien, i) => {
+    const minima = diaSiguiente(resultados[i]?.data)
+    if (minima) mapa.set(quien, minima)
+  })
+  return mapa
+}
+
 /**
  * Fecha minima permitida para registrar un pago (ultimo cierre + 1 dia), en
  * formato YYYY-MM-DD para el atributo `min` de un <input type="date">. Devuelve
@@ -49,9 +83,5 @@ export function useUltimaFechaCajaCerradaQuery(enabled = true, cobradoPor?: stri
  */
 export function useFechaMinimaPago(enabled = true, cobradoPor?: string | null): string | undefined {
   const { data } = useUltimaFechaCajaCerradaQuery(enabled, cobradoPor)
-  if (!data) return undefined
-  // Anclar a mediodia UTC para que sumar un dia no cruce husos horarios.
-  const d = new Date(`${data}T12:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + 1)
-  return d.toISOString().slice(0, 10)
+  return diaSiguiente(data)
 }

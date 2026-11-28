@@ -15,7 +15,7 @@ vi.mock('../supabase/base', () => ({
 }))
 vi.mock('../../contexts/SucursalContext', () => ({ useSucursal: () => ({ currentSucursalId: 1 }) }))
 
-import { useFechaMinimaPago } from './useUltimaFechaCajaCerradaQuery'
+import { useFechaMinimaPago, useFechasMinimasPorCobrador } from './useUltimaFechaCajaCerradaQuery'
 import { useRendicionCerradaQuery } from './useRendicionCerradaQuery'
 
 function envoltorio() {
@@ -43,6 +43,19 @@ describe('la caja de quien cobra (D6)', () => {
     renderHook(() => useFechaMinimaPago(true, null), { wrapper: envoltorio() })
 
     await waitFor(() => expect(rpc).toHaveBeenCalled())
+    expect(rpc).toHaveBeenCalledWith('ultima_fecha_caja_cerrada', { p_sucursal_id: 1 })
+  })
+
+  // Anular un cobro o cambiarle la forma: la caja de quien lo cobró (como el server); sin dueño, la de la sucursal.
+  it('la fecha mínima de cada cobro hecho es la de la caja de quien lo cobró', async () => {
+    rpc.mockImplementation(async (_fn: string, args: { p_cobrado_por?: string }) =>
+      ({ data: args.p_cobrado_por === 'chofer-a' ? '2026-11-27' : null, error: null }))
+    const { result } = renderHook(() => useFechasMinimasPorCobrador(['chofer-a', null, 'chofer-b', 'chofer-a']), { wrapper: envoltorio() })
+
+    await waitFor(() => expect(result.current.get('chofer-a')).toBe('2026-11-28'))
+    expect(result.current.has('chofer-b')).toBe(false)
+    expect(result.current.has(null)).toBe(false)
+    expect(rpc).toHaveBeenCalledTimes(3)
     expect(rpc).toHaveBeenCalledWith('ultima_fecha_caja_cerrada', { p_sucursal_id: 1 })
   })
 

@@ -121,7 +121,7 @@ describe('useRendiciones — gastos de la rendición', () => {
     const claves = (): string[] => rpc.mock.calls.filter(c => c[0] === 'confirmar_rendicion')
       .map(c => (c[1] as { p_gastos_rendicion: { clave: string } }).p_gastos_rendicion.clave)
 
-    rpc.mockImplementationOnce(async () => ({ data: null, error: { message: 'Failed to fetch' } }))
+    rpc.mockImplementationOnce(async () => ({ data: null, error: { message: 'TypeError: Failed to fetch', code: '' } }))
     await act(async () => {
       await result.current.confirmarRendicion('2026-10-05', 'tr-1', 'confirmada', 'ok', cambios).catch(() => undefined)
     })
@@ -132,6 +132,26 @@ describe('useRendiciones — gastos de la rendición', () => {
     expect(primera).toEqual(expect.any(String))
     expect(reintento).toBe(primera)
     expect(otra).not.toBe(primera)
+  })
+
+  // T5: si el server contesta con un error (no se escribió nada, o la clave quedó de un cierre que se
+  // reabrió), la clave no se reusa: el próximo intento lleva otra.
+  it('ante un error del server, el próximo cierre igual lleva otra clave', async () => {
+    respuestas()
+    const { result } = renderHook(() => useRendiciones())
+    const cambios = { vistos: [], guardar: [], quitar: [], pagos_personal_visto: 0, faltantes_visto: 0 }
+    const claves = (): string[] => rpc.mock.calls.filter(c => c[0] === 'confirmar_rendicion')
+      .map(c => (c[1] as { p_gastos_rendicion: { clave: string } }).p_gastos_rendicion.clave)
+
+    rpc.mockImplementationOnce(async () => ({ data: null, error: { code: '22023', message: 'Este cierre ya había entrado' } }))
+    await act(async () => {
+      await result.current.confirmarRendicion('2026-10-05', 'tr-1', 'confirmada', 'ok', cambios).catch(() => undefined)
+    })
+    await act(async () => { await result.current.confirmarRendicion('2026-10-05', 'tr-1', 'confirmada', 'ok', cambios) })
+
+    const [primera, segunda] = claves()
+    expect(segunda).toEqual(expect.any(String))
+    expect(segunda).not.toBe(primera)
   })
 })
 

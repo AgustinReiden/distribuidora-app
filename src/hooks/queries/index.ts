@@ -537,6 +537,7 @@ export type { NCResumen } from './useNotasCreditoQuery'
 export {
   rendicionCerradaKeys,
   useRendicionCerradaQuery,
+  useControlRendicionCerradoQuery,
 } from './useRendicionCerradaQuery'
 
 // Bot Telegram - Vinculación

@@ -6,7 +6,7 @@ import { Button } from '../ui/Button'
 // DENTRO del ModalBase: es un Radix Dialog portaleado con z-50 y un hermano
 // `fixed inset-0 z-50` queda detrás del overlay. Ver ModalPedido.
 import ModalConfirmacion, { type ModalConfirmacionConfig } from './ModalConfirmacion'
-import { usePedidosParaEntregaYPagoQuery, useRendicionCerradaQuery } from '../../hooks/queries'
+import { usePedidosParaEntregaYPagoQuery, useRendicionCerradaQuery, useControlRendicionCerradoQuery } from '../../hooks/queries'
 import {
   getEstadoLabel,
   getEstadoPagoLabel,
@@ -123,6 +123,11 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
     }
   }, [pedidos, selectedIds])
   const requiereTransportista = idsEntregar.length > 0
+  // D8 (T5): el control del chofer ese día ya está cerrado (confirmado, resuelto o en
+  // disconformidad): el server rechaza la entrega, así que se avisa y no se manda.
+  const { data: controlDelChofer = false } = useControlRendicionCerradoQuery(
+    selectedTransportista || null, fecha, requiereTransportista)
+  const bloqueadoPorControl = requiereTransportista && controlDelChofer
 
   // GTO-15 / 1598-b2: el admin fecha la entrega hasta 60 días atrás y nunca después de hoy
   // (el encargado ya va fijo en hoy). Rige si hay algo que entregar: el solo cobro sigue la
@@ -139,7 +144,8 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
     !guardando &&
     !!fecha &&
     !errorFecha &&
-    !bloqueadoPorRendicion
+    !bloqueadoPorRendicion &&
+    !bloqueadoPorControl
 
   // Total a cobrar = suma del saldo pendiente de los pedidos seleccionados
   const totalACobrar = useMemo(() => {
@@ -251,6 +257,16 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
             <div className="text-sm text-amber-900 dark:text-amber-200">
               <p className="font-medium">Rendición cerrada</p>
               <p>La rendición de hoy ya fue confirmada. No podés registrar más pagos a esta fecha. Pedile a un admin si necesitás corregir algo.</p>
+            </div>
+          </div>
+        )}
+
+        {bloqueadoPorControl && !bloqueadoPorRendicion && (
+          <div role="alert" className="flex items-start gap-2 p-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700">
+            <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="text-sm text-amber-900 dark:text-amber-200">
+              <p className="font-medium">Rendición del chofer cerrada</p>
+              <p>La rendición de ese chofer en esa fecha ya fue controlada o está en disconformidad: esta entrega la reabriría. Elegí otra fecha, o resolvé o reabrí primero ese control.</p>
             </div>
           </div>
         )}
