@@ -11,6 +11,7 @@ import userEvent from '@testing-library/user-event'
 
 vi.mock('../../hooks/queries/useUltimaFechaCajaCerradaQuery', () => ({
   useFechaMinimaPago: () => undefined,
+  useFechasMinimasPorCobrador: () => new Map(),
 }))
 
 import ModalRegistrarPago, { type ModalRegistrarPagoProps } from './ModalRegistrarPago'

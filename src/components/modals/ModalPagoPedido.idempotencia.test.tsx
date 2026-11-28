@@ -13,6 +13,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 
 vi.mock('../../hooks/queries/useUltimaFechaCajaCerradaQuery', () => ({
   useFechaMinimaPago: () => undefined,
+  useFechasMinimasPorCobrador: () => new Map(),
 }))
 
 import ModalPagoPedido, { type ModalPagoPedidoProps } from './ModalPagoPedido'

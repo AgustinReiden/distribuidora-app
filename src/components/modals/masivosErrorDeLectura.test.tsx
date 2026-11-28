@@ -24,6 +24,7 @@ vi.mock('../../hooks/queries', () => ({
   usePedidosParaEntregaYPagoQuery: () => lectura.valor,
   usePedidosNoPagadosQuery: () => lectura.valor,
   useRendicionCerradaQuery: () => ({ data: false }),
+  useControlRendicionCerradoQuery: () => ({ data: false }),
 }))
 
 import ModalEntregasMasivas from './ModalEntregasMasivas'

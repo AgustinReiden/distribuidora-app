@@ -7,8 +7,8 @@
 --       R5 el chofer tampoco entrega con esa fecha (como antes);
 --       y en todos el control sigue en pie.
 --   2 · Lo que sigue igual:
---       R6 el encargado entrega en un día sin control; un control en disconformidad
---          de ese día se descarta, como antes;
+--       R6 el encargado no entrega en un día con un control en disconformidad: desde la T5
+--          (D8, decisión del dueño 26/11) cuenta como cerrada, y el control sigue;
 --       S1 el server (DEFINER) sigue descartando el control al mover una entrega;
 --       M1 las dos masivas rechazan el día controlado y el control sigue;
 --       M2 marcar_entregas_masivo entrega en un día libre.
@@ -173,7 +173,7 @@ BEGIN
   END LOOP;
 
   -- ---------------------------------------------------- 2 · lo que sigue ---
-  -- R6 · el encargado entrega el 20, en disconformidad: entra y la descarta.
+  -- R6 · el encargado entrega el 20, en disconformidad: desde la T5 (D8) no entra y el control sigue.
   PERFORM pg_temp.t2_como(v_enc, v_suc);
   EXECUTE 'SET LOCAL ROLE authenticated';
   BEGIN
@@ -186,8 +186,8 @@ BEGIN
   EXECUTE 'RESET ROLE';
   SELECT count(*) INTO v_n FROM rendiciones_control
    WHERE fecha = v_dis AND transportista_id = v_chofer AND sucursal_id = v_suc;
-  IF v_res <> 'ok 1' OR v_n <> 0 THEN
-    v_fallas := v_fallas || format('R6 la entrega en un día sin control no entró o no descartó la disconformidad (%s, quedan %s)', v_res, v_n);
+  IF v_res NOT LIKE '42501%ya fue controlada%' OR v_n <> 1 THEN
+    v_fallas := v_fallas || format('R6 la entrega en un día con una disconformidad entró o la descartó (%s, quedan %s)', v_res, v_n);
   END IF;
 
   -- S1 · el server mueve la entrega de un día controlado: descarta el control, por diseño.

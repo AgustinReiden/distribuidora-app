@@ -1253,6 +1253,8 @@ export default function VistaRendiciones(): React.ReactElement {
             cobrosVistos={cobrosVistosDe(cerrarResumen)}
             totalPagosPersonal={cerrarResumen.total_pagos_personal}
             totalFaltantesEmpleados={cerrarResumen.total_faltantes_empleados}
+            huellaPagosPersonal={cerrarResumen.huella_pagos_personal}
+            huellaFaltantes={cerrarResumen.huella_faltantes}
             gastos={cerrarResumen.gastos}
             faltantes={cerrarResumen.faltantes}
             observacionesPrevias={cerrarResumen.observaciones}
@@ -1278,6 +1280,10 @@ export default function VistaRendiciones(): React.ReactElement {
             )}
             gastos={resolverResumen.gastos}
             totalPagosPersonal={resolverResumen.total_pagos_personal}
+            cobrosVistos={cobrosVistosDe(resolverResumen)}
+            totalFaltantesEmpleados={resolverResumen.total_faltantes_empleados}
+            huellaPagosPersonal={resolverResumen.huella_pagos_personal}
+            huellaFaltantes={resolverResumen.huella_faltantes}
             onResolver={handleResolver}
             onClose={() => setResolverResumen(null)}
             guardando={guardando}

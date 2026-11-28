@@ -32,7 +32,7 @@ import CampoQuienCobro, { type PersonaQueCobra } from '../rendiciones/CampoQuien
 import { cobradorDeLaEntrega } from '../../utils/quienCobro'
 import { esSaldoAFavorAplicado, notaCreditoAplicada, saldoAFavorAplicado, textoNotaCreditoAplicada, textoSaldoAFavorAplicado } from '../../utils/saldoAFavor'
 import { FORMAS_PAGO_SELECCIONABLES, esFormaPagoNoDineraria } from '../../constants/formasPago'
-import { useFechaMinimaPago } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
+import { useFechaMinimaPago, useFechasMinimasPorCobrador } from '../../hooks/queries/useUltimaFechaCajaCerradaQuery'
 import { errorDeFechaEntrega, rangoFechaEntrega, diasAtrasFechaEntrega as diasDeLaEntrega } from '../../utils/fechaEntrega'
 import {
   huellaCobroPedido,
@@ -236,8 +236,13 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
   // es lo que se ve. Quien no es admin no puede cambiar el cobro (siempre hoy): no hay nada que seguir.
   const [cobroTocado, setCobroTocado] = useState<boolean>(!!sinConfirmar)
   const [entregaTocada, setEntregaTocada] = useState<boolean>(false)
-  // Fecha minima: dia siguiente al ultimo cierre de caja de la sucursal (mig 134).
-  const fechaMinima = useFechaMinimaPago()
+  // D6 (T5): para anular un cobro o cambiarle la forma, la caja de quien lo cobró (como el server:
+  // pagos_guard_anulacion_caja_cerrada y actualizar_forma_pago_pago); un cobro sin dueño, la de la sucursal.
+  const fechasMinimas = useFechasMinimasPorCobrador(pagosPrevios.map(p => p.cobrado_por))
+  const cajaCerradaDe = (p: { fecha?: string | null; cobrado_por?: string | null }): boolean => {
+    const minima = fechasMinimas.get(p.cobrado_por || null)
+    return !!minima && !!p.fecha && p.fecha < minima
+  }
   const [observaciones, setObservaciones] = useState<string>(sinConfirmar?.observaciones ?? '')
   // Arranca VACIO a proposito. El container abre el modal y recien despues
   // resuelve los pagos previos (setPagosPreviosPedido([]) + await refresh...),
@@ -275,6 +280,9 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
     : modoEntregaTransportista
       ? cobradorDeLaEntrega(undefined, eleccionChofer, pedido.transportista_id)
       : null
+  // D6 (T5): la fecha mínima del cobro nuevo es la de la caja de quien cobra (la elegida o la propia): el
+  // día siguiente a su último cierre. Los cobros ya hechos miran la de quien los cobró (`cajaCerradaDe`).
+  const fechaMinimaCobro = useFechaMinimaPago(true, cobradoPorVisible ?? yoId)
   // pagoId en curso de edicion de forma_pago (para mostrar spinner inline).
   const [editandoPagoId, setEditandoPagoId] = useState<string | null>(null)
 
@@ -587,10 +595,12 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                             <select
                               value={p.forma_pago || 'efectivo'}
                               onChange={e => { void handleEditarFormaPago(p.id, e.target.value) }}
-                              disabled={guardando || editandoEste}
+                              disabled={guardando || editandoEste || cajaCerradaDe(p)}
                               className="text-xs px-1.5 py-0.5 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-50"
                               aria-label="Editar forma de pago"
-                              title="Editar forma de pago"
+                              title={cajaCerradaDe(p)
+                                ? 'La caja de quien cobró ya está cerrada ese día. Reabrí su rendición para cambiarla.'
+                                : 'Editar forma de pago'}
                             >
                               {/* Pago histórico con forma ya no seleccionable (ej: cuenta_corriente):
                                   se muestra deshabilitada para no cambiarla en silencio. */}
@@ -638,7 +648,8 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                       // vaciar plata de rendiciones confirmadas 15 veces, por
                       // $936.100. La mig 181 lo rechaza en la base; acá el botón
                       // se apaga y dice por qué, para no llegar al error crudo.
-                      const cajaCerrada = !!fechaMinima && !!p.fecha && p.fecha < fechaMinima
+                      // D6 (T5): la caja de quien lo cobró, como el server.
+                      const cajaCerrada = cajaCerradaDe(p)
                       return (
                         <Button
                           type="button"
@@ -650,7 +661,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                           aria-label="Anular pago"
                           title={
                             cajaCerrada
-                              ? 'La caja de ese día ya está cerrada. Reabrí la rendición para poder anularlo.'
+                              ? 'La caja de quien lo cobró ya está cerrada ese día. Reabrí su rendición para poder anularlo.'
                               : 'Anular pago'
                           }
                         >
@@ -715,7 +726,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                 setFechaEntrega(nueva)
                 setEntregaTocada(true)
                 if (isAdmin && !cobroTocado && nueva) {
-                  setFechaPago(fechaMinima && nueva < fechaMinima ? fechaMinima : nueva > hoy ? hoy : nueva)
+                  setFechaPago(fechaMinimaCobro && nueva < fechaMinimaCobro ? fechaMinimaCobro : nueva > hoy ? hoy : nueva)
                 }
               }}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
@@ -747,7 +758,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                 // #1246: el server no acepta un pago con fecha futura, y otra
                 // fecha que hoy sólo la carga un admin (FRV-2): para el resto
                 // el campo queda fijo en hoy.
-                min={isAdmin ? fechaMinima : hoy}
+                min={isAdmin ? fechaMinimaCobro : hoy}
                 max={hoy}
                 disabled={!isAdmin}
                 onChange={e => {

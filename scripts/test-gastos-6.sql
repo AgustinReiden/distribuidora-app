@@ -619,22 +619,16 @@ BEGIN
   END;
 
   -- ========================================================== 9 · lo visto ===
+  -- T5 (D8, decisión del dueño 26/11): una disconformidad cuenta como cerrada. Ni un gasto desde
+  -- Gastos ni un pago al personal con su plata le entran, así que lo que vio el modal de la resolución
+  -- no cambia por ahí (antes este caso los cargaba y esperaba que resolver los rechazara).
   BEGIN
-    -- Un gasto cargado desde Gastos despues de abrir el modal.
-    v_res := pg_temp.rs(d4, v_tr, jsonb_build_array(pg_temp.lr(100)));
-    v_n := pg_temp.como(v_a1, v_t, pg_temp.gg(pg_temp.gp(d4, 700) || pg_temp.plata(v_tr, d4)))::bigint;
     v_hu := pg_temp.huella(d4, v_tr);
-    v_fallas := v_fallas || pg_temp.falla('9 gastos', v_a1, v_t, pg_temp.rr(d4, v_tr, v_res),
-                  'Los gastos de esta rendición cambiaron mientras la resolvías: tocá Refrescar y volvé a abrir');
-    v_fallas := v_fallas || pg_temp.chk(pg_temp.huella(d4, v_tr) = v_hu, '9 gastos: quedo escrito');
-    PERFORM pg_temp.como(v_a1, v_t, pg_temp.ag(v_n, 'Ensayo'));
-    -- Un pago suelto al personal con la plata de la rendicion (queda: caso 18).
-    v_res := pg_temp.rs(d4, v_tr, jsonb_build_array(pg_temp.lr(100)));
-    PERFORM pg_temp.como(v_a1, v_t, pg_temp.mov(e2, '{"tipo":"pago","monto":2000}'::jsonb || pg_temp.plata(v_tr, d4)));
-    v_hu := pg_temp.huella(d4, v_tr);
-    v_fallas := v_fallas || pg_temp.falla('9 pagos', v_a1, v_t, pg_temp.rr(d4, v_tr, v_res),
-                  'Los pagos al personal de esta rendición cambiaron mientras la resolvías: tocá Refrescar y volvé a abrir');
-    v_fallas := v_fallas || pg_temp.chk(pg_temp.huella(d4, v_tr) = v_hu, '9 pagos: quedo escrito');
+    v_fallas := v_fallas || pg_temp.falla('9 gastos', v_a1, v_t,
+                  pg_temp.gg(pg_temp.gp(d4, 700) || pg_temp.plata(v_tr, d4)), 'Esa rendición ya está cerrada');
+    v_fallas := v_fallas || pg_temp.falla('9 pagos', v_a1, v_t,
+                  pg_temp.mov(e2, '{"tipo":"pago","monto":2000}'::jsonb || pg_temp.plata(v_tr, d4)), 'Esa rendición ya está cerrada');
+    v_fallas := v_fallas || pg_temp.chk(pg_temp.huella(d4, v_tr) = v_hu, '9: quedo escrito');
   EXCEPTION WHEN OTHERS THEN v_fallas := v_fallas || format('9 · error: %s', SQLERRM);
   END;
 

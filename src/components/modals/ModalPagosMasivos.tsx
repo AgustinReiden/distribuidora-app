@@ -66,7 +66,8 @@ const ModalPagosMasivos = memo(function ModalPagosMasivos({
   const [confirmConfig, setConfirmConfig] = useState<ModalConfirmacionConfig | null>(null)
 
   const { data: pedidos = [], isLoading, isError, refetch } = usePedidosNoPagadosQuery(true)
-  const { data: rendicionCerrada = false } = useRendicionCerradaQuery(fechaPago, fechaBloqueada)
+  // D6 (T5): la rendición de quien cobra (la elegida o la propia), no la de cualquiera de la sucursal.
+  const { data: rendicionCerrada = false } = useRendicionCerradaQuery(fechaPago, fechaBloqueada, cobradoPor ?? yoId)
 
   const pedidosFiltrados = useMemo(() => {
     // Fecha (de entrega por defecto, como «Armar ruta») y forma de pago: #1698.

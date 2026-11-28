@@ -1612,6 +1612,13 @@ export interface ResumenRendicionDiaria {
   total_pagos_personal: number;
   /** Deuda de empleados imputada al resolver la rendición (movimientos `faltante`). Resta del efectivo a entregar. */
   total_faltantes_empleados: number;
+  /**
+   * Rend-B7 (T5): cuáles son los pagos al personal y los faltantes de la rendición (una huella opaca de
+   * los movimientos, sin nombres ni montos). El cierre y la resolución la devuelven tal cual: el server
+   * rechaza si cambiaron aunque la suma sea la misma. `undefined` con un server de antes.
+   */
+  huella_pagos_personal?: string;
+  huella_faltantes?: string;
   /** Esos gastos, uno por uno (`obtener_gastos_rendiciones`). */
   gastos: GastoDeRendicion[];
   /** Las líneas vivas de la diferencia imputada (`obtener_faltantes_rendiciones`). */
@@ -1644,7 +1651,6 @@ export interface UseRendicionesReturn {
     fechaHasta: string,
     transportistaId?: string | null
   ) => Promise<ResumenRendicionDiaria[]>;
-  marcarControlada: (fecha: string, transportistaId: string) => Promise<void>;
   desmarcarControlada: (fecha: string, transportistaId: string) => Promise<void>;
   /** Confirma una rendición (estado: confirmada | disconformidad) y guarda sus gastos en el mismo call. */
   confirmarRendicion: (

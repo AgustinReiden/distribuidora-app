@@ -169,7 +169,7 @@ function mutation(
 }
 
 const FNS_RENDICION = [
-  'marcarControlada', 'desmarcarControlada', 'confirmarRendicion', 'resolverRendicion', 'consultarControl',
+  'desmarcarControlada', 'confirmarRendicion', 'resolverRendicion', 'consultarControl',
   'controlCerrado',
 ] as const
 
@@ -252,7 +252,6 @@ const casos: Caso[] = [
       const { result } = renderHook(() => useRendiciones())
       const f = result.current[fn] as (...a: unknown[]) => Promise<unknown>
       const args: Record<typeof FNS_RENDICION[number], unknown[]> = {
-        marcarControlada: ['2026-10-01', 't1'],
         desmarcarControlada: ['2026-10-01', 't1'],
         confirmarRendicion: ['2026-10-01', 't1', 'confirmada', null, { vistos: [], guardar: [], quitar: [], pagos_personal_visto: 0 }],
         resolverRendicion: ['2026-10-01', 't1', 'obs'],

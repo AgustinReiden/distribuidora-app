@@ -451,7 +451,8 @@ describe('VistaRendiciones — acciones por estado', () => {
       p_transportista_id: 'tr-1',
       p_estado: 'confirmada',
       p_observaciones: 'todo ok',
-      p_gastos_rendicion: { vistos: [], guardar: [], quitar: [], pagos_personal_visto: 0 },
+      // T5: con la clave del cierre (el reintento de lo mismo no se vuelve a guardar).
+      p_gastos_rendicion: { vistos: [], guardar: [], quitar: [], pagos_personal_visto: 0, clave: expect.any(String) },
     })
     expect(llamadas('confirmar_rendicion')[0][1]).not.toHaveProperty('p_gastos')
     await waitFor(() => expect(notifyMock.success).toHaveBeenCalledWith('Rendición confirmada'))
@@ -504,7 +505,7 @@ describe('VistaRendiciones — acciones por estado', () => {
       p_fecha: '2026-10-03',
       p_transportista_id: 'tr-1',
       p_observaciones: 'se devolvió la diferencia',
-      p_resolucion: RESOLUCION,
+      p_resolucion: { ...RESOLUCION, clave: expect.any(String) },
     })
     await waitFor(() => expect(notifyMock.success).toHaveBeenCalledWith('Disconformidad resuelta'))
     await waitFor(() => expect(llamadas('obtener_resumen_rendiciones')).toHaveLength(2))

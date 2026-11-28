@@ -8,6 +8,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 
 vi.mock('../../hooks/queries/useUltimaFechaCajaCerradaQuery', () => ({
   useFechaMinimaPago: () => undefined,
+  useFechasMinimasPorCobrador: () => new Map(),
 }))
 
 import ModalPagoPedido from './ModalPagoPedido'

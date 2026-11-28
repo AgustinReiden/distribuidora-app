@@ -228,9 +228,9 @@ BEGIN
     IF v_txt !~ '^22023 .*todavía no se puede cerrar' OR pg_temp.estado_rc(v_suc, v_a, v_hoy + 30) <> '-' THEN
       v_fallas := v_fallas || ('R2F · confirmar hoy + 30: ' || v_txt);
     END IF;
-    v_txt := pg_temp.r(v_e, v_suc, format('SELECT public.marcar_rendicion_controlada(%L::date, %L::uuid)', v_hoy + 30, v_a));
-    IF v_txt !~ '^22023 .*todavía no se puede cerrar' OR pg_temp.estado_rc(v_suc, v_a, v_hoy + 30) <> '-' THEN
-      v_fallas := v_fallas || ('R2F · marcar hoy + 30: ' || v_txt);
+    -- T5 (Rend-B1): marcar_rendicion_controlada se eliminó.
+    IF to_regprocedure('public.marcar_rendicion_controlada(date,uuid)') IS NOT NULL THEN
+      v_fallas := v_fallas || 'R2F · marcar_rendicion_controlada sigue existiendo'::text;
     END IF;
     RAISE EXCEPTION USING ERRCODE = 'ZZ001';
   EXCEPTION WHEN SQLSTATE 'ZZ001' THEN NULL;
@@ -242,10 +242,6 @@ BEGIN
     v_txt := pg_temp.r(v_e, v_suc, pg_temp.confirmar(v_hoy, v_x, 'confirmada', pg_temp.cierre(v_suc, v_x, v_hoy, 0, NULL)));
     IF v_txt !~ '^22023 No hay nada que rendir' OR pg_temp.estado_rc(v_suc, v_x, v_hoy) <> '-' THEN
       v_fallas := v_fallas || ('R2X · confirmar a X: ' || v_txt);
-    END IF;
-    v_txt := pg_temp.r(v_e, v_suc, format('SELECT public.marcar_rendicion_controlada(%L::date, %L::uuid)', v_hoy, v_x));
-    IF v_txt !~ '^22023 No hay nada que rendir' OR pg_temp.estado_rc(v_suc, v_x, v_hoy) <> '-' THEN
-      v_fallas := v_fallas || ('R2X · marcar a X: ' || v_txt);
     END IF;
     RAISE EXCEPTION USING ERRCODE = 'ZZ001';
   EXCEPTION WHEN SQLSTATE 'ZZ001' THEN NULL;

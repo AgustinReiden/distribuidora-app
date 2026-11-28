@@ -17,12 +17,13 @@ import type {
   ResolucionRendicion
 } from '../../types'
 import { claveRendicion } from '../../utils/rendicionGastos'
+import { useRequestIdEstable } from '../useRequestIdEstable'
 
 const SIN_CONEXION_CONTROL = 'Sin conexión: no se pudo consultar el control de la rendición. Revisá la señal e intentá de nuevo.'
 
-// #1342: el predicado del server (control_rendicion_cerrado: confirmado o resuelto, en
-// la sucursal activa). consultar_control_rendicion dice si hay una fila en cualquier
-// estado, y una disconformidad no está cerrada.
+// #1342: el predicado del server (control_rendicion_cerrado, en la sucursal activa). Desde la
+// T5 (D8, decisión del dueño 26/11) una disconformidad también cuenta como cerrada: confirmada,
+// resuelta o en disconformidad. consultar_control_rendicion dice si alguien la controló.
 function pedirControlCerrado(transportistaId: string, fecha: string) {
   return supabase.rpc('control_rendicion_cerrado', {
     p_transportista_id: transportistaId,
@@ -52,6 +53,10 @@ export function useRendiciones(): UseRendicionesReturn {
   // Número de la última carga pedida. Cambiar el rango dos veces seguidas lanza dos cargas y la
   // respuesta de la primera puede llegar después de la segunda: sólo la última pedida pinta.
   const ultimoPedido = useRef(0)
+  // T5: el cierre y la resolución llevan una clave estable por contenido (altas_por_clave). Si la
+  // respuesta se perdió y se reintenta lo mismo, el server devuelve el control del primer intento
+  // en vez de rechazar con «los gastos cambiaron» (sus gastos ya habían entrado).
+  const claveCierre = useRequestIdEstable()
   const [ultimoRango, setUltimoRango] = useState<{
     desde: string
     hasta: string
@@ -121,6 +126,9 @@ export function useRendiciones(): UseRendicionesReturn {
         cantidad_gastos: Number(r.cantidad_gastos) || 0,
         total_pagos_personal: Number(r.total_pagos_personal) || 0,
         total_faltantes_empleados: Number(r.total_faltantes_empleados) || 0,
+        // Rend-B7 (T5): opacas; se devuelven tal cual al cerrar o resolver.
+        huella_pagos_personal: typeof r.huella_pagos_personal === 'string' ? r.huella_pagos_personal : undefined,
+        huella_faltantes: typeof r.huella_faltantes === 'string' ? r.huella_faltantes : undefined,
         gastos: gastosPorRendicion.get(claveRendicion(r.transportista_id as string, r.fecha as string)) ?? [],
         faltantes: faltantesPorRendicion.get(claveRendicion(r.transportista_id as string, r.fecha as string)) ?? [],
         estado: ((r.estado as string) || 'pendiente') as EstadoRendicion,
@@ -159,25 +167,6 @@ export function useRendiciones(): UseRendicionesReturn {
     return fallo
   }, [ultimoRango, fetchResumen])
 
-  const marcarControlada = useCallback(async (
-    fecha: string,
-    transportistaId: string
-  ): Promise<void> => {
-    const { error } = await supabase.rpc('marcar_rendicion_controlada', {
-      p_fecha: fecha,
-      p_transportista_id: transportistaId
-    })
-
-    if (error) {
-      // La llamada pudo haber llegado aunque la respuesta se perdió: la tarjeta tiene que mostrar lo que hay.
-      throw await recargarConFallo(errorNotificado(error, 'Error al marcar como controlada', 'Sin conexión: no se pudo confirmar el control de la rendición. Revisá su estado antes de reintentar.'))
-    }
-
-    if (ultimoRango) {
-      await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
-    }
-  }, [ultimoRango, fetchResumen, recargarConFallo])
-
   const desmarcarControlada = useCallback(async (
     fecha: string,
     transportistaId: string
@@ -203,22 +192,29 @@ export function useRendiciones(): UseRendicionesReturn {
     observaciones: string | null,
     gastos: CambiosGastosRendicion
   ): Promise<void> => {
+    const huella = JSON.stringify(['cierre', fecha, transportistaId, estado, observaciones, gastos])
     const { error } = await supabase.rpc('confirmar_rendicion', {
       p_fecha: fecha,
       p_transportista_id: transportistaId,
       p_estado: estado,
       p_observaciones: observaciones,
-      p_gastos_rendicion: gastos
+      p_gastos_rendicion: { ...gastos, clave: gastos.clave ?? claveCierre(huella) }
     })
 
+    if (!error) claveCierre.olvidar([huella])
     if (error) {
-      throw await recargarConFallo(errorNotificado(error, 'Error al cerrar rendición', 'Sin conexión: no se pudo confirmar el cierre de la rendición. Revisá su estado antes de reintentar.'))
+      const fallo = errorNotificado(error, 'Error al cerrar rendición', 'Sin conexión: no se pudo confirmar el cierre de la rendición. Revisá su estado antes de reintentar.')
+      // El server contestó con un error: no se escribió nada, así que la clave no nombra ningún cierre
+      // (y una clave rechazada, como la de un cierre que se reabrió, no se queda trabada). Sin servidor
+      // la llamada pudo haber entrado: la clave se guarda para el reintento.
+      if (!fallo.sinServidor) claveCierre.olvidar([huella])
+      throw await recargarConFallo(fallo)
     }
 
     if (ultimoRango) {
       await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
     }
-  }, [ultimoRango, fetchResumen, recargarConFallo])
+  }, [ultimoRango, fetchResumen, recargarConFallo, claveCierre])
 
   const resolverRendicion = useCallback(async (
     fecha: string,
@@ -226,22 +222,28 @@ export function useRendiciones(): UseRendicionesReturn {
     observaciones: string,
     resolucion: ResolucionRendicion
   ): Promise<void> => {
+    const huella = JSON.stringify(['resolucion', fecha, transportistaId, observaciones, resolucion])
     const { error } = await supabase.rpc('resolver_rendicion', {
       p_fecha: fecha,
       p_transportista_id: transportistaId,
       p_observaciones: observaciones,
-      p_resolucion: resolucion
+      // Un llamador sin resolución (el bundle viejo) no lleva clave: el server no compara nada.
+      p_resolucion: resolucion ? { ...resolucion, clave: resolucion.clave ?? claveCierre(huella) } : resolucion
     })
 
+    if (!error) claveCierre.olvidar([huella])
     if (error) {
+      const fallo = errorNotificado(error, 'Error al resolver rendición', 'Sin conexión: no se pudo confirmar la resolución de la rendición. Revisá su estado antes de reintentar.')
+      // Como el cierre: con respuesta del server la clave se olvida; sin servidor, se guarda.
+      if (!fallo.sinServidor) claveCierre.olvidar([huella])
       // La llamada pudo haber llegado aunque la respuesta se perdió: la tarjeta tiene que mostrar lo que hay.
-      throw await recargarConFallo(errorNotificado(error, 'Error al resolver rendición', 'Sin conexión: no se pudo confirmar la resolución de la rendición. Revisá su estado antes de reintentar.'))
+      throw await recargarConFallo(fallo)
     }
 
     if (ultimoRango) {
       await fetchResumen(ultimoRango.desde, ultimoRango.hasta, ultimoRango.transportistaId)
     }
-  }, [ultimoRango, fetchResumen, recargarConFallo])
+  }, [ultimoRango, fetchResumen, recargarConFallo, claveCierre])
 
   const deshacerResolucion = useCallback(async (
     fecha: string,
@@ -313,7 +315,6 @@ export function useRendiciones(): UseRendicionesReturn {
     loading,
     error: falloLaCarga,
     fetchResumen,
-    marcarControlada,
     desmarcarControlada,
     confirmarRendicion,
     resolverRendicion,

@@ -19,8 +19,15 @@ import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/re
 
 /** Primer día con la caja abierta. `undefined` = ninguna rendición cerrada. */
 let fechaMinimaMock: string | undefined
+/** D6 (T5): la caja de cada quien cobró; sin entrada, `fechaMinimaMock` para todos. */
+let cajasPorCobrador: Record<string, string> | null = null
 vi.mock('../../hooks/queries/useUltimaFechaCajaCerradaQuery', () => ({
   useFechaMinimaPago: () => fechaMinimaMock,
+  useFechasMinimasPorCobrador: (cobradores: ReadonlyArray<string | null | undefined>) => new Map(
+    cobradores.flatMap(c => {
+      const minima = cajasPorCobrador ? cajasPorCobrador[c ?? ''] : fechaMinimaMock
+      return minima ? [[c || null, minima] as [string | null, string]] : []
+    })),
 }))
 
 import ModalPagoPedido, { type ModalPagoPedidoProps } from './ModalPagoPedido'
@@ -244,7 +251,7 @@ describe('ModalPagoPedido — monto sugerido', () => {
  * por qué en vez de comerse un error crudo de Postgres.
  */
 describe('ModalPagoPedido — anular pago', () => {
-  afterEach(() => { fechaMinimaMock = undefined })
+  afterEach(() => { fechaMinimaMock = undefined; cajasPorCobrador = null })
 
   const renderConAnular = (pago: PagoDBWithUsuario) => {
     const onAnularPago = vi.fn()
@@ -288,7 +295,33 @@ describe('ModalPagoPedido — anular pago', () => {
 
     expect(
       screen.getByRole('button', { name: /anular pago/i }).getAttribute('title'),
-    ).toMatch(/caja de ese día ya está cerrada/i)
+    ).toMatch(/caja de quien lo cobró ya está cerrada ese día/i)
+  })
+
+  // D6 (T5): la caja que traba es la de quien cobró el pago, como en el server.
+  it('mira la caja de quien cobró: la de A cerrada no traba un cobro de B', () => {
+    cajasPorCobrador = { 'chofer-a': '2026-08-10' }
+    const onAnularPago = vi.fn()
+    render(
+      <ModalPagoPedido
+        pedido={pedido}
+        pagosPrevios={[
+          { ...pagoDe(5000, '2026-08-08'), id: '1', cobrado_por: 'chofer-a' },
+          { ...pagoDe(3000, '2026-08-08'), id: '2', cobrado_por: 'chofer-b' },
+        ]}
+        onConfirmar={vi.fn()}
+        onAnularPago={onAnularPago}
+        onEditarFormaPago={vi.fn()}
+        onClose={vi.fn()}
+        guardando={false}
+      />,
+    )
+    const [deA, deB] = screen.getAllByRole('button', { name: /anular pago/i }) as HTMLButtonElement[]
+    expect(deA.disabled).toBe(true)
+    expect(deB.disabled).toBe(false)
+    const [formaA, formaB] = screen.getAllByRole('combobox', { name: 'Editar forma de pago' }) as HTMLSelectElement[]
+    expect(formaA.disabled).toBe(true)
+    expect(formaB.disabled).toBe(false)
   })
 
   it('sin ninguna rendición cerrada no bloquea nada', () => {

@@ -362,8 +362,9 @@ export default function ModalRegistrarPago({
   const [fechaElegida, setFecha] = useState<string>(fechaLocalISO())
   // Quien no es admin cobra con la fecha de hoy (cobros-B3): es lo que se ve y lo que se manda.
   const fecha = isAdmin ? fechaElegida : fechaLocalISO()
-  // Fecha minima: dia siguiente al ultimo cierre de caja de la sucursal (mig 134).
-  const fechaMinima = useFechaMinimaPago()
+  // Fecha minima: dia siguiente al ultimo cierre de la caja de quien cobra (mig 134; D6 de la T5: la
+  // de quien eligió el admin en «Quién cobró», o la suya).
+  const fechaMinima = useFechaMinimaPago(true, cobradoPor ?? yoId)
 
   // Idempotencia (mig 167). Dos guardas complementarias:
   //  - `enVueloRef` corta el doble toque instantaneo, que puede disparar dos

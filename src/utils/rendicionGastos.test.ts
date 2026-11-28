@@ -133,6 +133,15 @@ describe('cambiosDelCierre', () => {
     })
   })
 
+  // Rend-B7 (T5): las huellas del resumen viajan tal cual; sin ellas no se mandan (el server compara la suma).
+  it('manda las huellas de los pagos al personal y los faltantes si las hay', () => {
+    expect(cambiosDelCierre([], [], 0, 0, undefined, { pagos: 'h-pagos', faltantes: 'h-falt' })).toMatchObject({
+      huella_pagos_personal: 'h-pagos', huella_faltantes: 'h-falt',
+    })
+    expect(cambiosDelCierre([], [], 0)).not.toHaveProperty('huella_pagos_personal')
+    expect(cambiosDelCierre([], [], 0)).not.toHaveProperty('huella_faltantes')
+  })
+
   it('manda los faltantes que vio el modal, y 0 si no hay', () => {
     expect(cambiosDelCierre([], [], 0, 5000).faltantes_visto).toBe(5000)
     expect(cambiosDelCierre([], [], 0)).toHaveProperty('faltantes_visto', 0)

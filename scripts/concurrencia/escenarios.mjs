@@ -245,8 +245,10 @@ function c6() {
   // referencias seriales (0, 10, 20, 30) de la corrida concurrente (60).
   const base = { modo: "rondas", setup: ["select conc.c6_setup({{round}} + {{off}} + {{base}}) as c"], sample_ms: 3 };
   const workers = [cortar, confirmar];
-  // Confirmar primero y recortar después es un orden serial legítimo: el recorte lo frena `guard_pago_fecha_cerrada`
-  // (42501, "la caja de la sucursal está cerrada hasta el …"), igual que con una rendición confirmada de antes.
+  // Confirmar primero y recortar después es un orden serial legítimo. Hasta la T5 el recorte lo frenaba
+  // `guard_pago_fecha_cerrada` (42501, "la caja de la sucursal está cerrada hasta el …"); desde la T5 (D6) el guard mira
+  // la caja de quien cobró, y los pagos de esta boleta son del admin (no del chofer que se confirma): el recorte entra.
+  // Se deja el 42501 como esperado por si un setup vuelve a cobrar a nombre del chofer.
   const esperado = (err) => err.code === "42501" && /caja de la sucursal esta cerrada/.test(err.message);
 
   // C6b: forzar el cruce que C6 casi no puede alcanzar. `_rendicion_tomar_foto` toma los pagos del día FOR SHARE

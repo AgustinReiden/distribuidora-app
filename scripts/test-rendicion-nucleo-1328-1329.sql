@@ -204,8 +204,10 @@ BEGIN
   f := pg_temp.t_si(f, pg_temp.t_rechazo(j), format('el encargado resolvio la suya: %s', j));
   j := pg_temp.t_desmarcar(e, v_x, e);
   f := pg_temp.t_si(f, pg_temp.t_rechazo(j), format('el encargado borro su disconformidad: %s', j));
-  j := pg_temp.t_rpc(e, format('SELECT to_jsonb(public.marcar_rendicion_controlada(%L::date, %L::uuid))', v_x, e));
-  f := pg_temp.t_si(f, pg_temp.t_rechazo(j), format('el encargado firmo el control de la suya: %s', j));
+  -- T5 (Rend-B1): marcar_rendicion_controlada se eliminó (ninguna pantalla la usaba); el control
+  -- es confirmar_rendicion, que ya se probó arriba.
+  f := pg_temp.t_si(f, to_regprocedure('public.marcar_rendicion_controlada(date,uuid)') IS NULL,
+                    'marcar_rendicion_controlada sigue existiendo');
   j := pg_temp.t_resolver(a, v_x, e);
   f := pg_temp.t_si(f, NOT pg_temp.t_rechazo(j), format('el admin no pudo resolver la del encargado: %s', j));
 
@@ -503,10 +505,11 @@ BEGIN
   UPDATE public.pedidos SET estado = 'asignado', transportista_id = tr WHERE id = v_ped;
   v_pago := pg_temp.t_pago(c, s, v_ped, 100, v_x, a);
 
-  -- Ese dia nadie cerro; se cierra el siguiente (con un cobro suelto del admin: #1547,
-  -- una rendicion sin nada que rendir no se confirma).
-  PERFORM pg_temp.t_pago(c, s, NULL, 10, v_x + 1, a);
-  j := pg_temp.t_confirmar(a, v_x + 1, a);
+  -- Ese dia nadie cerro; se cierra el siguiente (con un cobro suelto: #1547, una rendicion
+  -- sin nada que rendir no se confirma). T5 (D6): la caja que traba es la de quien cobró, así
+  -- que se cierra la del chofer, que es de quien es el pago.
+  PERFORM pg_temp.t_pago(c, s, NULL, 10, v_x + 1, tr);
+  j := pg_temp.t_confirmar(a, v_x + 1, tr);
   f := pg_temp.t_si(f, NOT public.rendicion_dia_cerrada(v_x, s), 'el setup cerro el dia del pago');
 
   BEGIN

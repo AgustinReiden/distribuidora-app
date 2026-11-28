@@ -334,7 +334,7 @@ describe('useRendicionesCerradasQuery', () => {
     expect(fromCalls).toEqual(['rendiciones_control'])
     const llamadas = chainCalls.map(c => [c.method, ...c.args])
     expect(llamadas).toContainEqual(['select', 'transportista_id,fecha'])
-    expect(llamadas).toContainEqual(['in', 'estado', ['confirmada', 'resuelta']])
+    expect(llamadas).toContainEqual(['in', 'estado', ['confirmada', 'resuelta', 'disconformidad']])
     expect(llamadas).toContainEqual(['in', 'fecha', ['2026-10-27', '2026-10-28']])
     expect([...result.current.data!]).toEqual(['tr-1|2026-10-27'])
   })
