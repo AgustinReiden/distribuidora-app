@@ -187,7 +187,6 @@ describe('useRendiciones — confirmar, marcar y desmarcar recargan ante un erro
     llamar: (h: ReturnType<typeof useRendiciones>) => Promise<unknown>
   }> = [
     { nombre: 'confirmarRendicion', rpc: 'confirmar_rendicion', llamar: h => h.confirmarRendicion('2026-11-02', 't1', 'confirmada', null, GASTOS_VACIOS) },
-    { nombre: 'marcarControlada', rpc: 'marcar_rendicion_controlada', llamar: h => h.marcarControlada('2026-11-02', 't1') },
     { nombre: 'desmarcarControlada', rpc: 'desmarcar_rendicion_controlada', llamar: h => h.desmarcarControlada('2026-11-02', 't1') },
   ]
 

@@ -157,6 +157,28 @@ describe('ModalResolverRendicion — sin líneas', () => {
     })
   })
 
+  // m1 y Rend-B7 (T5): lo cobrado, lo imputado a empleados y las huellas que mostró la tarjeta viajan
+  // como vistos, congelados al abrir (un refetch no los cambia).
+  it('manda lo cobrado, los faltantes y las huellas que vio al abrir', async () => {
+    const cobros = { efectivo: 8000, transferencia: 0, cheque: 0, cuenta_corriente: 0, tarjeta: 0, otros: 0, entregas: 0 }
+    const { user, onResolver, conPropsNuevas } = renderResolver({
+      cobrosVistos: cobros, totalFaltantesEmpleados: 0, huellaPagosPersonal: 'h-p', huellaFaltantes: 'h-f',
+    })
+    conPropsNuevas({ cobrosVistos: { ...cobros, efectivo: 0, transferencia: 8000 }, huellaPagosPersonal: 'h-otra' })
+    await user.type(screen.getByLabelText(/¿Cómo se resolvió\?/), 'Era transferencia')
+    await user.click(screen.getByRole('button', BOTON_RESOLVER))
+
+    expect(onResolver).toHaveBeenCalledWith('Era transferencia', {
+      lineas: [],
+      vistos: [{ id: 7, updated_at: visto(7) }],
+      pagos_personal_visto: 0,
+      cobros_visto: cobros,
+      faltantes_visto: 0,
+      huella_pagos_personal: 'h-p',
+      huella_faltantes: 'h-f',
+    })
+  })
+
   it('un refetch de gastos con el modal abierto no cambia los vistos que se mandan', async () => {
     const { user, onResolver, conPropsNuevas } = renderResolver({ totalPagosPersonal: 100000 })
 

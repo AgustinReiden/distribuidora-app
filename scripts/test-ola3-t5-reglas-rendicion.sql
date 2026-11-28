@@ -12,7 +12,8 @@
 --   D6 · A cobra $ 10.000 y AD le confirma la rendición de hoy. Después B cobra $ 30.000: entran
 --        (B 30.000; A sigue en 10.000). A no puede cobrar $ 500 más (42501). E cobra $ 2.000 en la
 --        oficina por el FIFO de la ficha y $ 1.000 con el pago masivo, a su nombre: entran (E 3.000).
---        E entrega y cobra en masivo una boleta de B ($ 700, B 30.700). E no puede cobrar en masivo a
+--        E entrega y cobra en masivo una boleta de B ($ 700, B 30.700). AD le cambia la forma a un
+--        cobro de B y anula otro ($ 100), pero no a uno de A (42501). E no puede cobrar en masivo a
 --        nombre de A (42501). La caja de A cierra hoy; la de B, nunca;
 --        la de la sucursal, hoy.
 --   B1 · marcar_rendicion_controlada ya no existe.
@@ -121,15 +122,16 @@ BEGIN
 
   -- Boletas asignadas, de hoy (cliente 1 salvo p[5] y p[6]). p[1], p[2]: de A; p[3]: de B; p[4]: de D;
   -- p[5], p[6]: del cliente 2, de A (el FIFO y el masivo de E); p[7]: de H; p[8]: de M; p[9]: de K;
-  -- p[10]: de L; p[11]: de A (la oficina de AD); p[12]: de B (la entrega masiva de E).
-  FOR v_i IN 1..12 LOOP
+  -- p[10]: de L; p[11]: de A (la oficina de AD); p[12]: de B (la entrega masiva de E); p[13]: de B (el
+  -- cobro que AD anula).
+  FOR v_i IN 1..13 LOOP
     INSERT INTO pedidos (cliente_id, fecha, estado, total, monto_pagado, estado_pago, canal, usuario_id, creado_por,
                          sucursal_id, transportista_id)
     VALUES (CASE WHEN v_i IN (5, 6) THEN v_cli2 ELSE v_cli END, v_hoy, 'asignado',
             CASE v_i WHEN 1 THEN 10000 WHEN 2 THEN 500 WHEN 3 THEN 30000 WHEN 4 THEN 10000 WHEN 5 THEN 2000
-                     WHEN 6 THEN 1000 WHEN 7 THEN 8000 WHEN 8 THEN 1000 WHEN 11 THEN 5000 WHEN 12 THEN 700 ELSE 1000 END,
+                     WHEN 6 THEN 1000 WHEN 7 THEN 8000 WHEN 8 THEN 1000 WHEN 11 THEN 5000 WHEN 12 THEN 700 WHEN 13 THEN 100 ELSE 1000 END,
             0, 'pendiente', 'app', v_e, v_e, 1,
-            CASE WHEN v_i IN (1, 2, 5, 6, 11) THEN v_a WHEN v_i IN (3, 12) THEN v_b WHEN v_i = 4 THEN v_d
+            CASE WHEN v_i IN (1, 2, 5, 6, 11) THEN v_a WHEN v_i IN (3, 12, 13) THEN v_b WHEN v_i = 4 THEN v_d
                  WHEN v_i = 7 THEN v_h WHEN v_i = 8 THEN v_m WHEN v_i = 9 THEN v_k ELSE v_l END)
     RETURNING id INTO v_id;
     v_p := v_p || v_id;
@@ -229,6 +231,20 @@ BEGIN
   v_txt := pg_temp.r(v_e, format('SELECT public.marcar_pagos_masivo(ARRAY[%s]::bigint[], ''efectivo'', public._tablero_hoy(), NULL, %L::uuid)::text',
                                  v_p[2], v_a));
   IF v_txt !~ '^42501 ' THEN v_fallas := v_fallas || ('D6 · E cobró en masivo a nombre de A (confirmada): ' || v_txt); END IF;
+  -- Corregir la forma y anular miran la misma caja (#1329): un cobro de B sí, uno de A no.
+  SELECT id INTO v_pago FROM pagos WHERE pedido_id = v_p[3];
+  v_txt := pg_temp.r(v_ad, format('SELECT public.actualizar_forma_pago_pago(%s, ''transferencia'')::text', v_pago));
+  IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('D6 · AD no cambió la forma de un cobro de B: ' || v_txt); END IF;
+  v_txt := pg_temp.r(v_ad, format('SELECT public.actualizar_forma_pago_pago(%s, ''efectivo'')::text', v_pago));
+  SELECT id INTO v_pago FROM pagos WHERE pedido_id = v_p[1];
+  v_txt := pg_temp.r(v_ad, format('SELECT public.actualizar_forma_pago_pago(%s, ''transferencia'')::text', v_pago));
+  IF v_txt !~ '^42501 ' THEN v_fallas := v_fallas || ('D6 · AD cambió la forma de un cobro de A (confirmada): ' || v_txt); END IF;
+  v_txt := pg_temp.r(v_b, pg_temp.cobro(v_p[13], 100, 'efectivo'));
+  IF v_txt NOT LIKE 'PASA%' THEN v_fallas := v_fallas || ('D6 · B no cobró los 100: ' || v_txt); END IF;
+  v_txt := pg_temp.r(v_ad, format('WITH b AS (DELETE FROM public.pagos WHERE pedido_id = %s RETURNING 1) SELECT count(*)::text FROM b', v_p[13]));
+  IF v_txt IS DISTINCT FROM 'PASA 1' THEN v_fallas := v_fallas || ('D6 · AD no anuló un cobro de B: ' || v_txt); END IF;
+  v_txt := pg_temp.r(v_ad, format('WITH b AS (DELETE FROM public.pagos WHERE pedido_id = %s RETURNING 1) SELECT count(*)::text FROM b', v_p[1]));
+  IF v_txt !~ '^42501 ' THEN v_fallas := v_fallas || ('D6 · AD anuló un cobro de A (confirmada): ' || v_txt); END IF;
   v_txt := pg_temp.r(v_e, format('SELECT concat_ws(''/'', COALESCE(public.ultima_fecha_caja_cerrada(1, %L::uuid)::text, ''-''), COALESCE(public.ultima_fecha_caja_cerrada(1, %L::uuid)::text, ''-''), public.ultima_fecha_caja_cerrada(1), public.rendicion_dia_cerrada(public._tablero_hoy(), 1, %L::uuid)::text, public.rendicion_dia_cerrada(public._tablero_hoy(), 1, %L::uuid)::text)',
                                  v_a, v_b, v_a, v_b));
   IF v_txt IS DISTINCT FROM format('PASA %s/-/%s/true/false', v_hoy, v_hoy) THEN

@@ -534,7 +534,8 @@ export function rendicionesDelDia(filas: ReadonlyArray<FilaResumenRendicion> | n
         Number(f.total_pagos_personal) || 0,
         Number(f.total_faltantes_empleados) || 0,
       ),
-      cerrada: f.estado === 'confirmada' || f.estado === 'resuelta',
+      // D8 (T5): una disconformidad cuenta como cerrada, como en control_rendicion_cerrado.
+      cerrada: f.estado === 'confirmada' || f.estado === 'resuelta' || f.estado === 'disconformidad',
     }]
     : []))
 }

@@ -20,10 +20,12 @@
 --      p_cobrado_por (opcional: sin él, la sucursal entera, como antes, para los que la usan así),
 --      y las cuatro RPCs de cobro le preguntan por el que cobra. El trigger pasa a llamarse
 --      trg_pagos_zzz_guard_fecha_cerrada para correr después de trg_pagos_zz_cobrado_por, que es
---      el que fija de quién es el cobro.
---      Lo que sigue mirando la caja de la sucursal entera (más estricto, no se tocó): anular un
---      pago, cambiarle la forma, imputar un crédito, reponer el cobro de una salvedad, el cambio
---      de comprobante y la cancelación de un vale blanco.
+--      el que fija de quién es el cobro. Con el mismo criterio (#1329, son espejo del guard):
+--      cambiarle la forma a un cobro (actualizar_forma_pago_pago) y anularlo
+--      (pagos_guard_anulacion_caja_cerrada).
+--      Lo que sigue mirando la caja de la sucursal entera (más estricto, no se tocó): imputar un
+--      crédito, reponer el cobro de una salvedad, el cambio de comprobante, la cancelación de un
+--      vale blanco y el pedido entregado en un día cerrado (_pedido_en_caja_cerrada).
 --  2 · m1 / D8 · control_rendicion_cerrado cuenta la disconformidad como cerrada, y
 --      anular_control_por_cambio_fecha_entrega (su espejo) también.
 --  3 · 1601-b2 · control_rendicion_cerrado, ultima_fecha_caja_cerrada y rendicion_dia_cerrada
@@ -117,6 +119,8 @@ BEGIN
     ('public.registrar_pago_cliente_fifo_impl(bigint,numeric,text,date,text,text,uuid)', 'b64b3575f925e57f41629d01761a0dd5'),
     ('public.registrar_pago_combinado_cliente_fifo_impl(bigint,jsonb,date,text,text,uuid)', '1fbe2216a169e229201d72e04b3445b4'),
     ('public.pagos_cobrado_por()',                                                   '9b1238813541f8268e460b792ed62b3e'),
+    ('public.actualizar_forma_pago_pago(bigint,text)',                               '635b6cb520d332bd543fec2043414500'),
+    ('public.pagos_guard_anulacion_caja_cerrada()',                                  '649493239bdded558fe4a55649c1c60c'),
     ('public.auditoria_definer_sin_rol()',                                           '0584667cb81b0a3569055a9d7c8297ec')
   ) AS t(f, h) LOOP
     IF to_regprocedure(r.f) IS NULL THEN
@@ -390,6 +394,28 @@ BEGIN
     'IF public.rendicion_dia_cerrada(p_fecha, v_sucursal_id) THEN',
     '-- D6 (T5): la rendición de quien cobra, no la de toda la sucursal.
     IF public.rendicion_dia_cerrada(p_fecha, v_sucursal_id, COALESCE(p_transportista_id, auth.uid())) THEN', 1);
+  EXECUTE v_def;
+
+  -- #1329: cambiar la forma y anular un cobro miran la misma caja que el guard (la de quien cobró).
+  v_def := pg_get_functiondef('public.actualizar_forma_pago_pago(bigint,text)'::regprocedure);
+  v_def := pg_temp.t5_parche(v_def,
+    '  SELECT id, pedido_id, fecha, forma_pago
+    INTO v_pago',
+    '  SELECT id, pedido_id, fecha, forma_pago, cobrado_por
+    INTO v_pago', 1);
+  v_def := pg_temp.t5_parche(v_def,
+    '  -- #1329: el criterio de guard_pago_fecha_cerrada, que no cubre forma_pago.
+  v_limite := public.ultima_fecha_caja_cerrada(v_sucursal_id);',
+    '  -- #1329: el criterio de guard_pago_fecha_cerrada, que no cubre forma_pago. D6 (T5): la caja
+  -- de quien cobró (sin dueño, la de la sucursal).
+  v_limite := public.ultima_fecha_caja_cerrada(v_sucursal_id, v_pago.cobrado_por);', 1);
+  EXECUTE v_def;
+
+  v_def := pg_get_functiondef('public.pagos_guard_anulacion_caja_cerrada()'::regprocedure);
+  v_def := pg_temp.t5_parche(v_def,
+    '  v_limite := public.ultima_fecha_caja_cerrada(OLD.sucursal_id);',
+    '  -- D6 (T5): la caja de quien cobró, como guard_pago_fecha_cerrada (sin dueño, la de la sucursal).
+  v_limite := public.ultima_fecha_caja_cerrada(OLD.sucursal_id, OLD.cobrado_por);', 1);
   EXECUTE v_def;
 
   -- D8: el espejo de control_rendicion_cerrado (la carrera con un control que se cierra).
@@ -1056,6 +1082,8 @@ BEGIN
               'public.marcar_pagos_masivo_impl(bigint[],text,date,uuid)'::regprocedure,
               'public.marcar_entrega_y_pago_masivo_impl(bigint[],uuid,text,date)'::regprocedure,
               'public.anular_control_por_cambio_fecha_entrega()'::regprocedure,
+              'public.actualizar_forma_pago_pago(bigint,text)'::regprocedure,
+              'public.pagos_guard_anulacion_caja_cerrada()'::regprocedure,
               'public.consultar_control_rendicion(uuid,date)'::regprocedure,
               'public.jornadas_transportista(date,date,uuid)'::regprocedure,
               'public.jornada_transportista_detalle(date,uuid)'::regprocedure,

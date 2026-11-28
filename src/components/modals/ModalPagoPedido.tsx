@@ -275,6 +275,9 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
     : modoEntregaTransportista
       ? cobradorDeLaEntrega(undefined, eleccionChofer, pedido.transportista_id)
       : null
+  // D6 (T5): la fecha mínima del cobro nuevo es la de la caja de quien cobra (la elegida o la propia);
+  // la de la sucursal (`fechaMinima`) queda para el botón de anular, que es más estricto.
+  const fechaMinimaCobro = useFechaMinimaPago(true, cobradoPorVisible ?? yoId)
   // pagoId en curso de edicion de forma_pago (para mostrar spinner inline).
   const [editandoPagoId, setEditandoPagoId] = useState<string | null>(null)
 
@@ -715,7 +718,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                 setFechaEntrega(nueva)
                 setEntregaTocada(true)
                 if (isAdmin && !cobroTocado && nueva) {
-                  setFechaPago(fechaMinima && nueva < fechaMinima ? fechaMinima : nueva > hoy ? hoy : nueva)
+                  setFechaPago(fechaMinimaCobro && nueva < fechaMinimaCobro ? fechaMinimaCobro : nueva > hoy ? hoy : nueva)
                 }
               }}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
@@ -747,7 +750,7 @@ const ModalPagoPedido = memo(function ModalPagoPedido({
                 // #1246: el server no acepta un pago con fecha futura, y otra
                 // fecha que hoy sólo la carga un admin (FRV-2): para el resto
                 // el campo queda fijo en hoy.
-                min={isAdmin ? fechaMinima : hoy}
+                min={isAdmin ? fechaMinimaCobro : hoy}
                 max={hoy}
                 disabled={!isAdmin}
                 onChange={e => {

@@ -166,6 +166,11 @@ export interface CambiosGastosRendicion {
    * manda siempre.
    */
   cobros_visto?: CobrosVistos
+  /** Rend-B7 (T5): las huellas del resumen (`huella_pagos_personal`, `huella_faltantes`), tal como llegaron. */
+  huella_pagos_personal?: string
+  huella_faltantes?: string
+  /** T5: la clave del cierre. El mismo cierre reintentado con la misma clave no se vuelve a guardar. */
+  clave?: string
 }
 
 /**
@@ -213,4 +218,13 @@ export interface ResolucionRendicion {
   lineas: LineaResolucion[]
   vistos: GastoVisto[]
   pagos_personal_visto: number
+  /** m1 (T5): lo imputado a empleados al abrir el modal, como en el cierre. */
+  faltantes_visto?: number
+  /** m1 (T5): lo cobrado al abrir el modal: un cobro se puede corregir en una disconformidad. */
+  cobros_visto?: CobrosVistos
+  /** Rend-B7 (T5): las huellas del resumen. */
+  huella_pagos_personal?: string
+  huella_faltantes?: string
+  /** T5: la clave de la resolución (el reintento no vuelve a imputar). */
+  clave?: string
 }

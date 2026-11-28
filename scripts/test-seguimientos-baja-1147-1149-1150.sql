@@ -353,7 +353,8 @@ BEGIN
   v_j := pg_temp.t_rest_j(a, 'authenticated', pg_temp.t_sql_cobro(v_ped, v_uuid));
   f := pg_temp.t_si(f, COALESCE((v_j->>'success')::boolean, false), format('cobro con UUID: %s', v_j));
   SELECT id INTO v_pago FROM public.pagos WHERE pedido_id = v_ped;
-  PERFORM pg_temp.t_cerrar_caja(v_f, tr, s, a);
+  -- T5 (D6): la caja que traba es la de quien cobró; el cobro es del admin (oficina).
+  PERFORM pg_temp.t_cerrar_caja(v_f, a, s, a);
   -- (a) un UUID nuevo con fecha cerrada
   v_j := pg_temp.t_rest_j(a, 'authenticated', pg_temp.t_sql_cobro(v_ped, gen_random_uuid()));
   f := pg_temp.t_rech_j(f, 'UUID nuevo con caja cerrada', v_j, '42501', '%caja de la sucursal esta cerrada%');

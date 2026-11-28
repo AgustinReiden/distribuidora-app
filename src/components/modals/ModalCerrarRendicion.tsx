@@ -64,6 +64,9 @@ export interface ModalCerrarRendicionProps {
   totalPagosPersonal?: number
   /** Lo imputado a empleados al resolver la rendición (movimientos `faltante`): resta del efectivo a entregar. */
   totalFaltantesEmpleados?: number
+  /** Rend-B7 (T5): las huellas del resumen; el server rechaza si cambiaron los movimientos aunque no la suma. */
+  huellaPagosPersonal?: string
+  huellaFaltantes?: string
   /** Los gastos vivos de esta rendición. */
   gastos: GastoDeRendicion[]
   /** Las líneas vivas de la diferencia imputada: sus gastos no se tocan desde acá. */
@@ -100,6 +103,8 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
   cobrosVistos,
   totalPagosPersonal = 0,
   totalFaltantesEmpleados = 0,
+  huellaPagosPersonal,
+  huellaFaltantes,
   gastos,
   faltantes = [],
   observacionesPrevias,
@@ -121,6 +126,7 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
   // Ídem con lo cobrado (#1547): si entró, se anuló o cambió de forma un cobro con el modal abierto, el
   // server rechaza el cierre en vez de congelar en la foto algo que no se vio.
   const [cobrosVisto] = useState(() => cobrosVistos)
+  const [huellas] = useState(() => ({ pagos: huellaPagosPersonal, faltantes: huellaFaltantes }))
   const [items, setItems] = useState<ItemCierre[]>(() => itemsDelCierre(gastos))
   const [editor, setEditor] = useState<Editor | null>(null)
   const contador = useRef(0)
@@ -182,7 +188,7 @@ const ModalCerrarRendicion = memo(function ModalCerrarRendicion({
     await onConfirmar(
       estado,
       observaciones.trim() || null,
-      cambiosDelCierre(items, vistos, pagosPersonalVisto, faltantesVisto, cobrosVisto)
+      cambiosDelCierre(items, vistos, pagosPersonalVisto, faltantesVisto, cobrosVisto, huellas)
     )
   }
 

@@ -106,9 +106,32 @@ describe('useRendiciones — gastos de la rendición', () => {
     const llamada = rpc.mock.calls.find(c => c[0] === 'confirmar_rendicion')!
     expect(llamada[1]).toEqual({
       p_fecha: '2026-10-05', p_transportista_id: 'tr-1', p_estado: 'confirmada',
-      p_observaciones: 'ok', p_gastos_rendicion: cambios,
+      p_observaciones: 'ok', p_gastos_rendicion: { ...cambios, clave: expect.any(String) },
     })
     expect(llamada[1]).not.toHaveProperty('p_gastos')
+  })
+
+  // T5: la clave del cierre es estable por contenido. Si la respuesta se perdió, el reintento de lo
+  // mismo lleva la misma clave (el server devuelve el control del primer intento); después de un
+  // cierre que salió bien, el siguiente igual es otro cierre, con otra clave.
+  it('confirmarRendicion reintenta con la misma clave y, tras un éxito, acuña otra', async () => {
+    respuestas()
+    const { result } = renderHook(() => useRendiciones())
+    const cambios = { vistos: [], guardar: [], quitar: [], pagos_personal_visto: 0, faltantes_visto: 0 }
+    const claves = (): string[] => rpc.mock.calls.filter(c => c[0] === 'confirmar_rendicion')
+      .map(c => (c[1] as { p_gastos_rendicion: { clave: string } }).p_gastos_rendicion.clave)
+
+    rpc.mockImplementationOnce(async () => ({ data: null, error: { message: 'Failed to fetch' } }))
+    await act(async () => {
+      await result.current.confirmarRendicion('2026-10-05', 'tr-1', 'confirmada', 'ok', cambios).catch(() => undefined)
+    })
+    await act(async () => { await result.current.confirmarRendicion('2026-10-05', 'tr-1', 'confirmada', 'ok', cambios) })
+    await act(async () => { await result.current.confirmarRendicion('2026-10-05', 'tr-1', 'confirmada', 'ok', cambios) })
+
+    const [primera, reintento, otra] = claves()
+    expect(primera).toEqual(expect.any(String))
+    expect(reintento).toBe(primera)
+    expect(otra).not.toBe(primera)
   })
 })
 
@@ -183,7 +206,8 @@ describe('useRendiciones — faltantes de la rendición', () => {
 
     const llamada = rpc.mock.calls.find(c => c[0] === 'resolver_rendicion')!
     expect(llamada[1]).toEqual({
-      p_fecha: '2026-10-05', p_transportista_id: 'tr-1', p_observaciones: 'Se le cobró', p_resolucion: resolucion,
+      p_fecha: '2026-10-05', p_transportista_id: 'tr-1', p_observaciones: 'Se le cobró',
+      p_resolucion: { ...resolucion, clave: expect.any(String) },
     })
   })
 

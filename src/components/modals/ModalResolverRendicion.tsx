@@ -37,6 +37,7 @@ import { usePropsModalGasto } from '../../hooks/usePropsModalGasto'
 import { useEmpleadosParaElegirQuery } from '../../hooks/queries/usePersonalQuery'
 import type {
   CausalFaltante,
+  CobrosVistos,
   GastoDeRendicion,
   GastoVisto,
   GuardarGastoPayload,
@@ -56,6 +57,15 @@ export interface ModalResolverRendicionProps {
   /** Los gastos vivos de la rendición y lo pagado al personal: se congelan al abrir. */
   gastos: GastoDeRendicion[]
   totalPagosPersonal: number
+  /**
+   * m1 y Rend-B7 (T5): lo que mostró la tarjeta, que el server compara: lo cobrado por forma (en una
+   * disconformidad un cobro se puede corregir), lo imputado a empleados y las huellas de los pagos al
+   * personal y los faltantes. Opcionales para no romper un llamador viejo; la vista los manda siempre.
+   */
+  cobrosVistos?: CobrosVistos
+  totalFaltantesEmpleados?: number
+  huellaPagosPersonal?: string
+  huellaFaltantes?: string
   onResolver: (observaciones: string, resolucion: ResolucionRendicion) => Promise<void>
   onClose: () => void
   guardando: boolean
@@ -136,6 +146,10 @@ const ModalResolverRendicion = memo(function ModalResolverRendicion({
   aEntregar,
   gastos,
   totalPagosPersonal,
+  cobrosVistos,
+  totalFaltantesEmpleados,
+  huellaPagosPersonal,
+  huellaFaltantes,
   onResolver,
   onClose,
   guardando
@@ -145,6 +159,12 @@ const ModalResolverRendicion = memo(function ModalResolverRendicion({
   // el server no tendría nada que comparar (como el cierre).
   const [vistos] = useState<GastoVisto[]>(() => gastosVistos(gastos))
   const [pagosPersonalVisto] = useState(() => totalPagosPersonal)
+  const [visto] = useState(() => ({
+    ...(cobrosVistos ? { cobros_visto: cobrosVistos } : {}),
+    ...(totalFaltantesEmpleados !== undefined ? { faltantes_visto: totalFaltantesEmpleados } : {}),
+    ...(huellaPagosPersonal ? { huella_pagos_personal: huellaPagosPersonal } : {}),
+    ...(huellaFaltantes ? { huella_faltantes: huellaFaltantes } : {}),
+  }))
   const [lineas, setLineas] = useState<LineaEditable[]>([])
   const [editor, setEditor] = useState<{ clave: string } | null>(null)
   const contador = useRef(0)
@@ -215,7 +235,7 @@ const ModalResolverRendicion = memo(function ModalResolverRendicion({
       if (l.causal === 'robo_perdida') return { causal: 'robo_perdida', monto, observacion }
       return { causal: 'gasto_no_cargado', monto, gasto: l.gasto as GuardarGastoPayload }
     })
-    await onResolver(observaciones.trim(), { lineas: resueltas, vistos, pagos_personal_visto: pagosPersonalVisto })
+    await onResolver(observaciones.trim(), { lineas: resueltas, vistos, pagos_personal_visto: pagosPersonalVisto, ...visto })
   }
 
   return (

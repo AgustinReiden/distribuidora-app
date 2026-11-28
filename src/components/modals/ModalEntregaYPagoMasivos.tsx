@@ -71,7 +71,8 @@ const ModalEntregaYPagoMasivos = memo(function ModalEntregaYPagoMasivos({
   // Universo: pedidos que aún requieren acción = NO cancelados y NO (entregado Y pagado).
   // Incluye entregados-con-salvedad impagos (solo se cobran, sin re-entregar).
   const { data: pedidos = [], isLoading, isError, refetch } = usePedidosParaEntregaYPagoQuery(true)
-  const { data: rendicionCerrada = false } = useRendicionCerradaQuery(fecha, fechaBloqueada)
+  // D6 (T5): los cobros son del chofer elegido; sin elegirlo, la de cualquiera de la sucursal.
+  const { data: rendicionCerrada = false } = useRendicionCerradaQuery(fecha, fechaBloqueada, selectedTransportista || null)
 
   const pedidosFiltrados = useMemo(() => {
     // Fecha (de entrega por defecto, como «Armar ruta») y forma de pago: #1698.

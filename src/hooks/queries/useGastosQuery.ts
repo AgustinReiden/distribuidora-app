@@ -54,7 +54,8 @@ export function useGastosDelMesQuery(mes: string) {
 }
 
 /**
- * De esas rendiciones (transportista y día), cuáles están cerradas (`confirmada` o `resuelta`):
+ * De esas rendiciones (transportista y día), cuáles están cerradas (`confirmada`, `resuelta` o, desde
+ * la T5 (D8), en `disconformidad`):
  * desde la vista Gastos un gasto de una rendición cerrada no se toca, se cambia desde «Editar
  * cierre». La RLS de `rendiciones_control` deja leer a admin y encargado, en la sucursal actual.
  */
@@ -67,7 +68,8 @@ export function useRendicionesCerradasQuery(claves: Array<{ transportista_id: st
       const { data, error } = await supabase
         .from('rendiciones_control')
         .select('transportista_id,fecha')
-        .in('estado', ['confirmada', 'resuelta'])
+        // D8 (T5): una disconformidad cuenta como cerrada (control_rendicion_cerrado).
+        .in('estado', ['confirmada', 'resuelta', 'disconformidad'])
         .in('fecha', fechas)
       if (error) throw errorDeSupabase(error, 'Sin conexión: no se pudo saber qué rendiciones están cerradas. Revisá la señal e intentá de nuevo.')
       const pedidas = new Set(claves.map(c => claveRendicion(c.transportista_id, c.fecha)))

@@ -99,12 +99,16 @@ export function cambiosDelCierre(
   pagosPersonalVisto: number,
   faltantesVisto = 0,
   cobrosVisto?: CobrosVistos,
+  // Rend-B7 (T5): las huellas de los pagos al personal y los faltantes que dio el resumen.
+  huellas?: { pagos?: string; faltantes?: string },
 ): CambiosGastosRendicion {
   return {
     vistos,
     pagos_personal_visto: pagosPersonalVisto,
     faltantes_visto: faltantesVisto,
     ...(cobrosVisto ? { cobros_visto: cobrosVisto } : {}),
+    ...(huellas?.pagos ? { huella_pagos_personal: huellas.pagos } : {}),
+    ...(huellas?.faltantes ? { huella_faltantes: huellas.faltantes } : {}),
     guardar: items.filter(i => !i.quitado && (i.original === null || i.editado)).map(i => i.payload),
     quitar: items.filter(i => i.quitado && i.original !== null).map(i => i.original!.id),
   }

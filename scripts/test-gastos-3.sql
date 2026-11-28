@@ -61,7 +61,8 @@
 --      o quita uno del admin, falla con el prefijo del rubro
 --   8b el chofer perdio la sucursal: "Editar cierre" cambia su gasto viejo, y
 --      uno nuevo falla con 'Ese transportista no es de la sucursal del gasto'
---   9  reapertura: en disconformidad g1 se edita desde Gastos; resuelta, no;
+--   9  reapertura: en disconformidad g1 ya no se edita desde Gastos (D8, T5: cuenta como
+--      cerrada); resuelta, tampoco;
 --      desmarcada, otra vez si, y sus gastos siguen restando
 --   9b reapertura por un cambio de entrega (trg_pedidos_anular_control): con
 --      la rendicion cerrada g1 no se edita; movida la entrega a otro dia, si
@@ -584,9 +585,10 @@ BEGIN
   BEGIN
     PERFORM pg_temp.como(v_adm, v_a, pg_temp.cr(v_d, v_t, 'disconformidad',
               jsonb_build_object('vistos', pg_temp.vistos(v_adm, v_a, v_d, v_t))));
-    PERFORM pg_temp.como(v_adm, v_a, pg_temp.gg(v_base || jsonb_build_object('id', g1, 'monto_total', 9100)));
-    v_fallas := v_fallas || pg_temp.chk((SELECT monto_total FROM gastos WHERE id = g1) = 9100,
-                  '9 en disconformidad g1 no se edito desde Gastos');
+    -- T5 (D8, decisión del dueño 26/11): una disconformidad cuenta como cerrada.
+    v_fallas := v_fallas || pg_temp.falla('9 en disconformidad: editar g1 desde Gastos', v_adm, v_a,
+                  pg_temp.gg(v_base || jsonb_build_object('id', g1, 'monto_total', 9100)),
+                  'Este gasto es de una rendición cerrada: se cambia');
     PERFORM pg_temp.como(v_adm, v_a, format(
               'SELECT public.resolver_rendicion(p_fecha => %L::date, p_transportista_id => %L::uuid, p_observaciones => %L)',
               v_d, v_t, 'ensayo gastos 3'));
